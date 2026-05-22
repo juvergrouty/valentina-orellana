@@ -1,0 +1,104 @@
+---
+---
+
+<section class="py-section bg-white">
+  <div class="container-site grid grid-cols-1 md:grid-cols-2 gap-16 lg:gap-24">
+
+    <!-- Info -->
+    <div>
+      <p class="label text-stone mb-4">Contacto</p>
+      <div class="divider mb-6"></div>
+      <h2 class="section-title mb-8">¿Tienes alguna<br />consulta?</h2>
+
+      <p class="body-text mb-10 max-w-sm">
+        Puedes escribirme por WhatsApp o completar el formulario.
+        Respondo en un plazo máximo de 24 horas hábiles.
+      </p>
+
+      <ul class="space-y-6">
+        <li>
+          <p class="label text-stone mb-1">Teléfono</p>
+          <a href="tel:+56961273907" class="font-heading font-light text-xl text-ink hover:text-gold transition-colors">
+            +56 9 6127 3907
+          </a>
+        </li>
+        <li>
+          <p class="label text-stone mb-1">Ubicaciones</p>
+          <p class="font-body text-sm font-light text-stone leading-relaxed">
+            Vitacura · Las Condes<br />La Reina · Peñalolén
+          </p>
+        </li>
+        <li>
+          <p class="label text-stone mb-2">WhatsApp</p>
+          <a
+            href="https://wa.me/56961273907?text=Hola%20Valentina%2C%20me%20gustar%C3%ADa%20consultar%20sobre%20una%20sesi%C3%B3n"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn-dark text-[10px] py-3 px-6"
+          >
+            Escribir por WhatsApp
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Formulario -->
+    <form id="contact-form" class="flex flex-col gap-8" novalidate>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-8">
+        <div>
+          <label class="label text-stone block mb-2" for="nombre">Nombre</label>
+          <input id="nombre" name="nombre" type="text" required placeholder="Tu nombre"
+            class="field" />
+        </div>
+        <div>
+          <label class="label text-stone block mb-2" for="email">Correo</label>
+          <input id="email" name="email" type="email" required placeholder="tu@correo.cl"
+            class="field" />
+        </div>
+      </div>
+
+      <div>
+        <label class="label text-stone block mb-2" for="motivo">Motivo de consulta</label>
+        <select id="motivo" name="motivo"
+          class="field appearance-none bg-transparent cursor-pointer">
+          <option value="">Selecciona una opción</option>
+          <option>Psicología de adultos</option>
+          <option>Terapia de pareja</option>
+          <option>Trauma / PAS</option>
+          <option>Parentalidad</option>
+          <option>Información general</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="label text-stone block mb-2" for="mensaje">Mensaje</label>
+        <textarea id="mensaje" name="mensaje" rows="4"
+          placeholder="Cuéntame brevemente en qué puedo ayudarte..."
+          class="field resize-none"></textarea>
+      </div>
+
+      <div>
+        <button type="submit" class="btn-dark text-[10px] py-3.5 px-8">
+          Enviar mensaje
+        </button>
+        <p id="form-status" class="label text-stone mt-4 hidden"></p>
+      </div>
+    </form>
+
+  </div>
+</section>
+
+<script>
+  const form   = document.getElementById('contact-form') as HTMLFormElement;
+  const status = document.getElementById('form-status');
+
+  form?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (status) {
+      status.textContent = 'Mensaje enviado — te responderé a la brevedad.';
+      status.classList.remove('hidden');
+    }
+    form.reset();
+  });
+</script>

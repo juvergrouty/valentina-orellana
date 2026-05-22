@@ -1,0 +1,154 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600&family=Inter:wght@300;400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { scroll-behavior: smooth; }
+
+  body {
+    @apply font-body text-ink bg-sand antialiased;
+    font-feature-settings: 'kern' 1, 'liga' 1;
+  }
+
+  ::selection {
+    background: theme('colors.forest');
+    color: white;
+  }
+}
+
+@layer components {
+
+  /* ── Layout ─────────────────────────────────────────────────────────────── */
+  .container-site {
+    @apply max-w-site mx-auto px-6 md:px-12 lg:px-20;
+  }
+
+  /* ── Texturas ───────────────────────────────────────────────────────────── */
+  .texture-grain {
+    position: relative;
+    isolation: isolate;
+  }
+  .texture-grain::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23g)' opacity='0.05'/%3E%3C/svg%3E");
+    background-size: 300px 300px;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .texture-grain > * { position: relative; z-index: 2; }
+
+  .texture-dots {
+    position: relative;
+    isolation: isolate;
+  }
+  .texture-dots::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle, #DDD8CF 1px, transparent 1px);
+    background-size: 28px 28px;
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .texture-dots > * { position: relative; z-index: 1; }
+
+  .texture-lines {
+    position: relative;
+    isolation: isolate;
+  }
+  .texture-lines::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 6px,
+      rgba(221, 216, 207, 0.4) 6px,
+      rgba(221, 216, 207, 0.4) 7px
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+  .texture-lines > * { position: relative; z-index: 1; }
+
+  /* ── Tipografía ─────────────────────────────────────────────────────────── */
+  .label {
+    @apply font-body text-[10px] tracking-widest2 uppercase text-stone font-medium;
+  }
+
+  .display-title {
+    @apply font-heading font-semibold text-display text-ink;
+  }
+
+  .section-title {
+    @apply font-heading font-semibold text-title text-ink leading-tight;
+  }
+
+  .body-text {
+    @apply font-body text-lead text-stone font-light;
+  }
+
+  /* ── Botones ────────────────────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center gap-2 font-body text-[11px] tracking-widest uppercase
+           transition-all duration-300 rounded-[4px];
+  }
+
+  /* Botón principal — verde oscuro */
+  .btn-dark {
+    @apply btn bg-forest text-white px-8 py-3.5
+           hover:bg-forest/80;
+  }
+
+  /* Botón outline — borde verde */
+  .btn-outline {
+    @apply btn border border-forest text-forest px-8 py-3.5
+           hover:bg-forest hover:text-white;
+  }
+
+  /* Botón texto con subrayado */
+  .btn-text {
+    @apply btn text-ink border-b border-ink/40 pb-0.5
+           hover:text-forest hover:border-forest;
+  }
+
+  /* Botón ghost para fondos oscuros */
+  .btn-ghost {
+    @apply btn border border-white/40 text-white px-8 py-3.5
+           hover:bg-white hover:text-ink;
+  }
+
+  /* ── Ícono circular verde ────────────────────────────────────────────────── */
+  .icon-circle {
+    @apply w-12 h-12 rounded-full bg-forest flex items-center justify-center text-white flex-shrink-0;
+  }
+  .icon-circle-sm {
+    @apply w-10 h-10 rounded-full bg-forest flex items-center justify-center text-white flex-shrink-0;
+  }
+
+  /* ── Divisor ────────────────────────────────────────────────────────────── */
+  .divider {
+    @apply w-10 h-0.5 bg-forest/30 mx-0 my-0;
+  }
+
+  .divider-center {
+    @apply w-10 h-0.5 bg-forest/30 mx-auto my-0;
+  }
+
+  /* ── Card ────────────────────────────────────────────────────────────────── */
+  .card-minimal {
+    @apply bg-white border border-dust p-8 md:p-10 rounded-sm;
+  }
+
+  /* ── Field ─────────────────────────────────────────────────────────────── */
+  .field {
+    @apply w-full bg-transparent border-b border-dust py-3 text-sm font-body text-ink
+           placeholder:text-stone/60 focus:outline-none focus:border-forest transition-colors duration-200;
+  }
+}

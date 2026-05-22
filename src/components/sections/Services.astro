@@ -1,0 +1,42 @@
+---
+import { services } from '../../data/services';
+import Icon from '../ui/Icon.astro';
+---
+
+<section class="py-section bg-white">
+  <div class="container-site">
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 items-end">
+      <div>
+        <p class="label text-stone mb-4">Servicios</p>
+        <div class="divider mb-6"></div>
+        <h2 class="section-title">¿En qué puedo<br />ayudarte?</h2>
+      </div>
+      <div class="md:text-right md:self-end">
+        <a href="/servicios" class="btn-text text-[10px]">
+          Ver todos los servicios →
+        </a>
+      </div>
+    </div>
+
+    <!-- Grid de servicios -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-dust mt-12">
+      {services.map((service) => (
+        <div class="bg-sand p-8 md:p-10 group hover:bg-white transition-colors duration-300">
+          <div class="mb-6 text-stone group-hover:text-gold transition-colors duration-300">
+            <Icon name={service.icon} size={28} />
+          </div>
+          <h3 class="font-heading font-light text-xl text-ink mb-3 leading-snug">
+            {service.title}
+          </h3>
+          <div class="divider mb-4"></div>
+          <p class="font-body text-sm font-light text-stone leading-relaxed mb-5">
+            {service.description}
+          </p>
+          <p class="label text-gold">{service.duration} por sesión</p>
+        </div>
+      ))}
+    </div>
+
+  </div>
+</section>

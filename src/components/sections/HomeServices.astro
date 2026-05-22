@@ -1,0 +1,84 @@
+---
+import Icon from '../ui/Icon.astro';
+
+const cards = [
+  {
+    icon: 'brain',
+    title: 'Terapia Individual',
+    description: 'Un espacio para ti. Para entender lo que sientes, soltar lo que te pesa y reconectar contigo.',
+    href: '/servicios',
+    image: '/images/consultorio-individual.jpg',
+    imagePlaceholder: 'Fotografía · 700 × 500',
+  },
+  {
+    icon: 'users',
+    title: 'Terapia de Pareja',
+    description: 'Mejoren su comunicación, fortalezcan su vínculo y construyan una relación más sana y consciente.',
+    href: '/servicios',
+    image: '/images/consultorio-pareja.jpg',
+    imagePlaceholder: 'Fotografía · 700 × 500',
+  },
+];
+---
+
+<section class="py-section bg-sand">
+  <div class="container-site">
+
+    <!-- Encabezado -->
+    <div class="text-center mb-14">
+      <p class="label text-stone mb-4">¿En qué puedo ayudarte?</p>
+      <h2 class="font-heading font-semibold text-ink leading-tight mb-5"
+          style="font-size: clamp(1.8rem, 4vw, 3.2rem); letter-spacing: -0.02em;">
+        Terapia para crecer, sanar y avanzar.
+      </h2>
+      <p class="font-body text-stone font-light text-base leading-relaxed max-w-xl mx-auto">
+        Acompañamiento psicológico para adultos y parejas que desean comprenderse,
+        mejorar su bienestar y construir relaciones más conscientes.
+      </p>
+    </div>
+
+    <!-- Cards -->
+    <div class="flex flex-col gap-5">
+      {cards.map((card) => (
+        <div class="bg-white border border-dust rounded-sm overflow-hidden grid grid-cols-1 md:grid-cols-[1fr_auto] group hover:border-forest/30 transition-colors duration-300">
+
+          <!-- Texto -->
+          <div class="p-8 md:p-10 lg:p-12 flex flex-col justify-center">
+            <div class="icon-circle mb-6">
+              <Icon name={card.icon} size={22} />
+            </div>
+            <h3 class="font-heading font-semibold text-2xl md:text-3xl text-ink mb-3 leading-tight">
+              {card.title}
+            </h3>
+            <p class="font-body text-stone font-light text-sm md:text-base leading-relaxed mb-6 max-w-md">
+              {card.description}
+            </p>
+            <a href={card.href}
+               class="font-body text-[11px] text-forest tracking-wide flex items-center gap-2 hover:gap-3 transition-all duration-200 w-fit">
+              Conocer más
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+              </svg>
+            </a>
+          </div>
+
+          <!-- Imagen -->
+          <div class="relative w-full md:w-[380px] lg:w-[480px] h-60 md:h-auto overflow-hidden">
+            <img
+              src={card.image}
+              alt={card.title}
+              class="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
+              onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+            />
+            <div class="absolute inset-0 hidden items-center justify-center bg-warm flex-col gap-2">
+              <div class="w-10 h-px bg-dust"></div>
+              <p class="label text-dust">{card.imagePlaceholder}</p>
+            </div>
+          </div>
+
+        </div>
+      ))}
+    </div>
+
+  </div>
+</section>

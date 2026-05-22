@@ -1,0 +1,37 @@
+---
+import { testimonials } from '../../data/services';
+---
+
+<!-- Testimonio destacado — home page -->
+<section class="bg-ink texture-grain">
+  <div class="container-site py-20 md:py-28">
+
+    <!-- Cita principal (primera) -->
+    <div class="max-w-3xl mx-auto text-center">
+      <p class="font-heading font-light text-6xl text-forest/50 leading-none mb-4">"</p>
+      <blockquote class="font-heading font-light text-sand/90 leading-relaxed mb-8"
+                  style="font-size: clamp(1.2rem, 2.5vw, 1.8rem);">
+        {testimonials[0].text}
+      </blockquote>
+      <div class="w-10 h-px bg-sand/20 mx-auto mb-5"></div>
+      <p class="font-body text-[10px] tracking-widest2 uppercase text-sand/40">
+        — {testimonials[0].name} · {testimonials[0].service}
+      </p>
+    </div>
+
+    <!-- Otros dos testimonios -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-10 mt-16 pt-14 border-t border-sand/10">
+      {testimonials.slice(1).map((t) => (
+        <div>
+          <p class="font-body text-sm font-light text-sand/55 leading-relaxed italic mb-5">
+            "{t.text}"
+          </p>
+          <p class="font-body text-[10px] tracking-widest uppercase text-sand/35">
+            — {t.name} · {t.service}
+          </p>
+        </div>
+      ))}
+    </div>
+
+  </div>
+</section>

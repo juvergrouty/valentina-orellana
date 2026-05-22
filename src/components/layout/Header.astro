@@ -1,0 +1,103 @@
+---
+const navLinks = [
+  { href: '/servicios',  label: 'Terapia Individual' },
+  { href: '/servicios',  label: 'Terapia de Pareja',  hash: '#pareja' },
+  { href: '/sobre-mi',   label: 'Sobre mí' },
+  { href: '/precios',    label: 'Preguntas' },
+  { href: '/contacto',   label: 'Contacto' },
+];
+
+const currentPath = Astro.url.pathname;
+---
+
+<header id="site-header" class="fixed top-0 left-0 right-0 z-50 bg-sand/95 backdrop-blur-md border-b border-dust transition-shadow duration-300">
+  <div class="container-site flex items-center justify-between py-4 md:py-5">
+
+    <!-- Logo -->
+    <a href="/" class="group flex items-baseline gap-2">
+      <span class="font-heading font-semibold text-lg text-ink group-hover:text-forest transition-colors duration-300 leading-none">
+        Valentina Orellana
+      </span>
+      <span class="hidden sm:inline font-body text-xs text-stone/60 font-light">| Psicóloga</span>
+    </a>
+
+    <!-- Nav desktop -->
+    <nav class="hidden lg:flex items-center gap-7">
+      {navLinks.map(({ href, label, hash }) => (
+        <a
+          href={hash ? href + hash : href}
+          class={`font-body text-[11px] tracking-wide transition-colors duration-200
+            ${currentPath === href
+              ? 'text-forest font-medium'
+              : 'text-stone hover:text-ink'}`}
+        >
+          {label}
+        </a>
+      ))}
+    </nav>
+
+    <!-- CTA + hamburger -->
+    <div class="flex items-center gap-4">
+      <a href="/agenda" class="hidden md:inline-flex btn-dark text-[10px] py-2.5 px-5">
+        Agendar sesión
+      </a>
+      <button
+        id="menu-toggle"
+        class="lg:hidden flex flex-col gap-1.5 p-1"
+        aria-label="Abrir menú"
+      >
+        <span class="w-5 h-px bg-ink block transition-all duration-300" id="bar1"></span>
+        <span class="w-5 h-px bg-ink block transition-all duration-300" id="bar2"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Mobile menu -->
+  <div id="mobile-menu" class="hidden lg:hidden bg-sand border-t border-dust">
+    <nav class="container-site py-8 flex flex-col gap-5">
+      {navLinks.map(({ href, label, hash }) => (
+        <a
+          href={hash ? href + hash : href}
+          class={`font-body text-[11px] tracking-widest2 uppercase transition-colors
+            ${currentPath === href ? 'text-forest' : 'text-stone hover:text-ink'}`}
+        >
+          {label}
+        </a>
+      ))}
+      <a href="/agenda" class="btn-dark text-center mt-2 text-[10px] py-3">
+        Agendar sesión
+      </a>
+    </nav>
+  </div>
+</header>
+
+<!-- Spacer para compensar el header fixed -->
+<div class="h-[65px] md:h-[73px]"></div>
+
+<script>
+  // Sombra sutil al hacer scroll
+  const header = document.getElementById('site-header');
+  window.addEventListener('scroll', () => {
+    if (window.scrollY > 10) {
+      header?.classList.add('shadow-sm');
+    } else {
+      header?.classList.remove('shadow-sm');
+    }
+  }, { passive: true });
+
+  // Mobile toggle
+  const toggle = document.getElementById('menu-toggle');
+  const menu   = document.getElementById('mobile-menu');
+  const bar1   = document.getElementById('bar1');
+  const bar2   = document.getElementById('bar2');
+  let open = false;
+
+  toggle?.addEventListener('click', () => {
+    open = !open;
+    menu?.classList.toggle('hidden', !open);
+    if (bar1 && bar2) {
+      bar1.style.transform = open ? 'rotate(45deg) translate(3px, 3px)' : '';
+      bar2.style.transform = open ? 'rotate(-45deg) translate(3px, -3px)' : '';
+    }
+  });
+</script>

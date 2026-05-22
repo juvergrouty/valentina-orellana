@@ -1,0 +1,30 @@
+---
+import BaseLayout   from '../layouts/BaseLayout.astro';
+import Testimonials from '../components/sections/Testimonials.astro';
+---
+
+<BaseLayout title="Opiniones" description="Lo que dicen los pacientes de Ps. Valentina Orellana.">
+
+  <section class="py-24 md:py-32 bg-warm border-b border-dust">
+    <div class="container-site max-w-3xl">
+      <p class="label text-stone mb-4">Experiencias reales</p>
+      <div class="divider mb-6"></div>
+      <h1 class="display-title">Opiniones</h1>
+    </div>
+  </section>
+
+  <Testimonials />
+
+  <section class="py-20 bg-ink text-center">
+    <div class="container-site max-w-lg">
+      <p class="font-heading font-light text-3xl md:text-4xl text-sand mb-3">
+        ¿Listo para dar<br />el primer paso?
+      </p>
+      <div class="divider-center bg-sand/20 my-7"></div>
+      <a href="/agenda" class="btn bg-sand text-ink hover:bg-gold hover:text-white text-[10px] tracking-widest2 uppercase py-3.5 px-8 transition-all duration-300">
+        Reservar sesión
+      </a>
+    </div>
+  </section>
+
+</BaseLayout>

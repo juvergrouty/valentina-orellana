@@ -1,0 +1,240 @@
+---
+/**
+ * /confirmacion
+ *
+ * Flow redirige aquí después del pago con ?token=XXXXX
+ * Esta página consulta el estado real a la API de Flow y muestra el resultado.
+ */
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Icon from '../components/ui/Icon.astro';
+import { supabase } from '../lib/supabase';
+import { getPaymentStatus } from '../lib/flow';
+
+const token = Astro.url.searchParams.get('token') ?? '';
+
+const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+function formatDateEs(iso: string) {
+  const [y, m, d] = iso.split('-');
+  return `${parseInt(d)} de ${MONTHS_ES[parseInt(m) - 1]} de ${y}`;
+}
+
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+
+const SESSION_LABELS: Record<string, string> = {
+  'online':            'Sesión Individual Online',
+  'presencial':        'Sesión Individual Presencial',
+  'pareja-online':     'Sesión de Pareja Online',
+  'pareja-presencial': 'Sesión de Pareja Presencial',
+};
+
+// ── Determinar estado del pago ────────────────────────────────────────────────
+type PageState = 'paid' | 'rejected' | 'pending' | 'error';
+let pageState: PageState = 'error';
+let booking: Record<string, string | number> | null = null;
+let paymentMedia: string | null = null;
+
+if (!token) {
+  pageState = 'error';
+} else {
+  try {
+    const flowStatus = await getPaymentStatus(token);
+
+    // Mapear estado de Flow
+    if      (flowStatus.status === 2) pageState = 'paid';
+    else if (flowStatus.status === 3 || flowStatus.status === 4) pageState = 'rejected';
+    else                               pageState = 'pending';
+
+    paymentMedia = flowStatus.paymentData?.media ?? null;
+
+    // Buscar la reserva por el token guardado en mp_preference_id
+    const { data } = await supabase
+      .from('bookings')
+      .select('session_type, session_date, session_time, patient_name, amount, status')
+      .eq('mp_preference_id', token)
+      .maybeSingle();
+
+    booking = data as typeof booking;
+
+    // Confirmar en BD si aún no está confirmado (redundante con webhook, pero seguro)
+    if (flowStatus.status === 2 && booking && booking.status !== 'confirmed') {
+      await supabase
+        .from('bookings')
+        .update({
+          status:        'confirmed',
+          mp_payment_id: String(flowStatus.flowOrder),
+        })
+        .eq('mp_preference_id', token);
+    }
+
+  } catch (err) {
+    console.error('[confirmacion] Error consultando Flow:', err);
+    pageState = 'pending'; // Si hay error al consultar, mostrar como pendiente
+  }
+}
+
+const titles: Record<PageState, string> = {
+  paid:     '¡Reserva confirmada!',
+  rejected: 'Pago no procesado',
+  pending:  'Pago en proceso',
+  error:    'Error inesperado',
+};
+---
+
+<BaseLayout title={titles[pageState]}>
+  <section class="py-section bg-sand min-h-[80vh] flex items-center">
+    <div class="container-site max-w-lg mx-auto">
+
+      <!-- ── PAGADO ─────────────────────────────────────────────────────────── -->
+      {pageState === 'paid' && (
+        <div class="flex flex-col items-center text-center gap-8">
+
+          <div class="icon-circle w-20 h-20 rounded-full">
+            <Icon name="shield" size={36} />
+          </div>
+
+          <div>
+            <h1 class="font-heading font-semibold text-3xl md:text-4xl text-ink mb-2">
+              ¡Reserva confirmada!
+            </h1>
+            <p class="font-body text-stone font-light text-base">
+              Recibirás un recordatorio antes de tu sesión.
+            </p>
+          </div>
+
+          {booking && (
+            <div class="w-full bg-white border border-dust p-6 md:p-8 text-left space-y-3">
+              {[
+                ['Paciente',  booking.patient_name],
+                ['Sesión',    SESSION_LABELS[booking.session_type as string] ?? booking.session_type],
+                ['Fecha',     formatDateEs(booking.session_date as string)],
+                ['Hora',      (booking.session_time as string).slice(0, 5)],
+              ].map(([label, value]) => (
+                <div class="flex justify-between items-baseline gap-4">
+                  <span class="label text-stone">{label}</span>
+                  <span class="font-body text-sm text-ink font-medium text-right">{value}</span>
+                </div>
+              ))}
+              <div class="border-t border-dust pt-3 flex justify-between items-baseline">
+                <span class="label text-stone">Total pagado</span>
+                <span class="font-heading font-semibold text-xl text-forest">
+                  {formatCLP(booking.amount as number)}
+                </span>
+              </div>
+              {paymentMedia && (
+                <p class="label text-stone/60 text-right">Vía {paymentMedia}</p>
+              )}
+            </div>
+          )}
+
+          <p class="font-body text-sm text-stone font-light">
+            ¿Necesitas reprogramar? Escríbeme con al menos 24 horas de anticipación.
+          </p>
+
+          <a
+            href="https://wa.me/56961273907"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn-outline text-[10px] py-3 px-6"
+          >
+            Contactar por WhatsApp
+          </a>
+        </div>
+      )}
+
+      <!-- ── RECHAZADO / ANULADO ────────────────────────────────────────────── -->
+      {pageState === 'rejected' && (
+        <div class="flex flex-col items-center text-center gap-8">
+
+          <div class="w-20 h-20 rounded-full border border-dust flex items-center justify-center text-stone">
+            <Icon name="clock" size={32} />
+          </div>
+
+          <div>
+            <h1 class="font-heading font-semibold text-3xl text-ink mb-2">
+              El pago no fue procesado
+            </h1>
+            <p class="font-body text-stone font-light text-base">
+              No se realizó ningún cargo. Tu horario quedó disponible.
+            </p>
+          </div>
+
+          <div class="flex flex-col sm:flex-row gap-3 w-full">
+            <a href="/agenda" class="btn-dark text-[10px] py-3.5 px-6 text-center flex-1">
+              Intentar nuevamente
+            </a>
+            <a
+              href="https://wa.me/56961273907"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-outline text-[10px] py-3.5 px-6 text-center flex-1"
+            >
+              Coordinar por WhatsApp
+            </a>
+          </div>
+        </div>
+      )}
+
+      <!-- ── PENDIENTE ──────────────────────────────────────────────────────── -->
+      {pageState === 'pending' && (
+        <div class="flex flex-col items-center text-center gap-8">
+
+          <div class="w-20 h-20 rounded-full border border-dust flex items-center justify-center text-stone">
+            <Icon name="calendar" size={32} />
+          </div>
+
+          <div>
+            <h1 class="font-heading font-semibold text-3xl text-ink mb-2">
+              Pago en proceso
+            </h1>
+            <p class="font-body text-stone font-light text-base max-w-sm mx-auto">
+              Tu pago está siendo verificado. Te confirmaremos por correo
+              en cuanto se acredite. Puede tardar unos minutos.
+            </p>
+          </div>
+
+          <a
+            href="https://wa.me/56961273907"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn-outline text-[10px] py-3 px-6"
+          >
+            Consultar por WhatsApp
+          </a>
+        </div>
+      )}
+
+      <!-- ── ERROR ──────────────────────────────────────────────────────────── -->
+      {pageState === 'error' && (
+        <div class="flex flex-col items-center text-center gap-8">
+
+          <div class="w-20 h-20 rounded-full border border-dust flex items-center justify-center text-stone">
+            <Icon name="chat" size={32} />
+          </div>
+
+          <div>
+            <h1 class="font-heading font-semibold text-3xl text-ink mb-2">
+              Algo salió mal
+            </h1>
+            <p class="font-body text-stone font-light text-base max-w-sm mx-auto">
+              No pudimos verificar el estado de tu pago.
+              Por favor contáctanos directamente.
+            </p>
+          </div>
+
+          <a
+            href="https://wa.me/56961273907"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn-dark text-[10px] py-3 px-6"
+          >
+            Contactar por WhatsApp
+          </a>
+        </div>
+      )}
+
+    </div>
+  </section>
+</BaseLayout>

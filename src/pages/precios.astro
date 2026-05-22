@@ -1,0 +1,56 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Pricing    from '../components/sections/Pricing.astro';
+---
+
+<BaseLayout title="Precios" description="Valores y modalidades — psicología online y presencial en Santiago.">
+
+  <section class="py-24 md:py-32 bg-warm border-b border-dust">
+    <div class="container-site max-w-3xl">
+      <p class="label text-stone mb-4">Sin letra chica</p>
+      <div class="divider mb-6"></div>
+      <h1 class="display-title">Precios</h1>
+    </div>
+  </section>
+
+  <Pricing />
+
+  <!-- FAQ -->
+  <section class="py-section bg-white">
+    <div class="container-site max-w-2xl">
+      <p class="label text-stone mb-4">Preguntas frecuentes</p>
+      <div class="divider mb-10"></div>
+      <h2 class="section-title mb-12">Lo que más me<br />preguntan.</h2>
+
+      <div class="divide-y divide-dust">
+        {[
+          {
+            q: '¿Cómo puedo pagar?',
+            a: 'Aceptamos tarjetas de crédito, débito y transferencia bancaria a través de MercadoPago. El pago se realiza al momento de confirmar la reserva.',
+          },
+          {
+            q: '¿Qué pasa si necesito cancelar?',
+            a: 'Puedes cancelar o reprogramar hasta 24 horas antes de la sesión sin costo. Cancelaciones con menos de 24 horas de anticipación se cobran en su totalidad.',
+          },
+          {
+            q: '¿Atienden con Fonasa o Isapre?',
+            a: 'En este momento la atención es particular. Puedo emitir boleta para que solicites reembolso si tu plan de salud lo contempla.',
+          },
+          {
+            q: '¿La sesión online es igual de efectiva?',
+            a: 'Sí. La modalidad online ha demostrado ser igualmente efectiva para la mayoría de los procesos terapéuticos. Es cómoda, accesible y completamente privada.',
+          },
+        ].map(({ q, a }) => (
+          <details class="group py-6 cursor-pointer">
+            <summary class="font-heading font-light text-xl text-ink list-none flex justify-between items-center gap-4">
+              {q}
+              <span class="text-dust group-open:rotate-45 transition-transform duration-200 text-2xl font-light flex-shrink-0">+</span>
+            </summary>
+            <p class="body-text mt-4 max-w-lg">{a}</p>
+          </details>
+        ))}
+      </div>
+    </div>
+  </section>
+
+</BaseLayout>

@@ -1,0 +1,567 @@
+---
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { pricingPlans } from '../data/services';
+
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+---
+
+<BaseLayout
+  title="Reserva tu sesión"
+  description="Agenda una sesión con Ps. Valentina Orellana y paga de forma segura con Flow · Webpay · MACH."
+>
+  <section class="py-24 md:py-32 bg-warm border-b border-dust">
+    <div class="container-site">
+      <p class="label text-stone mb-4">Agenda en línea</p>
+      <div class="divider mb-6"></div>
+      <h1 class="display-title">Reserva tu sesión</h1>
+      <p class="body-text mt-5">Elige tu horario y paga de forma segura con Flow.</p>
+    </div>
+  </section>
+
+  <!-- Indicador de pasos -->
+  <div class="bg-white border-b border-dust sticky top-[72px] md:top-[80px] z-40">
+    <div class="container-site py-4">
+      <div class="flex items-center gap-2 md:gap-4">
+        {['Tipo de sesión', 'Fecha y hora', 'Tus datos', 'Pago'].map((label, i) => (
+          <div class="flex items-center gap-2 flex-1">
+            <div
+              id={`step-indicator-${i + 1}`}
+              class="w-6 h-6 flex items-center justify-center text-[10px] tracking-widest font-body flex-shrink-0 transition-all duration-200 step-indicator border border-dust text-stone"
+              data-step={i + 1}
+            >
+              {i + 1}
+            </div>
+            <span
+              id={`step-label-${i + 1}`}
+              class="hidden md:block font-body text-[10px] tracking-widest uppercase step-label text-stone"
+              data-step={i + 1}
+            >
+              {label}
+            </span>
+            {i < 3 && <div class="flex-1 h-px bg-dust ml-1"></div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+
+  <section class="py-section bg-sand">
+    <div class="container-site">
+
+      <!-- ── PASO 1: Tipo de sesión ─────────────────────────────────────── -->
+      <div id="step-1" class="booking-step">
+        <p class="label text-stone mb-4">Paso 1</p>
+        <div class="divider mb-6"></div>
+        <h2 class="font-heading font-light text-3xl text-ink mb-8">¿Qué tipo de sesión necesitas?</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-dust">
+          {pricingPlans.map((plan) => (
+            <button
+              type="button"
+              class="session-card bg-white text-left p-8 hover:bg-warm transition-colors duration-200 cursor-pointer border-2 border-transparent"
+              data-id={plan.id}
+              data-price={plan.price}
+              data-title={plan.title}
+            >
+              {plan.highlighted && (
+                <span class="label text-gold block mb-3">Más solicitado</span>
+              )}
+              <p class="font-heading font-light text-xl text-ink">{plan.title}</p>
+              <p class="font-heading font-light text-2xl text-ink mt-2">{formatCLP(plan.price)}</p>
+              <div class="h-px bg-dust my-4"></div>
+              <p class="font-body text-xs text-stone">{plan.duration} · {plan.modality}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <!-- ── PASO 2: Fecha y hora ───────────────────────────────────────── -->
+      <div id="step-2" class="booking-step hidden">
+        <button type="button" id="back-to-1" class="label text-stone hover:text-ink transition-colors mb-8 flex items-center gap-2">
+          ← Volver
+        </button>
+        <p class="label text-stone mb-4">Paso 2</p>
+        <div class="divider mb-6"></div>
+        <h2 class="font-heading font-light text-3xl text-ink mb-8">Elige fecha y hora</h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-dust">
+          <!-- Calendario -->
+          <div class="bg-white p-8">
+            <div class="flex items-center justify-between mb-6">
+              <button id="prev-month" type="button" class="w-8 h-8 flex items-center justify-center hover:text-gold transition-colors text-stone text-lg">‹</button>
+              <p id="calendar-title" class="font-heading font-light text-base text-ink"></p>
+              <button id="next-month" type="button" class="w-8 h-8 flex items-center justify-center hover:text-gold transition-colors text-stone text-lg">›</button>
+            </div>
+            <div class="grid grid-cols-7 gap-1 mb-3">
+              {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map((d) => (
+                <div class="text-center font-body text-[10px] tracking-widest text-stone py-1">{d}</div>
+              ))}
+            </div>
+            <div id="calendar-grid" class="grid grid-cols-7 gap-1"></div>
+          </div>
+
+          <!-- Slots de hora -->
+          <div class="bg-sand p-8">
+            <div id="slots-placeholder" class="h-full flex items-center justify-center text-center py-8">
+              <div>
+                <div class="divider-center mb-5"></div>
+                <p class="body-text text-sm">Selecciona un día para<br />ver los horarios disponibles</p>
+              </div>
+            </div>
+            <div id="slots-container" class="hidden">
+              <p id="slots-date-label" class="font-heading font-light text-lg text-ink mb-5"></p>
+              <div id="slots-grid" class="grid grid-cols-3 gap-2"></div>
+              <p id="no-slots-msg" class="hidden label text-stone text-center py-6">Sin horarios disponibles para este día.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PASO 3: Datos del paciente ────────────────────────────────── -->
+      <div id="step-3" class="booking-step hidden">
+        <button type="button" id="back-to-2" class="label text-stone hover:text-ink transition-colors mb-8 flex items-center gap-2">
+          ← Volver
+        </button>
+        <p class="label text-stone mb-4">Paso 3</p>
+        <div class="divider mb-6"></div>
+        <h2 class="font-heading font-light text-3xl text-ink mb-6">Tus datos</h2>
+
+        <!-- Resumen de la reserva -->
+        <div id="booking-summary" class="bg-warm border border-dust px-7 py-5 mb-8 font-body text-sm"></div>
+
+        <form id="patient-form" class="bg-white border border-dust p-8 md:p-10 flex flex-col gap-7" novalidate>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-7">
+            <div>
+              <label class="label text-stone block mb-2" for="patient_name">Nombre completo *</label>
+              <input id="patient_name" name="patient_name" type="text" required autocomplete="name"
+                placeholder="Tu nombre completo" class="field" />
+              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa tu nombre.</p>
+            </div>
+            <div>
+              <label class="label text-stone block mb-2" for="patient_phone">Teléfono *</label>
+              <input id="patient_phone" name="patient_phone" type="tel" required autocomplete="tel"
+                placeholder="+56 9 XXXX XXXX" class="field" />
+              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa tu teléfono.</p>
+            </div>
+          </div>
+          <div>
+            <label class="label text-stone block mb-2" for="patient_email">Correo electrónico *</label>
+            <input id="patient_email" name="patient_email" type="email" required autocomplete="email"
+              placeholder="tu@correo.cl" class="field" />
+            <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa un correo válido.</p>
+          </div>
+          <div>
+            <label class="label text-stone block mb-2" for="patient_notes">¿Algo que quieras contarme antes? (opcional)</label>
+            <textarea id="patient_notes" name="patient_notes" rows="3"
+              placeholder="Puedes describir brevemente tu situación..."
+              class="field resize-none"></textarea>
+          </div>
+          <div>
+            <button type="submit" id="submit-patient" class="btn-dark text-[10px] py-3.5 px-8 w-full">
+              Continuar al pago
+            </button>
+            <p id="form-error" class="hidden font-body text-xs text-red-500 text-center mt-3"></p>
+          </div>
+        </form>
+      </div>
+
+      <!-- ── PASO 4: Pago ───────────────────────────────────────────────── -->
+      <div id="step-4" class="booking-step hidden">
+        <p class="label text-stone mb-4">Paso 4</p>
+        <div class="divider mb-6"></div>
+        <h2 class="font-heading font-light text-3xl text-ink mb-8 text-center">Completa tu pago</h2>
+        <div class="bg-white border border-dust max-w-md mx-auto p-10 text-center flex flex-col items-center gap-6">
+          <div id="payment-loading" class="flex flex-col items-center gap-4 py-4">
+            <div class="w-8 h-8 border border-ink border-t-transparent animate-spin"></div>
+            <p class="label text-stone">Preparando el pago seguro...</p>
+          </div>
+          <div id="payment-ready" class="hidden w-full flex flex-col items-center gap-6">
+            <div id="payment-summary" class="font-body text-sm text-stone w-full"></div>
+            <div class="h-px bg-dust w-full"></div>
+            <a id="mp-checkout-btn" href="#" target="_blank" rel="noopener noreferrer"
+              class="btn-dark w-full text-center text-[10px] py-3.5">
+              Pagar con Flow
+            </a>
+            <p class="label text-stone leading-relaxed">
+              Pago 100% seguro · Webpay, MACH,<br />tarjeta de crédito y débito.
+            </p>
+          </div>
+          <div id="payment-error" class="hidden w-full">
+            <p class="font-body text-sm text-red-500 mb-5" id="payment-error-msg"></p>
+            <a href="https://wa.me/56961273907" target="_blank" rel="noopener noreferrer" class="btn-outline text-[10px] py-3 px-6">
+              Coordinar por WhatsApp
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Garantías -->
+  <section class="bg-warm border-t border-dust">
+    <div class="container-site">
+      <div class="grid grid-cols-3 divide-x divide-dust">
+        {[
+          ['Pago seguro', 'Flow · SSL'],
+          ['Cancelación', 'Hasta 24 h antes'],
+          ['Confidencialidad', '100% privado'],
+        ].map(([title, sub]) => (
+          <div class="text-center py-7 px-4">
+            <p class="font-heading font-light text-sm text-ink">{title}</p>
+            <p class="label text-stone mt-1">{sub}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .day-btn {
+    @apply w-full aspect-square text-xs font-body flex items-center justify-center transition-all duration-150;
+  }
+  .day-available {
+    @apply text-ink hover:bg-warm cursor-pointer;
+  }
+  .day-past {
+    @apply text-dust cursor-default;
+  }
+  .day-selected {
+    @apply bg-ink text-sand font-medium;
+  }
+  .slot-btn {
+    @apply py-2.5 px-1 text-[10px] tracking-widest font-body border border-dust text-stone
+           hover:border-ink hover:text-ink transition-all duration-150 cursor-pointer uppercase;
+  }
+  .slot-selected {
+    @apply bg-ink text-sand border-ink;
+  }
+</style>
+
+<script define:vars={{ plans: JSON.stringify(pricingPlans) }}>
+  // ─── Estado ───────────────────────────────────────────────────────────────
+  const state = {
+    step: 1,
+    sessionType: null,
+    sessionTitle: null,
+    sessionPrice: null,
+    selectedDate: null,   // 'YYYY-MM-DD'
+    selectedTime: null,   // 'HH:MM'
+    calendarYear: null,
+    calendarMonth: null,
+    availableDates: new Set(), // días con slots
+    loadedSlots: {},           // { 'YYYY-MM-DD': ['09:00', ...] }
+  };
+
+  const pricingPlans = JSON.parse(plans);
+
+  const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const show = (id) => $(id)?.classList.remove('hidden');
+  const hide = (id) => $(id)?.classList.add('hidden');
+
+  function formatDateEs(iso) {
+    const [y, m, d] = iso.split('-');
+    return `${parseInt(d)} de ${MONTHS_ES[parseInt(m) - 1]} de ${y}`;
+  }
+
+  function formatCLP(n) {
+    return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+  }
+
+  // ─── Indicador de pasos ───────────────────────────────────────────────────
+  function updateStepIndicators(currentStep) {
+    for (let i = 1; i <= 4; i++) {
+      const ind   = $(`step-indicator-${i}`);
+      const label = $(`step-label-${i}`);
+      if (!ind) continue;
+      ind.className = 'w-6 h-6 flex items-center justify-center text-[10px] tracking-widest font-body flex-shrink-0 transition-all duration-200 step-indicator';
+      if (i < currentStep) {
+        ind.classList.add('bg-ink', 'text-sand', 'border', 'border-ink');
+        ind.textContent = '✓';
+      } else if (i === currentStep) {
+        ind.classList.add('border', 'border-ink', 'text-ink', 'bg-warm');
+        ind.textContent = String(i);
+      } else {
+        ind.classList.add('border', 'border-dust', 'text-stone');
+        ind.textContent = String(i);
+      }
+      if (label) {
+        label.className = 'hidden md:block font-body text-[10px] tracking-widest uppercase step-label';
+        if (i === currentStep) label.classList.add('text-ink');
+        else label.classList.add('text-stone');
+      }
+    }
+  }
+
+  function goToStep(n) {
+    state.step = n;
+    document.querySelectorAll('.booking-step').forEach((el) => el.classList.add('hidden'));
+    $(`step-${n}`)?.classList.remove('hidden');
+    updateStepIndicators(n);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ─── PASO 1 → 2 ──────────────────────────────────────────────────────────
+  document.querySelectorAll('.session-card').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.sessionType  = btn.dataset.id;
+      state.sessionTitle = btn.dataset.title;
+      state.sessionPrice = parseInt(btn.dataset.price);
+
+      // Marcar seleccionado visualmente
+      document.querySelectorAll('.session-card').forEach((b) => b.classList.remove('border-ink', '!bg-warm'));
+      btn.classList.add('border-ink', '!bg-warm');
+
+      // Iniciar calendario en mes actual
+      const now = new Date();
+      state.calendarYear  = now.getFullYear();
+      state.calendarMonth = now.getMonth();
+
+      goToStep(2);
+      renderCalendar();
+    });
+  });
+
+  $('back-to-1')?.addEventListener('click', () => goToStep(1));
+  $('back-to-2')?.addEventListener('click', () => goToStep(2));
+
+  // ─── Calendario ──────────────────────────────────────────────────────────
+  $('prev-month')?.addEventListener('click', () => {
+    const d = new Date(state.calendarYear, state.calendarMonth - 1, 1);
+    const now = new Date(); now.setHours(0,0,0,0);
+    if (d < new Date(now.getFullYear(), now.getMonth(), 1)) return;
+    state.calendarYear  = d.getFullYear();
+    state.calendarMonth = d.getMonth();
+    renderCalendar();
+  });
+
+  $('next-month')?.addEventListener('click', () => {
+    const d = new Date(state.calendarYear, state.calendarMonth + 1, 1);
+    // Limitar a 3 meses adelante
+    const limit = new Date(); limit.setMonth(limit.getMonth() + 3);
+    if (d > limit) return;
+    state.calendarYear  = d.getFullYear();
+    state.calendarMonth = d.getMonth();
+    renderCalendar();
+  });
+
+  function isoDate(y, m, d) {
+    return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  async function renderCalendar() {
+    const y = state.calendarYear;
+    const m = state.calendarMonth;
+    $('calendar-title').textContent = `${MONTHS_ES[m]} ${y}`;
+
+    const grid = $('calendar-grid');
+    grid.innerHTML = '';
+
+    const firstDay  = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const today     = new Date(); today.setHours(0,0,0,0);
+
+    // Celdas vacías antes del primer día
+    for (let i = 0; i < firstDay; i++) {
+      grid.insertAdjacentHTML('beforeend', '<div></div>');
+    }
+
+    // Para saber qué días tienen slots, hacemos una consulta liviana por mes
+    // Cargamos todos los días del mes de una vez usando un fetch por cada día visible
+    // (optimización futura: endpoint por mes)
+    const dayButtons = [];
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso      = isoDate(y, m, d);
+      const dateObj  = new Date(iso + 'T00:00:00');
+      const isPast   = dateObj < today;
+      const isSelected = iso === state.selectedDate;
+
+      let cls = 'day-btn ';
+      if (isPast) {
+        cls += 'day-past';
+      } else if (isSelected) {
+        cls += 'day-selected';
+      } else {
+        cls += 'day-available';
+      }
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = cls;
+      btn.textContent = d;
+      btn.dataset.iso = iso;
+      btn.disabled = isPast;
+
+      if (!isPast) {
+        btn.addEventListener('click', () => selectDate(iso));
+      }
+
+      grid.appendChild(btn);
+      dayButtons.push({ btn, iso, isPast });
+    }
+  }
+
+  async function selectDate(iso) {
+    state.selectedDate = iso;
+    state.selectedTime = null;
+
+    // Actualizar estilos del calendario
+    document.querySelectorAll('.day-btn').forEach((b) => {
+      if (b.dataset.iso === iso) {
+        b.className = b.className.replace('day-available', 'day-selected');
+      } else if (!b.disabled) {
+        b.className = b.className.replace('day-selected', 'day-available');
+      }
+    });
+
+    // Mostrar slots
+    hide('slots-placeholder');
+    show('slots-container');
+    $('slots-date-label').textContent = formatDateEs(iso);
+    $('slots-grid').innerHTML = '<p class="col-span-3 text-xs text-muted py-2">Cargando horarios...</p>';
+    hide('no-slots-msg');
+
+    // Fetch slots
+    let slots = state.loadedSlots[iso];
+    if (!slots) {
+      try {
+        const res = await fetch(`/api/availability?date=${iso}`);
+        const data = await res.json();
+        slots = data.slots ?? [];
+        state.loadedSlots[iso] = slots;
+      } catch {
+        slots = [];
+      }
+    }
+
+    renderSlots(slots);
+  }
+
+  function renderSlots(slots) {
+    const grid = $('slots-grid');
+    grid.innerHTML = '';
+
+    if (!slots.length) {
+      show('no-slots-msg');
+      return;
+    }
+    hide('no-slots-msg');
+
+    slots.forEach((time) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `slot-btn ${state.selectedTime === time ? 'slot-selected' : ''}`;
+      btn.textContent = time;
+      btn.dataset.time = time;
+      btn.addEventListener('click', () => selectTime(time));
+      grid.appendChild(btn);
+    });
+  }
+
+  function selectTime(time) {
+    state.selectedTime = time;
+
+    document.querySelectorAll('.slot-btn').forEach((b) => {
+      if (b.dataset.time === time) b.className = b.className.replace('slot-btn', 'slot-btn slot-selected').replace('slot-selected slot-selected', 'slot-selected');
+      else b.classList.remove('slot-selected');
+    });
+    // Pequeño delay para que el usuario vea la selección antes de avanzar
+    setTimeout(() => {
+      buildBookingSummary();
+      goToStep(3);
+    }, 250);
+  }
+
+  // ─── PASO 3: formulario ───────────────────────────────────────────────────
+  function buildBookingSummary() {
+    const sessionLabel = { online: 'Sesión Online', presencial: 'Sesión Presencial', pareja: 'Sesión de Pareja' }[state.sessionType] ?? state.sessionTitle;
+    $('booking-summary').innerHTML = `
+      <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+        <span class="text-muted">Sesión:</span>     <span class="font-medium">${sessionLabel}</span>
+        <span class="text-muted">Fecha:</span>       <span class="font-medium">${formatDateEs(state.selectedDate)}</span>
+        <span class="text-muted">Hora:</span>        <span class="font-medium">${state.selectedTime}</span>
+        <span class="text-muted">Valor:</span>       <span class="font-medium text-primary">${formatCLP(state.sessionPrice)}</span>
+      </div>
+    `;
+  }
+
+  $('patient-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hide('form-error');
+
+    const name  = $('patient_name').value.trim();
+    const email = $('patient_email').value.trim();
+    const phone = $('patient_phone').value.trim();
+    const notes = $('patient_notes').value.trim();
+
+    // Validación
+    let valid = true;
+    document.querySelectorAll('.field-error').forEach((el) => el.classList.add('hidden'));
+
+    if (!name) { $('patient_name').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('patient_email').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!phone) { $('patient_phone').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!valid) return;
+
+    const btn = $('submit-patient');
+    btn.textContent = 'Procesando...';
+    btn.disabled = true;
+
+    goToStep(4);
+    show('payment-loading');
+    hide('payment-ready');
+    hide('payment-error');
+
+    try {
+      const res = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_type:  state.sessionType,
+          session_date:  state.selectedDate,
+          session_time:  state.selectedTime,
+          patient_name:  name,
+          patient_email: email,
+          patient_phone: phone,
+          notes,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.checkoutUrl) {
+        throw new Error(data.error ?? 'Error desconocido');
+      }
+
+      // Mostrar botón de pago
+      hide('payment-loading');
+      show('payment-ready');
+
+      $('payment-summary').innerHTML = `
+        <p class="font-heading text-xl text-dark">${formatCLP(state.sessionPrice)}</p>
+        <p class="text-xs text-muted mt-1">${state.sessionTitle} · ${formatDateEs(state.selectedDate)} · ${state.selectedTime}</p>
+      `;
+
+      $('mp-checkout-btn').href = data.checkoutUrl;
+      // En modo local/desarrollo usar sandbox_init_point si está disponible
+      // En producción usa checkoutUrl directamente
+
+    } catch (err) {
+      hide('payment-loading');
+      show('payment-error');
+      $('payment-error-msg').textContent = err.message ?? 'Ocurrió un error. Por favor contáctanos por WhatsApp.';
+    } finally {
+      btn.textContent = 'Continuar al pago';
+      btn.disabled = false;
+    }
+  });
+
+  // ─── Init ─────────────────────────────────────────────────────────────────
+  updateStepIndicators(1);
+</script>

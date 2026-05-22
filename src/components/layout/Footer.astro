@@ -1,0 +1,79 @@
+---
+const year = new Date().getFullYear();
+---
+
+<footer class="bg-ink text-sand/60 font-body texture-grain">
+  <div class="container-site pt-16 pb-10">
+
+    <div class="grid grid-cols-1 md:grid-cols-12 gap-12 pb-12 border-b border-sand/10">
+
+      <!-- Marca -->
+      <div class="md:col-span-4">
+        <p class="font-heading font-semibold text-2xl text-sand tracking-tight mb-1">
+          Valentina Orellana
+        </p>
+        <p class="font-body text-xs text-sand/35 mb-5">Psicóloga Clínica · Reg. #360070</p>
+        <p class="text-sm text-sand/50 leading-relaxed max-w-xs">
+          Acompaño a adultos y parejas en procesos de cambio, sanación y crecimiento personal.
+          Atención presencial en Santiago y online para todo Chile.
+        </p>
+      </div>
+
+      <!-- Navegación -->
+      <div class="md:col-span-3 md:col-start-6">
+        <p class="label text-sand/40 mb-5">Navegación</p>
+        <ul class="space-y-3">
+          {[
+            ['/', 'Inicio'],
+            ['/sobre-mi', 'Sobre mí'],
+            ['/servicios', 'Servicios'],
+            ['/precios', 'Precios'],
+            ['/opiniones', 'Opiniones'],
+            ['/contacto', 'Contacto'],
+            ['/agenda', 'Reservar sesión'],
+          ].map(([href, label]) => (
+            <li>
+              <a href={href} class="text-sm text-sand/50 hover:text-sand transition-colors duration-200">
+                {label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <!-- Contacto -->
+      <div class="md:col-span-4 md:col-start-9">
+        <p class="label text-sand/40 mb-5">Contacto</p>
+        <ul class="space-y-4">
+          <li>
+            <a href="tel:+56961273907" class="text-sm text-sand/50 hover:text-sand transition-colors duration-200 block">
+              +56 9 6127 3907
+            </a>
+          </li>
+          <li class="text-sm text-sand/50 leading-relaxed">
+            Vitacura · Las Condes<br />La Reina · Peñalolén
+          </li>
+          <li>
+            <a
+              href="https://wa.me/56961273907"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-sm text-sand/50 hover:text-sand transition-colors duration-200"
+            >
+              WhatsApp
+            </a>
+          </li>
+        </ul>
+
+        <a href="/agenda" class="btn-ghost mt-8 inline-flex text-[10px] py-3 px-6">
+          Reservar sesión
+        </a>
+      </div>
+    </div>
+
+    <div class="flex flex-col md:flex-row items-center justify-between gap-3 pt-8 text-xs text-sand/30">
+      <p>© {year} Ps. Valentina Orellana. Todos los derechos reservados.</p>
+      <p>Diseño por <a href="https://grouty.cl" class="hover:text-sand/60 transition-colors">Grouty</a></p>
+    </div>
+  </div>
+</footer>

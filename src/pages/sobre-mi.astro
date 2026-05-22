@@ -1,0 +1,88 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="Sobre mí" description="Conoce a la Ps. Valentina Orellana — formación, enfoque y valores.">
+
+  <!-- Banner editorial -->
+  <section class="py-24 md:py-32 bg-warm border-b border-dust">
+    <div class="container-site max-w-3xl">
+      <p class="label text-stone mb-4">Mi historia</p>
+      <div class="divider mb-6"></div>
+      <h1 class="display-title">Sobre mí</h1>
+    </div>
+  </section>
+
+  <!-- Contenido -->
+  <section class="py-section bg-sand">
+    <div class="container-site grid grid-cols-1 md:grid-cols-2 gap-16 lg:gap-24 items-start">
+
+      <!-- Imagen sticky -->
+      <div class="md:sticky md:top-28">
+        <div class="aspect-[3/4] bg-warm overflow-hidden">
+          <img
+            src="/images/valentina-sobre-mi.jpg"
+            alt="Ps. Valentina Orellana"
+            class="w-full h-full object-cover object-top"
+            onerror="this.style.display='none'"
+          />
+        </div>
+        <div class="border border-dust bg-white p-6 mt-px">
+          <p class="label text-stone mb-1">Registro profesional</p>
+          <p class="font-heading font-light text-3xl text-ink mt-1">#360070</p>
+          <p class="label text-stone mt-1">Colegio de Psicólogos de Chile</p>
+        </div>
+      </div>
+
+      <!-- Texto -->
+      <div class="space-y-12">
+
+        <div>
+          <p class="label text-stone mb-4">Enfoque terapéutico</p>
+          <div class="divider mb-6"></div>
+          <h2 class="font-heading font-light text-3xl text-ink mb-6">Hola, soy Valentina.</h2>
+          <div class="space-y-4 body-text">
+            <p>Soy psicóloga clínica con más de 8 años de experiencia acompañando a adultos, parejas y familias en procesos de cambio, sanación y crecimiento personal.</p>
+            <p>Mi enfoque integra herramientas de la Terapia Cognitivo-Conductual (TCC), el trabajo con apego y el acompañamiento a Personas Altamente Sensibles (PAS).</p>
+            <p>Mi objetivo es que cada persona que llegue a consulta se sienta escuchada, comprendida y acompañada, sin juicios y con total confidencialidad.</p>
+          </div>
+        </div>
+
+        <div>
+          <p class="label text-stone mb-4">Formación académica</p>
+          <div class="divider mb-6"></div>
+          <ul class="space-y-5">
+            {[
+              ['Licenciatura en Psicología', 'Universidad de Chile'],
+              ['Especialización en TCC', 'Instituto de Terapia Cognitiva (INTECO)'],
+              ['Formación en Trauma y Disociación', 'Centro de Estudios del Trauma'],
+              ['Certificación PAS', 'International HSP Association'],
+            ].map(([titulo, inst]) => (
+              <li class="grid grid-cols-1 gap-0.5 border-b border-dust pb-5">
+                <p class="font-body font-medium text-sm text-ink">{titulo}</p>
+                <p class="label text-stone">{inst}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <p class="label text-stone mb-4">Áreas de especialidad</p>
+          <div class="divider mb-6"></div>
+          <div class="flex flex-wrap gap-2">
+            {['Ansiedad', 'Depresión', 'Estrés', 'Duelo', 'Trauma', 'PAS',
+              'Autoestima', 'Vínculos afectivos', 'Pareja', 'Parentalidad'].map((tag) => (
+              <span class="font-body text-[10px] tracking-widest uppercase border border-dust text-stone px-3 py-2">
+                {tag}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <a href="/agenda" class="btn-dark inline-flex">Reservar una sesión</a>
+      </div>
+
+    </div>
+  </section>
+
+</BaseLayout>

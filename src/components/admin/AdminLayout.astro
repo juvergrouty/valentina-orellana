@@ -1,0 +1,261 @@
+---
+interface Props {
+  title: string;
+  current?: string;
+}
+const { title, current } = Astro.props;
+
+const nav = [
+  { href: '/admin',          label: 'Dashboard',  icon: '◈' },
+  { href: '/admin/agenda',   label: 'Agenda',     icon: '◫' },
+  { href: '/admin/bloqueos', label: 'Bloqueos',   icon: '◻' },
+];
+---
+
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title} · Admin Valentina</title>
+  <link rel="icon" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --sand:  #F7F5F0;
+      --white: #FFFFFF;
+      --ink:   #1A1916;
+      --stone: #6B6860;
+      --dust:  #C4BDB4;
+      --warm:  #E8E4DC;
+      --gold:  #A8906C;
+      --red:   #dc2626;
+      --green: #16a34a;
+    }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--sand);
+      color: var(--ink);
+      min-height: 100vh;
+      display: flex;
+      font-size: 14px;
+    }
+
+    /* ── Sidebar ───────────────────────────────────────────────────────────── */
+    aside {
+      width: 220px;
+      min-height: 100vh;
+      background: var(--ink);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+    .sidebar-brand {
+      padding: 1.75rem 1.5rem 1.25rem;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .sidebar-brand h1 {
+      font-family: 'Cormorant Garamond', serif;
+      font-weight: 300;
+      font-size: 1.1rem;
+      color: white;
+      line-height: 1.2;
+    }
+    .sidebar-brand p {
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.35);
+      margin-top: 0.25rem;
+    }
+    nav.sidebar-nav {
+      padding: 1.25rem 0;
+      flex: 1;
+    }
+    nav.sidebar-nav a {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.65rem 1.5rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.5);
+      text-decoration: none;
+      transition: color 0.15s, background 0.15s;
+    }
+    nav.sidebar-nav a:hover,
+    nav.sidebar-nav a.active {
+      color: white;
+      background: rgba(255,255,255,0.06);
+    }
+    nav.sidebar-nav a.active {
+      color: var(--gold);
+    }
+    nav.sidebar-nav a span.icon {
+      font-size: 1rem;
+      opacity: 0.6;
+    }
+    .sidebar-footer {
+      padding: 1.25rem 1.5rem;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .sidebar-footer form button {
+      width: 100%;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.45);
+      padding: 0.5rem;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .sidebar-footer form button:hover {
+      border-color: rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.7);
+    }
+
+    /* ── Main content ──────────────────────────────────────────────────────── */
+    main { flex: 1; overflow-x: auto; }
+    .topbar {
+      background: var(--white);
+      border-bottom: 1px solid var(--warm);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .topbar h2 {
+      font-family: 'Cormorant Garamond', serif;
+      font-weight: 400;
+      font-size: 1.4rem;
+      color: var(--ink);
+    }
+    .content { padding: 2rem; }
+
+    /* ── Componentes compartidos ───────────────────────────────────────────── */
+    .card {
+      background: var(--white);
+      border: 1px solid var(--warm);
+      padding: 1.5rem;
+    }
+    .label {
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--stone);
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.6rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 0.2rem 0.6rem;
+      border: 1px solid;
+    }
+    .badge-confirmed  { color: var(--green); border-color: var(--green); }
+    .badge-pending    { color: var(--gold);  border-color: var(--gold); }
+    .badge-cancelled  { color: var(--stone); border-color: var(--dust); }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left;
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--stone);
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid var(--warm);
+    }
+    td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--warm);
+      font-size: 0.8rem;
+      color: var(--ink);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--sand); }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      padding: 0.55rem 1.1rem;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      text-decoration: none;
+      border: none;
+    }
+    .btn-dark    { background: var(--ink);  color: white; }
+    .btn-dark:hover { background: var(--gold); }
+    .btn-outline { background: transparent; border: 1px solid var(--ink); color: var(--ink); }
+    .btn-outline:hover { background: var(--ink); color: white; }
+    .btn-danger  { background: transparent; border: 1px solid #fca5a5; color: var(--red); }
+    .btn-danger:hover { background: #fee2e2; }
+    .btn-sm { padding: 0.35rem 0.7rem; font-size: 0.58rem; }
+    input, select, textarea {
+      width: 100%;
+      border: none;
+      border-bottom: 1px solid var(--warm);
+      padding: 0.5rem 0;
+      font-size: 0.85rem;
+      font-family: 'Inter', sans-serif;
+      color: var(--ink);
+      background: transparent;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--ink); }
+    select { appearance: none; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <aside>
+    <div class="sidebar-brand">
+      <h1>Valentina<br />Orellana</h1>
+      <p>Panel administrativo</p>
+    </div>
+
+    <nav class="sidebar-nav">
+      {nav.map(({ href, label, icon }) => (
+        <a href={href} class={current === href ? 'active' : ''}>
+          <span class="icon">{icon}</span>
+          {label}
+        </a>
+      ))}
+    </nav>
+
+    <div class="sidebar-footer">
+      <form method="POST" action="/api/admin/logout">
+        <button type="submit">Cerrar sesión</button>
+      </form>
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <h2>{title}</h2>
+      <a href="/agenda" target="_blank" class="label" style="text-decoration:none;color:var(--stone);">
+        Ver sitio público →
+      </a>
+    </div>
+    <div class="content">
+      <slot />
+    </div>
+  </main>
+</body>
+</html>

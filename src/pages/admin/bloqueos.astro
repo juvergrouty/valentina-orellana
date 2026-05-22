@@ -1,0 +1,178 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+// Fechas bloqueadas desde hoy en adelante
+const today = new Date().toISOString().slice(0, 10);
+const { data: blocked } = await supabase
+  .from('blocked_dates')
+  .select('*')
+  .gte('date', today)
+  .order('date');
+
+// Pasadas (últimas 5, para referencia)
+const { data: past } = await supabase
+  .from('blocked_dates')
+  .select('*')
+  .lt('date', today)
+  .order('date', { ascending: false })
+  .limit(5);
+
+const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const formatDate = (iso: string) => {
+  const [y, m, d] = iso.split('-');
+  const dow = new Date(iso + 'T00:00:00').toLocaleDateString('es-CL', { weekday: 'long' });
+  return `${dow.charAt(0).toUpperCase() + dow.slice(1)}, ${parseInt(d)} de ${MONTHS_ES[parseInt(m)-1]} de ${y}`;
+};
+---
+
+<AdminLayout title="Bloqueos" current="/admin/bloqueos">
+
+  <div style="display:grid;grid-template-columns:1fr 360px;gap:1.5rem;align-items:start;">
+
+    <!-- Lista de fechas bloqueadas -->
+    <div>
+      <div class="card" style="margin-bottom:1rem;">
+        <p class="label" style="margin-bottom:1.25rem;">Fechas bloqueadas próximas</p>
+
+        {!blocked?.length ? (
+          <p style="font-size:0.8rem;color:var(--stone);padding:0.5rem 0;">
+            No hay fechas bloqueadas próximas.
+          </p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Motivo</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {blocked.map((b) => (
+                <tr>
+                  <td style="font-size:0.82rem;">{formatDate(b.date)}</td>
+                  <td style="color:var(--stone);font-size:0.8rem;">{b.reason ?? '—'}</td>
+                  <td style="width:80px;">
+                    <form method="POST" action="/api/admin/bloqueos">
+                      <input type="hidden" name="action" value="delete" />
+                      <input type="hidden" name="id" value={b.id} />
+                      <button type="submit" class="btn btn-danger btn-sm">Quitar</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {past && past.length > 0 && (
+        <div class="card">
+          <p class="label" style="margin-bottom:1rem;color:var(--dust);">Bloqueos pasados (últimos 5)</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Motivo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {past.map((b) => (
+                <tr style="opacity:0.5;">
+                  <td style="font-size:0.82rem;">{formatDate(b.date)}</td>
+                  <td style="color:var(--stone);font-size:0.8rem;">{b.reason ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+
+    <!-- Formulario para bloquear -->
+    <div style="display:flex;flex-direction:column;gap:1rem;">
+
+      <!-- Bloquear fecha individual -->
+      <div class="card">
+        <p class="label" style="margin-bottom:1.25rem;">Bloquear fecha</p>
+        <form method="POST" action="/api/admin/bloqueos" style="display:flex;flex-direction:column;gap:1rem;">
+          <input type="hidden" name="action" value="block-single" />
+          <div>
+            <label class="label" style="margin-bottom:0.3rem;display:block;">Fecha</label>
+            <input type="date" name="date" required min={today} />
+          </div>
+          <div>
+            <label class="label" style="margin-bottom:0.3rem;display:block;">Motivo (opcional)</label>
+            <input type="text" name="reason" placeholder="Feriado, vacaciones, etc." />
+          </div>
+          <button type="submit" class="btn btn-dark" style="width:100%;justify-content:center;">
+            Bloquear fecha
+          </button>
+        </form>
+      </div>
+
+      <!-- Bloquear rango de fechas -->
+      <div class="card">
+        <p class="label" style="margin-bottom:1.25rem;">Bloquear rango de fechas</p>
+        <form method="POST" action="/api/admin/bloqueos" style="display:flex;flex-direction:column;gap:1rem;">
+          <input type="hidden" name="action" value="block-range" />
+          <div>
+            <label class="label" style="margin-bottom:0.3rem;display:block;">Desde</label>
+            <input type="date" name="date_from" required min={today} />
+          </div>
+          <div>
+            <label class="label" style="margin-bottom:0.3rem;display:block;">Hasta</label>
+            <input type="date" name="date_to" required min={today} />
+          </div>
+          <div>
+            <label class="label" style="margin-bottom:0.3rem;display:block;">Motivo (opcional)</label>
+            <input type="text" name="reason" placeholder="Vacaciones de verano, etc." />
+          </div>
+          <button type="submit" class="btn btn-dark" style="width:100%;justify-content:center;">
+            Bloquear rango
+          </button>
+        </form>
+      </div>
+
+      <!-- Feriados nacionales Chile 2025 (atajos rápidos) -->
+      <div class="card">
+        <p class="label" style="margin-bottom:1rem;">Feriados Chile 2026 — atajos</p>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+          {[
+            ['2026-01-01', 'Año Nuevo'],
+            ['2026-04-03', 'Viernes Santo'],
+            ['2026-04-04', 'Sábado Santo'],
+            ['2026-05-01', 'Día del Trabajo'],
+            ['2026-05-21', 'Glorias Navales'],
+            ['2026-06-29', 'San Pedro y San Pablo'],
+            ['2026-07-16', 'V. del Carmen'],
+            ['2026-08-15', 'Asunción de la Virgen'],
+            ['2026-09-18', 'Independencia Nacional'],
+            ['2026-09-19', 'Glorias del Ejército'],
+            ['2026-10-12', 'Encuentro Dos Mundos'],
+            ['2026-10-31', 'Día de las Iglesias Ev.'],
+            ['2026-11-01', 'Día de Todos los Santos'],
+            ['2026-12-08', 'Inmaculada Concepción'],
+            ['2026-12-25', 'Navidad'],
+          ].filter(([date]) => date >= today).map(([date, label]) => (
+            <form method="POST" action="/api/admin/bloqueos" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
+              <input type="hidden" name="action" value="block-single" />
+              <input type="hidden" name="date" value={date} />
+              <input type="hidden" name="reason" value={label} />
+              <span style="font-size:0.78rem;color:var(--ink);">
+                {date.slice(5).replace('-', '/')} — {label}
+              </span>
+              <button type="submit" class="btn btn-outline btn-sm" style="flex-shrink:0;">
+                Bloquear
+              </button>
+            </form>
+          ))}
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</AdminLayout>

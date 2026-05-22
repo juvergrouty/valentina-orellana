@@ -1,0 +1,67 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { services } from '../data/services';
+---
+
+<BaseLayout title="Servicios" description="Servicios de psicología clínica: adultos, parejas, trauma y personas altamente sensibles.">
+
+  <section class="py-24 md:py-32 bg-warm border-b border-dust">
+    <div class="container-site max-w-3xl">
+      <p class="label text-stone mb-4">¿En qué puedo ayudarte?</p>
+      <div class="divider mb-6"></div>
+      <h1 class="display-title">Servicios</h1>
+    </div>
+  </section>
+
+  <section class="py-section bg-sand">
+    <div class="container-site">
+      <div class="space-y-0 divide-y divide-dust">
+        {services.map((service, i) => (
+          <div class={`grid grid-cols-1 md:grid-cols-2 gap-0 group`}>
+            <!-- Número + nombre -->
+            <div class={`p-10 md:p-16 flex flex-col justify-between bg-sand group-hover:bg-white transition-colors duration-300 ${i % 2 !== 0 ? 'md:order-2' : ''}`}>
+              <div>
+                <p class="label text-gold mb-6">0{i + 1}</p>
+                <h2 class="font-heading font-light text-3xl md:text-4xl text-ink leading-tight">
+                  {service.title}
+                </h2>
+              </div>
+              <div class="text-5xl mt-8 grayscale group-hover:grayscale-0 transition-all duration-500">
+                {service.icon}
+              </div>
+            </div>
+            <!-- Descripción -->
+            <div class={`p-10 md:p-16 bg-white flex flex-col justify-between ${i % 2 !== 0 ? 'md:order-1' : ''}`}>
+              <div>
+                <div class="divider mb-6"></div>
+                <p class="body-text leading-relaxed">{service.description}</p>
+              </div>
+              <div class="flex items-center justify-between mt-8 pt-6 border-t border-dust">
+                <div>
+                  <p class="label text-stone mb-0.5">Duración</p>
+                  <p class="font-heading font-light text-xl text-ink">{service.duration}</p>
+                </div>
+                <a href="/agenda" class="btn-outline text-[10px] py-2.5 px-5">Reservar</a>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA final -->
+  <section class="py-20 bg-ink text-center">
+    <div class="container-site max-w-xl">
+      <p class="label text-sand/40 mb-4">¿No sabes por dónde empezar?</p>
+      <div class="divider-center bg-sand/20 mb-8"></div>
+      <h2 class="font-heading font-light text-3xl md:text-4xl text-sand mb-6">
+        Escríbeme y lo<br />descubrimos juntos.
+      </h2>
+      <a href="/contacto" class="btn bg-sand text-ink hover:bg-gold hover:text-white text-[10px] tracking-widest2 uppercase py-3.5 px-8 transition-all duration-300">
+        Contactar a Valentina
+      </a>
+    </div>
+  </section>
+
+</BaseLayout>
