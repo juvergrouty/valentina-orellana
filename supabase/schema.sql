@@ -50,7 +50,7 @@ create table if not exists bookings (
   status           text not null default 'pending_payment'
                    check (status in ('pending_payment', 'confirmed', 'cancelled')),
   amount           integer not null,   -- en CLP
-  payment_method   text default 'online' check (payment_method in ('online', 'manual')),
+  payment_method   text default 'flow' check (payment_method in ('flow', 'manual')),
   mp_preference_id text,
   mp_payment_id    text,
   created_at       timestamptz default now()
