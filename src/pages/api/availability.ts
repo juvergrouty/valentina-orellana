@@ -38,7 +38,7 @@ export const GET: APIRoute = async ({ url }) => {
     .order('start_time');
 
   if (slotsError) {
-    return new Response(JSON.stringify({ error: 'Error consultando disponibilidad.' }), {
+    return new Response(JSON.stringify({ error: 'Error consultando disponibilidad.', detail: slotsError.message, code: slotsError.code }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
