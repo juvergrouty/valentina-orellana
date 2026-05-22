@@ -1,6 +1,9 @@
 # Dependencias
 node_modules/
 
+# npm — ya no se usa, ignorar si aparece
+package-lock.json
+
 # Build
 dist/
 .vercel/
