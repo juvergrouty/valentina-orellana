@@ -140,8 +140,12 @@ const formatCLP = (n: number) =>
             </div>
             <div>
               <label class="label text-stone block mb-2" for="patient_phone">Teléfono *</label>
-              <input id="patient_phone" name="patient_phone" type="tel" required autocomplete="tel"
-                placeholder="+56 9 XXXX XXXX" class="field" />
+              <div class="flex border border-dust focus-within:border-ink transition-colors bg-white">
+                <span class="flex items-center px-3 font-body text-sm text-stone bg-warm border-r border-dust select-none">+56</span>
+                <input id="patient_phone" name="patient_phone" type="tel" required
+                  placeholder="9 9999 9999" maxlength="11"
+                  class="flex-1 px-3 py-2.5 font-body text-sm text-ink bg-white outline-none placeholder:text-dust" />
+              </div>
               <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa tu teléfono.</p>
             </div>
           </div>
@@ -501,7 +505,8 @@ const formatCLP = (n: number) =>
 
     const name  = $('patient_name').value.trim();
     const email = $('patient_email').value.trim();
-    const phone = $('patient_phone').value.trim();
+    const phoneRaw = $('patient_phone').value.replace(/\D/g, '');
+    const phone = phoneRaw.length === 9 ? `+56${phoneRaw}` : '';
     const notes = $('patient_notes').value.trim();
 
     // Validación
@@ -510,7 +515,7 @@ const formatCLP = (n: number) =>
 
     if (!name) { $('patient_name').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('patient_email').nextElementSibling?.classList.remove('hidden'); valid = false; }
-    if (!phone) { $('patient_phone').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!phone) { $('patient_phone').closest('div').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!valid) return;
 
     const btn = $('submit-patient');
@@ -565,6 +570,31 @@ const formatCLP = (n: number) =>
       btn.disabled = false;
     }
   });
+
+  // ─── Formato teléfono ─────────────────────────────────────────────────────
+  const phoneInput = $('patient_phone');
+  if (phoneInput) {
+    phoneInput.addEventListener('input', () => {
+      // Solo dígitos
+      let digits = phoneInput.value.replace(/\D/g, '').slice(0, 9);
+      // Formato: 9 9999 9999
+      if (digits.length <= 1) {
+        phoneInput.value = digits;
+      } else if (digits.length <= 5) {
+        phoneInput.value = `${digits[0]} ${digits.slice(1)}`;
+      } else {
+        phoneInput.value = `${digits[0]} ${digits.slice(1, 5)} ${digits.slice(5)}`;
+      }
+    });
+    phoneInput.addEventListener('keydown', (e) => {
+      // Permitir: backspace, delete, tab, flechas, ctrl/cmd+a/c/v/x
+      const allowed = ['Backspace','Delete','Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
+      if (allowed.includes(e.key)) return;
+      if ((e.ctrlKey || e.metaKey) && ['a','c','v','x'].includes(e.key.toLowerCase())) return;
+      // Bloquear si no es dígito
+      if (!/^\d$/.test(e.key)) e.preventDefault();
+    });
+  }
 
   // ─── Init ─────────────────────────────────────────────────────────────────
   updateStepIndicators(1);

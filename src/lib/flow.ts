@@ -95,7 +95,7 @@ export async function createPaymentOrder(opts: {
     email:                 opts.email,
     urlConfirmation:       opts.urlConfirmation,
     urlReturn:             opts.urlReturn,
-    merchantTransactionId: opts.orderId,
+    commerceOrder:         opts.orderId,
   };
 
   const res = await fetch(`${FLOW_BASE_URL}/payment/create`, {
