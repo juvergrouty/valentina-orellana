@@ -178,6 +178,13 @@ const formatCLP = (n: number) =>
             <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa un correo válido.</p>
           </div>
           <div>
+            <label class="label text-stone block mb-2" for="motivo_consulta">Motivo de consulta *</label>
+            <select id="motivo_consulta" name="motivo_consulta" required class="field bg-transparent cursor-pointer">
+              <option value="" disabled selected>Selecciona el motivo principal...</option>
+            </select>
+            <p class="field-error hidden font-body text-xs text-red-500 mt-1">Selecciona un motivo de consulta.</p>
+          </div>
+          <div>
             <label class="label text-stone block mb-2" for="patient_notes">¿Algo que quieras contarme antes? (opcional)</label>
             <textarea id="patient_notes" name="patient_notes" rows="3"
               placeholder="Puedes describir brevemente tu situación..."
@@ -385,6 +392,9 @@ const formatCLP = (n: number) =>
       document.querySelectorAll('.modality-card').forEach((b) => b.classList.remove('border-forest', 'bg-warm'));
       btn.classList.add('border-forest', 'bg-warm');
 
+      // Actualizar motivos de consulta según grupo
+      updateMotivoSelect(selectedGroup);
+
       // Iniciar calendario en mes actual
       const now = new Date();
       state.calendarYear  = now.getFullYear();
@@ -552,6 +562,46 @@ const formatCLP = (n: number) =>
   }
 
   // ─── PASO 3: formulario ───────────────────────────────────────────────────
+  // ─── Motivos de consulta por grupo ───────────────────────────────────────
+  const MOTIVOS = {
+    individual: [
+      'Ansiedad o estrés',
+      'Depresión o tristeza persistente',
+      'Baja autoestima o inseguridad',
+      'Duelo o pérdida',
+      'Dificultades en relaciones personales',
+      'Problemas laborales o burnout',
+      'Trauma o experiencias difíciles del pasado',
+      'Crisis existencial o falta de propósito',
+      'Desarrollo personal y autoconocimiento',
+      'Otro',
+    ],
+    pareja: [
+      'Problemas de comunicación',
+      'Infidelidad o ruptura de confianza',
+      'Crisis o distanciamiento emocional',
+      'Dificultades de convivencia',
+      'Celos o inseguridades en la relación',
+      'Decisiones importantes (hijos, matrimonio, separación)',
+      'Violencia o conflictos frecuentes',
+      'Retomar la conexión y el vínculo',
+      'Otro',
+    ],
+  };
+
+  function updateMotivoSelect(group) {
+    const select = $('motivo_consulta');
+    if (!select) return;
+    const opciones = MOTIVOS[group] ?? MOTIVOS.individual;
+    select.innerHTML = '<option value="" disabled selected>Selecciona el motivo principal...</option>';
+    opciones.forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      select.appendChild(opt);
+    });
+  }
+
   function buildBookingSummary() {
     const sessionLabel = { online: 'Sesión Online', presencial: 'Sesión Presencial', pareja: 'Sesión de Pareja' }[state.sessionType] ?? state.sessionTitle;
     $('booking-summary').innerHTML = `
@@ -568,19 +618,23 @@ const formatCLP = (n: number) =>
     e.preventDefault();
     hide('form-error');
 
-    const name  = $('patient_name').value.trim();
-    const email = $('patient_email').value.trim();
+    const name   = $('patient_name').value.trim();
+    const email  = $('patient_email').value.trim();
     const phoneRaw = $('patient_phone').value.replace(/\D/g, '');
-    const phone = phoneRaw.length === 9 ? `+56${phoneRaw}` : '';
-    const notes = $('patient_notes').value.trim();
+    const phone  = phoneRaw.length === 9 ? `+56${phoneRaw}` : '';
+    const motivo = $('motivo_consulta').value.trim();
+    const notes  = motivo
+      ? `Motivo: ${motivo}` + ($('patient_notes').value.trim() ? `\n\n${$('patient_notes').value.trim()}` : '')
+      : $('patient_notes').value.trim();
 
     // Validación
     let valid = true;
     document.querySelectorAll('.field-error').forEach((el) => el.classList.add('hidden'));
 
-    if (!name) { $('patient_name').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!name)   { $('patient_name').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('patient_email').nextElementSibling?.classList.remove('hidden'); valid = false; }
-    if (!phone) { $('patient_phone').closest('div').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!phone)  { $('patient_phone').closest('div').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!motivo) { $('motivo_consulta').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!valid) return;
 
     const btn = $('submit-patient');
