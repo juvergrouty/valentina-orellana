@@ -38,32 +38,12 @@ const cards = [
     </div>
 
     <!-- Cards -->
-    <div class="flex flex-col gap-5">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
       {cards.map((card) => (
-        <div class="bg-white border border-dust rounded-sm overflow-hidden grid grid-cols-1 md:grid-cols-[1fr_auto] group hover:border-forest/30 transition-colors duration-300">
-
-          <!-- Texto -->
-          <div class="p-8 md:p-10 lg:p-12 flex flex-col justify-center">
-            <div class="icon-circle mb-6">
-              <Icon name={card.icon} size={22} />
-            </div>
-            <h3 class="font-heading font-semibold text-2xl md:text-3xl text-ink mb-3 leading-tight">
-              {card.title}
-            </h3>
-            <p class="font-body text-stone font-light text-sm md:text-base leading-relaxed mb-6 max-w-md">
-              {card.description}
-            </p>
-            <a href={card.href}
-               class="font-body text-[11px] text-forest tracking-wide flex items-center gap-2 hover:gap-3 transition-all duration-200 w-fit">
-              Conocer más
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-              </svg>
-            </a>
-          </div>
+        <div class="bg-white border border-dust rounded-sm overflow-hidden flex flex-col group hover:border-forest/30 transition-colors duration-300">
 
           <!-- Imagen -->
-          <div class="relative w-full md:w-[380px] lg:w-[480px] h-60 md:h-auto overflow-hidden">
+          <div class="relative w-full h-56 overflow-hidden">
             <img
               src={card.image}
               alt={card.title}
@@ -74,6 +54,26 @@ const cards = [
               <div class="w-10 h-px bg-dust"></div>
               <p class="label text-dust">{card.imagePlaceholder}</p>
             </div>
+          </div>
+
+          <!-- Texto -->
+          <div class="p-8 flex flex-col flex-1">
+            <div class="icon-circle mb-5">
+              <Icon name={card.icon} size={20} />
+            </div>
+            <h3 class="font-heading font-semibold text-2xl text-ink mb-3 leading-tight">
+              {card.title}
+            </h3>
+            <p class="font-body text-stone font-light text-sm leading-relaxed mb-6 flex-1">
+              {card.description}
+            </p>
+            <a href={card.href}
+               class="font-body text-[11px] text-forest tracking-wide flex items-center gap-2 hover:gap-3 transition-all duration-200 w-fit mt-auto">
+              Conocer más
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+              </svg>
+            </a>
           </div>
 
         </div>
