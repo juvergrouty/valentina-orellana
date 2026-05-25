@@ -79,7 +79,7 @@
 
   /* ── Tipografía ─────────────────────────────────────────────────────────── */
   .label {
-    @apply font-body text-[10px] tracking-widest2 uppercase text-stone font-medium;
+    @apply font-body text-[11px] tracking-widest2 uppercase text-stone font-medium;
   }
 
   .display-title {
@@ -148,7 +148,7 @@
 
   /* ── Field ─────────────────────────────────────────────────────────────── */
   .field {
-    @apply w-full bg-transparent border-b border-dust py-3 text-sm font-body text-ink
+    @apply w-full bg-transparent border-b border-dust py-3 text-base font-body text-ink
            placeholder:text-stone/60 focus:outline-none focus:border-forest transition-colors duration-200;
   }
 }

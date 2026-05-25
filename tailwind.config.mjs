@@ -20,7 +20,7 @@ export default {
       fontSize: {
         'display': ['clamp(2.5rem, 5.5vw, 5rem)', { lineHeight: '1.05', letterSpacing: '-0.02em' }],
         'title':   ['clamp(1.75rem, 3.5vw, 3rem)', { lineHeight: '1.1', letterSpacing: '-0.015em' }],
-        'lead':    ['clamp(0.95rem, 1.5vw, 1.1rem)', { lineHeight: '1.75' }],
+        'lead':    ['clamp(1.05rem, 1.5vw, 1.2rem)', { lineHeight: '1.8' }],
       },
       letterSpacing: {
         widest2: '0.2em',
