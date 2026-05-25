@@ -21,7 +21,7 @@ const formatCLP = (n: number) =>
   </section>
 
   <!-- Indicador de pasos -->
-  <div class="bg-white border-b border-dust sticky top-[72px] md:top-[80px] z-40">
+  <div id="booking-bar" class="bg-white border-b border-dust sticky top-[72px] md:top-[80px] z-40">
     <div class="container-site py-4">
       <div class="flex items-center gap-2 md:gap-4">
         {['Tipo de sesión', 'Fecha y hora', 'Tus datos', 'Pago'].map((label, i) => (
@@ -303,7 +303,11 @@ const formatCLP = (n: number) =>
     document.querySelectorAll('.booking-step').forEach((el) => el.classList.add('hidden'));
     $(`step-${n}`)?.classList.remove('hidden');
     updateStepIndicators(n);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const bar = document.getElementById('booking-bar');
+    if (bar) {
+      const top = bar.getBoundingClientRect().top + window.scrollY - 1;
+      window.scrollTo({ top, behavior: 'smooth' });
+    }
   }
 
   // ─── PASO 1 → 2 ──────────────────────────────────────────────────────────

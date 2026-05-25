@@ -38,15 +38,7 @@ export const GET: APIRoute = async ({ url }) => {
     .order('start_time');
 
   if (slotsError) {
-    let roleInKey = 'unknown';
-    try {
-      const parts = (import.meta.env.SUPABASE_SERVICE_ROLE_KEY ?? '').split('.');
-      if (parts.length >= 2) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-        roleInKey = payload.role ?? 'no-role';
-      }
-    } catch {}
-    return new Response(JSON.stringify({ error: 'Error consultando disponibilidad.', detail: slotsError.message, code: slotsError.code, roleInKey }), {
+    return new Response(JSON.stringify({ error: 'Error consultando disponibilidad.' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
