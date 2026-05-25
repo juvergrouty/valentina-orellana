@@ -107,10 +107,11 @@ export const POST: APIRoute = async ({ request }) => {
       urlReturn:       `${siteUrl}/confirmacion`,
     });
   } catch (err) {
-    console.error('Error creando orden Flow:', err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error('Error creando orden Flow:', errMsg);
     // Eliminar la reserva creada para evitar slots bloqueados sin pago
     await supabase.from('bookings').delete().eq('id', booking.id);
-    return json({ error: 'Error al conectar con el sistema de pago. Por favor contáctanos por WhatsApp.' }, 502);
+    return json({ error: 'Error al conectar con el sistema de pago.', detail: errMsg }, 502);
   }
 
   // Guardar el token de Flow en la reserva (para luego recuperarla desde el webhook/confirmación)
