@@ -32,17 +32,14 @@
       <p class="label text-stone mb-4">Sobre mí</p>
       <div class="divider mb-6"></div>
 
-      <h2 class="font-heading font-semibold text-ink mb-6 leading-tight"
-          style="font-size: clamp(1.8rem, 3.5vw, 2.8rem); letter-spacing: -0.02em;">
-        Soy Valentina Orellana, psicóloga clínica.
-      </h2>
+      <h2 class="section-title mb-6">Soy Valentina Orellana, psicóloga clínica.</h2>
 
       <div class="space-y-4 mb-8">
-        <p class="font-body text-stone font-light text-base leading-relaxed">
+        <p class="body-text">
           Con experiencia en terapia para adultos y parejas. Mi enfoque es cálido,
           cercano y basado en evidencia.
         </p>
-        <p class="font-body text-stone font-light text-base leading-relaxed">
+        <p class="body-text">
           Trabajo con herramientas de la terapia cognitivo-conductual,
           el apego y el acompañamiento a personas altamente sensibles.
         </p>
@@ -50,7 +47,7 @@
 
       <div class="flex flex-wrap gap-2 mb-10">
         {['Terapia Cognitivo-Conductual', 'Apego y Vínculo', 'Personas Altamente Sensibles', 'Trauma', 'Parentalidad'].map((tag) => (
-          <span class="font-body text-[10px] tracking-widest uppercase border border-dust text-stone px-3 py-1.5 rounded-sm">
+          <span class="label border border-dust text-stone px-3 py-1.5 rounded-sm normal-case tracking-normal text-xs">
             {tag}
           </span>
         ))}
@@ -73,7 +70,7 @@
         ].map(([value, label]) => (
           <div>
             <p class="font-heading font-semibold text-2xl text-ink leading-none mb-1">{value}</p>
-            <p class="font-body text-[11px] text-stone font-light leading-snug">{label}</p>
+            <p class="body-sm leading-snug">{label}</p>
           </div>
         ))}
       </div>

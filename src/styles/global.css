@@ -78,10 +78,12 @@
   .texture-lines > * { position: relative; z-index: 1; }
 
   /* ── Tipografía ─────────────────────────────────────────────────────────── */
+  /* Etiqueta pequeña — única clase para labels, captions, tags */
   .label {
-    @apply font-body text-[11px] tracking-widest2 uppercase text-stone font-medium;
+    @apply font-body text-xs tracking-widest uppercase text-stone font-medium;
   }
 
+  /* Títulos */
   .display-title {
     @apply font-heading font-semibold text-display text-ink;
   }
@@ -90,13 +92,26 @@
     @apply font-heading font-semibold text-title text-ink leading-tight;
   }
 
+  .card-title {
+    @apply font-heading font-semibold text-card text-ink leading-tight;
+  }
+
+  /* Cuerpo de texto */
+  .body-lead {
+    @apply font-body text-lg text-stone font-light leading-relaxed;
+  }
+
   .body-text {
-    @apply font-body text-lead text-stone font-light;
+    @apply font-body text-base text-stone font-light leading-relaxed;
+  }
+
+  .body-sm {
+    @apply font-body text-sm text-stone font-light leading-relaxed;
   }
 
   /* ── Botones ────────────────────────────────────────────────────────────── */
   .btn {
-    @apply inline-flex items-center gap-2 font-body text-[11px] tracking-widest uppercase
+    @apply inline-flex items-center gap-2 font-body text-xs tracking-widest uppercase
            transition-all duration-300 rounded-[4px];
   }
 

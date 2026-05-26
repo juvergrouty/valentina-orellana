@@ -27,11 +27,8 @@ const cards = [
     <!-- Encabezado -->
     <div class="text-center mb-14">
       <p class="label text-stone mb-4">¿En qué puedo ayudarte?</p>
-      <h2 class="font-heading font-semibold text-ink leading-tight mb-5"
-          style="font-size: clamp(1.8rem, 4vw, 3.2rem); letter-spacing: -0.02em;">
-        Terapia para crecer, sanar y avanzar.
-      </h2>
-      <p class="font-body text-stone font-light text-base leading-relaxed max-w-xl mx-auto">
+      <h2 class="section-title mb-5">Terapia para crecer, sanar y avanzar.</h2>
+      <p class="body-text max-w-xl mx-auto">
         Acompañamiento psicológico para adultos y parejas que desean comprenderse,
         mejorar su bienestar y construir relaciones más conscientes.
       </p>
@@ -61,10 +58,8 @@ const cards = [
             <div class="icon-circle mb-5">
               <Icon name={card.icon} size={20} />
             </div>
-            <h3 class="font-heading font-semibold text-2xl text-ink mb-3 leading-tight">
-              {card.title}
-            </h3>
-            <p class="font-body text-stone font-light text-sm leading-relaxed mb-6 flex-1">
+            <h3 class="card-title mb-3">{card.title}</h3>
+            <p class="body-sm mb-6 flex-1">
               {card.description}
             </p>
             <a href={card.href}

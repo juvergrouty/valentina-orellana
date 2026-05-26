@@ -9,26 +9,19 @@ import { testimonials } from '../../data/services';
     <!-- Cita principal (primera) -->
     <div class="max-w-3xl mx-auto text-center">
       <p class="font-heading font-light text-6xl text-forest/40 leading-none mb-4">"</p>
-      <blockquote class="font-heading font-light text-ink leading-relaxed mb-8"
-                  style="font-size: clamp(1.2rem, 2.5vw, 1.8rem);">
+      <blockquote class="font-heading font-light text-ink text-quote leading-relaxed mb-8">
         {testimonials[0].text}
       </blockquote>
       <div class="w-10 h-px bg-stone/20 mx-auto mb-5"></div>
-      <p class="font-body text-[10px] tracking-widest2 uppercase text-stone">
-        — {testimonials[0].name} · {testimonials[0].service}
-      </p>
+      <p class="label">— {testimonials[0].name} · {testimonials[0].service}</p>
     </div>
 
     <!-- Otros dos testimonios -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-10 mt-16 pt-14 border-t border-stone/20">
       {testimonials.slice(1).map((t) => (
         <div>
-          <p class="font-body text-sm font-light text-stone leading-relaxed italic mb-5">
-            "{t.text}"
-          </p>
-          <p class="font-body text-[10px] tracking-widest uppercase text-stone/60">
-            — {t.name} · {t.service}
-          </p>
+          <p class="body-text italic mb-5">"{t.text}"</p>
+          <p class="label">— {t.name} · {t.service}</p>
         </div>
       ))}
     </div>

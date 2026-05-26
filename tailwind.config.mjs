@@ -20,9 +20,10 @@ export default {
         body:    ['Inter', 'system-ui', 'sans-serif'],
       },
       fontSize: {
-        'display': ['clamp(2.5rem, 5.5vw, 5rem)', { lineHeight: '1.05', letterSpacing: '-0.02em' }],
-        'title':   ['clamp(1.75rem, 3.5vw, 3rem)', { lineHeight: '1.1', letterSpacing: '-0.015em' }],
-        'lead':    ['clamp(1.05rem, 1.5vw, 1.2rem)', { lineHeight: '1.8' }],
+        'display': ['clamp(2.4rem, 5vw, 4.2rem)',   { lineHeight: '1.05', letterSpacing: '-0.02em' }],
+        'title':   ['clamp(1.8rem, 3.5vw, 2.8rem)', { lineHeight: '1.1',  letterSpacing: '-0.015em' }],
+        'card':    ['clamp(1.3rem, 2vw, 1.6rem)',   { lineHeight: '1.2',  letterSpacing: '-0.01em' }],
+        'quote':   ['clamp(1.1rem, 2vw, 1.6rem)',   { lineHeight: '1.7' }],
       },
       letterSpacing: {
         widest2: '0.2em',
