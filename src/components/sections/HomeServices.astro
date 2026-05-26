@@ -40,10 +40,10 @@ const cards = [
     <!-- Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
       {cards.map((card) => (
-        <div class="bg-white border border-dust rounded-sm overflow-hidden flex flex-col group hover:border-forest/30 transition-colors duration-300">
+        <div class="bg-white border border-dust rounded-[10px] overflow-hidden flex flex-col group hover:border-forest/30 transition-colors duration-300">
 
           <!-- Imagen -->
-          <div class="relative w-full h-56 overflow-hidden">
+          <div class="relative w-full h-56 overflow-hidden rounded-t-[10px]">
             <img
               src={card.image}
               alt={card.title}

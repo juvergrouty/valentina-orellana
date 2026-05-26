@@ -4,14 +4,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        sand:    '#F5F0E8', // cream background principal
+        sand:    '#FAF7F4', // background principal web
         white:   '#FFFFFF',
         ink:     '#1A1A18', // negro cálido editorial
         stone:   '#6B6860', // texto secundario
         dust:    '#DDD8CF', // bordes, separadores
-        warm:    '#ECE8E0', // fondos alternativos
+        warm:    '#F4F0EC', // fondos alternativos (sección trust bar)
+        review:  '#DDDCD1', // fondo sección reseñas
+        header:  '#F5F1EC', // fondo header
         gold:    '#A8906C', // acento dorado (pequeños detalles)
-        forest:  '#3B5040', // verde oscuro — color primario de CTAs e íconos
+        forest:  '#576352', // verde — color primario de CTAs e íconos
       },
       fontFamily: {
         heading: ['Cormorant Garamond', 'Georgia', 'serif'],
