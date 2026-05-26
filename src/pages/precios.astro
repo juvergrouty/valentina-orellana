@@ -1,54 +1,104 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import Pricing    from '../components/sections/Pricing.astro';
+
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+
+const faq = [
+  {
+    q: '¿Cuáles son los valores de las sesiones?',
+    a: `Los valores dependen del tipo de sesión:\n\n• Terapia Individual Online — ${formatCLP(45000)} · 50 minutos\n• Terapia Individual Presencial — ${formatCLP(55000)} · 50 minutos\n• Terapia de Pareja Online — ${formatCLP(60000)} · 60 minutos\n• Terapia de Pareja Presencial — ${formatCLP(70000)} · 60 minutos`,
+  },
+  {
+    q: '¿Cómo puedo pagar?',
+    a: 'Aceptamos tarjetas de crédito, débito, MACH y transferencia bancaria a través de Flow (plataforma segura). El pago se realiza al momento de confirmar la reserva.',
+  },
+  {
+    q: '¿Qué pasa si necesito cancelar o reprogramar?',
+    a: 'Puedes cancelar o reprogramar hasta 24 horas antes de la sesión sin costo. Cancelaciones con menos de 24 horas de anticipación se cobran en su totalidad.',
+  },
+  {
+    q: '¿Atienden con Fonasa o Isapre?',
+    a: 'En este momento la atención es particular. Puedo emitir boleta para que solicites reembolso si tu plan de salud lo contempla.',
+  },
+  {
+    q: '¿La sesión online es igual de efectiva?',
+    a: 'Sí. La modalidad online ha demostrado ser igualmente efectiva para la mayoría de los procesos terapéuticos. Es cómoda, accesible y completamente privada.',
+  },
+  {
+    q: '¿Cuántas sesiones necesito?',
+    a: 'Depende de cada persona y proceso. Algunas personas notan cambios significativos en pocas semanas, otras prefieren un acompañamiento más prolongado. Lo conversamos juntos en la primera sesión.',
+  },
+  {
+    q: '¿Dónde se realizan las sesiones presenciales?',
+    a: 'El consultorio está ubicado en Las Condes, Santiago. Al confirmar tu reserva recibirás la dirección exacta y las indicaciones para llegar.',
+  },
+  {
+    q: '¿Cómo es la primera sesión?',
+    a: 'La primera sesión es de evaluación y conocimiento mutuo. Me cuentes lo que te trae, cuáles son tus objetivos y así definimos juntos cómo continuar. No hay presión ni compromisos.',
+  },
+];
 ---
 
-<BaseLayout title="Precios" description="Valores y modalidades — psicología online y presencial en Santiago.">
+<BaseLayout title="Preguntas frecuentes" description="Precios, modalidades y preguntas frecuentes — Ps. Valentina Orellana.">
 
+  <!-- Hero de sección -->
   <section class="py-24 md:py-32 bg-warm border-b border-dust">
-    <div class="container-site max-w-3xl">
-      <p class="label text-stone mb-4">Sin letra chica</p>
+    <div class="container-site">
+      <p class="label text-stone mb-4">Todo lo que necesitas saber</p>
       <div class="divider mb-6"></div>
-      <h1 class="display-title">Precios</h1>
+      <h1 class="display-title mb-6">Preguntas<br />frecuentes.</h1>
+      <p class="body-lead max-w-xl">
+        Aquí encontrarás respuesta a las dudas más comunes sobre las sesiones,
+        precios y cómo funciona el proceso terapéutico.
+      </p>
     </div>
   </section>
 
-  <Pricing />
-
-  <!-- FAQ -->
-  <section class="py-section bg-white">
-    <div class="container-site max-w-2xl">
-      <p class="label text-stone mb-4">Preguntas frecuentes</p>
-      <div class="divider mb-10"></div>
-      <h2 class="section-title mb-12">Lo que más me<br />preguntan.</h2>
-
+  <!-- Acordeón FAQ -->
+  <section class="py-section bg-sand">
+    <div class="container-site max-w-3xl">
       <div class="divide-y divide-dust">
-        {[
-          {
-            q: '¿Cómo puedo pagar?',
-            a: 'Aceptamos tarjetas de crédito, débito y transferencia bancaria a través de MercadoPago. El pago se realiza al momento de confirmar la reserva.',
-          },
-          {
-            q: '¿Qué pasa si necesito cancelar?',
-            a: 'Puedes cancelar o reprogramar hasta 24 horas antes de la sesión sin costo. Cancelaciones con menos de 24 horas de anticipación se cobran en su totalidad.',
-          },
-          {
-            q: '¿Atienden con Fonasa o Isapre?',
-            a: 'En este momento la atención es particular. Puedo emitir boleta para que solicites reembolso si tu plan de salud lo contempla.',
-          },
-          {
-            q: '¿La sesión online es igual de efectiva?',
-            a: 'Sí. La modalidad online ha demostrado ser igualmente efectiva para la mayoría de los procesos terapéuticos. Es cómoda, accesible y completamente privada.',
-          },
-        ].map(({ q, a }) => (
-          <details class="group py-6 cursor-pointer">
-            <summary class="font-heading font-light text-xl text-ink list-none flex justify-between items-center gap-4">
-              {q}
-              <span class="text-dust group-open:rotate-45 transition-transform duration-200 text-2xl font-light flex-shrink-0">+</span>
+        {faq.map(({ q, a }) => (
+          <details class="group py-7 cursor-pointer">
+            <summary class="font-heading font-light text-card text-ink list-none flex justify-between items-start gap-6">
+              <span>{q}</span>
+              <span class="text-forest group-open:rotate-45 transition-transform duration-300 text-2xl font-light flex-shrink-0 mt-0.5">+</span>
             </summary>
-            <p class="body-text mt-4 max-w-lg">{a}</p>
+            <div class="mt-5 space-y-2">
+              {a.split('\n\n').map((block) =>
+                block.startsWith('•') || block.includes('\n•')
+                  ? (
+                    <ul class="space-y-1.5">
+                      {block.split('\n').filter(l => l.trim()).map(line => (
+                        <li class="body-text flex gap-2">
+                          <span class="text-forest mt-1 flex-shrink-0">·</span>
+                          <span>{line.replace('• ', '')}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                  : <p class="body-text">{block}</p>
+              )}
+            </div>
           </details>
         ))}
+      </div>
+
+      <!-- CTA final -->
+      <div class="mt-16 pt-10 border-t border-dust flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+        <div>
+          <p class="font-heading font-light text-card text-ink mb-1">¿Tienes otra duda?</p>
+          <p class="body-sm">Escríbeme directamente por WhatsApp.</p>
+        </div>
+        <a
+          href="https://wa.me/56961273907?text=Hola%20Valentina%2C%20tengo%20una%20consulta."
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn-dark py-3.5 px-7 flex-shrink-0"
+        >
+          Escribir por WhatsApp
+        </a>
       </div>
     </div>
   </section>
