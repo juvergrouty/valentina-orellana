@@ -1,0 +1,137 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+const { data: slots } = await supabase
+  .from('availability_slots')
+  .select('*')
+  .order('day_of_week')
+  .order('start_time');
+
+const DAYS = [
+  { n: 0, label: 'Domingo' },
+  { n: 1, label: 'Lunes' },
+  { n: 2, label: 'Martes' },
+  { n: 3, label: 'Miércoles' },
+  { n: 4, label: 'Jueves' },
+  { n: 5, label: 'Viernes' },
+  { n: 6, label: 'Sábado' },
+];
+
+// Agrupar slots por día
+const byDay = new Map<number, typeof slots>();
+DAYS.forEach(d => byDay.set(d.n, []));
+(slots ?? []).forEach(s => byDay.get(s.day_of_week)?.push(s));
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+---
+
+<AdminLayout title="Horarios" current="/admin/horarios">
+
+  {saved && (
+    <div style="background:#f0fdf4;border:1px solid #86efac;color:#15803d;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
+      ✓ Cambio guardado.
+    </div>
+  )}
+
+  <div style="margin-bottom:1.5rem;">
+    <p style="font-size:0.8rem;color:var(--stone);line-height:1.6;">
+      Activa o desactiva horarios individuales. Los horarios inactivos no aparecen en la agenda pública.
+      Usa <strong>Horario extendido</strong> para agregar horas fuera del rango habitual.
+    </p>
+  </div>
+
+  <!-- Grid semanal -->
+  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:0.75rem;margin-bottom:2rem;">
+    {DAYS.map(({ n, label }) => {
+      const daySlots = byDay.get(n) ?? [];
+      return (
+        <div class="card" style="padding:1rem;">
+          <p class="label" style="margin-bottom:0.75rem;text-align:center;">{label}</p>
+
+          <!-- Slots existentes -->
+          <div style="display:flex;flex-direction:column;gap:0.4rem;margin-bottom:0.75rem;min-height:2rem;">
+            {daySlots.length === 0 && (
+              <p style="font-size:0.7rem;color:var(--dust);text-align:center;padding:0.5rem 0;">—</p>
+            )}
+            {daySlots.map(slot => (
+              <div style={`display:flex;align-items:center;justify-content:space-between;gap:0.25rem;padding:0.3rem 0.5rem;border:1px solid ${slot.active ? 'var(--green)' : 'var(--dust)'};background:${slot.active ? '#f0fdf4' : 'var(--sand)'};`}>
+                <span style={`font-size:0.8rem;font-family:'Cormorant Garamond',serif;${!slot.active ? 'color:var(--stone);text-decoration:line-through;' : ''}`}>
+                  {slot.start_time.slice(0,5)}
+                </span>
+                <div style="display:flex;gap:0.2rem;">
+                  <!-- Toggle activo -->
+                  <form method="POST" action="/api/admin/slots" style="margin:0;">
+                    <input type="hidden" name="action" value="toggle" />
+                    <input type="hidden" name="id" value={slot.id} />
+                    <input type="hidden" name="active" value={String(slot.active)} />
+                    <input type="hidden" name="redirect" value="/admin/horarios?saved=1" />
+                    <button type="submit" title={slot.active ? 'Desactivar' : 'Activar'}
+                      style={`background:none;border:none;cursor:pointer;font-size:0.7rem;padding:0;color:${slot.active ? 'var(--green)' : 'var(--stone)'};`}>
+                      {slot.active ? '●' : '○'}
+                    </button>
+                  </form>
+                  <!-- Eliminar -->
+                  <form method="POST" action="/api/admin/slots" style="margin:0;">
+                    <input type="hidden" name="action" value="delete" />
+                    <input type="hidden" name="id" value={slot.id} />
+                    <input type="hidden" name="redirect" value="/admin/horarios?saved=1" />
+                    <button type="submit" title="Eliminar"
+                      style="background:none;border:none;cursor:pointer;font-size:0.7rem;padding:0;color:var(--dust);"
+                      onclick="return confirm('¿Eliminar este horario?')">
+                      ✕
+                    </button>
+                  </form>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <!-- Agregar hora -->
+          <form method="POST" action="/api/admin/slots" style="display:flex;gap:0.25rem;align-items:center;">
+            <input type="hidden" name="action" value="create" />
+            <input type="hidden" name="day_of_week" value={String(n)} />
+            <input type="hidden" name="redirect" value="/admin/horarios?saved=1" />
+            <input type="time" name="start_time" step="300"
+              style="flex:1;font-size:0.72rem;padding:0.3rem 0.2rem;border:none;border-bottom:1px solid var(--dust);background:transparent;outline:none;" />
+            <button type="submit"
+              style="background:var(--ink);color:white;border:none;padding:0.3rem 0.5rem;font-size:0.65rem;cursor:pointer;flex-shrink:0;">
+              +
+            </button>
+          </form>
+        </div>
+      );
+    })}
+  </div>
+
+  <!-- Acciones rápidas -->
+  <div class="card" style="max-width:500px;">
+    <p class="label" style="margin-bottom:1rem;">Horario extendido — agregar a varios días a la vez</p>
+    <form method="POST" action="/api/admin/slots/bulk" style="display:flex;flex-direction:column;gap:1rem;">
+      <input type="hidden" name="redirect" value="/admin/horarios?saved=1" />
+
+      <div>
+        <label class="label" style="margin-bottom:0.4rem;display:block;">Hora a agregar</label>
+        <input type="time" name="start_time" step="300" required />
+      </div>
+
+      <div>
+        <label class="label" style="margin-bottom:0.5rem;display:block;">Días</label>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          {DAYS.map(({ n, label }) => (
+            <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;cursor:pointer;">
+              <input type="checkbox" name="days" value={String(n)} style="width:auto;" />
+              {label.slice(0, 2)}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-outline" style="width:fit-content;">
+        Agregar a días seleccionados
+      </button>
+    </form>
+  </div>
+
+</AdminLayout>

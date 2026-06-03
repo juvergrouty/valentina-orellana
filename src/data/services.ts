@@ -80,7 +80,7 @@ export const pricingPlans: PricingPlan[] = [
   {
     id: 'presencial',
     title: 'Individual Presencial',
-    price: 55000,
+    price: 500,
     currency: 'CLP',
     duration: '50 minutos',
     modality: 'Vitacura · Las Condes · La Reina · Peñalolén',
