@@ -1,6 +1,13 @@
 import { Resend } from 'resend';
 
-const resend = new Resend(import.meta.env.RESEND_API_KEY);
+// Inicialización perezosa — no falla si la key no está configurada
+let _resend: Resend | null = null;
+function getResend(): Resend | null {
+  const key = import.meta.env.RESEND_API_KEY;
+  if (!key) return null;
+  if (!_resend) _resend = new Resend(key);
+  return _resend;
+}
 
 const FROM = import.meta.env.EMAIL_FROM ?? 'onboarding@resend.dev';
 
@@ -38,10 +45,13 @@ const SESSION_LABELS: Record<string, string> = {
 
 // ─── Email al cliente: confirmación ──────────────────────────────────────────
 export async function sendConfirmationToClient(data: BookingEmailData) {
+  const client = getResend();
+  if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
+
   const sessionLabel = SESSION_LABELS[data.session_type] ?? data.session_type;
   const payLabel = data.payment_method === 'manual' ? 'Pago en consulta' : 'Pagado con Flow';
 
-  await resend.emails.send({
+  await client.emails.send({
     from: FROM,
     to:   data.patient_email,
     subject: `Sesión confirmada — Ps. Valentina Orellana`,
@@ -102,9 +112,12 @@ export async function sendConfirmationToClient(data: BookingEmailData) {
 
 // ─── Email al admin: nueva reserva ───────────────────────────────────────────
 export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail: string) {
+  const client = getResend();
+  if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
+
   const sessionLabel = SESSION_LABELS[data.session_type] ?? data.session_type;
 
-  await resend.emails.send({
+  await client.emails.send({
     from:    FROM,
     to:      adminEmail,
     subject: `Nueva reserva — ${data.patient_name} · ${formatDate(data.session_date)} ${data.session_time}`,
