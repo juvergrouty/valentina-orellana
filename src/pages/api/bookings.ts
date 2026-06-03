@@ -71,6 +71,11 @@ export const POST: APIRoute = async ({ request }) => {
   const plan = pricingPlans.find((p) => p.id === session_type);
   if (!plan) return json({ error: 'Plan no encontrado.' }, 400);
 
+  // Leer precio desde settings (si fue editado desde el admin), con fallback al valor de services.ts
+  const priceKey = `price_${session_type.replace('-', '_')}`;
+  const settingsPrice = settings[priceKey] ? parseInt(settings[priceKey]) : null;
+  const finalPrice = (settingsPrice && !isNaN(settingsPrice)) ? settingsPrice : plan.price;
+
   // ── Crear reserva en Supabase ────────────────────────────────────────────────
   const { data: booking, error: insertError } = await supabase
     .from('bookings')
@@ -84,7 +89,7 @@ export const POST: APIRoute = async ({ request }) => {
       notes:          notes?.trim() ?? null,
       status:         'pending_payment',
       payment_method: 'flow',
-      amount:         plan.price,
+      amount:         finalPrice,
     })
     .select('id')
     .single();
@@ -108,7 +113,7 @@ export const POST: APIRoute = async ({ request }) => {
     session_type,
     session_date,
     session_time,
-    amount:         plan.price,
+    amount:         finalPrice,
     payment_method: 'flow',
   };
 
@@ -139,7 +144,7 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     flowOrder = await createPaymentOrder({
       subject:         `${SESSION_LABELS[session_type]} — Ps. Valentina Orellana`,
-      amount:          plan.price,
+      amount:          finalPrice,
       email:           patient_email.trim().toLowerCase(),
       orderId:         booking.id,
       urlConfirmation: `${siteUrl}/api/flow/confirm`,

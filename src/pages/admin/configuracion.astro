@@ -120,19 +120,42 @@ const saved = Astro.url.searchParams.get('saved') === '1';
       </div>
     </div>
 
+    <!-- reCAPTCHA -->
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1.25rem;">
+        <p class="label" style="margin:0;">Google reCAPTCHA</p>
+        <span style="font-size:0.65rem;background:var(--warm);color:var(--stone);padding:0.2rem 0.6rem;border-radius:99px;letter-spacing:0.06em;text-transform:uppercase;">Próximamente</span>
+      </div>
+      <p style="font-size:0.85rem;color:var(--stone);margin-bottom:1.25rem;line-height:1.6;">
+        Cuando migres a producción, activa reCAPTCHA v3 para proteger el formulario de agenda
+        contra bots. Obtén las claves en
+        <a href="https://www.google.com/recaptcha/admin" target="_blank" style="color:var(--forest);">google.com/recaptcha</a>.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:1rem;">
+        <div>
+          <label class="label" style="margin-bottom:0.4rem;display:block;">Site Key (pública)</label>
+          <input type="text" name="recaptcha_site_key" value={settings['recaptcha_site_key'] ?? ''} placeholder="6Lc..." />
+        </div>
+        <div>
+          <label class="label" style="margin-bottom:0.4rem;display:block;">Secret Key (privada)</label>
+          <input type="password" name="recaptcha_secret_key" value={settings['recaptcha_secret_key'] ?? ''} placeholder="6Lc..." />
+        </div>
+      </div>
+    </div>
+
     <!-- Resend API Key -->
     <div class="card">
-      <p class="label" style="margin-bottom:1.25rem;">Clave API de Resend</p>
-      <p style="font-size:0.78rem;color:var(--stone);margin-bottom:1rem;line-height:1.5;">
-        El <strong>RESEND_API_KEY</strong> se configura en Vercel → Settings → Environment Variables.
-        Obtenlo en <a href="https://resend.com" target="_blank" style="color:var(--gold);">resend.com</a> (plan gratuito: 3.000 emails/mes).
+      <p class="label" style="margin-bottom:1.25rem;">Clave API de Resend (email)</p>
+      <p style="font-size:0.85rem;color:var(--stone);margin-bottom:1rem;line-height:1.6;">
+        Se configura en <strong>Vercel → Settings → Environment Variables</strong>.
+        Obtén la key en <a href="https://resend.com" target="_blank" style="color:var(--forest);">resend.com</a> (plan gratuito: 3.000 emails/mes).
       </p>
-      <div style="background:var(--sand);padding:0.6rem 1rem;font-size:0.75rem;font-family:monospace;color:var(--stone);">
+      <div style="background:var(--sand);padding:0.75rem 1rem;font-size:0.8rem;font-family:monospace;color:var(--stone);border-radius:var(--radius);">
         RESEND_API_KEY = re_xxxxxxxxxxxxxxxx
       </div>
     </div>
 
-    <button type="submit" class="btn btn-dark" style="width:100%;justify-content:center;padding:0.75rem;">
+    <button type="submit" class="btn btn-dark btn-lg" style="width:100%;justify-content:center;">
       Guardar configuración
     </button>
   </form>

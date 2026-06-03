@@ -54,28 +54,22 @@ const formatDate = (iso: string) => {
 
 <AdminLayout title="Dashboard" current="/admin">
 
-  <!-- Métricas rápidas -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2rem;">
-    <div class="card" style="text-align:center;">
-      <p class="label" style="margin-bottom:0.5rem;">Hoy</p>
-      <p style="font-family:'Cormorant Garamond',serif;font-size:2.5rem;font-weight:300;color:var(--ink);">
-        {todayBookings?.length ?? 0}
-      </p>
-      <p style="font-size:0.75rem;color:var(--stone);margin-top:0.25rem;">sesión{(todayBookings?.length ?? 0) !== 1 ? 'es' : ''}</p>
+  <!-- Métricas -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;margin-bottom:2rem;">
+    <div class="stat-card" style="text-align:center;">
+      <p class="stat-label">Sesiones hoy</p>
+      <p class="stat-value">{todayBookings?.length ?? 0}</p>
+      <p class="stat-sub">{formatDate(today)}</p>
     </div>
-    <div class="card" style="text-align:center;">
-      <p class="label" style="margin-bottom:0.5rem;">Este mes</p>
-      <p style="font-family:'Cormorant Garamond',serif;font-size:2.5rem;font-weight:300;color:var(--ink);">
-        {monthCount ?? 0}
-      </p>
-      <p style="font-size:0.75rem;color:var(--stone);margin-top:0.25rem;">confirmadas</p>
+    <div class="stat-card" style="text-align:center;">
+      <p class="stat-label">Este mes</p>
+      <p class="stat-value">{monthCount ?? 0}</p>
+      <p class="stat-sub">confirmadas</p>
     </div>
-    <div class="card" style="text-align:center;">
-      <p class="label" style="margin-bottom:0.5rem;">Pago pendiente</p>
-      <p style="font-family:'Cormorant Garamond',serif;font-size:2.5rem;font-weight:300;color:{(pendingCount ?? 0) > 0 ? 'var(--gold)' : 'var(--ink)'};">
-        {pendingCount ?? 0}
-      </p>
-      <p style="font-size:0.75rem;color:var(--stone);margin-top:0.25rem;">reservas</p>
+    <div class="stat-card" style="text-align:center;">
+      <p class="stat-label">Pago pendiente</p>
+      <p class="stat-value" style={(pendingCount ?? 0) > 0 ? 'color:var(--gold)' : ''}>{pendingCount ?? 0}</p>
+      <p class="stat-sub">reservas</p>
     </div>
   </div>
 
@@ -83,25 +77,25 @@ const formatDate = (iso: string) => {
 
     <!-- Sesiones de hoy -->
     <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
+      <div class="section-header">
         <p class="label">Hoy — {formatDate(today)}</p>
         <a href="/admin/agenda" class="btn btn-outline btn-sm">Ver agenda</a>
       </div>
       {!todayBookings?.length ? (
-        <p style="font-size:0.8rem;color:var(--stone);padding:1rem 0;">Sin sesiones para hoy.</p>
+        <p style="font-size:0.875rem;color:var(--stone);padding:1rem 0;">Sin sesiones para hoy.</p>
       ) : (
-        <div style="display:flex;flex-direction:column;gap:0.75rem;">
+        <div style="display:flex;flex-direction:column;gap:0.5rem;">
           {todayBookings.map((b) => (
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:0.6rem 0;border-bottom:1px solid var(--warm);">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem;background:var(--sand);border-radius:var(--radius);">
               <div>
-                <p style="font-size:0.85rem;font-weight:500;">{b.patient_name}</p>
-                <p style="font-size:0.72rem;color:var(--stone);margin-top:0.15rem;">
+                <p style="font-size:0.9rem;font-weight:500;">{b.patient_name}</p>
+                <p style="font-size:0.78rem;color:var(--stone);margin-top:0.15rem;">
                   {SESSION_LABELS[b.session_type as keyof typeof SESSION_LABELS] ?? b.session_type}
                 </p>
               </div>
               <div style="text-align:right;">
-                <p style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;">{formatTime(b.session_time)}</p>
-                <span class={`badge badge-${b.status === 'confirmed' ? 'confirmed' : 'pending'}`}>
+                <p style="font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:400;">{formatTime(b.session_time)}</p>
+                <span class={`badge badge-${b.status === 'confirmed' ? 'confirmed' : 'pending'}`} style="margin-top:0.25rem;">
                   {b.status === 'confirmed' ? 'Confirmada' : 'Por pagar'}
                 </span>
               </div>
@@ -113,12 +107,12 @@ const formatDate = (iso: string) => {
 
     <!-- Próximas sesiones -->
     <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
+      <div class="section-header">
         <p class="label">Próximos 7 días</p>
         <a href="/admin/agenda" class="btn btn-dark btn-sm">+ Nueva reserva</a>
       </div>
       {!upcoming?.length ? (
-        <p style="font-size:0.8rem;color:var(--stone);padding:1rem 0;">Sin sesiones próximas confirmadas.</p>
+        <p style="font-size:0.875rem;color:var(--stone);padding:1rem 0;">Sin sesiones próximas confirmadas.</p>
       ) : (
         <table>
           <thead>
@@ -134,8 +128,8 @@ const formatDate = (iso: string) => {
               <tr>
                 <td style="font-weight:500;">{b.patient_name}</td>
                 <td>{formatDate(b.session_date)}</td>
-                <td style="font-family:'Cormorant Garamond',serif;font-size:1rem;">{formatTime(b.session_time)}</td>
-                <td style="font-size:0.72rem;color:var(--stone);">
+                <td style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;">{formatTime(b.session_time)}</td>
+                <td style="color:var(--stone);">
                   {b.session_type === 'online' ? 'Ind. Online' :
                    b.session_type === 'presencial' ? 'Ind. Presencial' :
                    b.session_type === 'pareja-online' ? 'Pareja Online' : 'Pareja Presencial'}
