@@ -143,7 +143,7 @@ export const POST: APIRoute = async ({ request }) => {
       email:           patient_email.trim().toLowerCase(),
       orderId:         booking.id,
       urlConfirmation: `${siteUrl}/api/flow/confirm`,
-      urlReturn:       `${siteUrl}/confirmacion`,
+      urlReturn:       `${siteUrl}/api/flow/return`,
     });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
