@@ -705,7 +705,7 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
 
   // ─── Pago en consulta ─────────────────────────────────────────────────────
   document.getElementById('manual-pay-btn')?.addEventListener('click', async () => {
-    const btn = document.getElementById('manual-pay-btn') as HTMLButtonElement;
+    const btn = document.getElementById('manual-pay-btn');
     btn.textContent = 'Confirmando...';
     btn.disabled = true;
 
@@ -717,10 +717,10 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
           session_type:   state.sessionType,
           session_date:   state.selectedDate,
           session_time:   state.selectedTime,
-          patient_name:   (document.getElementById('patient_name') as HTMLInputElement)?.value ?? '',
-          patient_email:  (document.getElementById('patient_email') as HTMLInputElement)?.value ?? '',
-          patient_phone:  '+56' + (document.getElementById('patient_phone') as HTMLInputElement)?.value?.replace(/\D/g,'') ?? '',
-          notes:          (document.getElementById('patient_notes') as HTMLTextAreaElement)?.value ?? '',
+          patient_name:   document.getElementById('patient_name')?.value ?? '',
+          patient_email:  document.getElementById('patient_email')?.value ?? '',
+          patient_phone:  '+56' + (document.getElementById('patient_phone')?.value?.replace(/\D/g,'') ?? ''),
+          notes:          document.getElementById('patient_notes')?.value ?? '',
           payment_method: 'manual',
         }),
       });
