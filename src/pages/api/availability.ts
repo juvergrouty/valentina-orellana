@@ -3,8 +3,6 @@ import { supabase } from '../../lib/supabase';
 
 export const prerender = false;
 
-// GET /api/availability?date=YYYY-MM-DD
-// Devuelve los slots disponibles para la fecha solicitada
 export const GET: APIRoute = async ({ url }) => {
   const dateParam = url.searchParams.get('date');
 
@@ -26,76 +24,61 @@ export const GET: APIRoute = async ({ url }) => {
     });
   }
 
-  // día de semana (0=domingo…6=sábado)
   const dayOfWeek = requested.getDay();
 
-  // 1. Obtener slots activos para ese día de semana
-  const { data: slots, error: slotsError } = await supabase
-    .from('availability_slots')
-    .select('start_time')
-    .eq('day_of_week', dayOfWeek)
-    .eq('active', true)
-    .order('start_time');
+  // Cargar en paralelo: slots, fecha bloqueada, reservas del día y settings
+  const [
+    { data: slots, error: slotsError },
+    { data: blockedDate },
+    { data: booked, error: bookedError },
+    { data: settingsRows },
+  ] = await Promise.all([
+    supabase.from('availability_slots').select('start_time').eq('day_of_week', dayOfWeek).eq('active', true).order('start_time'),
+    supabase.from('blocked_dates').select('id').eq('date', dateParam).maybeSingle(),
+    supabase.from('bookings').select('session_time').eq('session_date', dateParam).neq('status', 'cancelled'),
+    supabase.from('settings').select('key, value'),
+  ]);
 
-  if (slotsError) {
-    return new Response(JSON.stringify({ error: 'Error consultando disponibilidad.' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  if (slotsError) return new Response(JSON.stringify({ error: 'Error consultando disponibilidad.' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+  if (!slots || slots.length === 0) return new Response(JSON.stringify({ slots: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  if (blockedDate) return new Response(JSON.stringify({ slots: [], blocked: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  if (bookedError) return new Response(JSON.stringify({ error: 'Error consultando reservas.' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 
-  if (!slots || slots.length === 0) {
-    return new Response(JSON.stringify({ slots: [] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  // Duración total = sesión + preparación (desde settings o por defecto 55+20=75)
+  const cfg: Record<string, string> = {};
+  (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { cfg[key] = value; });
+  const sessionMin = parseInt(cfg['session_duration_min'] ?? '55');
+  const prepMin    = parseInt(cfg['prep_duration_min']    ?? '20');
+  const totalMin   = sessionMin + prepMin;
 
-  // 2. Verificar si la fecha está bloqueada
-  const { data: blockedDate } = await supabase
-    .from('blocked_dates')
-    .select('id')
-    .eq('date', dateParam)
-    .maybeSingle();
+  // Convertir reservas a minutos desde medianoche
+  const bookedMinutes = (booked ?? []).map((b) => {
+    const [h, m] = b.session_time.slice(0, 5).split(':').map(Number);
+    return h * 60 + m;
+  });
 
-  if (blockedDate) {
-    return new Response(JSON.stringify({ slots: [], blocked: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  // 3. Obtener slots ya reservados para esa fecha
-  const { data: booked, error: bookedError } = await supabase
-    .from('bookings')
-    .select('session_time')
-    .eq('session_date', dateParam)
-    .neq('status', 'cancelled');
-
-  if (bookedError) {
-    return new Response(JSON.stringify({ error: 'Error consultando reservas.' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  const bookedTimes = new Set((booked ?? []).map((b) => b.session_time.slice(0, 5)));
-
-  // 3. Filtrar: quitar los ya ocupados
-  // Si es hoy, también quitar horas que ya pasaron
-  const nowHour = new Date();
-  const isToday = dateParam === nowHour.toISOString().slice(0, 10);
+  const nowHour  = new Date();
+  const isToday  = dateParam === nowHour.toISOString().slice(0, 10);
+  const nowMin   = nowHour.getHours() * 60 + nowHour.getMinutes() + 60; // +60 min buffer
 
   const available = slots
     .map((s) => s.start_time.slice(0, 5))
     .filter((time) => {
-      if (bookedTimes.has(time)) return false;
-      if (isToday) {
-        const [h, m] = time.split(':').map(Number);
-        const slotMinutes = h * 60 + m;
-        const nowMinutes = nowHour.getHours() * 60 + nowHour.getMinutes() + 60; // +60 min buffer
-        if (slotMinutes <= nowMinutes) return false;
+      const [h, m] = time.split(':').map(Number);
+      const slotMin = h * 60 + m;
+
+      // Filtrar horas pasadas si es hoy
+      if (isToday && slotMin <= nowMin) return false;
+
+      // Bloquear si el slot cae dentro de la duración de una reserva existente
+      // O si una reserva existente caería dentro de la duración de este slot
+      for (const bMin of bookedMinutes) {
+        // Slot dentro del bloque de una reserva: bMin <= slotMin < bMin + totalMin
+        if (slotMin >= bMin && slotMin < bMin + totalMin) return false;
+        // Reserva existente dentro del bloque de este slot: bMin >= slotMin && bMin < slotMin + totalMin
+        if (bMin >= slotMin && bMin < slotMin + totalMin) return false;
       }
+
       return true;
     });
 
