@@ -680,6 +680,9 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
         throw new Error(data.error ?? 'Error desconocido');
       }
 
+      // Guardar el bookingId para usarlo en "Pagar en consulta"
+      state.bookingId = data.bookingId;
+
       // Mostrar botón de pago
       hide('payment-loading');
       show('payment-ready');
@@ -710,32 +713,24 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
     btn.disabled = true;
 
     try {
-      const res = await fetch('/api/bookings', {
+      if (!state.bookingId) throw new Error('Reserva no encontrada.');
+
+      const res = await fetch('/api/bookings/confirm-manual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_type:   state.sessionType,
-          session_date:   state.selectedDate,
-          session_time:   state.selectedTime,
-          patient_name:   document.getElementById('patient_name')?.value ?? '',
-          patient_email:  document.getElementById('patient_email')?.value ?? '',
-          patient_phone:  '+56' + (document.getElementById('patient_phone')?.value?.replace(/\D/g,'') ?? ''),
-          notes:          document.getElementById('patient_notes')?.value ?? '',
-          payment_method: 'manual',
-        }),
+        body: JSON.stringify({ bookingId: state.bookingId }),
       });
 
       const data = await res.json();
       if (data.confirmed) {
-        // Redirigir a página de confirmación
         window.location.href = '/confirmacion?manual=1';
       } else {
         throw new Error(data.error ?? 'Error al confirmar');
       }
     } catch (err) {
-      hide('payment-loading');
+      hide('payment-error');
       show('payment-error');
-      $('payment-error-msg').textContent = 'Error al procesar. Intenta nuevamente.';
+      $('payment-error-msg').textContent = err.message ?? 'Error al procesar. Intenta nuevamente.';
       btn.textContent = 'Pagar en consulta';
       btn.disabled = false;
     }
