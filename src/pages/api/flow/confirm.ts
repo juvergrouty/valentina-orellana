@@ -19,6 +19,7 @@
 import type { APIRoute } from 'astro';
 import { getPaymentStatus } from '../../../lib/flow';
 import { supabase } from '../../../lib/supabase';
+import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
 
 export const prerender = false;
 
@@ -52,15 +53,38 @@ export const POST: APIRoute = async ({ request }) => {
 
     if (status.status === 2) {
       // ✅ Pagado — confirmar la reserva
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from('bookings')
         .update({
           status:         'confirmed',
           mp_payment_id:  String(status.flowOrder),
         })
-        .eq('mp_preference_id', token);
+        .eq('mp_preference_id', token)
+        .select()
+        .single();
 
-      if (error) console.error('[Flow webhook] Error confirmando reserva:', error);
+      if (error) {
+        console.error('[Flow webhook] Error confirmando reserva:', error);
+      } else if (updated) {
+        // Obtener email admin de settings
+        const { data: settingsRows } = await supabase.from('settings').select('key, value');
+        const adminEmail = (settingsRows ?? []).find((r: { key: string; value: string }) => r.key === 'notification_email')?.value ?? 'juver@grouty.cl';
+
+        const emailData = {
+          patient_name:   updated.patient_name,
+          patient_email:  updated.patient_email,
+          patient_phone:  updated.patient_phone,
+          session_type:   updated.session_type,
+          session_date:   updated.session_date,
+          session_time:   updated.session_time,
+          amount:         updated.amount,
+          payment_method: 'flow',
+        };
+        Promise.all([
+          sendConfirmationToClient(emailData).catch(console.error),
+          sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
+        ]);
+      }
 
     } else if (status.status === 3 || status.status === 4) {
       // ❌ Rechazado o anulado — cancelar la reserva

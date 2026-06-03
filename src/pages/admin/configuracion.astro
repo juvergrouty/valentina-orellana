@@ -1,0 +1,130 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+// Cargar settings actuales
+const { data: rows } = await supabase.from('settings').select('key, value');
+const settings: Record<string, string> = {};
+(rows ?? []).forEach(({ key, value }) => { settings[key] = value; });
+
+const manualEnabled    = settings['manual_payment_enabled'] !== 'false';
+const notificationEmail = settings['notification_email'] ?? 'juver@grouty.cl';
+const emailFrom        = settings['email_from'] ?? '';
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+---
+
+<AdminLayout title="Configuración" current="/admin/configuracion">
+
+  {saved && (
+    <div style="background:#f0fdf4;border:1px solid #86efac;color:#15803d;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
+      ✓ Configuración guardada correctamente.
+    </div>
+  )}
+
+  <form method="POST" action="/api/admin/settings" style="display:flex;flex-direction:column;gap:1.5rem;max-width:520px;">
+    <input type="hidden" name="redirect" value="/admin/configuracion?saved=1" />
+
+    <!-- Pagos -->
+    <div class="card">
+      <p class="label" style="margin-bottom:1.25rem;">Métodos de pago</p>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 0;border-bottom:1px solid var(--warm);">
+        <div>
+          <p style="font-size:0.85rem;font-weight:500;">Pago en consulta</p>
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.2rem;">
+            Permite a los clientes reservar sin pagar online. La reserva queda confirmada directamente.
+          </p>
+        </div>
+        <label style="position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;margin-left:1rem;">
+          <input
+            type="checkbox"
+            name="manual_payment_enabled"
+            value="true"
+            checked={manualEnabled}
+            style="opacity:0;width:0;height:0;"
+            id="toggle-manual"
+          />
+          <span id="toggle-track" style={`position:absolute;inset:0;border-radius:22px;cursor:pointer;transition:background 0.2s;background:${manualEnabled ? '#576352' : '#DDD8CF'};`}></span>
+          <span id="toggle-thumb" style={`position:absolute;top:3px;width:16px;height:16px;border-radius:50%;background:white;transition:left 0.2s;left:${manualEnabled ? '21px' : '3px'};`}></span>
+        </label>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 0;">
+        <div>
+          <p style="font-size:0.85rem;font-weight:500;">Flow (online)</p>
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.2rem;">Pago con tarjeta, MACH y Webpay. Siempre activo.</p>
+        </div>
+        <span style="font-size:0.72rem;color:var(--green);font-weight:500;letter-spacing:0.08em;text-transform:uppercase;">Activo</span>
+      </div>
+    </div>
+
+    <!-- Notificaciones -->
+    <div class="card">
+      <p class="label" style="margin-bottom:1.25rem;">Notificaciones por email</p>
+
+      <div style="margin-bottom:1rem;">
+        <label class="label" style="margin-bottom:0.4rem;display:block;">Email de notificaciones (admin)</label>
+        <input
+          type="email"
+          name="notification_email"
+          value={notificationEmail}
+          placeholder="tu@correo.cl"
+          required
+        />
+        <p style="font-size:0.7rem;color:var(--stone);margin-top:0.4rem;">
+          Recibirás un aviso cada vez que se haga una nueva reserva.
+        </p>
+      </div>
+
+      <div style="margin-bottom:0.5rem;">
+        <label class="label" style="margin-bottom:0.4rem;display:block;">Email remitente (opcional)</label>
+        <input
+          type="email"
+          name="email_from"
+          value={emailFrom}
+          placeholder="no-reply@psicologavalentinaorellana.com"
+        />
+        <p style="font-size:0.7rem;color:var(--stone);margin-top:0.4rem;">
+          Requiere dominio verificado en Resend. Si está vacío se usa el remitente de prueba.
+        </p>
+      </div>
+    </div>
+
+    <!-- Resend API Key -->
+    <div class="card">
+      <p class="label" style="margin-bottom:1.25rem;">Clave API de Resend</p>
+      <p style="font-size:0.78rem;color:var(--stone);margin-bottom:1rem;line-height:1.5;">
+        El <strong>RESEND_API_KEY</strong> se configura en Vercel → Settings → Environment Variables.
+        Obtenlo en <a href="https://resend.com" target="_blank" style="color:var(--gold);">resend.com</a> (plan gratuito: 3.000 emails/mes).
+      </p>
+      <div style="background:var(--sand);padding:0.6rem 1rem;font-size:0.75rem;font-family:monospace;color:var(--stone);">
+        RESEND_API_KEY = re_xxxxxxxxxxxxxxxx
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-dark" style="width:100%;justify-content:center;padding:0.75rem;">
+      Guardar configuración
+    </button>
+  </form>
+
+</AdminLayout>
+
+<script>
+  const checkbox = document.getElementById('toggle-manual') as HTMLInputElement;
+  const track    = document.getElementById('toggle-track') as HTMLElement;
+  const thumb    = document.getElementById('toggle-thumb') as HTMLElement;
+
+  checkbox?.addEventListener('change', () => {
+    const on = checkbox.checked;
+    track.style.background = on ? '#576352' : '#DDD8CF';
+    thumb.style.left       = on ? '21px' : '3px';
+  });
+
+  // Clic en el track también activa el checkbox
+  track?.addEventListener('click', () => {
+    checkbox.checked = !checkbox.checked;
+    checkbox.dispatchEvent(new Event('change'));
+  });
+</script>

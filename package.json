@@ -18,6 +18,7 @@
     "@astrojs/vercel": "^10.0.7",
     "@supabase/supabase-js": "^2.69.0",
     "astro": "^6.3.7",
+    "resend": "^6.12.4",
     "tailwindcss": "^3.4.0"
   },
   "devDependencies": {

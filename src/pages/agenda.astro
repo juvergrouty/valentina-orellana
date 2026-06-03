@@ -2,9 +2,16 @@
 export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { pricingPlans } from '../data/services';
+import { supabase } from '../lib/supabase';
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+
+// Verificar si el pago en consulta está habilitado
+const { data: settingsRows } = await supabase.from('settings').select('key, value');
+const settings: Record<string, string> = {};
+(settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
+const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
 ---
 
 <BaseLayout
@@ -213,10 +220,16 @@ const formatCLP = (n: number) =>
             <div id="payment-summary" class="font-body text-sm text-stone w-full"></div>
             <div class="h-px bg-dust w-full"></div>
             <a id="mp-checkout-btn" href="#" target="_blank" rel="noopener noreferrer"
-              class="btn-dark w-full text-center text-[10px] py-3.5">
+              class="btn-dark w-full text-center text-xs py-3.5">
               Pagar con Flow
             </a>
-            <p class="label text-stone leading-relaxed">
+            {manualPaymentEnabled && (
+              <button id="manual-pay-btn" type="button"
+                class="w-full text-center font-body text-xs tracking-widest uppercase py-3.5 border border-dust text-stone hover:border-ink hover:text-ink transition-colors duration-200">
+                Pagar en consulta
+              </button>
+            )}
+            <p class="label text-stone leading-relaxed text-center">
               Pago 100% seguro · Webpay, MACH,<br />tarjeta de crédito y débito.
             </p>
           </div>
@@ -686,6 +699,44 @@ const formatCLP = (n: number) =>
       $('payment-error-msg').textContent = err.message ?? 'Ocurrió un error. Por favor contáctanos por WhatsApp.';
     } finally {
       btn.textContent = 'Continuar al pago';
+      btn.disabled = false;
+    }
+  });
+
+  // ─── Pago en consulta ─────────────────────────────────────────────────────
+  document.getElementById('manual-pay-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('manual-pay-btn') as HTMLButtonElement;
+    btn.textContent = 'Confirmando...';
+    btn.disabled = true;
+
+    try {
+      const res = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_type:   state.sessionType,
+          session_date:   state.selectedDate,
+          session_time:   state.selectedTime,
+          patient_name:   (document.getElementById('patient_name') as HTMLInputElement)?.value ?? '',
+          patient_email:  (document.getElementById('patient_email') as HTMLInputElement)?.value ?? '',
+          patient_phone:  '+56' + (document.getElementById('patient_phone') as HTMLInputElement)?.value?.replace(/\D/g,'') ?? '',
+          notes:          (document.getElementById('patient_notes') as HTMLTextAreaElement)?.value ?? '',
+          payment_method: 'manual',
+        }),
+      });
+
+      const data = await res.json();
+      if (data.confirmed) {
+        // Redirigir a página de confirmación
+        window.location.href = '/confirmacion?manual=1';
+      } else {
+        throw new Error(data.error ?? 'Error al confirmar');
+      }
+    } catch (err) {
+      hide('payment-loading');
+      show('payment-error');
+      $('payment-error-msg').textContent = 'Error al procesar. Intenta nuevamente.';
+      btn.textContent = 'Pagar en consulta';
       btn.disabled = false;
     }
   });

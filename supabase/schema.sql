@@ -66,7 +66,24 @@ create index if not exists idx_bookings_status on bookings(status);
 create index if not exists idx_bookings_email  on bookings(patient_email);
 
 
--- ─── 4. Row Level Security ───────────────────────────────────────────────────
+-- ─── 4. Settings ────────────────────────────────────────────────────────────
+create table if not exists settings (
+  key        text primary key,
+  value      text not null,
+  updated_at timestamptz default now()
+);
+
+insert into settings (key, value) values
+  ('manual_payment_enabled', 'true'),
+  ('notification_email',     'juver@grouty.cl'),
+  ('email_from',             '')
+on conflict (key) do nothing;
+
+grant all on settings to service_role;
+grant select on settings to anon, authenticated;
+
+
+-- ─── 5. Row Level Security ───────────────────────────────────────────────────
 alter table availability_slots enable row level security;
 alter table blocked_dates       enable row level security;
 alter table bookings            enable row level security;

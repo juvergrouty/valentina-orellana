@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
 import { createPaymentOrder } from '../../lib/flow';
 import { pricingPlans } from '../../data/services';
+import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
 
 export const prerender = false;
 
@@ -91,6 +92,44 @@ export const POST: APIRoute = async ({ request }) => {
   if (insertError || !booking) {
     console.error('Error insertando reserva:', insertError);
     return json({ error: 'Error al crear la reserva. Intenta nuevamente.' }, 500);
+  }
+
+  // ── Obtener settings (email admin, pago manual) ──────────────────────────────
+  const { data: settingsRows } = await supabase.from('settings').select('key, value');
+  const settings: Record<string, string> = {};
+  (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
+  const notificationEmail  = settings['notification_email'] ?? 'juver@grouty.cl';
+  const manualEnabled      = settings['manual_payment_enabled'] !== 'false';
+
+  const emailData = {
+    patient_name:   patient_name.trim(),
+    patient_email:  patient_email.trim().toLowerCase(),
+    patient_phone:  patient_phone.trim(),
+    session_type,
+    session_date,
+    session_time,
+    amount:         plan.price,
+    payment_method: 'flow',
+  };
+
+  // ── Pago en consulta (manual) ─────────────────────────────────────────────────
+  const isManual = (body as Record<string, string>).payment_method === 'manual';
+
+  if (isManual && manualEnabled) {
+    // Confirmar directamente sin pasar por Flow
+    await supabase
+      .from('bookings')
+      .update({ status: 'confirmed', payment_method: 'manual' })
+      .eq('id', booking.id);
+
+    // Enviar emails (sin bloquear la respuesta)
+    const ed = { ...emailData, payment_method: 'manual' };
+    Promise.all([
+      sendConfirmationToClient(ed).catch(console.error),
+      sendNotificationToAdmin(ed, notificationEmail).catch(console.error),
+    ]);
+
+    return json({ bookingId: booking.id, confirmed: true });
   }
 
   // ── Crear orden de pago en Flow ──────────────────────────────────────────────
