@@ -247,10 +247,16 @@ const nav = [
       cursor: pointer;
       transition: all .15s;
       text-decoration: none;
-      border: 2px solid transparent;
+      border: 2px solid var(--ink);
       border-radius: var(--radius);
       white-space: nowrap;
+      /* Por defecto todos los botones son caja negra */
+      background: var(--ink);
+      color: white;
     }
+    .btn:hover { background: #333; border-color: #333; }
+
+    /* Variante oscura (principal) — igual que base */
     .btn-dark {
       background: var(--ink);
       color: white;
@@ -258,29 +264,40 @@ const nav = [
     }
     .btn-dark:hover { background: var(--forest); border-color: var(--forest); }
 
+    /* Variante outline — caja blanca con borde negro */
     .btn-outline {
-      background: transparent;
+      background: white;
       border-color: var(--ink);
       color: var(--ink);
     }
     .btn-outline:hover { background: var(--ink); color: white; }
 
+    /* Variante peligro — caja roja */
     .btn-danger {
-      background: transparent;
+      background: white;
       border-color: var(--red);
       color: var(--red);
     }
-    .btn-danger:hover { background: var(--red); color: white; }
+    .btn-danger:hover { background: var(--red); color: white; border-color: var(--red); }
 
+    /* Variante éxito */
     .btn-success {
       background: var(--green);
       border-color: var(--green);
       color: white;
     }
-    .btn-success:hover { opacity: 0.85; }
+    .btn-success:hover { background: #15803d; border-color: #15803d; }
 
-    .btn-sm { padding: 0.45rem 0.9rem; font-size: 0.73rem; }
+    .btn-sm { padding: 0.4rem 0.85rem; font-size: 0.73rem; }
     .btn-lg { padding: 0.85rem 2rem; font-size: 0.85rem; }
+
+    /* Excluir botones de toggle (tienen id específicos) del estilo agresivo */
+    button[id^="toggle-"],
+    button[id^="close-"] {
+      background: none !important;
+      border: none !important;
+      color: inherit !important;
+    }
 
     /* ── Inputs ─────────────────────────────────────────────────────────────── */
     input, select, textarea {

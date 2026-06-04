@@ -21,11 +21,7 @@ const saved = Astro.url.searchParams.get('saved') === '1';
 
 <AdminLayout title="Configuración" current="/admin/configuracion">
 
-  {saved && (
-    <div style="background:#f0fdf4;border:1px solid #86efac;color:#15803d;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
-      ✓ Configuración guardada correctamente.
-    </div>
-  )}
+  {saved && <div class="alert-success">✓ Configuración guardada correctamente.</div>}
 
   <form method="POST" action="/api/admin/settings" style="display:flex;flex-direction:column;gap:1.5rem;max-width:520px;">
     <input type="hidden" name="redirect" value="/admin/configuracion?saved=1" />
