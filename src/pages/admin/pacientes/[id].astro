@@ -52,9 +52,14 @@ const SESSION_LABELS: Record<string, string> = {
 
 const redirectBase = `/admin/pacientes/${id}`;
 
-// Indexar notas por fecha — para usar en la tab de sesiones
+// Indexar notas por booking_id (primary) y por session_date como fallback
+const notesByBooking: Record<string, any> = {};
 const notesByDate: Record<string, any> = {};
-(notes ?? []).forEach(n => { notesByDate[n.session_date] = n; });
+(notes ?? []).forEach(n => {
+  if (n.booking_id) notesByBooking[n.booking_id] = n;
+  // fallback por fecha solo si no hay booking_id
+  else if (!notesByDate[n.session_date]) notesByDate[n.session_date] = n;
+});
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
@@ -191,7 +196,7 @@ const formatCLP = (n: number) =>
       ) : (
         <div style="display:flex;flex-direction:column;gap:0.75rem;">
           {patientBookings.map((b, i) => {
-            const nota = notesByDate[b.session_date] ?? null;
+            const nota = notesByBooking[b.id] ?? notesByDate[b.session_date] ?? null;
             const badgeClass = b.status === 'confirmed' ? 'badge-confirmed' : b.status === 'cancelled' ? 'badge-cancelled' : 'badge-pending';
             const badgeLabel = b.status === 'confirmed' ? 'Confirmada' : b.status === 'cancelled' ? 'Cancelada' : 'Pendiente';
             return (
@@ -248,6 +253,7 @@ const formatCLP = (n: number) =>
                     <form method="POST" action="/api/admin/patients" style="display:flex;flex-direction:column;gap:0.75rem;">
                       <input type="hidden" name="action" value="add_note" />
                       <input type="hidden" name="patient_id" value={patient.id} />
+                      <input type="hidden" name="booking_id" value={b.id} />
                       <input type="hidden" name="session_date" value={b.session_date} />
                       <input type="hidden" name="session_type" value={b.session_type} />
                       <input type="hidden" name="redirect" value={`${redirectBase}?tab=sesiones`} />

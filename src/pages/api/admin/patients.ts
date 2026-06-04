@@ -50,8 +50,10 @@ export const POST: APIRoute = async ({ request }) => {
 
   // ── Agregar nota de sesión ──────────────────────────────────────────────────
   if (action === 'add_note') {
+    const bookingId = (form.get('booking_id') as string) || null;
     const { error } = await supabase.from('session_notes').insert({
       patient_id:   form.get('patient_id') as string,
+      booking_id:   bookingId,
       session_date: form.get('session_date') as string,
       session_type: form.get('session_type') as string,
       content:      (form.get('content') as string)?.trim(),
