@@ -1,6 +1,7 @@
 ---
 import BaseLayout  from '../layouts/BaseLayout.astro';
 import PageHero    from '../components/sections/PageHero.astro';
+import Icon        from '../components/ui/Icon.astro';
 import { services } from '../data/services';
 ---
 
@@ -21,8 +22,8 @@ import { services } from '../data/services';
                   {service.title}
                 </h2>
               </div>
-              <div class="text-5xl mt-8 grayscale group-hover:grayscale-0 transition-all duration-500">
-                {service.icon}
+              <div class="mt-8 text-forest/30 group-hover:text-forest transition-colors duration-500">
+                <Icon name={service.icon} size={48} />
               </div>
             </div>
             <!-- Descripción -->
