@@ -405,22 +405,21 @@ const formatCLP = (n: number) =>
 </div>
 
 <script>
-  // Toggle panel de nota por sesión
-  function toggleNota(id) {
+  // Exponer funciones globalmente para que funcionen en onclick=""
+  window.toggleNota = function(id) {
     const el = document.getElementById(id);
     if (!el) return;
     el.style.display = el.style.display === 'none' ? 'block' : 'none';
-  }
+  };
 
-  // Toggle entre vista y edición de nota
-  function toggleEdit(editId, viewId) {
+  window.toggleEdit = function(editId, viewId) {
     const edit = document.getElementById(editId);
     const view = document.getElementById(viewId);
     if (!edit || !view) return;
     const isEditing = edit.style.display !== 'none';
     edit.style.display = isEditing ? 'none' : 'flex';
     view.style.display = isEditing ? 'block' : 'none';
-  }
+  };
 
   const agendaModal  = document.getElementById('modal-agenda');
   const openAgenda   = document.getElementById('open-agenda-modal');
