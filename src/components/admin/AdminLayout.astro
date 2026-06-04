@@ -48,8 +48,8 @@ const nav = [
       color: var(--ink);
       min-height: 100vh;
       display: flex;
-      font-size: 15px;
-      line-height: 1.5;
+      font-size: 16px;
+      line-height: 1.6;
     }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────────── */
@@ -94,11 +94,11 @@ const nav = [
       display: flex;
       align-items: center;
       gap: 0.75rem;
-      padding: 0.7rem 1.75rem;
-      font-size: 0.78rem;
-      letter-spacing: 0.08em;
+      padding: 0.75rem 1.75rem;
+      font-size: 0.85rem;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
-      color: rgba(255,255,255,.45);
+      color: rgba(255,255,255,.5);
       text-decoration: none;
       transition: color .15s, background .15s;
       border-left: 2px solid transparent;
@@ -186,11 +186,11 @@ const nav = [
 
     /* ── Label ──────────────────────────────────────────────────────────────── */
     .label {
-      font-size: 0.7rem;
-      letter-spacing: 0.12em;
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
       color: var(--stone);
-      font-weight: 500;
+      font-weight: 600;
     }
 
     /* ── Badges ─────────────────────────────────────────────────────────────── */
@@ -213,19 +213,19 @@ const nav = [
     table { width: 100%; border-collapse: collapse; }
     th {
       text-align: left;
-      font-size: 0.7rem;
-      letter-spacing: 0.1em;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--stone);
-      font-weight: 500;
-      padding: 0.75rem 1rem;
+      font-weight: 600;
+      padding: 0.85rem 1.1rem;
       border-bottom: 1px solid var(--dust);
       background: var(--warm);
     }
     td {
-      padding: 0.85rem 1rem;
+      padding: 0.95rem 1.1rem;
       border-bottom: 1px solid var(--warm);
-      font-size: 0.875rem;
+      font-size: 0.95rem;
       color: var(--ink);
       vertical-align: middle;
     }
@@ -236,56 +236,59 @@ const nav = [
     .btn {
       display: inline-flex;
       align-items: center;
-      gap: 0.4rem;
+      justify-content: center;
+      gap: 0.5rem;
       font-family: 'Inter', sans-serif;
-      font-size: 0.72rem;
-      letter-spacing: 0.1em;
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      font-weight: 500;
-      padding: 0.6rem 1.2rem;
+      font-weight: 600;
+      padding: 0.65rem 1.4rem;
       cursor: pointer;
       transition: all .15s;
       text-decoration: none;
-      border: none;
+      border: 2px solid transparent;
       border-radius: var(--radius);
+      white-space: nowrap;
     }
     .btn-dark {
       background: var(--ink);
       color: white;
+      border-color: var(--ink);
     }
-    .btn-dark:hover { background: var(--forest); }
+    .btn-dark:hover { background: var(--forest); border-color: var(--forest); }
 
     .btn-outline {
       background: transparent;
-      border: 1px solid var(--dust);
+      border-color: var(--ink);
       color: var(--ink);
     }
-    .btn-outline:hover { border-color: var(--ink); background: var(--warm); }
+    .btn-outline:hover { background: var(--ink); color: white; }
 
     .btn-danger {
       background: transparent;
-      border: 1px solid #fca5a5;
+      border-color: var(--red);
       color: var(--red);
-      border-radius: var(--radius);
     }
-    .btn-danger:hover { background: #fee2e2; }
+    .btn-danger:hover { background: var(--red); color: white; }
 
     .btn-success {
       background: var(--green);
+      border-color: var(--green);
       color: white;
     }
     .btn-success:hover { opacity: 0.85; }
 
-    .btn-sm { padding: 0.4rem 0.8rem; font-size: 0.68rem; }
-    .btn-lg { padding: 0.8rem 1.75rem; font-size: 0.78rem; }
+    .btn-sm { padding: 0.45rem 0.9rem; font-size: 0.73rem; }
+    .btn-lg { padding: 0.85rem 2rem; font-size: 0.85rem; }
 
     /* ── Inputs ─────────────────────────────────────────────────────────────── */
     input, select, textarea {
       width: 100%;
-      border: 1px solid var(--dust);
+      border: 1.5px solid var(--dust);
       border-radius: var(--radius);
-      padding: 0.6rem 0.85rem;
-      font-size: 0.875rem;
+      padding: 0.65rem 1rem;
+      font-size: 0.95rem;
       font-family: 'Inter', sans-serif;
       color: var(--ink);
       background: var(--white);

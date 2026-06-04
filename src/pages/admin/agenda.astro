@@ -97,7 +97,7 @@ const nextMonth = month === 12 ? `?year=${year+1}&month=1` : `?year=${year}&mont
       <!-- Cabecera días -->
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px;">
         {DAYS_ES.map(d => (
-          <div style="text-align:center;font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--stone);padding:0.4rem 0;">
+          <div style="text-align:center;font-size:0.8rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--stone);padding:0.5rem 0;font-weight:600;">
             {d}
           </div>
         ))}
@@ -126,14 +126,14 @@ const nextMonth = month === 12 ? `?year=${year+1}&month=1` : `?year=${year}&mont
               href={`?year=${year}&month=${month}&date=${iso}`}
               style={`display:flex;flex-direction:column;align-items:center;padding:0.5rem 0.25rem;background:${bg};color:${color};text-decoration:none;cursor:${cursor};border:${isToday && !isSelected ? '1px solid var(--dust)' : '1px solid transparent'};`}
             >
-              <span style="font-size:0.85rem;">{d}</span>
+              <span style="font-size:0.95rem;">{d}</span>
               {dayBks.length > 0 && (
-                <span style={`font-size:0.55rem;letter-spacing:0.08em;margin-top:2px;color:${isSelected ? 'rgba(255,255,255,0.7)' : 'var(--gold)'}`}>
+                <span style={`font-size:0.7rem;font-weight:600;margin-top:2px;color:${isSelected ? 'rgba(255,255,255,0.8)' : 'var(--gold)'}`}>
                   {dayBks.length}
                 </span>
               )}
               {isBlocked && (
-                <span style={`font-size:0.5rem;color:${isSelected ? 'rgba(255,255,255,0.5)' : 'var(--stone)'};margin-top:2px;`}>✕</span>
+                <span style={`font-size:0.65rem;color:${isSelected ? 'rgba(255,255,255,0.5)' : 'var(--stone)'};margin-top:2px;`}>✕</span>
               )}
             </a>
           );
@@ -143,12 +143,12 @@ const nextMonth = month === 12 ? `?year=${year+1}&month=1` : `?year=${year}&mont
       <!-- Leyenda -->
       <div style="display:flex;gap:1.5rem;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--warm);">
         <div style="display:flex;align-items:center;gap:0.4rem;">
-          <span style="font-size:0.65rem;color:var(--gold);font-weight:600;">3</span>
-          <span style="font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--stone);">Sesiones</span>
+          <span style="font-size:0.8rem;color:var(--gold);font-weight:700;">3</span>
+          <span style="font-size:0.75rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--stone);font-weight:600;">Sesiones</span>
         </div>
         <div style="display:flex;align-items:center;gap:0.4rem;">
-          <span style="font-size:0.65rem;color:var(--stone);">✕</span>
-          <span style="font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--stone);">Bloqueado</span>
+          <span style="font-size:0.8rem;color:var(--stone);">✕</span>
+          <span style="font-size:0.75rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--stone);font-weight:600;">Bloqueado</span>
         </div>
         <div style="margin-left:auto;">
           <a href="/admin/bloqueos" class="btn btn-outline btn-sm">Gestionar bloqueos</a>

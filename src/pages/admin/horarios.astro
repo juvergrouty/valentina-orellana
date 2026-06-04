@@ -36,7 +36,7 @@ const saved = Astro.url.searchParams.get('saved') === '1';
   )}
 
   <div style="margin-bottom:1.5rem;">
-    <p style="font-size:0.8rem;color:var(--stone);line-height:1.6;">
+    <p style="font-size:0.95rem;color:var(--stone);line-height:1.6;">
       Activa o desactiva horarios individuales. Los horarios inactivos no aparecen en la agenda pública.
       Usa <strong>Horario extendido</strong> para agregar horas fuera del rango habitual.
     </p>
@@ -57,7 +57,7 @@ const saved = Astro.url.searchParams.get('saved') === '1';
             )}
             {daySlots.map(slot => (
               <div style={`display:flex;align-items:center;justify-content:space-between;gap:0.25rem;padding:0.3rem 0.5rem;border:1px solid ${slot.active ? 'var(--green)' : 'var(--dust)'};background:${slot.active ? '#f0fdf4' : 'var(--sand)'};`}>
-                <span style={`font-size:0.8rem;font-family:'Cormorant Garamond',serif;${!slot.active ? 'color:var(--stone);text-decoration:line-through;' : ''}`}>
+                <span style={`font-size:0.95rem;font-family:'Cormorant Garamond',serif;font-weight:500;${!slot.active ? 'color:var(--stone);text-decoration:line-through;' : ''}`}>
                   {slot.start_time.slice(0,5)}
                 </span>
                 <div style="display:flex;gap:0.2rem;">
@@ -89,16 +89,12 @@ const saved = Astro.url.searchParams.get('saved') === '1';
           </div>
 
           <!-- Agregar hora -->
-          <form method="POST" action="/api/admin/slots" style="display:flex;gap:0.25rem;align-items:center;">
+          <form method="POST" action="/api/admin/slots" style="display:flex;gap:0.4rem;align-items:center;margin-top:0.25rem;">
             <input type="hidden" name="action" value="create" />
             <input type="hidden" name="day_of_week" value={String(n)} />
             <input type="hidden" name="redirect" value="/admin/horarios?saved=1" />
-            <input type="time" name="start_time" step="300"
-              style="flex:1;font-size:0.72rem;padding:0.3rem 0.2rem;border:none;border-bottom:1px solid var(--dust);background:transparent;outline:none;" />
-            <button type="submit"
-              style="background:var(--ink);color:white;border:none;padding:0.3rem 0.5rem;font-size:0.65rem;cursor:pointer;flex-shrink:0;">
-              +
-            </button>
+            <input type="time" name="start_time" step="300" style="flex:1;min-width:0;" />
+            <button type="submit" class="btn btn-dark btn-sm" style="flex-shrink:0;padding:0.45rem 0.7rem;">+</button>
           </form>
         </div>
       );
@@ -128,7 +124,7 @@ const saved = Astro.url.searchParams.get('saved') === '1';
         </div>
       </div>
 
-      <button type="submit" class="btn btn-outline" style="width:fit-content;">
+      <button type="submit" class="btn btn-dark">
         Agregar a días seleccionados
       </button>
     </form>
