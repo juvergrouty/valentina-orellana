@@ -18,12 +18,24 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
   title="Reserva tu sesión"
   description="Agenda una sesión con Ps. Valentina Orellana y paga de forma segura con Flow · Webpay · MACH."
 >
-  <section class="py-24 md:py-32 bg-warm border-b border-dust">
-    <div class="container-site">
-      <p class="label text-stone mb-4">Agenda en línea</p>
-      <div class="divider mb-6"></div>
-      <h1 class="display-title">Reserva tu sesión</h1>
-      <p class="body-text mt-5">Elige tu horario y paga de forma segura con Flow.</p>
+  <section class="bg-warm border-b border-dust relative overflow-hidden min-h-[320px] md:min-h-[380px] flex items-center">
+    <!-- Foto lado derecho -->
+    <div class="absolute top-0 right-0 w-[45%] h-full hidden md:block lg:rounded-l-[10px] overflow-hidden">
+      <img
+        src="/images/valentina-retrato.jpg"
+        alt="Ps. Valentina Orellana"
+        class="w-full h-full object-cover object-top"
+      />
+      <div class="absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-warm to-transparent"></div>
+    </div>
+    <!-- Texto -->
+    <div class="relative z-10 container-site py-20 md:py-24 w-full">
+      <div class="max-w-lg">
+        <p class="label text-stone mb-4">Agenda en línea</p>
+        <div class="divider mb-6"></div>
+        <h1 class="display-title mb-5">Reserva tu sesión</h1>
+        <p class="body-text">Elige tu horario y paga de forma segura con Flow.</p>
+      </div>
     </div>
   </section>
 

@@ -1,17 +1,12 @@
 ---
 import BaseLayout   from '../layouts/BaseLayout.astro';
+import PageHero     from '../components/sections/PageHero.astro';
 import Testimonials from '../components/sections/Testimonials.astro';
 ---
 
 <BaseLayout title="Opiniones" description="Lo que dicen los pacientes de Ps. Valentina Orellana.">
 
-  <section class="py-24 md:py-32 bg-warm border-b border-dust">
-    <div class="container-site max-w-3xl">
-      <p class="label text-stone mb-4">Experiencias reales</p>
-      <div class="divider mb-6"></div>
-      <h1 class="display-title">Opiniones</h1>
-    </div>
-  </section>
+  <PageHero label="Experiencias reales" title="Opiniones" />
 
   <Testimonials />
 

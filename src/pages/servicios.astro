@@ -1,17 +1,12 @@
 ---
-import BaseLayout from '../layouts/BaseLayout.astro';
+import BaseLayout  from '../layouts/BaseLayout.astro';
+import PageHero    from '../components/sections/PageHero.astro';
 import { services } from '../data/services';
 ---
 
 <BaseLayout title="Servicios" description="Servicios de psicología clínica: adultos, parejas, trauma y personas altamente sensibles.">
 
-  <section class="py-24 md:py-32 bg-warm border-b border-dust">
-    <div class="container-site max-w-3xl">
-      <p class="label text-stone mb-4">¿En qué puedo ayudarte?</p>
-      <div class="divider mb-6"></div>
-      <h1 class="display-title">Servicios</h1>
-    </div>
-  </section>
+  <PageHero label="¿En qué puedo ayudarte?" title="Servicios" />
 
   <section class="py-section bg-sand">
     <div class="container-site">

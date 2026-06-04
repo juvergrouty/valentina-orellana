@@ -1,17 +1,11 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero   from '../components/sections/PageHero.astro';
 ---
 
 <BaseLayout title="Sobre mí" description="Conoce a la Ps. Valentina Orellana — formación, enfoque y valores.">
 
-  <!-- Banner editorial -->
-  <section class="py-24 md:py-32 bg-warm border-b border-dust">
-    <div class="container-site max-w-3xl">
-      <p class="label text-stone mb-4">Mi historia</p>
-      <div class="divider mb-6"></div>
-      <h1 class="display-title">Sobre mí</h1>
-    </div>
-  </section>
+  <PageHero label="Mi historia" title="Sobre mí" />
 
   <!-- Contenido -->
   <section class="py-section bg-sand">

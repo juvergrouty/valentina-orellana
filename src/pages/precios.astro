@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero   from '../components/sections/PageHero.astro';
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
@@ -42,18 +43,11 @@ const faq = [
 
 <BaseLayout title="Preguntas frecuentes" description="Precios, modalidades y preguntas frecuentes — Ps. Valentina Orellana.">
 
-  <!-- Hero de sección -->
-  <section class="py-24 md:py-32 bg-warm border-b border-dust">
-    <div class="container-site">
-      <p class="label text-stone mb-4">Todo lo que necesitas saber</p>
-      <div class="divider mb-6"></div>
-      <h1 class="display-title mb-6">Preguntas<br />frecuentes.</h1>
-      <p class="body-lead max-w-xl">
-        Aquí encontrarás respuesta a las dudas más comunes sobre las sesiones,
-        precios y cómo funciona el proceso terapéutico.
-      </p>
-    </div>
-  </section>
+  <PageHero
+    label="Todo lo que necesitas saber"
+    title="Preguntas frecuentes."
+    description="Aquí encontrarás respuesta a las dudas más comunes sobre las sesiones, precios y cómo funciona el proceso terapéutico."
+  />
 
   <!-- Acordeón FAQ -->
   <section class="py-section bg-sand">

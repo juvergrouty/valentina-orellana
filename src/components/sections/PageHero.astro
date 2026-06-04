@@ -1,0 +1,32 @@
+---
+interface Props {
+  label: string;
+  title: string;
+  description?: string;
+}
+const { label, title, description } = Astro.props;
+---
+
+<section class="bg-warm border-b border-dust relative overflow-hidden min-h-[300px] md:min-h-[360px] flex items-center">
+
+  <!-- Foto lado derecho — solo desktop -->
+  <div class="absolute top-0 right-0 w-[42%] h-full hidden md:block lg:rounded-l-[10px] overflow-hidden">
+    <img
+      src="/images/valentina-retrato.jpg"
+      alt="Ps. Valentina Orellana"
+      class="w-full h-full object-cover object-top"
+    />
+    <div class="absolute inset-y-0 left-0 w-40 bg-gradient-to-r from-warm to-transparent"></div>
+  </div>
+
+  <!-- Contenido -->
+  <div class="relative z-10 container-site py-20 md:py-24 w-full">
+    <div class="max-w-xl">
+      <p class="label text-stone mb-4">{label}</p>
+      <div class="divider mb-6"></div>
+      <h1 class="display-title">{title}</h1>
+      {description && <p class="body-lead mt-5 max-w-lg">{description}</p>}
+    </div>
+  </div>
+
+</section>

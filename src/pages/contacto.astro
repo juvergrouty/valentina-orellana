@@ -1,17 +1,12 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero   from '../components/sections/PageHero.astro';
 import Contact    from '../components/sections/Contact.astro';
 ---
 
 <BaseLayout title="Contacto" description="Escríbele a Ps. Valentina Orellana — WhatsApp, formulario o teléfono.">
 
-  <section class="py-24 md:py-32 bg-warm border-b border-dust">
-    <div class="container-site max-w-3xl">
-      <p class="label text-stone mb-4">Hablemos</p>
-      <div class="divider mb-6"></div>
-      <h1 class="display-title">Contacto</h1>
-    </div>
-  </section>
+  <PageHero label="Hablemos" title="Contacto" />
 
   <Contact />
 
