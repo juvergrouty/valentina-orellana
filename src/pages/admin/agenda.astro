@@ -51,6 +51,7 @@ const errorParam = Astro.url.searchParams.get('error');
     </div>
     <div style="display:flex;gap:0.5rem;">
       <a href="/admin/bloqueos" class="btn btn-outline btn-sm">Gestionar bloqueos</a>
+      <button id="btn-refresh" class="btn btn-outline btn-sm" title="Actualizar eventos">↻ Actualizar</button>
       <button id="open-modal" class="btn btn-dark btn-sm">+ Nueva reserva</button>
     </div>
   </div>
@@ -365,6 +366,15 @@ const errorParam = Astro.url.searchParams.get('error');
 
     calendar.render();
   }
+
+  // Botón actualizar
+  document.getElementById('btn-refresh')?.addEventListener('click', () => {
+    const btn = document.getElementById('btn-refresh');
+    btn.textContent = '↻ Actualizando...';
+    btn.disabled = true;
+    calendar?.refetchEvents();
+    setTimeout(() => { btn.textContent = '↻ Actualizar'; btn.disabled = false; }, 1200);
+  });
 
   // Cerrar panel al clic fuera
   document.addEventListener('click', (e) => {
