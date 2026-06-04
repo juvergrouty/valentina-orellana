@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
-import { syncBookingToCalendar } from '../../../lib/syncCalendar';
+import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar } from '../../../lib/syncCalendar';
 
 export const prerender = false;
 
@@ -30,6 +30,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
     await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', id);
+    deleteBookingFromCalendar(id).catch(console.error);
     return redirect(dest);
   }
 
@@ -55,6 +56,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     await supabase.from('bookings')
       .update({ session_date, session_time }).eq('id', id);
+
+    // Actualizar el evento en Google Calendar
+    rescheduleBookingInCalendar(id, session_date, session_time).catch(console.error);
 
     return redirect(dest);
   }

@@ -107,11 +107,23 @@ const embedUrl = googleConnected
           ) : (
             <div style="display:flex;flex-direction:column;gap:0.6rem;">
               {events.map(ev => (
-                <div style={`padding:0.75rem;border-left:3px solid ${isFromSystem(ev) ? 'var(--forest)' : 'var(--gold)'};background:var(--sand);border-radius:0 4px 4px 0;`}>
-                  <p style="font-size:0.85rem;font-weight:600;line-height:1.3;">{ev.summary ?? 'Sin título'}</p>
-                  <p style="font-size:0.75rem;color:var(--stone);margin-top:0.2rem;">
-                    {formatEventDate(ev)} · {formatEventTime(ev)}
-                  </p>
+                <div id={`ev-${ev.id}`} style={`padding:0.75rem;border-left:3px solid ${isFromSystem(ev) ? 'var(--forest)' : 'var(--gold)'};background:var(--sand);border-radius:0 4px 4px 0;`}>
+                  <div style="display:flex;justify-content:space-between;align-items:start;gap:0.5rem;">
+                    <div style="flex:1;min-width:0;">
+                      <p style="font-size:0.85rem;font-weight:600;line-height:1.3;">{ev.summary ?? 'Sin título'}</p>
+                      <p style="font-size:0.75rem;color:var(--stone);margin-top:0.2rem;">
+                        {formatEventDate(ev)} · {formatEventTime(ev)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      title="Eliminar evento"
+                      onclick={`deleteEvent('${ev.id}')`}
+                      style="background:none;border:none;cursor:pointer;color:var(--dust);font-size:0.9rem;padding:0.1rem 0.2rem;flex-shrink:0;transition:color .15s;"
+                      onmouseover="this.style.color='var(--red)'"
+                      onmouseout="this.style.color='var(--dust)'"
+                    >✕</button>
+                  </div>
                   {isFromSystem(ev) && (
                     <span style="font-size:0.65rem;background:var(--forest);color:white;padding:0.1rem 0.4rem;border-radius:99px;margin-top:0.3rem;display:inline-block;">
                       Sistema
@@ -165,6 +177,29 @@ const embedUrl = googleConnected
 </AdminLayout>
 
 <script define:vars={{ accessToken, calendarId }}>
+  // Eliminar evento del calendario
+  window.deleteEvent = async function(eventId) {
+    if (!confirm('¿Eliminar este evento del calendario?')) return;
+    const el = document.getElementById(`ev-${eventId}`);
+    if (el) { el.style.opacity = '0.4'; el.style.pointerEvents = 'none'; }
+    try {
+      const res = await fetch('/api/admin/google/delete-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId }),
+      });
+      if (res.ok) {
+        el?.remove();
+      } else {
+        if (el) { el.style.opacity = '1'; el.style.pointerEvents = 'auto'; }
+        alert('Error al eliminar el evento.');
+      }
+    } catch {
+      if (el) { el.style.opacity = '1'; el.style.pointerEvents = 'auto'; }
+      alert('Error de conexión.');
+    }
+  };
+
   document.getElementById('quick-event-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn  = e.currentTarget.querySelector('button[type=submit]');

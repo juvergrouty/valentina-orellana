@@ -138,6 +138,46 @@ export async function listCalendars(accessToken: string) {
   }));
 }
 
+/** Elimina un evento del calendario */
+export async function deleteCalendarEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+): Promise<void> {
+  await fetch(
+    `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
+    { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+}
+
+/** Actualiza fecha/hora de un evento existente */
+export async function updateCalendarEventTime(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  date: string,
+  startTime: string,
+  durationMin: number,
+): Promise<void> {
+  const startDate = new Date(`${date}T${startTime}:00`);
+  const endDate   = new Date(startDate.getTime() + durationMin * 60_000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const toISO = (d: Date) =>
+    `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+
+  await fetch(
+    `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
+    {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        start: { dateTime: toISO(startDate), timeZone: TIMEZONE },
+        end:   { dateTime: toISO(endDate),   timeZone: TIMEZONE },
+      }),
+    }
+  );
+}
+
 /** Obtiene info del usuario conectado */
 export async function getGoogleUserInfo(accessToken: string) {
   const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {

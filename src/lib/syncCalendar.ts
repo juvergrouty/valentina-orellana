@@ -5,7 +5,7 @@
  */
 
 import { supabase } from './supabase';
-import { refreshAccessToken, createCalendarEvent } from './googleCalendar';
+import { refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime } from './googleCalendar';
 
 const SESSION_LABELS: Record<string, string> = {
   'online':            'Sesión Individual Online',
@@ -22,6 +22,52 @@ export interface BookingForCalendar {
   patient_name:  string;
   patient_email: string;
   amount:        number;
+}
+
+/** Obtiene un access_token válido desde settings, refrescando si es necesario */
+export async function getValidAccessToken(): Promise<{ token: string; calendarId: string } | null> {
+  const { data: rows } = await supabase.from('settings').select('key, value')
+    .in('key', ['google_access_token','google_refresh_token','google_token_expiry','google_calendar_id']);
+  const cfg: Record<string, string> = {};
+  (rows ?? []).forEach(({ key, value }: { key: string; value: string }) => { cfg[key] = value; });
+
+  if (!cfg['google_refresh_token']) return null;
+
+  let token = cfg['google_access_token'];
+  const expiry = parseInt(cfg['google_token_expiry'] ?? '0');
+
+  if (!token || Date.now() > expiry - 60_000) {
+    const refreshed = await refreshAccessToken(cfg['google_refresh_token']);
+    token = refreshed.access_token;
+    await supabase.from('settings').upsert(
+      { key: 'google_access_token', value: token, updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
+    await supabase.from('settings').upsert(
+      { key: 'google_token_expiry', value: String(Date.now() + refreshed.expires_in * 1000), updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
+  }
+
+  return { token, calendarId: cfg['google_calendar_id'] ?? 'primary' };
+}
+
+/** Elimina el evento de Google Calendar asociado a una reserva */
+export async function deleteBookingFromCalendar(bookingId: string): Promise<void> {
+  const { data: booking } = await supabase.from('bookings').select('google_event_id').eq('id', bookingId).single();
+  if (!booking?.google_event_id) return;
+  const auth = await getValidAccessToken();
+  if (!auth) return;
+  await deleteCalendarEvent(auth.token, auth.calendarId, booking.google_event_id);
+}
+
+/** Actualiza fecha/hora del evento en Google Calendar al reagendar */
+export async function rescheduleBookingInCalendar(bookingId: string, date: string, time: string, durationMin = 55): Promise<void> {
+  const { data: booking } = await supabase.from('bookings').select('google_event_id').eq('id', bookingId).single();
+  if (!booking?.google_event_id) return;
+  const auth = await getValidAccessToken();
+  if (!auth) return;
+  await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin);
 }
 
 export async function syncBookingToCalendar(booking: BookingForCalendar): Promise<{
@@ -85,10 +131,10 @@ export async function syncBookingToCalendar(booking: BookingForCalendar): Promis
       calendarId:    cfg['google_calendar_id'] ?? 'primary',
     });
 
-    // Guardar el Meet link en la reserva si lo hay
-    if (event.meetLink) {
-      await supabase.from('bookings').update({ notes: `Meet: ${event.meetLink}` }).eq('id', booking.id);
-    }
+    // Guardar event_id y Meet link en la reserva
+    const updateData: Record<string, string> = { google_event_id: event.id };
+    if (event.meetLink) updateData.notes = `Meet: ${event.meetLink}`;
+    await supabase.from('bookings').update(updateData).eq('id', booking.id);
 
     return { success: true, meetLink: event.meetLink, eventLink: event.htmlLink };
 
