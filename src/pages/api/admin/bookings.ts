@@ -1,25 +1,31 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
+import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 
 export const prerender = false;
 
-// POST /api/admin/bookings
-// Acciones: create | confirm | cancel
 export const POST: APIRoute = async ({ request, redirect }) => {
-  const form     = await request.formData();
-  const action   = form.get('action')?.toString();
-  const dest     = form.get('redirect')?.toString() ?? '/admin/agenda';
+  const form   = await request.formData();
+  const action = form.get('action')?.toString();
+  const dest   = form.get('redirect')?.toString() ?? '/admin/agenda';
 
-  // ── Confirmar reserva ─────────────────────────────────────────────────────
+  // ── Confirmar reserva ───────────────────────────────────────────────────────
   if (action === 'confirm') {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
+
     await supabase.from('bookings').update({ status: 'confirmed' }).eq('id', id);
+
+    // Sincronizar con Google Calendar
+    const { data: booking } = await supabase
+      .from('bookings').select('*').eq('id', id).single();
+    if (booking) syncBookingToCalendar(booking).catch(console.error);
+
     return redirect(dest);
   }
 
-  // ── Cancelar reserva ──────────────────────────────────────────────────────
+  // ── Cancelar reserva ────────────────────────────────────────────────────────
   if (action === 'cancel') {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
@@ -27,7 +33,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     return redirect(dest);
   }
 
-  // ── Reagendar reserva ────────────────────────────────────────────────────
+  // ── Reagendar reserva ───────────────────────────────────────────────────────
   if (action === 'reschedule') {
     const id           = form.get('id')?.toString();
     const session_date = form.get('session_date')?.toString() ?? '';
@@ -37,10 +43,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (!id || !session_date || !session_time) return redirect(dest);
 
-    // Verificar que el nuevo horario no esté ocupado
     const { data: conflict } = await supabase
-      .from('bookings')
-      .select('id')
+      .from('bookings').select('id')
       .eq('session_date', session_date)
       .eq('session_time', session_time)
       .neq('status', 'cancelled')
@@ -49,15 +53,13 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (conflict) return redirect(dest + '&error=conflict');
 
-    await supabase
-      .from('bookings')
-      .update({ session_date, session_time })
-      .eq('id', id);
+    await supabase.from('bookings')
+      .update({ session_date, session_time }).eq('id', id);
 
     return redirect(dest);
   }
 
-  // ── Crear reserva manual ──────────────────────────────────────────────────
+  // ── Crear reserva manual ────────────────────────────────────────────────────
   if (action === 'create') {
     const session_type  = form.get('session_type')?.toString() ?? '';
     const session_date  = form.get('session_date')?.toString() ?? '';
@@ -73,10 +75,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       return redirect(dest + '&error=missing_fields');
     }
 
+    // Leer precio desde settings (con fallback a services.ts)
+    const { data: priceRows } = await supabase.from('settings').select('key, value')
+      .eq('key', `price_${session_type.replace(/-/g, '_')}`);
+    const settingsPrice = priceRows?.[0]?.value ? parseInt(priceRows[0].value) : null;
     const plan   = pricingPlans.find(p => p.id === session_type);
-    const amount = plan?.price ?? 0;
+    const amount = (settingsPrice && !isNaN(settingsPrice)) ? settingsPrice : (plan?.price ?? 0);
 
-    const { error } = await supabase.from('bookings').insert({
+    const { data: booking, error } = await supabase.from('bookings').insert({
       session_type,
       session_date,
       session_time,
@@ -87,12 +93,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       status:         'confirmed',
       payment_method: 'manual',
       amount,
-    });
+    }).select().single();
 
-    if (error) {
-      console.error('Error creando reserva manual:', error.message);
+    if (error || !booking) {
+      console.error('Error creando reserva manual:', error?.message);
       return redirect(dest + '&error=conflict');
     }
+
+    // Sincronizar con Google Calendar en segundo plano
+    syncBookingToCalendar(booking).catch(console.error);
 
     return redirect(dest);
   }
