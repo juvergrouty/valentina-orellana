@@ -1,11 +1,9 @@
 ---
-import Icon from '../ui/Icon.astro';
-
 const items = [
-  { icon: 'shield',   title: 'Espacio confidencial',   sub: 'y seguro' },
-  { icon: 'users',    title: 'Acompañamiento profesional', sub: 'y cercano' },
-  { icon: 'leaf',     title: 'Enfoque basado',          sub: 'en evidencia' },
-  { icon: 'building', title: 'Sesiones presenciales',   sub: 'y online' },
+  { icon: '/images/escudo-seguro.svg', title: 'Espacio confidencial',       sub: 'y seguro' },
+  { icon: '/images/usuario.svg',       title: 'Acompañamiento profesional', sub: 'y cercano' },
+  { icon: '/images/hojas.svg',         title: 'Enfoque basado',             sub: 'en evidencia' },
+  { icon: '/images/reloj.svg',         title: 'Sesiones presenciales',      sub: 'y online' },
 ];
 ---
 
@@ -13,10 +11,13 @@ const items = [
   <div class="container-site">
     <div class="grid grid-cols-2 md:grid-cols-4 divide-x divide-dust">
       {items.map((item) => (
-        <div class="flex flex-col items-center text-center py-14 px-4 gap-3">
-          <div class="text-forest/70">
-            <Icon name={item.icon} size={22} />
-          </div>
+        <div class="flex flex-col items-center text-center py-14 px-4 gap-4">
+          <img
+            src={item.icon}
+            alt={item.title}
+            class="w-8 h-8 opacity-60"
+            style="filter: brightness(0) saturate(100%) invert(33%) sepia(13%) saturate(587%) hue-rotate(93deg) brightness(94%) contrast(85%);"
+          />
           <div>
             <p class="body-text font-medium text-ink leading-snug">{item.title}</p>
             <p class="body-sm">{item.sub}</p>
