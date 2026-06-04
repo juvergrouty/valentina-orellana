@@ -20,6 +20,7 @@ import type { APIRoute } from 'astro';
 import { getPaymentStatus } from '../../../lib/flow';
 import { supabase } from '../../../lib/supabase';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
+import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 
 export const prerender = false;
 
@@ -91,6 +92,7 @@ export const POST: APIRoute = async ({ request }) => {
         Promise.all([
           sendConfirmationToClient(emailData).catch(console.error),
           sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
+          syncBookingToCalendar(updated).catch(console.error),
         ]);
       }
 
