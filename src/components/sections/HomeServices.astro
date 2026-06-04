@@ -1,22 +1,48 @@
 ---
 import Icon from '../ui/Icon.astro';
+import { supabase } from '../../lib/supabase';
 
-const cards = [
+// Intentar cargar servicios de la BD con show_home=true
+const { data: dbServices } = await supabase
+  .from('services_catalog')
+  .select('id, name, description, modality, location, image_url, type')
+  .eq('show_home', true)
+  .eq('visible', true)
+  .order('sort_order')
+  .limit(6);
+
+// Fallback a los 2 servicios estáticos si la tabla está vacía
+const fallbackCards = [
   {
+    id: 'individual',
     icon: 'brain',
-    title: 'Terapia Individual',
+    name: 'Terapia Individual',
     description: 'Un espacio para ti. Para entender lo que sientes, soltar lo que te pesa y reconectar contigo.',
-    href: '/servicios',
+    href: '/servicios?grupo=individual',
     image: '/images/consultorio-individual.jpg',
   },
   {
+    id: 'pareja',
     icon: 'users',
-    title: 'Terapia de Pareja',
+    name: 'Terapia de Pareja',
     description: 'Mejoren su comunicación, fortalezcan su vínculo y construyan una relación más sana y consciente.',
-    href: '/servicios',
+    href: '/servicios?grupo=pareja',
     image: '/images/consultorio-pareja.jpg',
   },
 ];
+
+const useDB = dbServices && dbServices.length > 0;
+
+const cards = useDB
+  ? dbServices.map(s => ({
+      id:          s.id,
+      icon:        s.type === 'pareja' ? 'users' : 'brain',
+      name:        s.name,
+      description: s.description ?? '',
+      href:        `/agenda?grupo=${s.type === 'pareja' ? 'pareja' : 'individual'}`,
+      image:       s.image_url ?? '/images/consultorio-individual.jpg',
+    }))
+  : fallbackCards;
 ---
 
 <section class="py-section bg-sand">
@@ -32,50 +58,61 @@ const cards = [
       </p>
     </div>
 
-    <!-- Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-      {cards.map((card) => (
-        <div class="bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-md transition-shadow duration-300 flex flex-row" style="min-height: 300px;">
-
-          <!-- Contenido izquierdo -->
-          <div class="flex flex-col justify-between p-8 flex-1 min-w-0">
-            <!-- Ícono y título en la misma fila -->
-            <div>
-              <div class="flex items-center gap-3 mb-4">
-                <div class="icon-circle flex-shrink-0">
+    <!-- Carrusel / Grid de servicios -->
+    {cards.length <= 2 ? (
+      <!-- Hasta 2: layout horizontal dentro de cada card -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {cards.map(card => (
+          <div class="bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-md transition-shadow duration-300 flex flex-row" style="min-height: 300px;">
+            <div class="flex flex-col justify-between p-7 flex-1 min-w-0">
+              <div>
+                <div class="icon-circle mb-4">
                   <Icon name={card.icon} size={20} />
                 </div>
-                <h3 class="font-heading font-semibold text-xl text-ink leading-tight">
-                  {card.title}
-                </h3>
+                <h3 class="font-heading font-semibold text-xl text-ink mb-3 leading-tight">{card.name}</h3>
+                <p class="body-sm leading-relaxed">{card.description}</p>
               </div>
-              <p class="body-sm leading-relaxed">
-                {card.description}
-              </p>
+              <a href={card.href}
+                 class="font-body text-sm text-forest tracking-wide flex items-center gap-2 hover:gap-3 transition-all duration-200 w-fit mt-6">
+                Conocer más
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                </svg>
+              </a>
             </div>
-            <a href={card.href}
-               class="font-body text-sm text-forest tracking-wide flex items-center gap-2 hover:gap-3 transition-all duration-200 w-fit mt-6">
-              Conocer más
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-              </svg>
-            </a>
+            <div class="relative w-[42%] flex-shrink-0 overflow-hidden">
+              <div class="absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-white to-transparent z-10"></div>
+              <img src={card.image} alt={card.name}
+                class="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700" />
+            </div>
           </div>
-
-          <!-- Imagen derecha con degradado de blend -->
-          <div class="relative w-[42%] flex-shrink-0 overflow-hidden">
-            <!-- Degradado izquierdo que mezcla con el blanco del card -->
-            <div class="absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-white to-transparent z-10"></div>
-            <img
-              src={card.image}
-              alt={card.title}
-              class="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
-            />
-          </div>
-
+        ))}
+      </div>
+    ) : (
+      <!-- 3 o más: carrusel horizontal scrollable -->
+      <div style="overflow-x:auto;padding-bottom:0.5rem;-webkit-overflow-scrolling:touch;scrollbar-width:thin;">
+        <div style={`display:flex;gap:1.25rem;width:max-content;padding:0.25rem 0.1rem;`}>
+          {cards.map(card => (
+            <div class="bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-md transition-shadow duration-300 flex flex-col"
+                 style="width:300px;flex-shrink:0;">
+              <div class="relative w-full overflow-hidden" style="height:180px;">
+                <img src={card.image} alt={card.name}
+                  class="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700" />
+                <div class="absolute inset-0 bg-gradient-to-t from-ink/40 to-transparent"></div>
+              </div>
+              <div class="p-5 flex flex-col flex-1">
+                <h3 class="font-heading font-semibold text-lg text-ink mb-2 leading-tight">{card.name}</h3>
+                <p class="body-sm leading-relaxed mb-4 flex-1 line-clamp-3">{card.description}</p>
+                <a href={card.href}
+                   class="font-body text-sm text-forest tracking-wide flex items-center gap-1.5 hover:gap-2.5 transition-all duration-200 w-fit mt-auto">
+                  Reservar →
+                </a>
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
-    </div>
+      </div>
+    )}
 
   </div>
 </section>
