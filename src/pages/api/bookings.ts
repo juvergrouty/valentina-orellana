@@ -105,6 +105,13 @@ export const POST: APIRoute = async ({ request }) => {
   (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
   const notificationEmail  = settings['notification_email'] ?? 'juver@grouty.cl';
   const manualEnabled      = settings['manual_payment_enabled'] !== 'false';
+  const flowEnabled        = settings['flow_enabled'] !== 'false';
+  const flowEnvSetting     = settings['flow_env']; // 'sandbox' | 'production' | undefined
+  const flowBaseUrl        = flowEnvSetting === 'production'
+    ? 'https://www.flow.cl/api'
+    : flowEnvSetting === 'sandbox'
+    ? 'https://sandbox.flow.cl/api'
+    : undefined; // usa el valor del env var FLOW_ENV
 
   const emailData = {
     patient_name:   patient_name.trim(),
@@ -137,6 +144,12 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ bookingId: booking.id, confirmed: true });
   }
 
+  // ── Flow deshabilitado desde admin ────────────────────────────────────────────
+  if (!flowEnabled) {
+    await supabase.from('bookings').delete().eq('id', booking.id);
+    return json({ error: 'El pago online está temporalmente deshabilitado. Por favor coordina tu sesión por WhatsApp.' }, 503);
+  }
+
   // ── Crear orden de pago en Flow ──────────────────────────────────────────────
   const siteUrl = import.meta.env.PUBLIC_SITE_URL?.replace(/\/$/, '') ?? 'http://localhost:4321';
 
@@ -149,6 +162,7 @@ export const POST: APIRoute = async ({ request }) => {
       orderId:         booking.id,
       urlConfirmation: `${siteUrl}/api/flow/confirm`,
       urlReturn:       `${siteUrl}/api/flow/return`,
+      baseUrl:         flowBaseUrl,
     });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);

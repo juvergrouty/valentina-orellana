@@ -9,6 +9,8 @@ const settings: Record<string, string> = {};
 (rows ?? []).forEach(({ key, value }) => { settings[key] = value; });
 
 const manualEnabled     = settings['manual_payment_enabled'] !== 'false';
+const flowEnabled       = settings['flow_enabled'] !== 'false';
+const flowEnv           = settings['flow_env'] ?? (import.meta.env.FLOW_ENV ?? 'sandbox');
 const notificationEmail = settings['notification_email'] ?? 'juver@grouty.cl';
 const emailFrom         = settings['email_from'] ?? '';
 const sessionDuration   = settings['session_duration_min'] ?? '55';
@@ -53,12 +55,54 @@ const saved = Astro.url.searchParams.get('saved') === '1';
         </label>
       </div>
 
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 0;">
-        <div>
-          <p style="font-size:0.85rem;font-weight:500;">Flow (online)</p>
-          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.2rem;">Pago con tarjeta, MACH y Webpay. Siempre activo.</p>
+      <!-- Flow toggle -->
+      <div style="padding:0.75rem 0;border-bottom:1px solid var(--warm);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
+          <div>
+            <p style="font-size:0.95rem;font-weight:500;">Flow — pago online</p>
+            <p style="font-size:0.8rem;color:var(--stone);margin-top:0.2rem;">Webpay, tarjeta de crédito/débito, MACH.</p>
+          </div>
+          <label style="position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;margin-left:1rem;">
+            <input
+              type="checkbox"
+              name="flow_enabled"
+              value="true"
+              checked={flowEnabled}
+              style="opacity:0;width:0;height:0;"
+              id="toggle-flow"
+            />
+            <span id="toggle-flow-track" style={`position:absolute;inset:0;border-radius:22px;cursor:pointer;transition:background 0.2s;background:${flowEnabled ? '#576352' : '#DDD8CF'};`}></span>
+            <span id="toggle-flow-thumb" style={`position:absolute;top:3px;width:16px;height:16px;border-radius:50%;background:white;transition:left 0.2s;left:${flowEnabled ? '21px' : '3px'};`}></span>
+          </label>
         </div>
-        <span style="font-size:0.72rem;color:var(--green);font-weight:500;letter-spacing:0.08em;text-transform:uppercase;">Activo</span>
+
+        <!-- Entorno Flow -->
+        <div id="flow-env-section" style={`${!flowEnabled ? 'opacity:0.4;pointer-events:none;' : ''}`}>
+          <p class="label" style="margin-bottom:0.6rem;">Entorno de pago</p>
+          <div style="display:flex;gap:0.75rem;">
+            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;padding:0.6rem 1rem;border:2px solid ${flowEnv === 'sandbox' ? 'var(--forest)' : 'var(--dust)'};border-radius:var(--radius);flex:1;background:${flowEnv === 'sandbox' ? '#f0fdf4' : 'white'};" id="label-sandbox">
+              <input type="radio" name="flow_env" value="sandbox" checked={flowEnv === 'sandbox'}
+                style="width:auto;accent-color:var(--forest);" id="radio-sandbox" />
+              <div>
+                <p style="font-size:0.85rem;font-weight:600;">Sandbox</p>
+                <p style="font-size:0.72rem;color:var(--stone);">sandbox.flow.cl — pruebas</p>
+              </div>
+            </label>
+            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;padding:0.6rem 1rem;border:2px solid ${flowEnv === 'production' ? 'var(--forest)' : 'var(--dust)'};border-radius:var(--radius);flex:1;background:${flowEnv === 'production' ? '#f0fdf4' : 'white'};" id="label-production">
+              <input type="radio" name="flow_env" value="production" checked={flowEnv === 'production'}
+                style="width:auto;accent-color:var(--forest);" id="radio-production" />
+              <div>
+                <p style="font-size:0.85rem;font-weight:600;">Producción</p>
+                <p style="font-size:0.72rem;color:var(--stone);">www.flow.cl — cobros reales</p>
+              </div>
+            </label>
+          </div>
+          <p style="font-size:0.8rem;color:var(--stone);margin-top:0.6rem;">
+            URL activa: <code style="background:var(--warm);padding:0.1rem 0.4rem;border-radius:3px;font-size:0.75rem;" id="flow-url-preview">
+              {flowEnv === 'production' ? 'https://www.flow.cl/api' : 'https://sandbox.flow.cl/api'}
+            </code>
+          </p>
+        </div>
       </div>
     </div>
 
@@ -174,6 +218,49 @@ const saved = Astro.url.searchParams.get('saved') === '1';
   }
   sessionInput?.addEventListener('input', updateTotal);
   prepInput?.addEventListener('input', updateTotal);
+
+  // Toggle Flow
+  const flowChk   = document.getElementById('toggle-flow');
+  const flowTrack = document.getElementById('toggle-flow-track');
+  const flowThumb = document.getElementById('toggle-flow-thumb');
+  const flowEnvSection = document.getElementById('flow-env-section');
+  const flowUrlPreview = document.getElementById('flow-url-preview');
+
+  function updateFlowToggle() {
+    const on = flowChk?.checked;
+    if (flowTrack) flowTrack.style.background = on ? '#576352' : '#DDD8CF';
+    if (flowThumb) flowThumb.style.left = on ? '21px' : '3px';
+    if (flowEnvSection) {
+      flowEnvSection.style.opacity = on ? '1' : '0.4';
+      flowEnvSection.style.pointerEvents = on ? 'auto' : 'none';
+    }
+  }
+  flowChk?.addEventListener('change', updateFlowToggle);
+  flowTrack?.addEventListener('click', () => {
+    if (flowChk) { flowChk.checked = !flowChk.checked; updateFlowToggle(); }
+  });
+
+  // Radio entorno Flow — actualizar estilos y URL preview
+  document.querySelectorAll('input[name="flow_env"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const isProd = document.getElementById('radio-production')?.checked;
+      const sandbox    = document.getElementById('label-sandbox');
+      const production = document.getElementById('label-production');
+      if (sandbox) {
+        sandbox.style.borderColor = !isProd ? 'var(--forest)' : 'var(--dust)';
+        sandbox.style.background  = !isProd ? '#f0fdf4' : 'white';
+      }
+      if (production) {
+        production.style.borderColor = isProd ? 'var(--forest)' : 'var(--dust)';
+        production.style.background  = isProd ? '#f0fdf4' : 'white';
+      }
+      if (flowUrlPreview) {
+        flowUrlPreview.textContent = isProd
+          ? 'https://www.flow.cl/api'
+          : 'https://sandbox.flow.cl/api';
+      }
+    });
+  });
 
   const checkbox = document.getElementById('toggle-manual');
   const track    = document.getElementById('toggle-track') as HTMLElement;

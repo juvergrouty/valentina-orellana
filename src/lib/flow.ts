@@ -13,11 +13,14 @@ import { createHmac } from 'node:crypto';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const IS_SANDBOX = import.meta.env.FLOW_ENV !== 'production';
+export const FLOW_URLS = {
+  sandbox:    'https://sandbox.flow.cl/api',
+  production: 'https://www.flow.cl/api',
+} as const;
 
-export const FLOW_BASE_URL = IS_SANDBOX
-  ? 'https://sandbox.flow.cl/api'
-  : 'https://www.flow.cl/api';
+// URL por defecto basada en env var (se puede sobreescribir por settings de Supabase)
+const IS_SANDBOX = import.meta.env.FLOW_ENV !== 'production';
+export const FLOW_BASE_URL = IS_SANDBOX ? FLOW_URLS.sandbox : FLOW_URLS.production;
 
 const API_KEY    = import.meta.env.FLOW_API_KEY;
 const SECRET_KEY = import.meta.env.FLOW_SECRET_KEY;
@@ -80,13 +83,15 @@ export interface FlowStatus {
  * El usuario debe ser redirigido a: `${order.url}?token=${order.token}`
  */
 export async function createPaymentOrder(opts: {
-  subject:          string;  // Descripción del pago
-  amount:           number;  // Monto en CLP (entero)
-  email:            string;  // Email del pagador
-  orderId:          string;  // ID único del pedido (nuestro booking UUID)
-  urlConfirmation:  string;  // Webhook POST que Flow llama al confirmar
-  urlReturn:        string;  // URL de retorno después del pago
+  subject:          string;
+  amount:           number;
+  email:            string;
+  orderId:          string;
+  urlConfirmation:  string;
+  urlReturn:        string;
+  baseUrl?:         string;  // sobreescribe FLOW_BASE_URL (desde settings de admin)
 }): Promise<FlowOrder> {
+  const base = opts.baseUrl ?? FLOW_BASE_URL;
   const params: Params = {
     apiKey:                API_KEY,
     subject:               opts.subject,
@@ -98,7 +103,7 @@ export async function createPaymentOrder(opts: {
     commerceOrder:         opts.orderId,
   };
 
-  const res = await fetch(`${FLOW_BASE_URL}/payment/create`, {
+  const res = await fetch(`${base}/payment/create`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body:    buildBody(params).toString(),
