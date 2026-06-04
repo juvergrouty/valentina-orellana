@@ -25,8 +25,8 @@ export const GET: APIRoute = async ({ url }) => {
     'pareja-online': 'Par. Online', 'pareja-presencial': 'Par. Presencial',
   };
   const STATUS_COLOR: Record<string, string> = {
-    confirmed:       '#576352',
-    pending_payment: '#A8906C',
+    confirmed:       '#22C55E',   // verde manzana vibrante
+    pending_payment: '#F97316',   // naranja
   };
 
   for (const b of bookings ?? []) {

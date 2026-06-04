@@ -4,7 +4,25 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { pricingPlans, SESSION_LABELS } from '../../data/services';
 
-const today = new Date().toISOString().slice(0, 10);
+const today   = new Date().toISOString().slice(0, 10);
+const in30days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+// Próximas reservas (30 días)
+const { data: upcoming } = await supabase
+  .from('bookings')
+  .select('id, patient_name, session_type, session_date, session_time, status, amount')
+  .gte('session_date', today)
+  .lte('session_date', in30days)
+  .neq('status', 'cancelled')
+  .order('session_date')
+  .order('session_time')
+  .limit(40);
+
+const MONTHS_SHORT = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function shortDate(iso: string) {
+  const [, m, d] = iso.split('-');
+  return `${parseInt(d)} ${MONTHS_SHORT[parseInt(m)-1]}`;
+}
 
 // Slots para el modal de nueva reserva (día de hoy por defecto)
 const dayOfWeek = new Date(today + 'T00:00:00').getDay();
@@ -37,21 +55,76 @@ const errorParam = Astro.url.searchParams.get('error');
     </div>
   </div>
 
-  <!-- FullCalendar -->
-  <div class="card" style="padding:1.25rem;">
-    <!-- Leyenda -->
-    <div style="display:flex;gap:1.25rem;margin-bottom:1rem;font-size:0.75rem;color:var(--stone);flex-wrap:wrap;align-items:center;">
-      <span style="display:flex;align-items:center;gap:0.35rem;">
-        <span style="width:12px;height:12px;border-radius:2px;background:#576352;display:inline-block;"></span> Confirmada
-      </span>
-      <span style="display:flex;align-items:center;gap:0.35rem;">
-        <span style="width:12px;height:12px;border-radius:2px;background:#A8906C;display:inline-block;"></span> Pendiente pago
-      </span>
-      <span style="display:flex;align-items:center;gap:0.35rem;">
-        <span style="width:12px;height:12px;border-radius:2px;background:#6B7280;display:inline-block;"></span> Google Calendar
-      </span>
+  <div style="display:grid;grid-template-columns:1fr 280px;gap:1.25rem;align-items:start;">
+
+    <!-- FullCalendar -->
+    <div class="card" style="padding:1.25rem;">
+      <div style="display:flex;gap:1.25rem;margin-bottom:1rem;font-size:0.75rem;color:var(--stone);flex-wrap:wrap;align-items:center;">
+        <span style="display:flex;align-items:center;gap:0.35rem;">
+          <span style="width:12px;height:12px;border-radius:2px;background:#22C55E;display:inline-block;"></span> Confirmada
+        </span>
+        <span style="display:flex;align-items:center;gap:0.35rem;">
+          <span style="width:12px;height:12px;border-radius:2px;background:#F97316;display:inline-block;"></span> Pendiente pago
+        </span>
+        <span style="display:flex;align-items:center;gap:0.35rem;">
+          <span style="width:12px;height:12px;border-radius:2px;background:#6B7280;display:inline-block;"></span> Google Calendar
+        </span>
+      </div>
+      <div id="fullcalendar" style="min-height:600px;"></div>
     </div>
-    <div id="fullcalendar" style="min-height:600px;"></div>
+
+    <!-- Lista lateral de próximas reservas -->
+    <div style="display:flex;flex-direction:column;gap:0.75rem;position:sticky;top:90px;">
+      <div class="card" style="padding:1.25rem;">
+        <p class="label" style="margin-bottom:1rem;">Próximas sesiones</p>
+
+        {!upcoming?.length ? (
+          <p style="font-size:0.82rem;color:var(--stone);text-align:center;padding:1rem 0;">Sin sesiones próximas</p>
+        ) : (
+          <div style="display:flex;flex-direction:column;gap:0;">
+            {upcoming.map((b, i) => {
+              const isConfirmed = b.status === 'confirmed';
+              const dotColor    = isConfirmed ? '#22C55E' : '#F97316';
+              const labelShort  = { online:'Online', presencial:'Presencial', 'pareja-online':'Par. Online', 'pareja-presencial':'Par. Presencial' }[b.session_type] ?? b.session_type;
+              return (
+                <div style={`display:flex;align-items:start;gap:0.6rem;padding:0.65rem 0;${i < upcoming.length-1 ? 'border-bottom:1px solid var(--warm);' : ''}`}>
+                  <div style={`width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;margin-top:5px;`}></div>
+                  <div style="flex:1;min-width:0;">
+                    <p style="font-size:0.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{b.patient_name}</p>
+                    <p style="font-size:0.72rem;color:var(--stone);">{shortDate(b.session_date)} · {b.session_time.slice(0,5)}</p>
+                    <p style="font-size:0.68rem;color:var(--stone);">{labelShort}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <!-- Stats rápidas -->
+      <div class="card" style="padding:1.25rem;">
+        <p class="label" style="margin-bottom:0.75rem;">Resumen</p>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:0.8rem;color:var(--stone);">Confirmadas</span>
+            <span style="font-size:0.9rem;font-weight:700;color:#22C55E;">
+              {upcoming?.filter(b => b.status === 'confirmed').length ?? 0}
+            </span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:0.8rem;color:var(--stone);">Pendiente pago</span>
+            <span style="font-size:0.9rem;font-weight:700;color:#F97316;">
+              {upcoming?.filter(b => b.status === 'pending_payment').length ?? 0}
+            </span>
+          </div>
+          <div style="border-top:1px solid var(--warm);padding-top:0.5rem;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:0.8rem;color:var(--stone);">Total 30 días</span>
+            <span style="font-size:0.9rem;font-weight:700;color:var(--ink);">{upcoming?.length ?? 0}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- Panel detalle de reserva (popup lateral) -->
@@ -242,10 +315,11 @@ const errorParam = Astro.url.searchParams.get('error');
       initialView:   'timeGridWeek',
       locale:        'es',
       firstDay:      1,
-      slotMinTime:   '07:00:00',
-      slotMaxTime:   '21:00:00',
+      slotMinTime:   '00:00:00',
+      slotMaxTime:   '24:00:00',
       slotDuration:  '00:30:00',
-      height:        'auto',
+      height:        650,
+      scrollTime:    '07:00:00', // vista inicial desde las 7am, pero se puede scrollear
       nowIndicator:  true,
       allDaySlot:    true,
       editable:      false,
