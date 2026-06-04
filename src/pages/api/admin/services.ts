@@ -53,12 +53,33 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   if (action === 'duplicate') {
-    const id = get('id')!;
-    const { data: orig } = await supabase.from('services_catalog').select('*').eq('id', id).single();
-    if (orig) {
-      const { id: _id, created_at, ...rest } = orig;
-      await supabase.from('services_catalog').insert({ ...rest, name: rest.name + ' (copia)' });
+    const id = get('id');
+    if (!id) return new Response(null, { status: 302, headers: { Location: redirect } });
+
+    const { data: orig, error: fetchErr } = await supabase
+      .from('services_catalog').select('*').eq('id', id).single();
+
+    if (fetchErr || !orig) {
+      console.error('[services] duplicate fetch:', fetchErr?.message);
+      return new Response(null, { status: 302, headers: { Location: redirect } });
     }
+
+    // Extraer solo los campos del servicio (sin id ni created_at)
+    const { error: insertErr } = await supabase.from('services_catalog').insert({
+      name:         orig.name + ' (copia)',
+      description:  orig.description,
+      type:         orig.type,
+      modality:     orig.modality,
+      location:     orig.location,
+      duration_min: orig.duration_min,
+      price:        orig.price,
+      visible:      orig.visible,
+      show_home:    orig.show_home,
+      image_url:    orig.image_url,
+      sort_order:   (orig.sort_order ?? 0) + 1,
+    });
+
+    if (insertErr) console.error('[services] duplicate insert:', insertErr.message, insertErr.code);
   }
 
   return new Response(null, { status: 302, headers: { Location: redirect } });
