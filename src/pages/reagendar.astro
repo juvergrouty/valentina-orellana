@@ -1,0 +1,348 @@
+---
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { supabase } from '../lib/supabase';
+
+const bookingId = Astro.url.searchParams.get('id') ?? '';
+
+// Cargar datos de la reserva si viene con ID
+let booking: Record<string, string | number> | null = null;
+if (bookingId) {
+  const { data } = await supabase
+    .from('bookings')
+    .select('id, patient_name, session_type, session_date, session_time, status, patient_email')
+    .eq('id', bookingId)
+    .eq('status', 'confirmed')
+    .single();
+  booking = data;
+}
+
+const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+function formatDate(iso: string) {
+  const [y, m, d] = iso.split('-');
+  return `${parseInt(d)} de ${MONTHS_ES[parseInt(m)-1]} de ${y}`;
+}
+
+const SESSION_LABELS: Record<string, string> = {
+  'online': 'Sesión Individual Online',
+  'presencial': 'Sesión Individual Presencial',
+  'pareja-online': 'Sesión de Pareja Online',
+  'pareja-presencial': 'Sesión de Pareja Presencial',
+};
+---
+
+<BaseLayout title="Reagendar sesión" description="Cambia la fecha y hora de tu sesión con Ps. Valentina Orellana.">
+
+  <section class="py-24 md:py-32 bg-warm border-b border-dust">
+    <div class="container-site">
+      <p class="label text-stone mb-4">Reagendar</p>
+      <div class="divider mb-6"></div>
+      <h1 class="display-title mb-4">Cambia tu sesión</h1>
+      <p class="body-lead max-w-lg">Selecciona un nuevo día y hora para tu sesión. Recuerda que el cambio debe hacerse con al menos 24 horas de anticipación.</p>
+    </div>
+  </section>
+
+  <section class="py-section bg-sand">
+    <div class="container-site max-w-2xl">
+
+      {!bookingId && (
+        <!-- Sin ID: pedir correo + ID manual -->
+        <div class="bg-white border border-dust p-8 md:p-10">
+          <p class="body-text mb-6">Ingresa el correo con el que realizaste tu reserva y el ID de tu sesión (lo encuentras en el email de confirmación).</p>
+          <div class="flex flex-col gap-5">
+            <div>
+              <label class="label text-stone block mb-2">Correo electrónico</label>
+              <input id="input-email" type="email" placeholder="tu@correo.cl" class="field" />
+            </div>
+            <div>
+              <label class="label text-stone block mb-2">ID de reserva</label>
+              <input id="input-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="field" />
+            </div>
+            <button id="btn-buscar" class="btn-dark py-3.5 px-7 w-fit">
+              Buscar mi reserva
+            </button>
+            <p id="buscar-error" class="hidden body-sm text-red-500"></p>
+          </div>
+        </div>
+      )}
+
+      {bookingId && !booking && (
+        <div class="bg-white border border-dust p-8 text-center">
+          <p class="body-text text-stone mb-4">No encontramos una reserva confirmada con ese ID.</p>
+          <a href="/reagendar" class="btn-dark py-3 px-6">Intentar nuevamente</a>
+        </div>
+      )}
+
+      {booking && (
+        <div id="reschedule-form-wrap">
+          <!-- Reserva actual -->
+          <div class="bg-warm border border-dust p-6 mb-8 flex items-start justify-between gap-4">
+            <div>
+              <p class="label text-stone mb-1">Reserva actual</p>
+              <p class="font-heading font-light text-xl text-ink">{booking.patient_name}</p>
+              <p class="body-sm">{SESSION_LABELS[booking.session_type as string] ?? booking.session_type}</p>
+              <p class="body-sm font-medium mt-1">{formatDate(booking.session_date as string)} · {(booking.session_time as string).slice(0,5)}</p>
+            </div>
+            <span class="label text-forest border border-forest/30 px-3 py-1">Confirmada</span>
+          </div>
+
+          <!-- Selección nueva fecha/hora -->
+          <div class="bg-white border border-dust p-8">
+            <p class="label text-stone mb-6">Nuevo horario</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-dust">
+              <!-- Calendario -->
+              <div class="bg-white p-6">
+                <div class="flex items-center justify-between mb-5">
+                  <button id="prev-month" type="button" class="w-8 h-8 flex items-center justify-center hover:text-forest transition-colors text-stone text-lg">‹</button>
+                  <p id="calendar-title" class="font-heading font-light text-base text-ink"></p>
+                  <button id="next-month" type="button" class="w-8 h-8 flex items-center justify-center hover:text-forest transition-colors text-stone text-lg">›</button>
+                </div>
+                <div class="grid grid-cols-7 gap-1 mb-2">
+                  {['Do','Lu','Ma','Mi','Ju','Vi','Sá'].map(d => (
+                    <div class="text-center font-body text-[10px] tracking-widest text-stone py-1">{d}</div>
+                  ))}
+                </div>
+                <div id="calendar-grid" class="grid grid-cols-7 gap-1"></div>
+              </div>
+
+              <!-- Slots -->
+              <div class="bg-sand p-6">
+                <div id="slots-placeholder" class="h-full flex items-center justify-center text-center py-8">
+                  <p class="body-sm">Selecciona un día para ver horarios</p>
+                </div>
+                <div id="slots-container" class="hidden">
+                  <p id="slots-date-label" class="font-heading font-light text-base text-ink mb-4"></p>
+                  <div id="slots-grid" class="grid grid-cols-3 gap-2"></div>
+                  <p id="no-slots-msg" class="hidden label text-stone text-center py-4">Sin horarios disponibles.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Email verificación + botón -->
+            <div class="mt-6 flex flex-col gap-4">
+              <div>
+                <label class="label text-stone block mb-2">Confirma tu correo *</label>
+                <input id="verify-email" type="email" placeholder="tu@correo.cl" class="field" />
+              </div>
+              <button id="btn-reagendar" disabled
+                class="btn-dark py-3.5 px-7 w-full opacity-50 cursor-not-allowed">
+                Confirmar nuevo horario
+              </button>
+              <p id="reschedule-error" class="hidden body-sm text-red-500 text-center"></p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <!-- Confirmación éxito -->
+      <div id="success-msg" class="hidden bg-white border border-dust p-10 text-center">
+        <div class="icon-circle w-16 h-16 mx-auto mb-6">
+          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+        </div>
+        <h2 class="font-heading font-light text-3xl text-ink mb-3">¡Sesión reagendada!</h2>
+        <p id="success-detail" class="body-text mb-6"></p>
+        <a href="/" class="btn-dark py-3 px-6">Volver al inicio</a>
+      </div>
+
+    </div>
+  </section>
+
+</BaseLayout>
+
+<style>
+  .day-btn { @apply w-full aspect-square text-xs font-body flex items-center justify-center transition-all duration-150; }
+  .day-available { @apply text-ink hover:bg-warm cursor-pointer; }
+  .day-past { @apply text-dust cursor-default; }
+  .day-selected { @apply bg-ink text-sand font-medium; }
+  .slot-btn { @apply py-2.5 px-1 text-[10px] tracking-widest font-body border border-dust text-stone hover:border-ink hover:text-ink transition-all duration-150 cursor-pointer uppercase; }
+  .slot-selected { @apply bg-ink text-sand border-ink; }
+</style>
+
+<script define:vars={{ bookingId, bookingEmail: booking?.patient_email ?? '' }}>
+  const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const $ = id => document.getElementById(id);
+
+  let selectedDate = null;
+  let selectedTime = null;
+  let calYear  = new Date().getFullYear();
+  let calMonth = new Date().getMonth();
+  let loadedSlots = {};
+
+  function isoDate(y, m, d) {
+    return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  }
+  function formatDateEs(iso) {
+    const [y,m,d] = iso.split('-');
+    return `${parseInt(d)} de ${MONTHS_ES[parseInt(m)-1]} de ${y}`;
+  }
+
+  // ── Buscar reserva sin ID ──────────────────────────────────────────────────
+  document.getElementById('btn-buscar')?.addEventListener('click', () => {
+    const email = document.getElementById('input-email')?.value.trim();
+    const id    = document.getElementById('input-id')?.value.trim();
+    if (!email || !id) {
+      const err = document.getElementById('buscar-error');
+      if (err) { err.textContent = 'Completa ambos campos.'; err.classList.remove('hidden'); }
+      return;
+    }
+    window.location.href = `/reagendar?id=${encodeURIComponent(id)}&email_hint=${encodeURIComponent(email)}`;
+  });
+
+  // ── Calendario ─────────────────────────────────────────────────────────────
+  if (bookingId && document.getElementById('calendar-grid')) {
+    renderCalendar();
+
+    document.getElementById('prev-month')?.addEventListener('click', () => {
+      const d = new Date(calYear, calMonth - 1, 1);
+      const now = new Date(); now.setHours(0,0,0,0);
+      if (d < new Date(now.getFullYear(), now.getMonth(), 1)) return;
+      calYear = d.getFullYear(); calMonth = d.getMonth();
+      renderCalendar();
+    });
+    document.getElementById('next-month')?.addEventListener('click', () => {
+      const d = new Date(calYear, calMonth + 1, 1);
+      const limit = new Date(); limit.setMonth(limit.getMonth() + 3);
+      if (d > limit) return;
+      calYear = d.getFullYear(); calMonth = d.getMonth();
+      renderCalendar();
+    });
+  }
+
+  function renderCalendar() {
+    const y = calYear, m = calMonth;
+    if ($('calendar-title')) $('calendar-title').textContent = `${MONTHS_ES[m]} ${y}`;
+    const grid = $('calendar-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    const firstDay    = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m+1, 0).getDate();
+    const today       = new Date(); today.setHours(0,0,0,0);
+    // Mínimo: mañana (24h anticipación)
+    const minDate = new Date(today); minDate.setDate(minDate.getDate() + 1);
+
+    for (let i = 0; i < firstDay; i++) grid.insertAdjacentHTML('beforeend', '<div></div>');
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = isoDate(y, m, d);
+      const dateObj = new Date(iso + 'T00:00:00');
+      const isPast  = dateObj < minDate;
+      const isSel   = iso === selectedDate;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `day-btn ${isPast ? 'day-past' : isSel ? 'day-selected' : 'day-available'}`;
+      btn.textContent = d;
+      btn.dataset.iso = iso;
+      btn.disabled = isPast;
+      if (!isPast) btn.addEventListener('click', () => selectDate(iso));
+      grid.appendChild(btn);
+    }
+  }
+
+  async function selectDate(iso) {
+    selectedDate = iso;
+    selectedTime = null;
+    updateConfirmBtn();
+
+    document.querySelectorAll('.day-btn').forEach(b => {
+      if (b.dataset.iso === iso) b.className = b.className.replace('day-available','day-selected');
+      else if (!b.disabled) b.className = b.className.replace('day-selected','day-available');
+    });
+
+    $('slots-placeholder')?.classList.add('hidden');
+    $('slots-container')?.classList.remove('hidden');
+    if ($('slots-date-label')) $('slots-date-label').textContent = formatDateEs(iso);
+    if ($('slots-grid')) $('slots-grid').innerHTML = '<p class="col-span-3 text-xs text-stone py-2">Cargando...</p>';
+    $('no-slots-msg')?.classList.add('hidden');
+
+    let slots = loadedSlots[iso];
+    if (!slots) {
+      try {
+        const res  = await fetch(`/api/availability?date=${iso}`);
+        const data = await res.json();
+        slots = data.slots ?? [];
+        loadedSlots[iso] = slots;
+      } catch { slots = []; }
+    }
+    renderSlots(slots);
+  }
+
+  function renderSlots(slots) {
+    const grid = $('slots-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (!slots.length) { $('no-slots-msg')?.classList.remove('hidden'); return; }
+    $('no-slots-msg')?.classList.add('hidden');
+    slots.forEach(time => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `slot-btn ${selectedTime === time ? 'slot-selected' : ''}`;
+      btn.textContent = time;
+      btn.dataset.time = time;
+      btn.addEventListener('click', () => {
+        selectedTime = time;
+        document.querySelectorAll('.slot-btn').forEach(b => {
+          b.className = b.dataset.time === time ? 'slot-btn slot-selected' : 'slot-btn';
+        });
+        updateConfirmBtn();
+      });
+      grid.appendChild(btn);
+    });
+  }
+
+  function updateConfirmBtn() {
+    const btn = $('btn-reagendar');
+    if (!btn) return;
+    if (selectedDate && selectedTime) {
+      btn.disabled = false;
+      btn.classList.remove('opacity-50','cursor-not-allowed');
+    } else {
+      btn.disabled = true;
+      btn.classList.add('opacity-50','cursor-not-allowed');
+    }
+  }
+
+  // ── Confirmar reagendamiento ───────────────────────────────────────────────
+  $('btn-reagendar')?.addEventListener('click', async () => {
+    const email = $('verify-email')?.value?.trim()?.toLowerCase();
+    const errEl = $('reschedule-error');
+
+    if (!email) {
+      if (errEl) { errEl.textContent = 'Ingresa tu correo para confirmar.'; errEl.classList.remove('hidden'); }
+      return;
+    }
+    if (!selectedDate || !selectedTime) return;
+
+    const btn = $('btn-reagendar');
+    btn.textContent = 'Confirmando...';
+    btn.disabled = true;
+
+    try {
+      const res  = await fetch('/api/reschedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId, email, session_date: selectedDate, session_time: selectedTime }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        $('reschedule-form-wrap')?.classList.add('hidden');
+        $('success-msg')?.classList.remove('hidden');
+        const detail = $('success-detail');
+        if (detail) detail.textContent = `Tu nueva sesión queda agendada para el ${formatDateEs(selectedDate)} a las ${selectedTime}.`;
+      } else {
+        if (errEl) { errEl.textContent = data.error ?? 'Error al reagendar.'; errEl.classList.remove('hidden'); }
+        btn.textContent = 'Confirmar nuevo horario';
+        btn.disabled = false;
+      }
+    } catch {
+      if (errEl) { errEl.textContent = 'Error de conexión. Intenta nuevamente.'; errEl.classList.remove('hidden'); }
+      btn.textContent = 'Confirmar nuevo horario';
+      btn.disabled = false;
+    }
+  });
+
+  // Pre-fill email hint si viene en URL
+  const emailHint = new URLSearchParams(window.location.search).get('email_hint');
+  if (emailHint && $('verify-email')) $('verify-email').value = emailHint;
+</script>
