@@ -59,6 +59,15 @@ export const POST: APIRoute = async ({ request }) => {
     if (error) console.error('[session_notes] add:', error.message);
   }
 
+  // ── Editar nota ─────────────────────────────────────────────────────────────
+  if (action === 'update_note') {
+    const id      = form.get('id') as string;
+    const content = (form.get('content') as string)?.trim();
+    if (id && content) {
+      await supabase.from('session_notes').update({ content }).eq('id', id);
+    }
+  }
+
   // ── Eliminar nota ───────────────────────────────────────────────────────────
   if (action === 'delete_note') {
     await supabase.from('session_notes').delete().eq('id', form.get('id') as string);
