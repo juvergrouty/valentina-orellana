@@ -18,38 +18,39 @@ export const FLOW_URLS = {
   production: 'https://www.flow.cl/api',
 } as const;
 
-// URL por defecto basada en env var (se puede sobreescribir por settings de Supabase)
 const IS_SANDBOX = import.meta.env.FLOW_ENV !== 'production';
 export const FLOW_BASE_URL = IS_SANDBOX ? FLOW_URLS.sandbox : FLOW_URLS.production;
 
+// Keys por defecto según env var FLOW_ENV
+// En sandbox usa FLOW_SANDBOX_API_KEY si existe, si no cae en FLOW_API_KEY
 const API_KEY    = import.meta.env.FLOW_API_KEY;
 const SECRET_KEY = import.meta.env.FLOW_SECRET_KEY;
+const SANDBOX_API_KEY    = import.meta.env.FLOW_SANDBOX_API_KEY    ?? API_KEY;
+const SANDBOX_SECRET_KEY = import.meta.env.FLOW_SANDBOX_SECRET_KEY ?? SECRET_KEY;
 
 // ─── Firma ───────────────────────────────────────────────────────────────────
 
 type Params = Record<string, string | number>;
 
 /** Genera la firma HMAC-SHA256 requerida por Flow */
-function sign(params: Params): string {
+function sign(params: Params, secretKey: string): string {
   const keys   = Object.keys(params).sort();
   const concat = keys.map(k => `${k}${params[k]}`).join('');
-  return createHmac('sha256', SECRET_KEY).update(concat).digest('hex');
+  return createHmac('sha256', secretKey).update(concat).digest('hex');
 }
 
 /** Construye un body form-encoded con todos los params + firma */
-function buildBody(params: Params): URLSearchParams {
-  const s    = sign(params);
+function buildBody(params: Params, secretKey: string): URLSearchParams {
+  const s    = sign(params, secretKey);
   const body = new URLSearchParams();
-  Object.keys(params)
-    .sort()
-    .forEach(k => body.append(k, String(params[k])));
+  Object.keys(params).sort().forEach(k => body.append(k, String(params[k])));
   body.append('s', s);
   return body;
 }
 
 /** Construye query string con todos los params + firma */
-function buildQuery(params: Params): URLSearchParams {
-  return buildBody(params); // mismo formato
+function buildQuery(params: Params, secretKey: string): URLSearchParams {
+  return buildBody(params, secretKey);
 }
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
@@ -91,22 +92,25 @@ export async function createPaymentOrder(opts: {
   urlReturn:        string;
   baseUrl?:         string;  // sobreescribe FLOW_BASE_URL (desde settings de admin)
 }): Promise<FlowOrder> {
-  const base = opts.baseUrl ?? FLOW_BASE_URL;
+  const base      = opts.baseUrl ?? FLOW_BASE_URL;
+  const isSandbox = base === FLOW_URLS.sandbox;
+  const apiKey    = isSandbox ? SANDBOX_API_KEY    : API_KEY;
+  const secretKey = isSandbox ? SANDBOX_SECRET_KEY : SECRET_KEY;
   const params: Params = {
-    apiKey:                API_KEY,
-    subject:               opts.subject,
-    currency:              'CLP',
-    amount:                opts.amount,
-    email:                 opts.email,
-    urlConfirmation:       opts.urlConfirmation,
-    urlReturn:             opts.urlReturn,
-    commerceOrder:         opts.orderId,
+    apiKey:          apiKey,
+    subject:         opts.subject,
+    currency:        'CLP',
+    amount:          opts.amount,
+    email:           opts.email,
+    urlConfirmation: opts.urlConfirmation,
+    urlReturn:       opts.urlReturn,
+    commerceOrder:   opts.orderId,
   };
 
   const res = await fetch(`${base}/payment/create`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body:    buildBody(params).toString(),
+    body:    buildBody(params, secretKey).toString(),
   });
 
   if (!res.ok) {
@@ -121,11 +125,15 @@ export async function createPaymentOrder(opts: {
  * Consulta el estado de un pago por su token.
  * Usar tanto en el webhook como en la página de confirmación.
  */
-export async function getPaymentStatus(token: string): Promise<FlowStatus> {
-  const params: Params = { apiKey: API_KEY, token };
-  const qs = buildQuery(params);
+export async function getPaymentStatus(token: string, baseUrl?: string): Promise<FlowStatus> {
+  const base      = baseUrl ?? FLOW_BASE_URL;
+  const isSandbox = base === FLOW_URLS.sandbox;
+  const apiKey    = isSandbox ? SANDBOX_API_KEY    : API_KEY;
+  const secretKey = isSandbox ? SANDBOX_SECRET_KEY : SECRET_KEY;
+  const params: Params = { apiKey, token };
+  const qs = buildQuery(params, secretKey);
 
-  const res = await fetch(`${FLOW_BASE_URL}/payment/getStatus?${qs}`);
+  const res = await fetch(`${base}/payment/getStatus?${qs}`);
 
   if (!res.ok) {
     const msg = await res.text().catch(() => res.status.toString());
