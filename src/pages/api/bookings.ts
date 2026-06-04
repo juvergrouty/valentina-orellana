@@ -77,14 +77,18 @@ async function handleBooking(request: Request) {
     return json({ error: 'Ese horario ya fue reservado. Por favor elige otro.' }, 409);
   }
 
+  // ── Cargar settings primero ──────────────────────────────────────────────────
+  const { data: settingsRows } = await supabase.from('settings').select('key, value');
+  const settings: Record<string, string> = {};
+  (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
+
   // ── Obtener precio ───────────────────────────────────────────────────────────
   const plan = pricingPlans.find((p) => p.id === session_type);
   if (!plan) return json({ error: 'Plan no encontrado.' }, 400);
 
-  // Leer precio desde settings (si fue editado desde el admin), con fallback al valor de services.ts
-  const priceKey = `price_${session_type.replace('-', '_')}`;
+  const priceKey      = `price_${session_type.replace(/-/g, '_')}`;
   const settingsPrice = settings[priceKey] ? parseInt(settings[priceKey]) : null;
-  const finalPrice = (settingsPrice && !isNaN(settingsPrice)) ? settingsPrice : plan.price;
+  const finalPrice    = (settingsPrice && !isNaN(settingsPrice)) ? settingsPrice : plan.price;
 
   // ── Crear reserva en Supabase ────────────────────────────────────────────────
   const { data: booking, error: insertError } = await supabase
@@ -109,10 +113,7 @@ async function handleBooking(request: Request) {
     return json({ error: 'Error al crear la reserva. Intenta nuevamente.' }, 500);
   }
 
-  // ── Obtener settings (email admin, pago manual) ──────────────────────────────
-  const { data: settingsRows } = await supabase.from('settings').select('key, value');
-  const settings: Record<string, string> = {};
-  (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
+  // ── Leer config desde settings ───────────────────────────────────────────────
   const notificationEmail  = settings['notification_email'] ?? 'juver@grouty.cl';
   const manualEnabled      = settings['manual_payment_enabled'] !== 'false';
   const flowEnabled        = settings['flow_enabled'] !== 'false';
