@@ -120,6 +120,7 @@ const cards = raw.map(s => ({
 </section>
 
 <script>
+(function() {
   const track = document.getElementById('svc-track');
   const prev  = document.getElementById('svc-prev');
   const next  = document.getElementById('svc-next');
@@ -168,4 +169,5 @@ const cards = raw.map(s => ({
   const style = document.createElement('style');
   style.textContent = '#svc-track::-webkit-scrollbar { display:none; }';
   document.head.appendChild(style);
+})();
 </script>
