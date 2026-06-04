@@ -3,7 +3,23 @@ import { supabase } from '../../lib/supabase';
 
 export const prerender = false;
 
+// Limpiar reservas pending_payment con más de 30 min — no bloqueante
+function cleanupExpiredPending() {
+  const expiry = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  supabase
+    .from('bookings')
+    .delete()
+    .eq('status', 'pending_payment')
+    .lt('created_at', expiry)
+    .then(({ error }) => {
+      if (error) console.warn('[availability] cleanup error:', error.message);
+    });
+}
+
 export const GET: APIRoute = async ({ url }) => {
+  // Limpiar reservas expiradas en segundo plano
+  cleanupExpiredPending();
+
   const dateParam = url.searchParams.get('date');
 
   if (!dateParam || !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
@@ -35,7 +51,12 @@ export const GET: APIRoute = async ({ url }) => {
   ] = await Promise.all([
     supabase.from('availability_slots').select('start_time').eq('day_of_week', dayOfWeek).eq('active', true).order('start_time'),
     supabase.from('blocked_dates').select('id').eq('date', dateParam).maybeSingle(),
-    supabase.from('bookings').select('session_time').eq('session_date', dateParam).neq('status', 'cancelled'),
+    // Solo bloquear: confirmadas + pending_payment creadas hace menos de 30 min
+    supabase.from('bookings')
+      .select('session_time')
+      .eq('session_date', dateParam)
+      .neq('status', 'cancelled')
+      .or(`status.eq.confirmed,and(status.eq.pending_payment,created_at.gte.${new Date(Date.now() - 30 * 60 * 1000).toISOString()})`),
     supabase.from('settings').select('key, value'),
   ]);
 
