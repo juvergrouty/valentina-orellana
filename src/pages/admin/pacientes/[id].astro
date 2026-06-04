@@ -1,0 +1,292 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../components/admin/AdminLayout.astro';
+import { supabase } from '../../../lib/supabase';
+
+const { id } = Astro.params;
+
+const [{ data: patient }, { data: notes }, { data: bookings }] = await Promise.all([
+  supabase.from('patients').select('*').eq('id', id!).single(),
+  supabase.from('session_notes').select('*').eq('patient_id', id!).order('session_date', { ascending: false }),
+  supabase.from('bookings').select('*').eq('patient_email', '').order('session_date', { ascending: false }).limit(0),
+]);
+
+// Buscar reservas por email del paciente si tiene email
+let patientBookings: any[] = [];
+if (patient?.email) {
+  const { data } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('patient_email', patient.email)
+    .order('session_date', { ascending: false });
+  patientBookings = data ?? [];
+}
+
+if (!patient) return Astro.redirect('/admin/pacientes');
+
+const tab  = Astro.url.searchParams.get('tab') ?? 'info';
+const saved = Astro.url.searchParams.get('saved') === '1';
+
+function formatDate(iso: string) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('es-CL', { day:'2-digit', month:'long', year:'numeric' });
+}
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleDateString('es-CL', { day:'2-digit', month:'short', year:'numeric' });
+}
+function age(iso: string | null) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const today = new Date();
+  let a = today.getFullYear() - d.getFullYear();
+  if (today.getMonth() < d.getMonth() || (today.getMonth() === d.getMonth() && today.getDate() < d.getDate())) a--;
+  return a;
+}
+function initials(name: string) {
+  return name.split(' ').slice(0,2).map(w => w[0]).join('').toUpperCase();
+}
+
+const SESSION_LABELS: Record<string, string> = {
+  'online': 'Ind. Online', 'presencial': 'Ind. Presencial',
+  'pareja-online': 'Pareja Online', 'pareja-presencial': 'Pareja Presencial',
+};
+
+const redirectBase = `/admin/pacientes/${id}`;
+---
+
+<AdminLayout title={patient.name} current="/admin/pacientes">
+
+  {saved && <div class="alert-success">✓ Cambios guardados.</div>}
+
+  <!-- Header paciente -->
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:2rem;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <a href="/admin/pacientes" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Pacientes</a>
+      <div style="width:52px;height:52px;border-radius:50%;background:var(--forest);color:white;display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700;flex-shrink:0;">
+        {initials(patient.name)}
+      </div>
+      <div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">{patient.name}</h2>
+        <div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.2rem;">
+          <span class={`badge ${patient.active ? 'badge-confirmed' : 'badge-cancelled'}`}>
+            {patient.active ? 'Activo' : 'Archivado'}
+          </span>
+          {patient.birthdate && <span style="font-size:0.78rem;color:var(--stone);">{age(patient.birthdate)} años</span>}
+          {patient.rut && <span style="font-size:0.78rem;color:var(--stone);">RUT {patient.rut}</span>}
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0.5rem;">
+      {patient.phone && (
+        <a href={`https://wa.me/${patient.phone.replace(/\D/g,'')}`} target="_blank"
+           class="btn btn-outline btn-sm">WhatsApp</a>
+      )}
+      <form method="POST" action="/api/admin/patients" style="margin:0;">
+        <input type="hidden" name="action" value="archive" />
+        <input type="hidden" name="id" value={patient.id} />
+        <input type="hidden" name="active" value={String(patient.active)} />
+        <input type="hidden" name="redirect" value={redirectBase} />
+        <button type="submit" class="btn btn-outline btn-sm">
+          {patient.active ? 'Archivar' : 'Restaurar'}
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div style="display:flex;gap:0;border-bottom:2px solid var(--dust);margin-bottom:1.75rem;">
+    {[
+      { key: 'info',     label: 'Información' },
+      { key: 'sesiones', label: `Sesiones (${patientBookings.length})` },
+      { key: 'notas',    label: `Notas clínicas (${notes?.length ?? 0})` },
+    ].map(t => (
+      <a href={`${redirectBase}?tab=${t.key}`}
+         style={`padding:0.6rem 1.25rem;font-size:0.8rem;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;text-decoration:none;border-bottom:2px solid ${tab===t.key ? 'var(--ink)' : 'transparent'};color:${tab===t.key ? 'var(--ink)' : 'var(--stone)'};margin-bottom:-2px;transition:color .15s;`}>
+        {t.label}
+      </a>
+    ))}
+  </div>
+
+  <!-- ── TAB: INFORMACIÓN ────────────────────────────────────────────────────── -->
+  {tab === 'info' && (
+    <div style="max-width:580px;">
+      <form method="POST" action="/api/admin/patients" style="display:flex;flex-direction:column;gap:1.25rem;">
+        <input type="hidden" name="action" value="update" />
+        <input type="hidden" name="id" value={patient.id} />
+        <input type="hidden" name="redirect" value={`${redirectBase}?tab=info&saved=1`} />
+
+        <div class="card">
+          <p class="label" style="margin-bottom:1.25rem;">Datos personales</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+            <div style="grid-column:1/-1;">
+              <label class="label" style="display:block;margin-bottom:0.3rem;">Nombre completo *</label>
+              <input type="text" name="name" value={patient.name} required />
+            </div>
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.3rem;">Email</label>
+              <input type="email" name="email" value={patient.email ?? ''} />
+            </div>
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.3rem;">Teléfono</label>
+              <input type="tel" name="phone" value={patient.phone ?? ''} />
+            </div>
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.3rem;">RUT</label>
+              <input type="text" name="rut" value={patient.rut ?? ''} placeholder="12.345.678-9" />
+            </div>
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.3rem;">Fecha de nacimiento</label>
+              <input type="date" name="birthdate" value={patient.birthdate ?? ''} />
+            </div>
+            <div style="grid-column:1/-1;">
+              <label class="label" style="display:block;margin-bottom:0.3rem;">Dirección</label>
+              <input type="text" name="address" value={patient.address ?? ''} />
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <p class="label" style="margin-bottom:1.25rem;">Contacto de emergencia</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.3rem;">Nombre</label>
+              <input type="text" name="emergency_name" value={patient.emergency_name ?? ''} />
+            </div>
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.3rem;">Teléfono</label>
+              <input type="tel" name="emergency_phone" value={patient.emergency_phone ?? ''} />
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <p class="label" style="margin-bottom:1rem;">Notas generales</p>
+          <textarea name="notes" rows="5" placeholder="Motivo de consulta, antecedentes relevantes, observaciones generales..."
+            style="resize:vertical;">{patient.notes ?? ''}</textarea>
+        </div>
+
+        <button type="submit" class="btn btn-dark btn-lg" style="width:100%;justify-content:center;">
+          Guardar cambios
+        </button>
+      </form>
+    </div>
+  )}
+
+  <!-- ── TAB: SESIONES ──────────────────────────────────────────────────────── -->
+  {tab === 'sesiones' && (
+    <div>
+      {!patientBookings.length ? (
+        <div class="card" style="text-align:center;padding:3rem;">
+          <p style="color:var(--stone);font-size:0.9rem;margin-bottom:1rem;">
+            No hay sesiones registradas para este paciente.
+          </p>
+          <a href="/admin/agenda" class="btn btn-dark btn-sm">Agendar sesión</a>
+        </div>
+      ) : (
+        <div class="card" style="padding:0;overflow:hidden;">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Hora</th>
+                <th>Tipo</th>
+                <th>Estado</th>
+                <th>Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {patientBookings.map(b => (
+                <tr>
+                  <td style="font-weight:500;">{formatDate(b.session_date)}</td>
+                  <td style="font-family:'Cormorant Garamond',serif;font-size:1rem;">{b.session_time.slice(0,5)}</td>
+                  <td style="color:var(--stone);font-size:0.82rem;">{SESSION_LABELS[b.session_type] ?? b.session_type}</td>
+                  <td>
+                    <span class={`badge badge-${b.status === 'confirmed' ? 'confirmed' : b.status === 'cancelled' ? 'cancelled' : 'pending'}`}>
+                      {b.status === 'confirmed' ? 'Confirmada' : b.status === 'cancelled' ? 'Cancelada' : 'Pendiente'}
+                    </span>
+                  </td>
+                  <td style="font-size:0.85rem;">
+                    {new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP',maximumFractionDigits:0}).format(b.amount)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )}
+
+  <!-- ── TAB: NOTAS CLÍNICAS ────────────────────────────────────────────────── -->
+  {tab === 'notas' && (
+    <div style="display:grid;grid-template-columns:1fr 340px;gap:1.5rem;align-items:start;">
+
+      <!-- Lista de notas -->
+      <div style="display:flex;flex-direction:column;gap:1rem;">
+        {!notes?.length ? (
+          <div class="card" style="text-align:center;padding:3rem;">
+            <p style="color:var(--stone);font-size:0.9rem;">Sin notas clínicas aún.</p>
+          </div>
+        ) : notes.map(note => (
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.75rem;">
+              <div>
+                <p style="font-weight:600;font-size:0.9rem;">{formatDate(note.session_date)}</p>
+                {note.session_type && (
+                  <span style="font-size:0.72rem;background:var(--warm);color:var(--stone);padding:0.15rem 0.5rem;border-radius:99px;">
+                    {SESSION_LABELS[note.session_type] ?? note.session_type}
+                  </span>
+                )}
+              </div>
+              <form method="POST" action="/api/admin/patients" style="margin:0;">
+                <input type="hidden" name="action" value="delete_note" />
+                <input type="hidden" name="id" value={note.id} />
+                <input type="hidden" name="redirect" value={`${redirectBase}?tab=notas`} />
+                <button type="submit" class="btn btn-danger btn-sm"
+                  onclick="return confirm('¿Eliminar esta nota?')">✕</button>
+              </form>
+            </div>
+            <p style="font-size:0.88rem;line-height:1.7;color:var(--ink);white-space:pre-wrap;">{note.content}</p>
+          </div>
+        ))}
+      </div>
+
+      <!-- Agregar nota -->
+      <div class="card" style="position:sticky;top:90px;">
+        <p class="label" style="margin-bottom:1.25rem;">+ Nueva nota</p>
+        <form method="POST" action="/api/admin/patients" style="display:flex;flex-direction:column;gap:1rem;">
+          <input type="hidden" name="action" value="add_note" />
+          <input type="hidden" name="patient_id" value={patient.id} />
+          <input type="hidden" name="redirect" value={`${redirectBase}?tab=notas`} />
+
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Fecha de sesión</label>
+            <input type="date" name="session_date"
+              value={new Date().toISOString().slice(0,10)} required />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Tipo de sesión</label>
+            <select name="session_type">
+              <option value="">— Sin especificar</option>
+              <option value="presencial">Ind. Presencial</option>
+              <option value="online">Ind. Online</option>
+              <option value="pareja-presencial">Pareja Presencial</option>
+              <option value="pareja-online">Pareja Online</option>
+            </select>
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Notas de sesión</label>
+            <textarea name="content" rows="8" required
+              placeholder="Temas abordados, evolución del paciente, tareas asignadas..."
+              style="resize:vertical;"></textarea>
+          </div>
+          <button type="submit" class="btn btn-dark" style="width:100%;justify-content:center;">
+            Guardar nota
+          </button>
+        </form>
+      </div>
+
+    </div>
+  )}
+
+</AdminLayout>
