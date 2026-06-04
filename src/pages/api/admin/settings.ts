@@ -3,7 +3,7 @@ import { supabase } from '../../../lib/supabase';
 
 export const prerender = false;
 
-// Claves que son checkboxes — si no vienen en el form se guardan como 'false'
+// Claves boolean: si no vienen en el form → desmarcado → 'false'
 const BOOLEAN_KEYS = ['manual_payment_enabled', 'flow_enabled'];
 
 // GET — obtener todas las settings
@@ -15,35 +15,46 @@ export const GET: APIRoute = async () => {
   return new Response(JSON.stringify(settings), { headers: { 'Content-Type': 'application/json' } });
 };
 
-// POST — guardar settings
+// POST — guardar settings usando UPDATE o INSERT explícitos
 export const POST: APIRoute = async ({ request }) => {
   const form     = await request.formData();
   const redirect = (form.get('redirect') as string) ?? '/admin/configuracion';
 
-  const updates: { key: string; value: string }[] = [];
+  const updates: Record<string, string> = {};
 
-  // Recoger todos los campos del form
   for (const [key, value] of form.entries()) {
     if (key === 'redirect') continue;
-    updates.push({ key, value: String(value) });
+    updates[key] = String(value);
   }
 
-  // Para checkboxes: si no están en el form significa que están desmarcados → guardar 'false'
+  // Checkboxes desmarcados no se envían — guardar 'false' explícitamente
   for (const boolKey of BOOLEAN_KEYS) {
-    if (!updates.find(u => u.key === boolKey)) {
-      updates.push({ key: boolKey, value: 'false' });
-    }
+    if (!(boolKey in updates)) updates[boolKey] = 'false';
   }
 
-  // Guardar cada setting con upsert
-  for (const { key, value } of updates) {
-    const { error } = await supabase
-      .from('settings')
-      .upsert(
-        { key, value, updated_at: new Date().toISOString() },
-        { onConflict: 'key' }
-      );
-    if (error) console.error(`[settings] Error guardando ${key}:`, error.message);
+  // Obtener qué claves ya existen
+  const { data: existing } = await supabase
+    .from('settings')
+    .select('key')
+    .in('key', Object.keys(updates));
+
+  const existingKeys = new Set((existing ?? []).map((r: { key: string }) => r.key));
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (existingKeys.has(key)) {
+      // UPDATE
+      const { error } = await supabase
+        .from('settings')
+        .update({ value, updated_at: new Date().toISOString() })
+        .eq('key', key);
+      if (error) console.error(`[settings] UPDATE ${key}:`, error.message, error.code);
+    } else {
+      // INSERT
+      const { error } = await supabase
+        .from('settings')
+        .insert({ key, value });
+      if (error) console.error(`[settings] INSERT ${key}:`, error.message, error.code);
+    }
   }
 
   return new Response(null, { status: 302, headers: { Location: redirect } });

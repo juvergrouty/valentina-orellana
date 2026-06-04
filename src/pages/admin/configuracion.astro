@@ -10,7 +10,7 @@ const settings: Record<string, string> = {};
 
 const manualEnabled     = settings['manual_payment_enabled'] !== 'false';
 const flowEnabled       = settings['flow_enabled'] !== 'false';
-const flowEnv           = settings['flow_env'] ?? (import.meta.env.FLOW_ENV ?? 'sandbox');
+const flowEnv           = settings['flow_env'] ?? 'sandbox'; // default sandbox si no hay fila
 const notificationEmail = settings['notification_email'] ?? 'juver@grouty.cl';
 const emailFrom         = settings['email_from'] ?? '';
 const sessionDuration   = settings['session_duration_min'] ?? '55';
