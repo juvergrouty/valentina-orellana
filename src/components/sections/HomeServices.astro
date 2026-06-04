@@ -1,7 +1,6 @@
 ---
 import { supabase } from '../../lib/supabase';
 
-// Servicios con show_home=true desde la BD
 const { data: dbServices } = await supabase
   .from('services_catalog')
   .select('id, name, description, modality, location, image_url, type, price, duration_min')
@@ -10,91 +9,98 @@ const { data: dbServices } = await supabase
   .order('sort_order')
   .limit(10);
 
-// Fallback estático si la tabla está vacía
 const fallback = [
   {
-    id: 'ind-online', name: 'Terapia Individual Online',
+    id: 'individual', name: 'Terapia Individual',
     description: 'Un espacio para ti. Para entender lo que sientes, soltar lo que te pesa y reconectar contigo.',
-    type: 'individual', modality: 'online', image_url: '/images/consultorio-individual.jpg', price: 45000, duration_min: 50, location: null,
+    type: 'individual', modality: 'ambos', image_url: '/images/consultorio-individual.jpg', price: 45000, duration_min: 50, location: null,
   },
   {
-    id: 'ind-pres', name: 'Terapia Individual Presencial',
-    description: 'Un espacio cálido y privado en Santiago. Sesión presencial para acompañarte en tu proceso.',
-    type: 'individual', modality: 'presencial', image_url: '/images/consultorio-individual.jpg', price: 55000, duration_min: 50, location: 'Las Condes',
-  },
-  {
-    id: 'par-online', name: 'Terapia de Pareja Online',
-    description: 'Mejoren su comunicación, fortalezcan su vínculo y construyan una relación más sana.',
-    type: 'pareja', modality: 'online', image_url: '/images/consultorio-pareja.jpg', price: 60000, duration_min: 60, location: null,
-  },
-  {
-    id: 'par-pres', name: 'Terapia de Pareja Presencial',
-    description: 'Sesión presencial para parejas que buscan reconectar y construir una relación más sana.',
-    type: 'pareja', modality: 'presencial', image_url: '/images/consultorio-pareja.jpg', price: 70000, duration_min: 60, location: 'Las Condes',
+    id: 'pareja', name: 'Terapia de Pareja',
+    description: 'Mejoren su comunicación, fortalezcan su vínculo y construyan una relación más sana y consciente.',
+    type: 'pareja', modality: 'ambos', image_url: '/images/consultorio-pareja.jpg', price: 60000, duration_min: 60, location: null,
   },
 ];
 
-const cards = (dbServices && dbServices.length > 0 ? dbServices : fallback).map(s => ({
-  ...s,
-  href: `/agenda?grupo=${s.type === 'pareja' ? 'pareja' : 'individual'}`,
-  label: s.modality === 'online' ? 'Online' : s.modality === 'presencial' ? 'Presencial' : 'Online + Presencial',
-  labelColor: s.modality === 'online' ? '#576352' : '#A8906C',
-}));
-
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style:'currency', currency:'CLP', maximumFractionDigits:0 }).format(n);
+
+const raw = (dbServices && dbServices.length > 0 ? dbServices : fallback);
+const cards = raw.map(s => ({
+  ...s,
+  href:       `/agenda?grupo=${s.type === 'pareja' ? 'pareja' : 'individual'}`,
+  badge:      s.modality === 'online' ? 'Online' : s.modality === 'presencial' ? 'Presencial' : 'Online · Presencial',
+  priceLabel: s.modality === 'ambos' ? `Desde ${formatCLP(s.price)}` : formatCLP(s.price),
+}));
 ---
 
-<section class="py-section bg-sand overflow-hidden">
+<section class="py-section bg-sand">
   <div class="container-site">
 
-    <!-- Encabezado -->
-    <div class="text-center mb-12">
-      <p class="label text-stone mb-4">¿En qué puedo ayudarte?</p>
-      <h2 class="section-title mb-5">Terapia para crecer, sanar y avanzar.</h2>
-      <p class="body-text max-w-xl mx-auto">
-        Acompañamiento psicológico para adultos y parejas que desean comprenderse,
-        mejorar su bienestar y construir relaciones más conscientes.
-      </p>
+    <!-- Encabezado + controles en la misma fila -->
+    <div class="flex items-end justify-between mb-10 gap-4">
+      <div>
+        <p class="label text-stone mb-3">¿En qué puedo ayudarte?</p>
+        <h2 class="section-title">Terapia para crecer,<br class="hidden md:block" /> sanar y avanzar.</h2>
+      </div>
+      <!-- Flechas de navegación -->
+      <div class="hidden md:flex gap-2 flex-shrink-0">
+        <button id="svc-prev"
+          class="w-10 h-10 rounded-full border border-dust flex items-center justify-center text-stone hover:border-ink hover:text-ink transition-all duration-200">
+          ‹
+        </button>
+        <button id="svc-next"
+          class="w-10 h-10 rounded-full border border-dust flex items-center justify-center text-stone hover:border-ink hover:text-ink transition-all duration-200">
+          ›
+        </button>
+      </div>
     </div>
+
+    <p class="body-text max-w-xl mb-10 md:hidden">
+      Acompañamiento psicológico para adultos y parejas que desean comprenderse,
+      mejorar su bienestar y construir relaciones más conscientes.
+    </p>
 
   </div>
 
-  <!-- Carrusel: sale del container para tener sangría izquierda como el container pero scroll libre a la derecha -->
-  <div class="carousel-outer">
-    <div class="carousel-track" id="services-carousel">
-      {cards.map(card => (
-        <div class="service-card group">
+  <!-- Carrusel full-bleed desde el container -->
+  <div class="pl-6 md:pl-12 lg:pl-20 xl:pl-[max(5rem,calc((100vw-1600px)/2+5rem))]">
+    <div id="svc-track"
+      class="flex gap-5 overflow-x-auto pb-4"
+      style="scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;cursor:grab;">
 
-          <!-- Imagen superior con degradado -->
-          <div class="service-card-img">
+      {cards.map(card => (
+        <div class="flex-shrink-0 w-[280px] md:w-[300px] bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-lg transition-all duration-300"
+             style="scroll-snap-align:start;">
+
+          <!-- Imagen -->
+          <div class="relative h-[170px] overflow-hidden">
             <img
               src={card.image_url ?? '/images/consultorio-individual.jpg'}
               alt={card.name}
-              class="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
+              class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
             />
-            <div class="absolute inset-0 bg-gradient-to-t from-ink/50 via-transparent to-transparent"></div>
-            <!-- Badge modalidad -->
-            <span class="absolute top-3 left-3 font-body text-xs font-medium px-2.5 py-1 rounded-full"
-              style={`background:white;color:${card.labelColor};`}>
-              {card.label}
+            <div class="absolute inset-0 bg-gradient-to-t from-ink/40 to-transparent"></div>
+            <span class="absolute top-3 left-3 text-xs font-body font-medium px-3 py-1 rounded-full bg-white/90 text-ink">
+              {card.badge}
             </span>
           </div>
 
           <!-- Contenido -->
-          <div class="service-card-body">
-            <h3 class="font-heading font-semibold text-lg text-ink leading-tight mb-2">{card.name}</h3>
+          <div class="p-5 flex flex-col" style="min-height:180px;">
+            <h3 class="font-heading font-semibold text-lg text-ink leading-tight mb-1">{card.name}</h3>
             {card.location && (
               <p class="font-body text-xs text-stone mb-2">📍 {card.location}</p>
             )}
-            <p class="body-sm leading-relaxed mb-4 flex-1">{card.description}</p>
-            <div class="flex items-center justify-between pt-4 border-t border-dust mt-auto">
+            <p class="font-body text-sm text-stone font-light leading-relaxed mb-4 flex-1 line-clamp-3">{card.description}</p>
+
+            <div class="flex items-center justify-between pt-3 border-t border-dust">
               <div>
-                <p class="font-heading font-semibold text-lg text-ink leading-none">{formatCLP(card.price)}</p>
-                <p class="font-body text-xs text-stone">{card.duration_min} minutos</p>
+                <p class="font-heading font-semibold text-base text-ink leading-none">{card.priceLabel}</p>
+                <p class="font-body text-xs text-stone mt-0.5">{card.duration_min} minutos</p>
               </div>
               <a href={card.href}
-                class="font-body text-xs tracking-widest uppercase px-4 py-2.5 border border-forest text-forest hover:bg-forest hover:text-white transition-all duration-200 rounded-[4px]">
+                class="font-body text-xs tracking-widest uppercase px-4 py-2 border border-forest text-forest hover:bg-forest hover:text-white transition-all duration-200 rounded-[4px]">
                 Reservar
               </a>
             </div>
@@ -102,147 +108,64 @@ const formatCLP = (n: number) =>
 
         </div>
       ))}
-    </div>
 
-    <!-- Botones navegación -->
-    <button id="carousel-prev" aria-label="Anterior" class="carousel-nav carousel-nav-left">‹</button>
-    <button id="carousel-next" aria-label="Siguiente" class="carousel-nav carousel-nav-right">›</button>
+      <!-- Espaciado final para ver el último card completo -->
+      <div class="flex-shrink-0 w-6 md:w-12 lg:w-20"></div>
+    </div>
   </div>
 
-  <!-- Dots indicadores -->
-  <div id="carousel-dots" class="flex justify-center gap-2 mt-6"></div>
+  <!-- Dots -->
+  <div id="svc-dots" class="flex justify-center gap-2 mt-5 container-site"></div>
 
 </section>
 
-<style>
-  .carousel-outer {
-    position: relative;
-    padding-left: max(1.5rem, calc((100vw - 1600px) / 2 + 1.5rem));
-  }
-  @media (min-width: 768px) {
-    .carousel-outer {
-      padding-left: max(3rem, calc((100vw - 1600px) / 2 + 3rem));
-    }
-  }
-  @media (min-width: 1024px) {
-    .carousel-outer {
-      padding-left: max(5rem, calc((100vw - 1600px) / 2 + 5rem));
-    }
-  }
-
-  .carousel-track {
-    display: flex;
-    gap: 1.25rem;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    padding-right: 2rem;
-    padding-bottom: 0.5rem;
-    cursor: grab;
-  }
-  .carousel-track:active { cursor: grabbing; }
-  .carousel-track::-webkit-scrollbar { display: none; }
-
-  .service-card {
-    flex-shrink: 0;
-    width: 300px;
-    background: white;
-    border: 1px solid var(--dust, #DDD8CF);
-    border-radius: 10px;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    scroll-snap-align: start;
-    transition: box-shadow .2s, transform .2s;
-  }
-  .service-card:hover {
-    box-shadow: 0 8px 32px rgba(0,0,0,.1);
-    transform: translateY(-2px);
-  }
-
-  .service-card-img {
-    position: relative;
-    height: 180px;
-    overflow: hidden;
-  }
-  .service-card-img img {
-    width: 100%; height: 100%; object-fit: cover;
-  }
-
-  .service-card-body {
-    padding: 1.25rem;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-  }
-
-  /* Navegación */
-  .carousel-nav {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 40px; height: 40px;
-    border-radius: 50%;
-    background: white;
-    border: 1px solid var(--dust, #DDD8CF);
-    font-size: 1.3rem;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 2px 8px rgba(0,0,0,.1);
-    transition: all .15s;
-    z-index: 10;
-    color: var(--ink, #1A1916);
-  }
-  .carousel-nav:hover { background: var(--ink, #1A1916); color: white; border-color: var(--ink); }
-  .carousel-nav-left  { left: 0.25rem; }
-  .carousel-nav-right { right: 1rem; }
-
-  @media (max-width: 640px) {
-    .service-card { width: 260px; }
-    .carousel-nav { display: none; }
-    .carousel-outer { padding-left: 1.25rem; }
-  }
-</style>
-
 <script>
-  const track  = document.getElementById('services-carousel');
-  const prev   = document.getElementById('carousel-prev');
-  const next   = document.getElementById('carousel-next');
-  const dotsEl = document.getElementById('carousel-dots');
+  const track = document.getElementById('svc-track');
+  const prev  = document.getElementById('svc-prev');
+  const next  = document.getElementById('svc-next');
+  const dots  = document.getElementById('svc-dots');
 
-  if (track) {
-    const cardW = () => (track.firstElementChild as HTMLElement)?.offsetWidth + 20 || 320;
+  if (!track) return;
 
-    // Botones
-    prev?.addEventListener('click', () => track.scrollBy({ left: -cardW(), behavior: 'smooth' }));
-    next?.addEventListener('click', () => track.scrollBy({ left:  cardW(), behavior: 'smooth' }));
+  const cardW = () => {
+    const c = track.querySelector('.flex-shrink-0') as HTMLElement;
+    return c ? c.offsetWidth + 20 : 320;
+  };
 
-    // Drag to scroll
-    let isDragging = false, startX = 0, scrollLeft = 0;
-    track.addEventListener('mousedown', e => { isDragging = true; startX = e.pageX - track.offsetLeft; scrollLeft = track.scrollLeft; });
-    track.addEventListener('mouseleave', () => isDragging = false);
-    track.addEventListener('mouseup',   () => isDragging = false);
-    track.addEventListener('mousemove', e => {
-      if (!isDragging) return;
-      e.preventDefault();
-      track.scrollLeft = scrollLeft - (e.pageX - track.offsetLeft - startX);
+  // Flechas
+  prev?.addEventListener('click', () => track.scrollBy({ left: -cardW(), behavior: 'smooth' }));
+  next?.addEventListener('click', () => track.scrollBy({ left:  cardW(), behavior: 'smooth' }));
+
+  // Drag to scroll
+  let dragging = false, startX = 0, scrollLeft = 0;
+  track.addEventListener('mousedown',  e => { dragging = true; startX = e.pageX; scrollLeft = track.scrollLeft; track.style.cursor = 'grabbing'; });
+  track.addEventListener('mouseup',    () => { dragging = false; track.style.cursor = 'grab'; });
+  track.addEventListener('mouseleave', () => { dragging = false; track.style.cursor = 'grab'; });
+  track.addEventListener('mousemove',  e => { if (!dragging) return; e.preventDefault(); track.scrollLeft = scrollLeft - (e.pageX - startX); });
+
+  // Dots
+  const cards = track.querySelectorAll('.flex-shrink-0:not(:last-child)');
+  cards.forEach((_, i) => {
+    const dot = document.createElement('button');
+    dot.setAttribute('aria-label', `Ir al servicio ${i+1}`);
+    dot.style.cssText = `width:7px;height:7px;border-radius:50%;border:none;cursor:pointer;transition:all .2s;background:${i===0?'var(--forest)':'var(--dust)'}`;
+    dot.addEventListener('click', () => track.scrollTo({ left: i * cardW(), behavior: 'smooth' }));
+    dots?.appendChild(dot);
+  });
+
+  // Actualizar dots y flechas en scroll
+  track.addEventListener('scroll', () => {
+    const idx = Math.round(track.scrollLeft / cardW());
+    dots?.querySelectorAll('button').forEach((d, i) => {
+      (d as HTMLElement).style.background = i === idx ? 'var(--forest)' : 'var(--dust)';
+      (d as HTMLElement).style.transform  = i === idx ? 'scale(1.3)' : 'scale(1)';
     });
+    if (prev) (prev as HTMLButtonElement).style.opacity = track.scrollLeft < 10 ? '0.3' : '1';
+    if (next) (next as HTMLButtonElement).style.opacity = track.scrollLeft + track.clientWidth >= track.scrollWidth - 10 ? '0.3' : '1';
+  }, { passive: true });
 
-    // Dots
-    const cards = track.querySelectorAll('.service-card');
-    cards.forEach((_, i) => {
-      const dot = document.createElement('button');
-      dot.style.cssText = `width:7px;height:7px;border-radius:50%;border:none;cursor:pointer;transition:background .2s;background:${i===0?'var(--forest)':'var(--dust)'}`;
-      dot.addEventListener('click', () => track.scrollTo({ left: i * cardW(), behavior: 'smooth' }));
-      dotsEl?.appendChild(dot);
-    });
-
-    track.addEventListener('scroll', () => {
-      const idx = Math.round(track.scrollLeft / cardW());
-      dotsEl?.querySelectorAll('button').forEach((d, i) => {
-        (d as HTMLElement).style.background = i === idx ? 'var(--forest)' : 'var(--dust)';
-      });
-    });
-  }
+  // Ocultar scrollbar CSS
+  const style = document.createElement('style');
+  style.textContent = '#svc-track::-webkit-scrollbar { display:none; }';
+  document.head.appendChild(style);
 </script>
