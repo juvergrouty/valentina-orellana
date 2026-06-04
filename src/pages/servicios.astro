@@ -1,7 +1,6 @@
 ---
-import BaseLayout  from '../layouts/BaseLayout.astro';
-import PageHero    from '../components/sections/PageHero.astro';
-import Icon        from '../components/ui/Icon.astro';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero   from '../components/sections/PageHero.astro';
 import { services } from '../data/services';
 ---
 
@@ -11,35 +10,43 @@ import { services } from '../data/services';
 
   <section class="py-section bg-sand">
     <div class="container-site">
-      <div class="space-y-0 divide-y divide-dust">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
         {services.map((service, i) => (
-          <div class={`grid grid-cols-1 md:grid-cols-2 gap-0 group`}>
-            <!-- Número + nombre -->
-            <div class={`p-10 md:p-16 flex flex-col justify-between bg-sand group-hover:bg-white transition-colors duration-300 ${i % 2 !== 0 ? 'md:order-2' : ''}`}>
-              <div>
-                <p class="label text-gold mb-6">0{i + 1}</p>
-                <h2 class="font-heading font-light text-3xl md:text-4xl text-ink leading-tight">
-                  {service.title}
-                </h2>
-              </div>
-              <div class="mt-8 text-forest/30 group-hover:text-forest transition-colors duration-500">
-                <Icon name={service.icon} size={48} />
-              </div>
-            </div>
-            <!-- Descripción -->
-            <div class={`p-10 md:p-16 bg-white flex flex-col justify-between ${i % 2 !== 0 ? 'md:order-1' : ''}`}>
-              <div>
-                <div class="divider mb-6"></div>
-                <p class="body-text leading-relaxed">{service.description}</p>
-              </div>
-              <div class="flex items-center justify-between mt-8 pt-6 border-t border-dust">
+          <div class="relative overflow-hidden rounded-[10px] group min-h-[420px] flex flex-col justify-end">
+
+            <!-- Imagen de fondo -->
+            {service.image && (
+              <img
+                src={service.image}
+                alt={service.title}
+                class="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
+              />
+            )}
+
+            <!-- Degradado inferior para legibilidad -->
+            <div class="absolute inset-0 bg-gradient-to-t from-ink/90 via-ink/40 to-transparent"></div>
+
+            <!-- Contenido sobre la imagen -->
+            <div class="relative z-10 p-8 md:p-10">
+              <p class="label text-white/50 mb-3">0{i + 1}</p>
+              <h2 class="font-heading font-light text-3xl md:text-4xl text-white leading-tight mb-3">
+                {service.title}
+              </h2>
+              <p class="font-body text-sm text-white/70 font-light leading-relaxed mb-6 max-w-sm">
+                {service.description}
+              </p>
+              <div class="flex items-center justify-between pt-5 border-t border-white/20">
                 <div>
-                  <p class="label text-stone mb-0.5">Duración</p>
-                  <p class="font-heading font-light text-xl text-ink">{service.duration}</p>
+                  <p class="label text-white/40 mb-0.5">Duración</p>
+                  <p class="font-heading font-light text-lg text-white">{service.duration}</p>
                 </div>
-                <a href="/agenda" class="btn-outline text-[10px] py-2.5 px-5">Reservar</a>
+                <a href="/agenda"
+                  class="font-body text-xs tracking-widest uppercase py-2.5 px-5 border border-white/40 text-white hover:bg-white hover:text-ink transition-all duration-200">
+                  Reservar
+                </a>
               </div>
             </div>
+
           </div>
         ))}
       </div>

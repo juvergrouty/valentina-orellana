@@ -4,6 +4,7 @@ export interface Service {
   description: string;
   duration: string;
   icon: string;
+  image?: string;
 }
 
 export interface PricingPlan {
@@ -35,6 +36,7 @@ export const services: Service[] = [
       'Acompañamiento terapéutico individual para el manejo de ansiedad, depresión, estrés, duelo y bienestar emocional en general.',
     duration: '50 min',
     icon: 'brain',
+    image: '/images/servicio-adultos.jpg',
   },
   {
     id: 'terapia-pareja',
@@ -43,6 +45,7 @@ export const services: Service[] = [
       'Espacio de escucha y trabajo conjunto para mejorar la comunicación, resolver conflictos y fortalecer el vínculo.',
     duration: '60 min',
     icon: 'users',
+    image: '/images/servicio-pareja.jpg',
   },
   {
     id: 'trauma',
@@ -51,6 +54,7 @@ export const services: Service[] = [
       'Tratamiento especializado para personas que han vivido experiencias traumáticas o que se reconocen como Personas Altamente Sensibles (PAS).',
     duration: '50 min',
     icon: 'leaf',
+    image: '/images/servicio-trauma.jpg',
   },
   {
     id: 'parentalidad',
@@ -59,6 +63,7 @@ export const services: Service[] = [
       'Orientación para padres y madres que buscan fortalecer el vínculo con sus hijos y desarrollar una crianza consciente.',
     duration: '50 min',
     icon: 'home',
+    image: '/images/servicio-parentalidad.jpg',
   },
 ];
 
