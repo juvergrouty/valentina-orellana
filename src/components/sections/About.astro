@@ -6,12 +6,12 @@ import Icon from '../ui/Icon.astro';
   <div class="container-site">
     <div class="flex flex-col md:flex-row items-stretch">
 
-      <!-- Foto izquierda -->
-      <div class="relative flex-shrink-0 md:w-[240px] h-[240px] md:h-auto">
+      <!-- Foto izquierda — self-stretch para llenar toda la altura -->
+      <div class="relative flex-shrink-0 md:w-[240px] self-stretch min-h-[220px]">
         <img
           src="/images/planta-about.webp"
           alt="Consultorio Ps. Valentina Orellana"
-          class="w-full h-full object-cover object-center"
+          class="absolute inset-0 w-full h-full object-cover object-center"
         />
         <!-- Degradado blend hacia el texto -->
         <div class="absolute inset-y-0 right-0 w-16 bg-gradient-to-r from-transparent to-white hidden md:block"></div>
