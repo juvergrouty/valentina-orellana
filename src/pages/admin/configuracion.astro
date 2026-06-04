@@ -13,10 +13,8 @@ const flowEnabled       = settings['flow_enabled'] !== 'false';
 const flowEnv           = settings['flow_env'] ?? 'sandbox'; // default sandbox si no hay fila
 const notificationEmail = settings['notification_email'] ?? 'juver@grouty.cl';
 const emailFrom         = settings['email_from'] ?? '';
-const sessionDuration    = settings['session_duration_min'] ?? '55';
-const prepDuration       = settings['prep_duration_min'] ?? '20';
-const durationIndividual = settings['duration_individual'] ?? '50 minutos';
-const durationPareja     = settings['duration_pareja']     ?? '60 minutos';
+const sessionDuration = settings['session_duration_min'] ?? '55';
+const prepDuration    = settings['prep_duration_min'] ?? '20';
 
 const saved = Astro.url.searchParams.get('saved') === '1';
 ---
@@ -161,21 +159,6 @@ const saved = Astro.url.searchParams.get('saved') === '1';
         Total bloqueado por sesión: <strong id="total-blocked">{parseInt(sessionDuration) + parseInt(prepDuration)} minutos</strong>
       </div>
 
-      <!-- Texto de duración que aparece en la web -->
-      <div style="margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--warm);">
-        <p class="label" style="margin-bottom:0.75rem;">Texto en la web</p>
-        <p style="font-size:0.82rem;color:var(--stone);margin-bottom:1rem;">Aparece en servicios, preguntas frecuentes y agenda.</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-          <div>
-            <label class="label" style="margin-bottom:0.4rem;display:block;">Sesión individual</label>
-            <input type="text" name="duration_individual" value={durationIndividual} placeholder="50 minutos" />
-          </div>
-          <div>
-            <label class="label" style="margin-bottom:0.4rem;display:block;">Sesión de pareja</label>
-            <input type="text" name="duration_pareja" value={durationPareja} placeholder="60 minutos" />
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- reCAPTCHA -->

@@ -8,73 +8,96 @@ const { data: rows } = await supabase.from('settings').select('key, value');
 const settings: Record<string, string> = {};
 (rows ?? []).forEach(({ key, value }) => { settings[key] = value; });
 
-// Leer precios desde settings, con fallback a services.ts
 const prices = {
-  online:            parseInt(settings['price_online']            ?? String(pricingPlans.find(p => p.id === 'online')?.price            ?? 45000)),
-  presencial:        parseInt(settings['price_presencial']        ?? String(pricingPlans.find(p => p.id === 'presencial')?.price        ?? 55000)),
-  'pareja-online':   parseInt(settings['price_pareja_online']     ?? String(pricingPlans.find(p => p.id === 'pareja-online')?.price     ?? 60000)),
+  online:              parseInt(settings['price_online']            ?? String(pricingPlans.find(p => p.id === 'online')?.price            ?? 45000)),
+  presencial:          parseInt(settings['price_presencial']        ?? String(pricingPlans.find(p => p.id === 'presencial')?.price        ?? 55000)),
+  'pareja-online':     parseInt(settings['price_pareja_online']     ?? String(pricingPlans.find(p => p.id === 'pareja-online')?.price     ?? 60000)),
   'pareja-presencial': parseInt(settings['price_pareja_presencial'] ?? String(pricingPlans.find(p => p.id === 'pareja-presencial')?.price ?? 70000)),
 };
+
+const durationIndividual = settings['duration_individual'] ?? '50 minutos';
+const durationPareja     = settings['duration_pareja']     ?? '60 minutos';
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 
 const saved = Astro.url.searchParams.get('saved') === '1';
-
-const plans = [
-  { id: 'online',              key: 'price_online',              label: 'Individual Online',       sub: '50 minutos · Videollamada',          icon: '💻' },
-  { id: 'presencial',          key: 'price_presencial',          label: 'Individual Presencial',   sub: '50 minutos · Consultorio Santiago',   icon: '🏢' },
-  { id: 'pareja-online',       key: 'price_pareja_online',       label: 'Pareja Online',           sub: '60 minutos · Videollamada',          icon: '💑' },
-  { id: 'pareja-presencial',   key: 'price_pareja_presencial',   label: 'Pareja Presencial',       sub: '60 minutos · Consultorio Santiago',   icon: '🏠' },
-];
 ---
 
-<AdminLayout title="Precios" current="/admin/precios">
+<AdminLayout title="Precios y Duración" current="/admin/precios">
 
-  {saved && <div class="alert-success">✓ Precios actualizados correctamente.</div>}
+  {saved && <div class="alert-success">✓ Cambios guardados correctamente.</div>}
 
-  <div style="max-width:560px;">
-    <p style="font-size:0.875rem;color:var(--stone);margin-bottom:1.75rem;line-height:1.6;">
-      Los precios ingresados aquí se aplican automáticamente en la agenda pública y en el proceso de pago.
-      Los cambios son inmediatos sin necesidad de redeploy.
+  <div style="max-width:580px;">
+    <p style="font-size:0.9rem;color:var(--stone);margin-bottom:2rem;line-height:1.6;">
+      Los cambios se aplican en toda la web de forma inmediata — agenda, página de servicios, preguntas frecuentes y proceso de pago.
     </p>
 
-    <form method="POST" action="/api/admin/pricing" style="display:flex;flex-direction:column;gap:1rem;">
+    <form method="POST" action="/api/admin/pricing" style="display:flex;flex-direction:column;gap:1.5rem;">
       <input type="hidden" name="redirect" value="/admin/precios?saved=1" />
 
-      {plans.map(plan => (
-        <div class="card" style="padding:1.25rem 1.5rem;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
-            <div style="flex:1;">
-              <p style="font-size:0.95rem;font-weight:500;margin-bottom:0.15rem;">
-                {plan.icon} {plan.label}
-              </p>
-              <p style="font-size:0.78rem;color:var(--stone);">{plan.sub}</p>
-            </div>
-            <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">
+      <!-- ── Sesión Individual ────────────────────────────────────────────── -->
+      <div class="card">
+        <p class="label" style="margin-bottom:1.25rem;">Sesión Individual</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem;">
+          <div>
+            <label class="label" style="margin-bottom:0.4rem;display:block;">💻 Online</label>
+            <div style="display:flex;align-items:center;gap:0.4rem;">
               <span style="font-size:0.85rem;color:var(--stone);">$</span>
-              <input
-                type="number"
-                name={plan.key}
-                value={prices[plan.id as keyof typeof prices]}
-                min="100"
-                step="100"
-                required
-                style="width:130px;text-align:right;font-size:1rem;font-weight:500;"
-              />
-              <span style="font-size:0.75rem;color:var(--stone);">CLP</span>
+              <input type="number" name="price_online" value={prices.online} min="100" step="100" required style="text-align:right;font-size:1rem;font-weight:500;" />
             </div>
+            <p style="font-size:0.75rem;color:var(--stone);margin-top:0.3rem;">Actual: <strong>{formatCLP(prices.online)}</strong></p>
           </div>
-          <div style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--warm);">
-            <p style="font-size:0.78rem;color:var(--stone);">
-              Precio actual: <strong style="color:var(--ink);">{formatCLP(prices[plan.id as keyof typeof prices])}</strong>
-            </p>
+          <div>
+            <label class="label" style="margin-bottom:0.4rem;display:block;">🏢 Presencial</label>
+            <div style="display:flex;align-items:center;gap:0.4rem;">
+              <span style="font-size:0.85rem;color:var(--stone);">$</span>
+              <input type="number" name="price_presencial" value={prices.presencial} min="100" step="100" required style="text-align:right;font-size:1rem;font-weight:500;" />
+            </div>
+            <p style="font-size:0.75rem;color:var(--stone);margin-top:0.3rem;">Actual: <strong>{formatCLP(prices.presencial)}</strong></p>
           </div>
         </div>
-      ))}
 
-      <button type="submit" class="btn btn-dark btn-lg" style="width:100%;justify-content:center;margin-top:0.5rem;">
-        Guardar precios
+        <div style="border-top:1px solid var(--warm);padding-top:1rem;">
+          <label class="label" style="margin-bottom:0.4rem;display:block;">Duración (texto en la web)</label>
+          <input type="text" name="duration_individual" value={durationIndividual} placeholder="ej: 50 minutos" />
+          <p style="font-size:0.75rem;color:var(--stone);margin-top:0.4rem;">Aparece en servicios, preguntas frecuentes y agenda.</p>
+        </div>
+      </div>
+
+      <!-- ── Sesión de Pareja ─────────────────────────────────────────────── -->
+      <div class="card">
+        <p class="label" style="margin-bottom:1.25rem;">Sesión de Pareja</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem;">
+          <div>
+            <label class="label" style="margin-bottom:0.4rem;display:block;">💻 Online</label>
+            <div style="display:flex;align-items:center;gap:0.4rem;">
+              <span style="font-size:0.85rem;color:var(--stone);">$</span>
+              <input type="number" name="price_pareja_online" value={prices['pareja-online']} min="100" step="100" required style="text-align:right;font-size:1rem;font-weight:500;" />
+            </div>
+            <p style="font-size:0.75rem;color:var(--stone);margin-top:0.3rem;">Actual: <strong>{formatCLP(prices['pareja-online'])}</strong></p>
+          </div>
+          <div>
+            <label class="label" style="margin-bottom:0.4rem;display:block;">🏢 Presencial</label>
+            <div style="display:flex;align-items:center;gap:0.4rem;">
+              <span style="font-size:0.85rem;color:var(--stone);">$</span>
+              <input type="number" name="price_pareja_presencial" value={prices['pareja-presencial']} min="100" step="100" required style="text-align:right;font-size:1rem;font-weight:500;" />
+            </div>
+            <p style="font-size:0.75rem;color:var(--stone);margin-top:0.3rem;">Actual: <strong>{formatCLP(prices['pareja-presencial'])}</strong></p>
+          </div>
+        </div>
+
+        <div style="border-top:1px solid var(--warm);padding-top:1rem;">
+          <label class="label" style="margin-bottom:0.4rem;display:block;">Duración (texto en la web)</label>
+          <input type="text" name="duration_pareja" value={durationPareja} placeholder="ej: 60 minutos" />
+          <p style="font-size:0.75rem;color:var(--stone);margin-top:0.4rem;">Aparece en servicios, preguntas frecuentes y agenda.</p>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-dark btn-lg" style="width:100%;justify-content:center;">
+        Guardar precios y duración
       </button>
     </form>
   </div>
