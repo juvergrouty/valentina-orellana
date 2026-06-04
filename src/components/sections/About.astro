@@ -3,61 +3,60 @@ import Icon from '../ui/Icon.astro';
 ---
 
 <section class="bg-white overflow-hidden">
-  <div class="container-site">
-    <div class="flex flex-col md:flex-row items-stretch">
+  <!-- Flex directo en el max-width container, sin padding izquierdo para la foto -->
+  <div class="max-w-site mx-auto flex flex-col md:flex-row items-stretch">
 
-      <!-- Foto izquierda — self-stretch para llenar toda la altura -->
-      <div class="relative flex-shrink-0 md:w-[240px] self-stretch min-h-[220px]">
-        <img
-          src="/images/planta-about.webp"
-          alt="Consultorio Ps. Valentina Orellana"
-          class="absolute inset-0 w-full h-full object-cover object-center"
-        />
-        <!-- Degradado blend hacia el texto -->
-        <div class="absolute inset-y-0 right-0 w-16 bg-gradient-to-r from-transparent to-white hidden md:block"></div>
-      </div>
-
-      <!-- Texto central — ancho fijo -->
-      <div class="flex flex-col justify-center py-8 px-6 lg:px-8 flex-shrink-0 md:w-[340px]">
-        <p class="label text-stone mb-2">Sobre mí</p>
-        <div class="w-7 h-0.5 bg-forest/30 mb-4"></div>
-        <p class="body-text mb-4" style="font-size:0.9rem;">
-          Soy Valentina Orellana, psicóloga clínica con experiencia en terapia para adultos
-          y parejas. Mi enfoque es cálido, cercano y basado en evidencia.
-        </p>
-        <a href="/sobre-mi"
-           class="font-body text-sm text-stone tracking-wide flex items-center gap-2 hover:text-forest hover:gap-3 transition-all duration-200 w-fit">
-          Conocer más sobre mí
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"/>
-          </svg>
-        </a>
-      </div>
-
-      <!-- Stats — 3 columnas con divisores cortos centrados -->
-      <div class="flex flex-1 items-stretch">
-        {[
-          { icon: 'users',   value: '+5 años',   label: 'acompañando a personas y parejas' },
-          { icon: 'shield',  value: '100%',       label: 'comprometida con cada proceso' },
-          { icon: 'map-pin', value: 'Las Condes', label: 'y atención online en todo Chile' },
-        ].map(({ icon, value, label }, i) => (
-          <>
-            {i > 0 && (
-              <div class="flex items-center self-stretch">
-                <div class="w-px bg-dust" style="height:50px;"></div>
-              </div>
-            )}
-            <div class="flex flex-col items-center justify-center text-center px-5 py-8 gap-1.5 flex-1">
-              <div class="text-forest/50 mb-2">
-                <Icon name={icon} size={36} />
-              </div>
-              <p class="font-heading font-semibold text-2xl text-ink leading-none mb-1">{value}</p>
-              <p style="font-size:0.82rem;color:#6B6860;line-height:1.4;">{label}</p>
-            </div>
-          </>
-        ))}
-      </div>
-
+    <!-- Foto — toca el borde izquierdo del contenedor -->
+    <div class="relative flex-shrink-0 md:w-[240px] self-stretch min-h-[220px]">
+      <img
+        src="/images/planta-about.webp"
+        alt="Consultorio Ps. Valentina Orellana"
+        class="absolute inset-0 w-full h-full object-cover object-center"
+      />
+      <!-- Degradado blend hacia el texto -->
+      <div class="absolute inset-y-0 right-0 w-16 bg-gradient-to-r from-transparent to-white hidden md:block"></div>
     </div>
+
+    <!-- Texto central — padding propio -->
+    <div class="flex flex-col justify-center py-8 px-8 lg:px-10 flex-shrink-0 md:w-[340px]">
+      <p class="label text-stone mb-2">Sobre mí</p>
+      <div class="w-7 h-0.5 bg-forest/30 mb-4"></div>
+      <p class="body-text mb-4" style="font-size:0.9rem;">
+        Soy Valentina Orellana, psicóloga clínica con experiencia en terapia para adultos
+        y parejas. Mi enfoque es cálido, cercano y basado en evidencia.
+      </p>
+      <a href="/sobre-mi"
+         class="font-body text-sm text-stone tracking-wide flex items-center gap-2 hover:text-forest hover:gap-3 transition-all duration-200 w-fit">
+        Conocer más sobre mí
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"/>
+        </svg>
+      </a>
+    </div>
+
+    <!-- Stats con padding derecho del container -->
+    <div class="flex flex-1 items-stretch pr-6 md:pr-12 lg:pr-20">
+      {[
+        { icon: 'users',   value: '+5 años',   label: 'acompañando a personas y parejas' },
+        { icon: 'shield',  value: '100%',       label: 'comprometida con cada proceso' },
+        { icon: 'map-pin', value: 'Las Condes', label: 'y atención online en todo Chile' },
+      ].map(({ icon, value, label }, i) => (
+        <>
+          {i > 0 && (
+            <div class="flex items-center self-stretch">
+              <div class="w-px bg-dust" style="height:50px;"></div>
+            </div>
+          )}
+          <div class="flex flex-col items-center justify-center text-center px-5 py-8 gap-1.5 flex-1">
+            <div class="text-forest/50 mb-2">
+              <Icon name={icon} size={36} />
+            </div>
+            <p class="font-heading font-semibold text-2xl text-ink leading-none mb-1">{value}</p>
+            <p style="font-size:0.82rem;color:#6B6860;line-height:1.4;">{label}</p>
+          </div>
+        </>
+      ))}
+    </div>
+
   </div>
 </section>
