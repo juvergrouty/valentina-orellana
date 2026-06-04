@@ -32,20 +32,23 @@ const cards = [
       </p>
     </div>
 
-    <!-- Cards — layout horizontal: contenido izq, imagen der -->
+    <!-- Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
       {cards.map((card) => (
-        <div class="bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-md transition-shadow duration-300 flex flex-row">
+        <div class="bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-md transition-shadow duration-300 flex flex-row" style="min-height: 220px;">
 
           <!-- Contenido izquierdo -->
-          <div class="flex flex-col justify-between p-7 flex-1 min-w-0">
+          <div class="flex flex-col justify-between p-8 flex-1 min-w-0">
+            <!-- Ícono y título en la misma fila -->
             <div>
-              <div class="icon-circle mb-4">
-                <Icon name={card.icon} size={20} />
+              <div class="flex items-center gap-3 mb-4">
+                <div class="icon-circle flex-shrink-0">
+                  <Icon name={card.icon} size={20} />
+                </div>
+                <h3 class="font-heading font-semibold text-xl text-ink leading-tight">
+                  {card.title}
+                </h3>
               </div>
-              <h3 class="font-heading font-semibold text-xl text-ink mb-3 leading-tight">
-                {card.title}
-              </h3>
               <p class="body-sm leading-relaxed">
                 {card.description}
               </p>
@@ -59,8 +62,10 @@ const cards = [
             </a>
           </div>
 
-          <!-- Imagen derecha -->
+          <!-- Imagen derecha con degradado de blend -->
           <div class="relative w-[42%] flex-shrink-0 overflow-hidden">
+            <!-- Degradado izquierdo que mezcla con el blanco del card -->
+            <div class="absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-white to-transparent z-10"></div>
             <img
               src={card.image}
               alt={card.title}
