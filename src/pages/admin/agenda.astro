@@ -56,7 +56,7 @@ const errorParam = Astro.url.searchParams.get('error');
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 280px;gap:1.25rem;align-items:start;">
+  <div style="display:grid;grid-template-columns:1fr 280px;gap:1.25rem;align-items:start;" class="agenda-grid">
 
     <!-- FullCalendar -->
     <div class="card" style="padding:1.25rem;">
@@ -75,7 +75,7 @@ const errorParam = Astro.url.searchParams.get('error');
     </div>
 
     <!-- Lista lateral de próximas reservas -->
-    <div style="display:flex;flex-direction:column;gap:0.75rem;position:sticky;top:90px;">
+    <div class="agenda-sidebar-list" style="display:flex;flex-direction:column;gap:0.75rem;position:sticky;top:90px;">
       <div class="card" style="padding:1.25rem;">
         <p class="label" style="margin-bottom:1rem;">Próximas sesiones</p>
 

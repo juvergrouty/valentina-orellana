@@ -55,7 +55,7 @@ const formatDate = (iso: string) => {
 <AdminLayout title="Dashboard" current="/admin">
 
   <!-- Métricas -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;margin-bottom:2rem;">
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2rem;">
     <div class="stat-card" style="text-align:center;">
       <p class="stat-label">Sesiones hoy</p>
       <p class="stat-value">{todayBookings?.length ?? 0}</p>
@@ -73,7 +73,7 @@ const formatDate = (iso: string) => {
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5rem;">
 
     <!-- Sesiones de hoy -->
     <div class="card">

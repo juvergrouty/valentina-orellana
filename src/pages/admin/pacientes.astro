@@ -28,7 +28,7 @@ function formatDate(iso: string) {
   {saved && <div class="alert-success">✓ Paciente guardado correctamente.</div>}
 
   <!-- Barra de búsqueda + acciones -->
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;margin-bottom:1.5rem;flex-wrap:wrap;">
     <form method="GET" action="/admin/pacientes" style="display:flex;gap:0.75rem;flex:1;min-width:200px;max-width:440px;">
       <input type="hidden" name="filtro" value={filtro} />
       <input type="search" name="q" value={q} placeholder="Buscar paciente..."
@@ -45,6 +45,7 @@ function formatDate(iso: string) {
 
   <!-- Lista de pacientes -->
   <div class="card" style="padding:0;overflow:hidden;">
+    <div style="overflow-x:auto;">
     {!patients?.length ? (
       <p style="padding:2rem;text-align:center;color:var(--stone);font-size:0.9rem;">
         {q ? `Sin resultados para "${q}"` : 'No hay pacientes aún.'}
@@ -93,6 +94,7 @@ function formatDate(iso: string) {
           ))}
         </tbody>
       </table>
+    </div>
     )}
   </div>
 

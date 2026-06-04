@@ -5,6 +5,7 @@ export interface Service {
   duration: string;
   icon: string;
   image?: string;
+  grupo: 'individual' | 'pareja'; // para pre-seleccionar en la agenda
 }
 
 export interface PricingPlan {
@@ -37,6 +38,7 @@ export const services: Service[] = [
     duration: '50 min',
     icon: 'brain',
     image: '/images/servicio-adultos.jpg',
+    grupo: 'individual',
   },
   {
     id: 'terapia-pareja',
@@ -46,6 +48,7 @@ export const services: Service[] = [
     duration: '60 min',
     icon: 'users',
     image: '/images/servicio-pareja.jpg',
+    grupo: 'pareja',
   },
   {
     id: 'trauma',
@@ -55,6 +58,7 @@ export const services: Service[] = [
     duration: '50 min',
     icon: 'leaf',
     image: '/images/servicio-trauma.jpg',
+    grupo: 'individual',
   },
   {
     id: 'parentalidad',
@@ -64,6 +68,7 @@ export const services: Service[] = [
     duration: '50 min',
     icon: 'home',
     image: '/images/servicio-parentalidad.jpg',
+    grupo: 'individual',
   },
 ];
 

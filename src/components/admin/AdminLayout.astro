@@ -55,6 +55,26 @@ const nav = [
     position: sticky;
     top: 0;
     height: 100vh;
+    transition: transform .25s ease;
+    z-index: 200;
+  }
+
+  /* Mobile: sidebar oculto por defecto, aparece como drawer */
+  @media (max-width: 768px) {
+    aside {
+      position: fixed;
+      left: 0; top: 0; bottom: 0;
+      transform: translateX(-100%);
+    }
+    aside.open { transform: translateX(0); }
+
+    .sidebar-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 199;
+    }
+    .sidebar-overlay.open { display: block; }
   }
 
   .sidebar-brand { padding: 2rem 1.75rem 1.5rem; border-bottom: 1px solid rgba(255,255,255,.07); }
@@ -88,14 +108,58 @@ const nav = [
 
   .topbar {
     background: var(--white); border-bottom: 1px solid var(--dust);
-    padding: 1.1rem 2rem; display: flex; align-items: center;
-    justify-content: space-between; position: sticky; top: 0; z-index: 10;
+    padding: 1rem 2rem; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 10; gap: 1rem;
   }
   .topbar h2 { font-family: 'Cormorant Garamond', serif; font-weight: 400; font-size: 1.5rem; color: var(--ink); letter-spacing: -0.01em; }
   .topbar > a { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--stone); text-decoration: none; transition: color .2s; }
   .topbar > a:hover { color: var(--ink); }
 
-  .content { padding: 2rem; max-width: 1200px; }
+  .hamburger {
+    display: none; background: none; border: none; cursor: pointer;
+    flex-direction: column; gap: 5px; padding: 4px; flex-shrink: 0;
+  }
+  .hamburger span { display: block; width: 22px; height: 2px; background: var(--ink); border-radius: 2px; }
+
+  .content { padding: 1.5rem 2rem; max-width: 1200px; }
+
+  /* ── Responsive ──────────────────────────────────────────────────────────── */
+  @media (max-width: 768px) {
+    body { display: block !important; }
+    aside { position: fixed; left: 0; top: 0; bottom: 0; transform: translateX(-100%); z-index: 200; }
+    aside.open { transform: translateX(0); box-shadow: 4px 0 20px rgba(0,0,0,.3); }
+    .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 199; }
+    .sidebar-overlay.open { display: block; }
+    main { width: 100%; min-height: 100vh; }
+    .hamburger { display: flex !important; }
+    .topbar { padding: 0.9rem 1rem; }
+    .topbar h2 { font-size: 1.2rem; }
+    .topbar > a.topbar-link { display: none; }
+    .content { padding: 1rem; }
+    .card { padding: 1.25rem; }
+    table { font-size: 0.82rem; }
+    td, th { padding: 0.65rem 0.75rem; }
+    .btn { padding: 0.55rem 1rem !important; font-size: 0.75rem !important; }
+    .btn-sm { padding: 0.38rem 0.7rem !important; font-size: 0.7rem !important; }
+
+    /* Agenda: ocultar lista lateral en mobile */
+    .agenda-grid { grid-template-columns: 1fr !important; }
+    .agenda-sidebar-list { display: none !important; }
+
+    /* Horarios: grid de 7 columnas → 3-4 columnas en mobile */
+    .horarios-grid { grid-template-columns: repeat(3, 1fr) !important; }
+
+    /* Stat cards en columna única */
+    .stat-card { text-align: left !important; }
+    .stat-card .stat-value { font-size: 2rem !important; }
+
+    /* Tables scroll */
+    .table-scroll { overflow-x: auto; }
+
+    /* Ficha paciente: tabs scroll horizontal */
+    .patient-tabs { overflow-x: auto; white-space: nowrap; }
+    .patient-tabs a { display: inline-block !important; }
+  }
 
   /* ── Card ────────────────────────────────────────────────────────────────── */
   .card { background: var(--white); border: 1px solid var(--dust); border-radius: var(--radius); padding: 1.75rem; box-shadow: var(--shadow); }
@@ -222,7 +286,10 @@ const nav = [
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
 </head>
 <body>
-  <aside>
+  <!-- Overlay móvil para cerrar sidebar -->
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <aside id="sidebar">
     <div class="sidebar-brand">
       <h1>Valentina<br />Orellana</h1>
       <p>Panel administrativo</p>
@@ -246,12 +313,44 @@ const nav = [
 
   <main>
     <div class="topbar">
+      <!-- Hamburguesa — solo mobile -->
+      <button class="hamburger" id="hamburger" aria-label="Abrir menú">
+        <span></span><span></span><span></span>
+      </button>
       <h2>{title}</h2>
-      <a href="/agenda" target="_blank">Ver sitio público →</a>
+      <a href="/agenda" target="_blank" class="topbar-link">Ver sitio público →</a>
     </div>
     <div class="content">
       <slot />
     </div>
   </main>
 </body>
+<script>
+  const sidebar  = document.getElementById('sidebar');
+  const overlay  = document.getElementById('sidebar-overlay');
+  const hamburger = document.getElementById('hamburger');
+
+  function openSidebar() {
+    sidebar?.classList.add('open');
+    overlay?.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeSidebar() {
+    sidebar?.classList.remove('open');
+    overlay?.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  hamburger?.addEventListener('click', () => {
+    sidebar?.classList.contains('open') ? closeSidebar() : openSidebar();
+  });
+  overlay?.addEventListener('click', closeSidebar);
+
+  // Cerrar al navegar (clic en link del sidebar en mobile)
+  sidebar?.querySelectorAll('nav a').forEach(a => {
+    a.addEventListener('click', () => {
+      if (window.innerWidth <= 768) closeSidebar();
+    });
+  });
+</script>
 </html>

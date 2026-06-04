@@ -12,6 +12,9 @@ const { data: settingsRows } = await supabase.from('settings').select('key, valu
 const settings: Record<string, string> = {};
 (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
 const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
+
+// Pre-selección de grupo desde URL (ej: /agenda?grupo=individual)
+const grupoParam = Astro.url.searchParams.get('grupo') ?? null; // 'individual' | 'pareja' | null
 ---
 
 <BaseLayout
@@ -290,7 +293,7 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
   }
 </style>
 
-<script define:vars={{ plans: JSON.stringify(pricingPlans) }}>
+<script define:vars={{ plans: JSON.stringify(pricingPlans), preselectedGroup: grupoParam }}>
   // ─── Estado ───────────────────────────────────────────────────────────────
   const state = {
     step: 1,
@@ -363,6 +366,28 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
   // ─── PASO 1: Grupo → Modalidad → Paso 2 ─────────────────────────────────
   let selectedGroup = null; // 'individual' | 'pareja'
 
+  // Función para activar un grupo programáticamente
+  function activateGroup(group) {
+    selectedGroup = group;
+    const prices = {
+      individual: { online: 45000, presencial: 55000, duration: '50 minutos' },
+      pareja:     { online: 60000, presencial: 70000, duration: '60 minutos' },
+    };
+    const p = prices[group] ?? prices.individual;
+    if ($('price-online'))     $('price-online').textContent     = formatCLP(p.online) + ' · ' + p.duration;
+    if ($('price-presencial')) $('price-presencial').textContent = formatCLP(p.presencial) + ' · ' + p.duration;
+    if ($('modality-subtitle')) $('modality-subtitle').textContent = group === 'individual'
+      ? 'Sesión Individual — elige cómo quieres conectar'
+      : 'Sesión de Pareja — elige cómo quieren conectar';
+    $('group-selection')?.classList.add('hidden');
+    $('modality-selection')?.classList.remove('hidden');
+  }
+
+  // Si viene con grupo pre-seleccionado desde la página de servicios → saltar paso 1a
+  if (preselectedGroup === 'individual' || preselectedGroup === 'pareja') {
+    activateGroup(preselectedGroup);
+  }
+
   document.querySelectorAll('.group-card').forEach((btn) => {
     btn.addEventListener('click', () => {
       selectedGroup = btn.dataset.group;
@@ -390,8 +415,13 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
   });
 
   $('back-to-group')?.addEventListener('click', () => {
-    $('modality-selection').classList.add('hidden');
-    $('group-selection').classList.remove('hidden');
+    if (preselectedGroup) {
+      // Vino desde servicios → volver a servicios
+      window.location.href = '/servicios';
+    } else {
+      $('modality-selection').classList.add('hidden');
+      $('group-selection').classList.remove('hidden');
+    }
   });
 
   document.querySelectorAll('.modality-card').forEach((btn) => {
