@@ -48,8 +48,18 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   try {
-    const status = await getPaymentStatus(token);
-    console.log(`[Flow webhook] token=${token} status=${status.status} order=${status.flowOrder}`);
+    // Leer entorno Flow desde settings (sandbox o producción)
+    const { data: settingsRows } = await supabase.from('settings').select('key, value');
+    const cfg: Record<string, string> = {};
+    (settingsRows ?? []).forEach((r: { key: string; value: string }) => { cfg[r.key] = r.value; });
+    const flowBaseUrl = cfg['flow_env'] === 'production'
+      ? 'https://www.flow.cl/api'
+      : cfg['flow_env'] === 'sandbox'
+      ? 'https://sandbox.flow.cl/api'
+      : undefined;
+
+    const status = await getPaymentStatus(token, flowBaseUrl);
+    console.log(`[Flow webhook] token=${token} status=${status.status} order=${status.flowOrder} env=${cfg['flow_env'] ?? 'default'}`);
 
     if (status.status === 2) {
       // ✅ Pagado — confirmar la reserva
@@ -66,9 +76,7 @@ export const POST: APIRoute = async ({ request }) => {
       if (error) {
         console.error('[Flow webhook] Error confirmando reserva:', error);
       } else if (updated) {
-        // Obtener email admin de settings
-        const { data: settingsRows } = await supabase.from('settings').select('key, value');
-        const adminEmail = (settingsRows ?? []).find((r: { key: string; value: string }) => r.key === 'notification_email')?.value ?? 'juver@grouty.cl';
+        const adminEmail = cfg['notification_email'] ?? 'juver@grouty.cl';
 
         const emailData = {
           patient_name:   updated.patient_name,

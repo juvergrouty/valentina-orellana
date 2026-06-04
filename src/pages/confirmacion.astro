@@ -43,7 +43,17 @@ if (manual) {
   pageState = 'error';
 } else {
   try {
-    const flowStatus = await getPaymentStatus(token);
+    // Leer entorno desde settings
+    const { data: settingsRows } = await supabase.from('settings').select('key, value');
+    const cfg: Record<string, string> = {};
+    (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { cfg[key] = value; });
+    const flowBaseUrl = cfg['flow_env'] === 'production'
+      ? 'https://www.flow.cl/api'
+      : cfg['flow_env'] === 'sandbox'
+      ? 'https://sandbox.flow.cl/api'
+      : undefined;
+
+    const flowStatus = await getPaymentStatus(token, flowBaseUrl);
 
     // Mapear estado de Flow
     if      (flowStatus.status === 2) pageState = 'paid';
