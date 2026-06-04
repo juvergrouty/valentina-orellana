@@ -1,7 +1,16 @@
 ---
+export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
 import { services } from '../data/services';
+import { getSiteConfig } from '../lib/siteConfig';
+
+const { durations } = await getSiteConfig();
+// Mapear la duración según tipo de servicio
+function getDuration(serviceId: string): string {
+  if (serviceId === 'terapia-pareja') return durations.pareja;
+  return durations.individual;
+}
 ---
 
 <BaseLayout title="Servicios" description="Servicios de psicología clínica: adultos, parejas, trauma y personas altamente sensibles.">
@@ -38,7 +47,7 @@ import { services } from '../data/services';
               <div class="flex items-center justify-between pt-5 border-t border-white/20">
                 <div>
                   <p class="label text-white/40 mb-0.5">Duración</p>
-                  <p class="font-heading font-light text-lg text-white">{service.duration}</p>
+                  <p class="font-heading font-light text-lg text-white">{getDuration(service.id)}</p>
                 </div>
                 <a href="/agenda"
                   class="font-body text-xs tracking-widest uppercase py-2.5 px-5 border border-white/40 text-white hover:bg-white hover:text-ink transition-all duration-200">

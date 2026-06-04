@@ -1,14 +1,16 @@
 ---
+export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
+import { getSiteConfig, formatCLP } from '../lib/siteConfig';
 
-const formatCLP = (n: number) =>
-  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+const cfg = await getSiteConfig();
+const { prices, durations } = cfg;
 
 const faq = [
   {
     q: '¿Cuáles son los valores de las sesiones?',
-    a: `Los valores dependen del tipo de sesión:\n\n• Terapia Individual Online — ${formatCLP(45000)} · 50 minutos\n• Terapia Individual Presencial — ${formatCLP(55000)} · 50 minutos\n• Terapia de Pareja Online — ${formatCLP(60000)} · 60 minutos\n• Terapia de Pareja Presencial — ${formatCLP(70000)} · 60 minutos`,
+    a: `Los valores dependen del tipo de sesión:\n\n• Terapia Individual Online — ${formatCLP(prices.online)} · ${durations.individual}\n• Terapia Individual Presencial — ${formatCLP(prices.presencial)} · ${durations.individual}\n• Terapia de Pareja Online — ${formatCLP(prices.parejaOnline)} · ${durations.pareja}\n• Terapia de Pareja Presencial — ${formatCLP(prices.parejaPresencial)} · ${durations.pareja}`,
   },
   {
     q: '¿Cómo puedo pagar?',

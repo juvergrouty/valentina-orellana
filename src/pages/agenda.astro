@@ -18,24 +18,16 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
   title="Reserva tu sesión"
   description="Agenda una sesión con Ps. Valentina Orellana y paga de forma segura con Flow · Webpay · MACH."
 >
-  <section class="bg-warm border-b border-dust relative overflow-hidden min-h-[320px] md:min-h-[380px] flex items-center">
-    <!-- Foto lado derecho -->
-    <div class="absolute top-0 right-0 w-[45%] h-full hidden md:block lg:rounded-l-[10px] overflow-hidden">
-      <img
-        src="/images/valentina-retrato.jpg"
-        alt="Ps. Valentina Orellana"
-        class="w-full h-full object-cover object-top"
-      />
-      <div class="absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-warm to-transparent"></div>
-    </div>
-    <!-- Texto -->
-    <div class="relative z-10 container-site py-20 md:py-24 w-full">
-      <div class="max-w-lg">
-        <p class="label text-stone mb-4">Agenda en línea</p>
-        <div class="divider mb-6"></div>
-        <h1 class="display-title mb-5">Reserva tu sesión</h1>
-        <p class="body-text">Elige tu horario y paga de forma segura con Flow.</p>
-      </div>
+  <section class="relative overflow-hidden min-h-[300px] md:min-h-[360px] flex items-end border-b border-dust">
+    <img src="/images/hero-paginas.jpg" alt="" class="absolute inset-0 w-full h-full object-cover object-center" aria-hidden="true" />
+    <div class="absolute inset-0 bg-gradient-to-t from-ink/80 via-ink/30 to-ink/10"></div>
+    <div class="relative z-10 container-site py-14 md:py-20 w-full">
+      <p class="label text-white/60 mb-3">Agenda en línea</p>
+      <div class="w-10 h-0.5 bg-white/30 mb-5"></div>
+      <h1 class="font-heading font-semibold text-white leading-tight mb-4" style="font-size:clamp(2rem,5vw,3.8rem);letter-spacing:-0.02em;">
+        Reserva tu sesión
+      </h1>
+      <p class="font-body text-white/75 font-light text-lg max-w-lg leading-relaxed">Elige tu horario y paga de forma segura con Flow.</p>
     </div>
   </section>
 

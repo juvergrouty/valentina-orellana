@@ -7,26 +7,30 @@ interface Props {
 const { label, title, description } = Astro.props;
 ---
 
-<section class="bg-warm border-b border-dust relative overflow-hidden min-h-[300px] md:min-h-[360px] flex items-center">
+<section class="relative overflow-hidden min-h-[300px] md:min-h-[360px] flex items-end border-b border-dust">
 
-  <!-- Foto lado derecho — solo desktop -->
-  <div class="absolute top-0 right-0 w-[42%] h-full hidden md:block lg:rounded-l-[10px] overflow-hidden">
-    <img
-      src="/images/valentina-retrato.jpg"
-      alt="Ps. Valentina Orellana"
-      class="w-full h-full object-cover object-top"
-    />
-    <div class="absolute inset-y-0 left-0 w-40 bg-gradient-to-r from-warm to-transparent"></div>
-  </div>
+  <!-- Imagen de fondo -->
+  <img
+    src="/images/hero-paginas.jpg"
+    alt=""
+    class="absolute inset-0 w-full h-full object-cover object-center"
+    aria-hidden="true"
+  />
+
+  <!-- Degradado sobre la imagen — más oscuro abajo para que el texto resalte -->
+  <div class="absolute inset-0 bg-gradient-to-t from-ink/80 via-ink/30 to-ink/10"></div>
 
   <!-- Contenido -->
-  <div class="relative z-10 container-site py-20 md:py-24 w-full">
-    <div class="max-w-xl">
-      <p class="label text-stone mb-4">{label}</p>
-      <div class="divider mb-6"></div>
-      <h1 class="display-title">{title}</h1>
-      {description && <p class="body-lead mt-5 max-w-lg">{description}</p>}
-    </div>
+  <div class="relative z-10 container-site py-14 md:py-20 w-full">
+    <p class="label text-white/60 mb-3">{label}</p>
+    <div class="w-10 h-0.5 bg-white/30 mb-5"></div>
+    <h1 class="font-heading font-semibold text-display text-white leading-tight"
+        style="font-size: clamp(2rem, 5vw, 3.8rem); letter-spacing: -0.02em;">
+      {title}
+    </h1>
+    {description && (
+      <p class="font-body text-white/75 font-light text-lg mt-4 max-w-lg leading-relaxed">{description}</p>
+    )}
   </div>
 
 </section>
