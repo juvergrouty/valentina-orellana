@@ -3,15 +3,16 @@ interface Props {
   label: string;
   title: string;
   description?: string;
+  image?: string;  // imagen personalizada, por defecto hero-paginas.jpg
 }
-const { label, title, description } = Astro.props;
+const { label, title, description, image = '/images/hero-paginas.jpg' } = Astro.props;
 ---
 
 <section class="relative overflow-hidden min-h-[300px] md:min-h-[360px] flex items-end border-b border-dust">
 
   <!-- Imagen de fondo -->
   <img
-    src="/images/hero-paginas.jpg"
+    src={image}
     alt=""
     class="absolute inset-0 w-full h-full object-cover object-center"
     aria-hidden="true"
