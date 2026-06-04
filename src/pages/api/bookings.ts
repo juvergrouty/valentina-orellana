@@ -18,6 +18,16 @@ const VALID_TYPES = Object.keys(SESSION_LABELS);
 // ─── POST /api/bookings ───────────────────────────────────────────────────────
 // Crea una reserva en BD (status=pending_payment) y devuelve la URL de pago de Flow
 export const POST: APIRoute = async ({ request }) => {
+  try {
+    return await handleBooking(request);
+  } catch (fatal) {
+    const msg = fatal instanceof Error ? fatal.message : String(fatal);
+    console.error('[bookings] Error fatal:', msg);
+    return json({ error: 'Error interno del servidor.', detail: msg }, 500);
+  }
+};
+
+async function handleBooking(request: Request) {
   // ── Parse body ──────────────────────────────────────────────────────────────
   let body: Record<string, unknown>;
   try {

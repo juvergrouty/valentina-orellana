@@ -113,12 +113,18 @@ export async function createPaymentOrder(opts: {
     body:    buildBody(params, secretKey).toString(),
   });
 
+  const rawText = await res.text().catch(() => '');
   if (!res.ok) {
-    const msg = await res.text().catch(() => res.status.toString());
-    throw new Error(`Flow /payment/create ${res.status}: ${msg}`);
+    throw new Error(`Flow /payment/create ${res.status}: ${rawText || '(respuesta vacía)'}`);
   }
-
-  return res.json() as Promise<FlowOrder>;
+  if (!rawText) {
+    throw new Error(`Flow /payment/create: respuesta vacía (status ${res.status})`);
+  }
+  try {
+    return JSON.parse(rawText) as FlowOrder;
+  } catch {
+    throw new Error(`Flow /payment/create: JSON inválido: ${rawText.slice(0, 200)}`);
+  }
 }
 
 /**
