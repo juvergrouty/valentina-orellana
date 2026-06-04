@@ -8,7 +8,6 @@ const cards = [
     description: 'Un espacio para ti. Para entender lo que sientes, soltar lo que te pesa y reconectar contigo.',
     href: '/servicios',
     image: '/images/consultorio-individual.jpg',
-    imagePlaceholder: 'Fotografía · 700 × 500',
   },
   {
     icon: 'users',
@@ -16,7 +15,6 @@ const cards = [
     description: 'Mejoren su comunicación, fortalezcan su vínculo y construyan una relación más sana y consciente.',
     href: '/servicios',
     image: '/images/consultorio-pareja.jpg',
-    imagePlaceholder: 'Fotografía · 700 × 500',
   },
 ];
 ---
@@ -34,41 +32,40 @@ const cards = [
       </p>
     </div>
 
-    <!-- Cards -->
+    <!-- Cards — layout horizontal: contenido izq, imagen der -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
       {cards.map((card) => (
-        <div class="bg-white border border-dust rounded-[10px] overflow-hidden flex flex-col group hover:border-forest/30 transition-colors duration-300">
+        <div class="bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-md transition-shadow duration-300 flex flex-row">
 
-          <!-- Imagen -->
-          <div class="relative w-full h-[400px] overflow-hidden rounded-t-[10px]">
-            <img
-              src={card.image}
-              alt={card.title}
-              class="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
-              onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
-            />
-            <div class="absolute inset-0 hidden items-center justify-center bg-warm flex-col gap-2">
-              <div class="w-10 h-px bg-dust"></div>
-              <p class="label text-dust">{card.imagePlaceholder}</p>
+          <!-- Contenido izquierdo -->
+          <div class="flex flex-col justify-between p-7 flex-1 min-w-0">
+            <div>
+              <div class="icon-circle mb-4">
+                <Icon name={card.icon} size={20} />
+              </div>
+              <h3 class="font-heading font-semibold text-xl text-ink mb-3 leading-tight">
+                {card.title}
+              </h3>
+              <p class="body-sm leading-relaxed">
+                {card.description}
+              </p>
             </div>
-          </div>
-
-          <!-- Texto -->
-          <div class="p-8 flex flex-col flex-1">
-            <div class="icon-circle mb-5">
-              <Icon name={card.icon} size={20} />
-            </div>
-            <h3 class="card-title mb-3">{card.title}</h3>
-            <p class="body-sm mb-6 flex-1">
-              {card.description}
-            </p>
             <a href={card.href}
-               class="font-body text-[11px] text-forest tracking-wide flex items-center gap-2 hover:gap-3 transition-all duration-200 w-fit mt-auto">
+               class="font-body text-sm text-forest tracking-wide flex items-center gap-2 hover:gap-3 transition-all duration-200 w-fit mt-6">
               Conocer más
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
               </svg>
             </a>
+          </div>
+
+          <!-- Imagen derecha -->
+          <div class="relative w-[42%] flex-shrink-0 overflow-hidden">
+            <img
+              src={card.image}
+              alt={card.title}
+              class="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
+            />
           </div>
 
         </div>

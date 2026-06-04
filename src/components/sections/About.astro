@@ -1,75 +1,54 @@
 ---
+import Icon from '../ui/Icon.astro';
 ---
 
-<section class="py-section bg-white">
-  <div class="container-site grid grid-cols-1 lg:grid-cols-2 gap-16 xl:gap-24 items-center">
+<section class="bg-white border-t border-b border-dust">
+  <div class="container-site">
+    <div class="grid grid-cols-1 md:grid-cols-[280px_1fr_auto] gap-0 items-stretch">
 
-    <!-- Imagen -->
-    <div class="relative">
-      <div class="aspect-[4/5] bg-warm overflow-hidden rounded-[10px] relative">
+      <!-- Foto izquierda — compacta -->
+      <div class="relative overflow-hidden hidden md:block" style="min-height:260px;">
         <img
           src="/images/valentina-consultorio.webp"
           alt="Ps. Valentina Orellana"
-          class="w-full h-full object-cover object-top"
-          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+          class="absolute inset-0 w-full h-full object-cover object-center"
         />
-        <!-- Placeholder -->
-        <div class="absolute inset-0 hidden items-center justify-center bg-warm flex-col gap-3">
-          <div class="w-12 h-px bg-dust"></div>
-          <p class="label text-dust text-center">Fotografía<br />800 × 1000</p>
-          <div class="w-12 h-px bg-dust"></div>
-        </div>
-      </div>
-      <!-- Badge registro -->
-      <div class="absolute -bottom-4 -right-4 md:-bottom-6 md:-right-6 bg-white border border-dust p-5 hidden md:block shadow-sm">
-        <p class="font-heading font-semibold text-xl text-ink">#360070</p>
-        <p class="label text-stone mt-1">Colegio de Psicólogos</p>
-      </div>
-    </div>
-
-    <!-- Texto -->
-    <div>
-      <p class="label text-stone mb-4">Sobre mí</p>
-      <div class="divider mb-6"></div>
-
-      <h2 class="section-title mb-6">Soy Valentina Orellana, psicóloga clínica.</h2>
-
-      <p class="body-text mb-8">
-        Soy Valentina Orellana, psicóloga clínica con experiencia en terapia para adultos
-        y parejas. Mi enfoque es cálido, cercano y basado en evidencia.
-      </p>
-
-      <div class="flex flex-wrap gap-2 mb-10">
-        {['Terapia Cognitivo-Conductual', 'Apego y Vínculo', 'Personas Altamente Sensibles', 'Trauma', 'Parentalidad'].map((tag) => (
-          <span class="label border border-dust text-stone px-3 py-1.5 rounded-sm normal-case tracking-normal text-xs">
-            {tag}
-          </span>
-        ))}
       </div>
 
-      <a href="/sobre-mi"
-         class="font-body text-[11px] text-forest tracking-wide flex items-center gap-2 hover:gap-3 transition-all duration-200 w-fit mb-12">
-        Conocer más sobre mí
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-        </svg>
-      </a>
+      <!-- Texto central -->
+      <div class="py-10 px-8 lg:px-12 flex flex-col justify-center border-x border-dust">
+        <p class="label text-stone mb-3">Sobre mí</p>
+        <div class="w-8 h-0.5 bg-forest/30 mb-5"></div>
+        <p class="body-text mb-5">
+          Soy Valentina Orellana, psicóloga clínica con experiencia en terapia para adultos
+          y parejas. Mi enfoque es cálido, cercano y basado en evidencia.
+        </p>
+        <a href="/sobre-mi"
+           class="font-body text-sm text-forest tracking-wide flex items-center gap-2 hover:gap-3 transition-all duration-200 w-fit">
+          Conocer más sobre mí
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"/>
+          </svg>
+        </a>
+      </div>
 
-      <!-- Stats -->
-      <div class="grid grid-cols-3 border-t border-dust pt-8 gap-4">
+      <!-- Stats derechos -->
+      <div class="grid grid-cols-3 md:grid-cols-1 md:grid-rows-3 divide-x md:divide-x-0 md:divide-y divide-dust">
         {[
-          ['+5 años',   'acompañando a personas y parejas'],
-          ['100%',      'comprometida con cada proceso'],
-          ['Las Condes','y atención online en todo Chile'],
-        ].map(([value, label]) => (
-          <div>
-            <p class="font-heading font-semibold text-2xl text-ink leading-none mb-1">{value}</p>
-            <p class="body-sm leading-snug">{label}</p>
+          { icon: 'users',   value: '+5 años',    label: 'acompañando a\npersonas y parejas' },
+          { icon: 'shield',  value: '100%',        label: 'comprometida con\ncada proceso' },
+          { icon: 'map-pin', value: 'Las Condes',  label: 'y atención online\nen todo Chile' },
+        ].map(({ icon, value, label }) => (
+          <div class="flex flex-col items-center justify-center text-center px-6 py-8 gap-2">
+            <div class="text-forest/60 mb-1">
+              <Icon name={icon} size={20} />
+            </div>
+            <p class="font-heading font-semibold text-xl text-ink leading-none">{value}</p>
+            <p class="body-sm leading-snug whitespace-pre-line">{label}</p>
           </div>
         ))}
       </div>
 
     </div>
-
   </div>
 </section>
