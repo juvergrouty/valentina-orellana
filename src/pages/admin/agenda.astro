@@ -4,327 +4,93 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { pricingPlans, SESSION_LABELS } from '../../data/services';
 
-// Mes actual o el que viene por query param
-const qYear  = Astro.url.searchParams.get('year');
-const qMonth = Astro.url.searchParams.get('month');
-const now    = new Date();
-const year   = qYear  ? parseInt(qYear)  : now.getFullYear();
-const month  = qMonth ? parseInt(qMonth) : now.getMonth() + 1; // 1-12
+const today = new Date().toISOString().slice(0, 10);
 
-const monthStart = `${year}-${String(month).padStart(2,'0')}-01`;
-const lastDay    = new Date(year, month, 0).getDate();
-const monthEnd   = `${year}-${String(month).padStart(2,'0')}-${lastDay}`;
-
-// Reservas del mes (no canceladas)
-const { data: bookings } = await supabase
-  .from('bookings')
-  .select('*')
-  .gte('session_date', monthStart)
-  .lte('session_date', monthEnd)
-  .neq('status', 'cancelled')
-  .order('session_date')
-  .order('session_time');
-
-// Fechas bloqueadas del mes
-const { data: blocked } = await supabase
-  .from('blocked_dates')
-  .select('date, reason')
-  .gte('date', monthStart)
-  .lte('date', monthEnd);
-
-// Día seleccionado (por query param o hoy si es este mes)
-const qDate     = Astro.url.searchParams.get('date');
-const todayIso  = now.toISOString().slice(0, 10);
-const isThisMonth = year === now.getFullYear() && month === (now.getMonth() + 1);
-const selectedDate = qDate ?? (isThisMonth ? todayIso : monthStart);
-
-// Reservas del día seleccionado (incluyendo canceladas)
-const { data: dayBookings } = await supabase
-  .from('bookings')
-  .select('*')
-  .eq('session_date', selectedDate)
-  .order('session_time');
-
-// Slots disponibles para ese día (para la reserva manual)
-const dayOfWeek = new Date(selectedDate + 'T00:00:00').getDay();
+// Slots para el modal de nueva reserva (día de hoy por defecto)
+const dayOfWeek = new Date(today + 'T00:00:00').getDay();
 const { data: slots } = await supabase
   .from('availability_slots')
   .select('start_time')
   .eq('day_of_week', dayOfWeek)
   .eq('active', true)
   .order('start_time');
-
-const bookedTimes = new Set(
-  (dayBookings ?? []).filter(b => b.status !== 'cancelled').map(b => b.session_time.slice(0,5))
-);
-const availableSlots = (slots ?? [])
-  .map(s => s.start_time.slice(0,5))
-  .filter(t => !bookedTimes.has(t));
-
-// Helpers
-const bookingsByDate = new Map<string, typeof bookings>();
-(bookings ?? []).forEach(b => {
-  if (!bookingsByDate.has(b.session_date)) bookingsByDate.set(b.session_date, []);
-  bookingsByDate.get(b.session_date)!.push(b);
-});
-const blockedSet = new Set((blocked ?? []).map(b => b.date));
-
-const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-const DAYS_ES   = ['Do','Lu','Ma','Mi','Ju','Vi','Sá'];
-const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
+const availableSlots = (slots ?? []).map(s => s.start_time.slice(0, 5));
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 
-const prevMonth = month === 1 ? `?year=${year-1}&month=12` : `?year=${year}&month=${month-1}`;
-const nextMonth = month === 12 ? `?year=${year+1}&month=1` : `?year=${year}&month=${month+1}`;
+const errorParam = Astro.url.searchParams.get('error');
 ---
 
 <AdminLayout title="Agenda" current="/admin/agenda">
 
-  <!-- Toggle de vista -->
-  <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1.5rem;">
-    <button id="btn-list" class="btn btn-dark btn-sm">Lista</button>
-    <button id="btn-cal"  class="btn btn-outline btn-sm">Calendario interactivo</button>
-    <span style="font-size:0.78rem;color:var(--stone);margin-left:0.5rem;">
-      El calendario interactivo muestra reservas + eventos de Google Calendar en tiempo real
-    </span>
-  </div>
+  {errorParam === 'conflict' && <div class="alert-error">⚠ Ese horario ya está ocupado. Elige otro.</div>}
 
-  <!-- ── VISTA CALENDARIO FULLCALENDAR ──────────────────────────────────────── -->
-  <div id="view-calendar" style="display:none;">
-    <div class="card" style="padding:1.25rem;">
-      <div id="fullcalendar"></div>
+  <!-- Acciones superiores -->
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap;">
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+      <span style="font-size:0.78rem;color:var(--stone);">Haz clic en un espacio vacío para crear una reserva · Arrastra para reagendar</span>
+    </div>
+    <div style="display:flex;gap:0.5rem;">
+      <a href="/admin/bloqueos" class="btn btn-outline btn-sm">Gestionar bloqueos</a>
+      <button id="open-modal" class="btn btn-dark btn-sm">+ Nueva reserva</button>
     </div>
   </div>
 
-  <!-- ── VISTA LISTA (original) ─────────────────────────────────────────────── -->
-  <div id="view-list">
-  <div style="display:grid;grid-template-columns:1fr 340px;gap:1.5rem;align-items:start;">
-
-    <!-- Calendario -->
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
-        <a href={prevMonth} class="btn btn-outline btn-sm">‹</a>
-        <p style="font-family:'Cormorant Garamond',serif;font-size:1.3rem;font-weight:400;">
-          {MONTHS_ES[month-1]} {year}
-        </p>
-        <a href={nextMonth} class="btn btn-outline btn-sm">›</a>
-      </div>
-
-      <!-- Cabecera días -->
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px;">
-        {DAYS_ES.map(d => (
-          <div style="text-align:center;font-size:0.8rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--stone);padding:0.5rem 0;font-weight:600;">
-            {d}
-          </div>
-        ))}
-      </div>
-
-      <!-- Días -->
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">
-        {Array.from({ length: firstDayOfWeek }, (_, i) => (
-          <div key={`empty-${i}`}></div>
-        ))}
-        {Array.from({ length: lastDay }, (_, i) => {
-          const d   = i + 1;
-          const iso = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-          const dayBks  = bookingsByDate.get(iso) ?? [];
-          const isBlocked  = blockedSet.has(iso);
-          const isPast     = iso < todayIso;
-          const isSelected = iso === selectedDate;
-          const isToday    = iso === todayIso;
-
-          const bg = isSelected ? 'var(--ink)' : isBlocked ? 'var(--warm)' : 'transparent';
-          const color = isSelected ? 'white' : isPast ? 'var(--dust)' : 'var(--ink)';
-          const cursor = isBlocked ? 'default' : 'pointer';
-
-          return (
-            <a
-              href={`?year=${year}&month=${month}&date=${iso}`}
-              style={`display:flex;flex-direction:column;align-items:center;padding:0.5rem 0.25rem;background:${bg};color:${color};text-decoration:none;cursor:${cursor};border:${isToday && !isSelected ? '1px solid var(--dust)' : '1px solid transparent'};`}
-            >
-              <span style="font-size:0.95rem;">{d}</span>
-              {dayBks.length > 0 && (
-                <span style={`font-size:0.7rem;font-weight:600;margin-top:2px;color:${isSelected ? 'rgba(255,255,255,0.8)' : 'var(--gold)'}`}>
-                  {dayBks.length}
-                </span>
-              )}
-              {isBlocked && (
-                <span style={`font-size:0.65rem;color:${isSelected ? 'rgba(255,255,255,0.5)' : 'var(--stone)'};margin-top:2px;`}>✕</span>
-              )}
-            </a>
-          );
-        })}
-      </div>
-
-      <!-- Leyenda -->
-      <div style="display:flex;gap:1.5rem;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--warm);">
-        <div style="display:flex;align-items:center;gap:0.4rem;">
-          <span style="font-size:0.8rem;color:var(--gold);font-weight:700;">3</span>
-          <span style="font-size:0.75rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--stone);font-weight:600;">Sesiones</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:0.4rem;">
-          <span style="font-size:0.8rem;color:var(--stone);">✕</span>
-          <span style="font-size:0.75rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--stone);font-weight:600;">Bloqueado</span>
-        </div>
-        <div style="margin-left:auto;">
-          <a href="/admin/bloqueos" class="btn btn-outline btn-sm">Gestionar bloqueos</a>
-        </div>
-      </div>
+  <!-- FullCalendar -->
+  <div class="card" style="padding:1.25rem;">
+    <!-- Leyenda -->
+    <div style="display:flex;gap:1.25rem;margin-bottom:1rem;font-size:0.75rem;color:var(--stone);flex-wrap:wrap;align-items:center;">
+      <span style="display:flex;align-items:center;gap:0.35rem;">
+        <span style="width:12px;height:12px;border-radius:2px;background:#576352;display:inline-block;"></span> Confirmada
+      </span>
+      <span style="display:flex;align-items:center;gap:0.35rem;">
+        <span style="width:12px;height:12px;border-radius:2px;background:#A8906C;display:inline-block;"></span> Pendiente pago
+      </span>
+      <span style="display:flex;align-items:center;gap:0.35rem;">
+        <span style="width:12px;height:12px;border-radius:2px;background:#6B7280;display:inline-block;"></span> Google Calendar
+      </span>
     </div>
+    <div id="fullcalendar" style="min-height:600px;"></div>
+  </div>
 
-    <!-- Panel derecho: detalle del día -->
-    <div style="display:flex;flex-direction:column;gap:1rem;">
-
-      <!-- Reservas del día -->
-      <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
-          <p class="label">
-            {new Date(selectedDate + 'T00:00:00').toLocaleDateString('es-CL', { weekday:'long', day:'numeric', month:'long' })}
-          </p>
-          {blockedSet.has(selectedDate) && (
-            <span class="badge badge-cancelled">Bloqueado</span>
-          )}
-        </div>
-
-        {!dayBookings?.length ? (
-          <p style="font-size:0.8rem;color:var(--stone);">Sin reservas para este día.</p>
-        ) : (
-          <div style="display:flex;flex-direction:column;gap:0.6rem;">
-            {dayBookings.map((b) => (
-              <div style={`padding:0.75rem;border:1px solid var(--warm);background:${b.status === 'cancelled' ? 'var(--sand)' : 'white'};`}>
-                <div style="display:flex;justify-content:space-between;align-items:start;gap:0.5rem;">
-                  <div style="flex:1;min-width:0;">
-                    <p style={`font-size:0.85rem;font-weight:500;${b.status === 'cancelled' ? 'text-decoration:line-through;color:var(--stone);' : ''}`}>
-                      {b.patient_name}
-                    </p>
-                    <p style="font-size:0.7rem;color:var(--stone);margin-top:0.15rem;">
-                      {SESSION_LABELS[b.session_type as keyof typeof SESSION_LABELS] ?? b.session_type}
-                    </p>
-                    <p style="font-size:0.7rem;color:var(--stone);">{b.patient_phone}</p>
-                  </div>
-                  <div style="text-align:right;flex-shrink:0;">
-                    <p style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;">{b.session_time.slice(0,5)}</p>
-                    <span class={`badge badge-${b.status === 'confirmed' ? 'confirmed' : b.status === 'cancelled' ? 'cancelled' : 'pending'}`} style="margin-top:0.25rem;display:inline-block;">
-                      {b.status === 'confirmed' ? 'Confirmada' : b.status === 'cancelled' ? 'Cancelada' : 'Por pagar'}
-                    </span>
-                  </div>
-                </div>
-                {b.status !== 'cancelled' && (
-                  <div style="display:flex;gap:0.5rem;margin-top:0.6rem;flex-wrap:wrap;">
-                    {b.status === 'pending_payment' && (
-                      <form method="POST" action="/api/admin/bookings">
-                        <input type="hidden" name="action" value="confirm" />
-                        <input type="hidden" name="id" value={b.id} />
-                        <input type="hidden" name="redirect" value={`/admin/agenda?year=${year}&month=${month}&date=${selectedDate}`} />
-                        <button type="submit" class="btn btn-outline btn-sm">✓ Confirmar</button>
-                      </form>
-                    )}
-                    <button type="button" class="btn btn-outline btn-sm"
-                      onclick={`openReschedule('${b.id}','${b.patient_name}')`}>
-                      ↻ Reagendar
-                    </button>
-                    <form method="POST" action="/api/admin/bookings">
-                      <input type="hidden" name="action" value="cancel" />
-                      <input type="hidden" name="id" value={b.id} />
-                      <input type="hidden" name="redirect" value={`/admin/agenda?year=${year}&month=${month}&date=${selectedDate}`} />
-                      <button type="submit" class="btn btn-danger btn-sm">Cancelar</button>
-                    </form>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <!-- Botón nueva reserva -->
-      <button id="open-modal" class="btn btn-dark" style="width:100%;justify-content:center;padding:0.7rem;">
-        + Nueva reserva manual
-      </button>
-
+  <!-- Panel detalle de reserva (popup lateral) -->
+  <div id="booking-detail" style="display:none;position:fixed;right:1.5rem;top:90px;width:320px;background:white;border:1px solid var(--dust);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.12);z-index:50;padding:1.5rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+      <p class="label" id="detail-label">Detalle</p>
+      <button onclick="closeDetail()" style="background:none;border:none;cursor:pointer;font-size:1.2rem;color:var(--stone);">✕</button>
     </div>
+    <div id="detail-content"></div>
+    <div id="detail-actions" style="display:flex;gap:0.5rem;margin-top:1rem;flex-wrap:wrap;"></div>
   </div>
 
 </AdminLayout>
 
-<!-- ── Modal reagendar ──────────────────────────────────────────────────────── -->
-<div id="modal-reschedule" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;align-items:center;justify-content:center;padding:1rem;">
-  <div style="background:white;width:100%;max-width:420px;padding:2rem;position:relative;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
-      <p class="label">Reagendar — <span id="reschedule-patient"></span></p>
-      <button id="close-reschedule" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--stone);">✕</button>
-    </div>
-
-    <form method="POST" action="/api/admin/bookings" style="display:flex;flex-direction:column;gap:1rem;">
-      <input type="hidden" name="action" value="reschedule" />
-      <input type="hidden" name="id" id="reschedule-id" value="" />
-      <input type="hidden" name="redirect" value={`/admin/agenda?year=${year}&month=${month}&date=${selectedDate}`} />
-
-      <div>
-        <label class="label" style="margin-bottom:0.4rem;display:block;">Nueva fecha</label>
-        <input type="date" name="session_date" required
-          min={new Date(Date.now() + 86400000).toISOString().slice(0,10)} />
-      </div>
-      <div>
-        <label class="label" style="margin-bottom:0.4rem;display:block;">Nueva hora</label>
-        <select name="session_time" id="reschedule-time-select" required>
-          {availableSlots.length === 0
-            ? <option value="">Sin slots disponibles</option>
-            : availableSlots.map(t => <option value={t}>{t}</option>)
-          }
-          <option value="custom">— Horario personalizado</option>
-        </select>
-      </div>
-      <div id="reschedule-custom-wrap" style="display:none;">
-        <label class="label" style="margin-bottom:0.4rem;display:block;">Horario personalizado</label>
-        <input type="time" name="custom_time" step="300" />
-      </div>
-
-      <div id="reschedule-conflict" style="display:none;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;padding:0.6rem 0.85rem;border-radius:6px;font-size:0.82rem;">
-        ⚠ Ese horario ya está ocupado. Elige otro.
-      </div>
-
-      <button type="submit" class="btn btn-dark" style="width:100%;justify-content:center;">
-        Confirmar reagendamiento
-      </button>
-    </form>
-  </div>
-</div>
-
-  </div> <!-- /view-list -->
-
-<!-- ── Modal nueva reserva ──────────────────────────────────────────────────── -->
+<!-- Modal nueva reserva -->
 <div id="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;align-items:center;justify-content:center;padding:1rem;">
-  <div style="background:white;width:100%;max-width:440px;max-height:90vh;overflow-y:auto;padding:2rem;position:relative;">
-
+  <div style="background:white;width:100%;max-width:440px;max-height:90vh;overflow-y:auto;padding:2rem;border-radius:6px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
-      <p class="label">Nueva reserva manual</p>
-      <button id="close-modal" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--stone);line-height:1;padding:0.2rem 0.4rem;border-radius:4px;transition:background .15s;" onmouseover="this.style.background='var(--warm)'" onmouseout="this.style.background='none'">✕</button>
+      <p class="label" id="modal-title">Nueva reserva manual</p>
+      <button id="close-modal" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--stone);">✕</button>
     </div>
-
     <form method="POST" action="/api/admin/bookings" style="display:flex;flex-direction:column;gap:1rem;">
       <input type="hidden" name="action" value="create" />
-      <input type="hidden" name="redirect" value={`/admin/agenda?year=${year}&month=${month}&date=${selectedDate}`} />
-
+      <input type="hidden" name="redirect" value="/admin/agenda" />
       <div>
-        <label class="label" style="margin-bottom:0.3rem;display:block;">Fecha</label>
-        <input type="date" name="session_date" value={selectedDate} required />
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Fecha</label>
+        <input type="date" id="modal-date" name="session_date" value={today} required />
       </div>
-
       <div>
-        <label class="label" style="margin-bottom:0.3rem;display:block;">Tipo de sesión</label>
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Tipo de sesión</label>
         <select name="session_type" required>
           {pricingPlans.map(p => (
-            <option value={p.id}>{p.title} — {new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP',maximumFractionDigits:0}).format(p.price)}</option>
+            <option value={p.id}>{p.title} — {formatCLP(p.price)}</option>
           ))}
         </select>
       </div>
-
       <div>
-        <label class="label" style="margin-bottom:0.3rem;display:block;">Hora</label>
-        <select name="session_time" id="modal-time-select" required>
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Hora</label>
+        <select id="modal-time" name="session_time" required>
           {availableSlots.length === 0
             ? <option value="">Sin slots disponibles</option>
             : availableSlots.map(t => <option value={t}>{t}</option>)
@@ -332,29 +98,26 @@ const nextMonth = month === 12 ? `?year=${year+1}&month=1` : `?year=${year}&mont
           <option value="custom">— Horario personalizado</option>
         </select>
       </div>
-
       <div id="custom-time-wrap" style="display:none;">
-        <label class="label" style="margin-bottom:0.3rem;display:block;">Horario personalizado</label>
-        <input type="time" name="custom_time" step="300" />
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Horario personalizado</label>
+        <input type="time" id="modal-custom-time" name="custom_time" step="300" />
       </div>
-
       <div>
-        <label class="label" style="margin-bottom:0.3rem;display:block;">Nombre paciente</label>
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Nombre paciente *</label>
         <input type="text" name="patient_name" required placeholder="Nombre completo" />
       </div>
       <div>
-        <label class="label" style="margin-bottom:0.3rem;display:block;">Teléfono</label>
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Teléfono *</label>
         <input type="tel" name="patient_phone" required placeholder="+56 9 XXXX XXXX" />
       </div>
       <div>
-        <label class="label" style="margin-bottom:0.3rem;display:block;">Correo</label>
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Correo *</label>
         <input type="email" name="patient_email" required placeholder="correo@ejemplo.cl" />
       </div>
       <div>
-        <label class="label" style="margin-bottom:0.3rem;display:block;">Notas (opcional)</label>
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Notas (opcional)</label>
         <textarea name="notes" rows="2" placeholder="Observaciones..."></textarea>
       </div>
-
       <button type="submit" class="btn btn-dark" style="width:100%;justify-content:center;margin-top:0.5rem;">
         Crear reserva confirmada
       </button>
@@ -362,133 +125,131 @@ const nextMonth = month === 12 ? `?year=${year+1}&month=1` : `?year=${year}&mont
   </div>
 </div>
 
+<!-- Script: carga FullCalendar y lógica de la agenda -->
 <script>
-  // Modal reagendar
-  const rescheduleOverlay = document.getElementById('modal-reschedule');
-  document.getElementById('close-reschedule')?.addEventListener('click', () => {
-    rescheduleOverlay.style.display = 'none';
-    document.body.style.overflow = '';
-  });
-  rescheduleOverlay?.addEventListener('click', (e) => {
-    if (e.target === rescheduleOverlay) {
-      rescheduleOverlay.style.display = 'none';
-      document.body.style.overflow = '';
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  const overlay  = document.getElementById('modal-overlay');
+  const closeBtn = document.getElementById('close-modal');
+  const openBtn  = document.getElementById('open-modal');
+  const modalDate = document.getElementById('modal-date');
+  const modalTime = document.getElementById('modal-time');
+  const customWrap = document.getElementById('custom-time-wrap');
+  const customTime = document.getElementById('modal-custom-time');
+
+  const openModal = (date, time) => {
+    if (date && modalDate) modalDate.value = date;
+    if (time && modalTime) {
+      const opt = Array.from(modalTime.options).find(o => o.value === time);
+      if (opt) { modalTime.value = time; customWrap.style.display = 'none'; }
+      else { modalTime.value = 'custom'; customWrap.style.display = 'block'; if (customTime) customTime.value = time; }
     }
-  });
-
-  window.openReschedule = function(id, name) {
-    document.getElementById('reschedule-id').value = id;
-    document.getElementById('reschedule-patient').textContent = name;
-    document.getElementById('reschedule-conflict').style.display = 'none';
-    rescheduleOverlay.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-  };
-
-  // Mostrar error de conflicto si viene en URL
-  if (window.location.search.includes('error=conflict')) {
-    document.getElementById('reschedule-conflict').style.display = 'block';
-  }
-
-  const rescheduleTimeSelect = document.getElementById('reschedule-time-select');
-  const rescheduleCustomWrap = document.getElementById('reschedule-custom-wrap');
-  rescheduleTimeSelect?.addEventListener('change', () => {
-    rescheduleCustomWrap.style.display = rescheduleTimeSelect.value === 'custom' ? 'block' : 'none';
-  });
-
-  // Modal
-  const overlay   = document.getElementById('modal-overlay');
-  const openBtn   = document.getElementById('open-modal');
-  const closeBtn  = document.getElementById('close-modal');
-
-  openBtn?.addEventListener('click', () => {
     overlay.style.display = 'flex';
     document.body.style.overflow = 'hidden';
-  });
-  const closeModal = () => {
-    overlay.style.display = 'none';
-    document.body.style.overflow = '';
   };
-  closeBtn?.addEventListener('click', closeModal);
-  overlay?.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+  const closeModal = () => { overlay.style.display = 'none'; document.body.style.overflow = ''; };
 
-  // Horario personalizado
-  const select = document.getElementById('modal-time-select');
-  const wrap   = document.getElementById('custom-time-wrap');
-  select?.addEventListener('change', () => {
-    wrap.style.display = select.value === 'custom' ? 'block' : 'none';
+  openBtn?.addEventListener('click', () => openModal(null, null));
+  closeBtn?.addEventListener('click', closeModal);
+  overlay?.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+  modalTime?.addEventListener('change', () => {
+    customWrap.style.display = modalTime.value === 'custom' ? 'block' : 'none';
   });
 
-  // ── Toggle de vistas ────────────────────────────────────────────────────────
-  const btnList = document.getElementById('btn-list');
-  const btnCal  = document.getElementById('btn-cal');
-  const viewList = document.getElementById('view-list');
-  const viewCal  = document.getElementById('view-calendar');
-  let calInitialized = false;
+  // ── Panel detalle ──────────────────────────────────────────────────────────
+  window.closeDetail = () => { document.getElementById('booking-detail').style.display = 'none'; };
 
-  function showList() {
-    viewList.style.display = 'block';
-    viewCal.style.display  = 'none';
-    btnList.className = 'btn btn-dark btn-sm';
-    btnCal.className  = 'btn btn-outline btn-sm';
-  }
-  function showCalendar() {
-    viewList.style.display = 'none';
-    viewCal.style.display  = 'block';
-    btnList.className = 'btn btn-outline btn-sm';
-    btnCal.className  = 'btn btn-dark btn-sm';
-    if (!calInitialized) { initFullCalendar(); calInitialized = true; }
+  function showBookingDetail(event) {
+    const props = event.extendedProps;
+    const panel  = document.getElementById('booking-detail');
+    const label  = document.getElementById('detail-label');
+    const content = document.getElementById('detail-content');
+    const actions = document.getElementById('detail-actions');
+
+    const startTime = event.start ? event.start.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '';
+    const date = event.start ? event.start.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
+
+    if (props.type === 'gcal') {
+      label.textContent = 'Google Calendar';
+      content.innerHTML = `
+        <p style="font-weight:600;font-size:0.95rem;margin-bottom:0.5rem;">${event.title}</p>
+        <p style="font-size:0.82rem;color:var(--stone);">${date}</p>
+        <p style="font-size:0.82rem;color:var(--stone);">${startTime}</p>
+        ${props.meetLink ? `<a href="${props.meetLink}" target="_blank" style="font-size:0.82rem;color:var(--forest);display:block;margin-top:0.5rem;">📹 Unirse al Meet</a>` : ''}
+      `;
+      actions.innerHTML = `
+        <button onclick="deleteGcalEvent('${props.googleEventId}')" class="btn btn-danger btn-sm">Eliminar evento</button>
+      `;
+    } else {
+      const statusLabel = props.status === 'confirmed' ? 'Confirmada' : 'Pendiente pago';
+      const statusColor = props.status === 'confirmed' ? 'var(--green)' : 'var(--gold)';
+      label.textContent = 'Reserva';
+      content.innerHTML = `
+        <p style="font-weight:600;font-size:0.95rem;margin-bottom:0.25rem;">${event.title.split(' · ')[0]}</p>
+        <p style="font-size:0.82rem;color:var(--stone);margin-bottom:0.5rem;">${event.title.split(' · ')[1] ?? ''}</p>
+        <p style="font-size:0.82rem;color:var(--stone);">${date}</p>
+        <p style="font-size:0.82rem;color:var(--stone);">${startTime}</p>
+        <p style="font-size:0.8rem;font-weight:600;color:${statusColor};margin-top:0.5rem;">${statusLabel}</p>
+      `;
+      const bookingId = props.bookingId;
+      const dateStr = event.start ? event.start.toISOString().slice(0, 10) : '';
+      actions.innerHTML = `
+        <form method="POST" action="/api/admin/bookings" style="margin:0;">
+          <input type="hidden" name="action" value="confirm" />
+          <input type="hidden" name="id" value="${bookingId}" />
+          <input type="hidden" name="redirect" value="/admin/agenda" />
+          ${props.status === 'pending_payment' ? '<button type="submit" class="btn btn-outline btn-sm">✓ Confirmar</button>' : ''}
+        </form>
+        <form method="POST" action="/api/admin/bookings" style="margin:0;">
+          <input type="hidden" name="action" value="cancel" />
+          <input type="hidden" name="id" value="${bookingId}" />
+          <input type="hidden" name="redirect" value="/admin/agenda" />
+          <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('¿Cancelar esta reserva?')">Cancelar</button>
+        </form>
+      `;
+    }
+
+    panel.style.display = 'block';
   }
 
-  btnList?.addEventListener('click', showList);
-  btnCal?.addEventListener('click', showCalendar);
+  window.deleteGcalEvent = async (eventId) => {
+    if (!confirm('¿Eliminar este evento de Google Calendar?')) return;
+    const res = await fetch('/api/admin/google/delete-event', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventId }),
+    });
+    if (res.ok) { closeDetail(); calendar?.refetchEvents(); }
+    else alert('Error al eliminar.');
+  };
 
   // ── FullCalendar ────────────────────────────────────────────────────────────
-  function initFullCalendar() {
-    // Cargar FullCalendar desde CDN
-    const link = document.createElement('link');
-    link.rel  = 'stylesheet';
-    link.href = 'https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.15/main.min.css';
-    document.head.appendChild(link);
-    const link2 = document.createElement('link');
-    link2.rel  = 'stylesheet';
-    link2.href = 'https://cdn.jsdelivr.net/npm/@fullcalendar/timegrid@6.1.15/main.min.css';
-    document.head.appendChild(link2);
+  let calendar;
 
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.15/index.global.min.js';
-    script.onload = () => {
-      const s2 = document.createElement('script');
-      s2.src = 'https://cdn.jsdelivr.net/npm/@fullcalendar/daygrid@6.1.15/index.global.min.js';
-      s2.onload = () => {
-        const s3 = document.createElement('script');
-        s3.src = 'https://cdn.jsdelivr.net/npm/@fullcalendar/timegrid@6.1.15/index.global.min.js';
-        s3.onload = () => {
-          const s4 = document.createElement('script');
-          s4.src = 'https://cdn.jsdelivr.net/npm/@fullcalendar/interaction@6.1.15/index.global.min.js';
-          s4.onload = () => renderCalendar();
-          document.head.appendChild(s4);
-        };
-        document.head.appendChild(s3);
-      };
-      document.head.appendChild(s2);
-    };
-    document.head.appendChild(script);
-  }
+  const fcScript = document.createElement('script');
+  fcScript.src = 'https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js';
+  fcScript.onload = initCalendar;
+  document.head.appendChild(fcScript);
 
-  function renderCalendar() {
+  const fcCss = document.createElement('link');
+  fcCss.rel  = 'stylesheet';
+  fcCss.href = 'https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css';
+  document.head.appendChild(fcCss);
+
+  function initCalendar() {
     const el = document.getElementById('fullcalendar');
     if (!el || !window.FullCalendar) return;
 
-    const calendar = new window.FullCalendar.Calendar(el, {
-      plugins: ['dayGrid', 'timeGrid', 'interaction'],
-      initialView: 'timeGridWeek',
-      locale: 'es',
-      firstDay: 1,
-      slotMinTime: '08:00:00',
-      slotMaxTime: '20:00:00',
-      slotDuration: '00:30:00',
-      height: 'auto',
-      nowIndicator: true,
+    calendar = new window.FullCalendar.Calendar(el, {
+      initialView:   'timeGridWeek',
+      locale:        'es',
+      firstDay:      1,
+      slotMinTime:   '07:00:00',
+      slotMaxTime:   '21:00:00',
+      slotDuration:  '00:30:00',
+      height:        'auto',
+      nowIndicator:  true,
+      allDaySlot:    true,
+      editable:      false,
+      selectable:    true,
       headerToolbar: {
         left:   'prev,next today',
         center: 'title',
@@ -496,77 +257,46 @@ const nextMonth = month === 12 ? `?year=${year+1}&month=1` : `?year=${year}&mont
       },
       buttonText: { today: 'Hoy', month: 'Mes', week: 'Semana', day: 'Día' },
 
-      // Fuente de eventos
-      events: async (info, successCb, failureCb) => {
+      // Fuente de eventos combinada
+      events: async (info, success, failure) => {
         try {
-          const res = await fetch(
-            `/api/admin/calendar-events?start=${info.startStr}&end=${info.endStr}`
-          );
+          const res  = await fetch(`/api/admin/calendar-events?start=${info.startStr}&end=${info.endStr}`);
           const data = await res.json();
-          successCb(data);
-        } catch { failureCb({}); }
+          success(data);
+        } catch { failure({}); }
       },
 
-      // Clic en espacio vacío → abrir modal para crear
+      // Clic en espacio vacío → abrir modal con fecha/hora
       dateClick: (info) => {
-        const dateInput = document.getElementById('modal-agenda-date') ||
-                          document.querySelector('input[name="session_date"]');
-        if (dateInput) dateInput.value = info.dateStr.slice(0, 10);
-        // Si tiene hora, pre-rellenar
-        if (info.dateStr.length > 10) {
-          const time = info.dateStr.slice(11, 16);
-          const timeSelect = document.getElementById('modal-time-select');
-          if (timeSelect) {
-            // Buscar si hay opción con ese horario
-            const opt = Array.from(timeSelect.options).find(o => o.value === time);
-            if (opt) timeSelect.value = time;
-            else {
-              timeSelect.value = 'custom';
-              const customInput = document.querySelector('input[name="custom_time"]');
-              if (customInput) customInput.value = time;
-              document.getElementById('custom-time-wrap').style.display = 'block';
-            }
-          }
-        }
-        overlay.style.display = 'flex';
-        document.body.style.overflow = 'hidden';
+        const date = info.dateStr.slice(0, 10);
+        const time = info.dateStr.length > 10 ? info.dateStr.slice(11, 16) : null;
+        openModal(date, time);
       },
 
-      // Clic en evento → mostrar info
+      // Clic en evento → panel de detalle
       eventClick: (info) => {
-        const { extendedProps } = info.event;
-        if (extendedProps.type === 'booking') {
-          // Ir a la agenda en la fecha del evento
-          const date = info.event.startStr.slice(0, 10);
-          window.location.href = `/admin/agenda?date=${date}`;
-        } else if (extendedProps.meetLink) {
-          window.open(extendedProps.meetLink, '_blank');
-        }
+        info.jsEvent.stopPropagation();
+        showBookingDetail(info.event);
       },
 
-      // Colores y estilos
+      // Estilos visuales
       eventDidMount: (info) => {
-        if (info.event.extendedProps.type === 'gcal') {
-          info.el.style.opacity = '0.85';
-          info.el.title = '📅 Google Calendar — ' + info.event.title;
-        }
+        const type = info.event.extendedProps.type;
+        if (type === 'gcal') info.el.style.opacity = '0.8';
         if (info.event.extendedProps.meetLink) {
-          info.el.title = '📹 ' + info.event.title + ' (Meet disponible)';
+          info.el.setAttribute('title', '📹 Tiene link de Meet');
         }
       },
     });
 
     calendar.render();
-
-    // Leyenda
-    const legend = document.createElement('div');
-    legend.style.cssText = 'display:flex;gap:1rem;padding:0.75rem 0;font-size:0.75rem;color:#6B6860;flex-wrap:wrap;';
-    legend.innerHTML = `
-      <span style="display:flex;align-items:center;gap:0.3rem;"><span style="width:12px;height:12px;border-radius:2px;background:#576352;display:inline-block;"></span> Confirmada</span>
-      <span style="display:flex;align-items:center;gap:0.3rem;"><span style="width:12px;height:12px;border-radius:2px;background:#A8906C;display:inline-block;"></span> Pendiente pago</span>
-      <span style="display:flex;align-items:center;gap:0.3rem;"><span style="width:12px;height:12px;border-radius:2px;background:#6B6860;display:inline-block;"></span> Google Calendar</span>
-      <span style="margin-left:auto;color:#6B6860;">Haz clic en un espacio vacío para crear una reserva</span>
-    `;
-    el.parentNode.insertBefore(legend, el);
   }
+
+  // Cerrar panel al clic fuera
+  document.addEventListener('click', (e) => {
+    const panel = document.getElementById('booking-detail');
+    if (panel && !panel.contains(e.target) && !e.target.closest('.fc-event')) {
+      panel.style.display = 'none';
+    }
+  });
 </script>
