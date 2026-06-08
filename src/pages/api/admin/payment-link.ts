@@ -109,6 +109,12 @@ export const POST: APIRoute = async ({ request }) => {
 
     const paymentUrl = `${order.url}?token=${order.token}`;
 
+    // Guardar el token de Flow en mp_preference_id para que el webhook pueda encontrar esta reserva
+    await supabase
+      .from('bookings')
+      .update({ mp_preference_id: order.token })
+      .eq('id', bookingId);
+
     // Mensaje de WhatsApp
     const firstName  = name.trim().split(' ')[0];
     const amountFmt  = new Intl.NumberFormat('es-CL').format(amountInt);
