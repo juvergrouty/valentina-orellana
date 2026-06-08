@@ -7,7 +7,7 @@ export const prerender = false;
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
-    const { name, email, phone, amount, description, serviceType } = body;
+    const { name, email, phone, amount, description, serviceType, force } = body;
 
     // Validación básica
     if (!name?.trim() || !email?.trim() || !amount || !description?.trim()) {
@@ -16,6 +16,30 @@ export const POST: APIRoute = async ({ request }) => {
     const amountInt = parseInt(amount);
     if (isNaN(amountInt) || amountInt < 1000) {
       return Response.json({ error: 'Monto inválido (mínimo $1.000 CLP).' }, { status: 400 });
+    }
+
+    // Verificar cobro duplicado en la última hora (misma email + monto)
+    if (!force) {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { data: recent } = await supabase
+        .from('bookings')
+        .select('id, patient_name, amount, created_at')
+        .eq('patient_email', email.trim().toLowerCase())
+        .eq('amount', amountInt)
+        .like('notes', 'Cobro manual%')
+        .gte('created_at', oneHourAgo)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (recent && recent.length > 0) {
+        const prev = recent[0];
+        const mins = Math.round((Date.now() - new Date(prev.created_at).getTime()) / 60000);
+        return Response.json({
+          warning:  true,
+          message:  `Ya se generó un cobro de $${new Intl.NumberFormat('es-CL').format(amountInt)} para ${prev.patient_name} hace ${mins} minuto${mins !== 1 ? 's' : ''}. ¿Deseas enviar uno nuevo de todas formas?`,
+          duplicate: { id: prev.id, createdAt: prev.created_at, minutesAgo: mins },
+        });
+      }
     }
 
     // Leer configuración de Flow
@@ -40,19 +64,20 @@ export const POST: APIRoute = async ({ request }) => {
     if (waPhone.length === 9)     waPhone = '56' + waPhone;
     if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = waPhone.slice(1);
 
-    // Crear registro en bookings (para trazabilidad)
-    const bookingId  = crypto.randomUUID();
-    const today      = new Date().toISOString().split('T')[0];
-
     // session_type debe ser uno de los valores permitidos por el CHECK constraint
     const validTypes = ['individual', 'pareja', 'grupal', 'paquete'];
     const sessionType = validTypes.includes(serviceType) ? serviceType : 'individual';
 
+    // Crear registro en bookings (para trazabilidad)
+    // session_date y session_time = NULL para cobros manuales:
+    // el UNIQUE idx_bookings_slot trata NULLs como distintos → sin colisiones entre cobros
+    const bookingId = crypto.randomUUID();
+
     const { error: bookingErr } = await supabase.from('bookings').insert({
       id:             bookingId,
       session_type:   sessionType,
-      session_date:   today,
-      session_time:   '00:00',
+      session_date:   null,
+      session_time:   null,
       patient_name:   name.trim(),
       patient_email:  email.trim().toLowerCase(),
       patient_phone:  phone?.trim() ?? '',
