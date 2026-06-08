@@ -130,6 +130,24 @@ const servicesJson  = JSON.stringify(services  ?? []);
             <label class="label" style="display:block;margin-bottom:0.35rem;">Hora de sesión</label>
             <input type="time" id="cobro-time" step="900" />
           </div>
+          <div style="grid-column:1/-1;">
+            <label class="label" style="display:block;margin-bottom:0.5rem;">Modalidad</label>
+            <div style="display:flex;gap:0.5rem;">
+              <label id="mod-presencial-wrap"
+                style="flex:1;display:flex;align-items:center;gap:0.5rem;padding:0.6rem 1rem;border:1.5px solid var(--ink);border-radius:var(--radius);cursor:pointer;font-size:0.88rem;background:var(--ink);color:white;transition:all .15s;">
+                <input type="radio" name="modality" id="mod-presencial" value="presencial" checked style="width:auto;accent-color:white;" />
+                📍 Presencial
+              </label>
+              <label id="mod-online-wrap"
+                style="flex:1;display:flex;align-items:center;gap:0.5rem;padding:0.6rem 1rem;border:1.5px solid var(--dust);border-radius:var(--radius);cursor:pointer;font-size:0.88rem;background:white;color:var(--stone);transition:all .15s;">
+                <input type="radio" name="modality" id="mod-online" value="online" style="width:auto;accent-color:var(--forest);" />
+                🎥 Online (Google Meet)
+              </label>
+            </div>
+            <p id="meet-hint" style="display:none;font-size:0.76rem;color:var(--forest);margin-top:0.4rem;">
+              ✓ Se generará un link de Google Meet automáticamente al completar el pago.
+            </p>
+          </div>
         </div>
 
         <!-- Preview mensaje WhatsApp -->
@@ -183,6 +201,12 @@ const servicesJson  = JSON.stringify(services  ?? []);
             class="btn btn-outline btn-sm" style="flex-shrink:0;white-space:nowrap;">
             Copiar URL
           </button>
+        </div>
+
+        <!-- Meet link (solo online) -->
+        <div id="meet-result" style="display:none;margin-top:0.75rem;padding:0.75rem 1rem;background:#f0fdf4;border:1px solid #86efac;border-radius:var(--radius);font-size:0.85rem;">
+          <p style="font-weight:600;color:var(--green);margin-bottom:0.25rem;">🎥 Google Meet generado</p>
+          <a id="meet-link-a" href="#" target="_blank" style="color:var(--forest);word-break:break-all;"></a>
         </div>
 
         <p id="no-wa-msg" style="display:none;font-size:0.8rem;color:var(--stone);margin-top:0.75rem;text-align:center;">
@@ -303,8 +327,13 @@ const servicesJson  = JSON.stringify(services  ?? []);
   const serviceSelect    = document.getElementById('service-select');
   const cobroAmount      = document.getElementById('cobro-amount');
   const cobroDesc        = document.getElementById('cobro-desc');
-  const cobroDate        = document.getElementById('cobro-date');
-  const cobroTime        = document.getElementById('cobro-time');
+  const cobroDate           = document.getElementById('cobro-date');
+  const cobroTime           = document.getElementById('cobro-time');
+  const modPresencial       = document.getElementById('mod-presencial');
+  const modOnline           = document.getElementById('mod-online');
+  const modPresencialWrap   = document.getElementById('mod-presencial-wrap');
+  const modOnlineWrap       = document.getElementById('mod-online-wrap');
+  const meetHint            = document.getElementById('meet-hint');
   const waPreviewWrap    = document.getElementById('wa-preview-wrap');
   const waPreview        = document.getElementById('wa-preview');
   const btnGenerar       = document.getElementById('btn-generar');
@@ -318,6 +347,8 @@ const servicesJson  = JSON.stringify(services  ?? []);
   const paymentUrlInput  = document.getElementById('payment-url-input');
   const btnCopy          = document.getElementById('btn-copy');
   const noWaMsg          = document.getElementById('no-wa-msg');
+  const meetResult       = document.getElementById('meet-result');
+  const meetLinkA        = document.getElementById('meet-link-a');
 
   let mode = 'registrado';   // 'registrado' | 'personalizado'
   let selectedPatient = null;
@@ -397,6 +428,32 @@ const servicesJson  = JSON.stringify(services  ?? []);
 
   // ── Autocompletar desde servicio ─────────────────────────────────────────
   let selectedServiceType = 'individual';
+  let selectedModality    = 'presencial';
+
+  function updateModalityUI() {
+    selectedModality = modOnline.checked ? 'online' : 'presencial';
+    if (selectedModality === 'online') {
+      modOnlineWrap.style.background    = 'var(--ink)';
+      modOnlineWrap.style.color         = 'white';
+      modOnlineWrap.style.borderColor   = 'var(--ink)';
+      modPresencialWrap.style.background = 'white';
+      modPresencialWrap.style.color      = 'var(--stone)';
+      modPresencialWrap.style.borderColor = 'var(--dust)';
+      meetHint.style.display = '';
+    } else {
+      modPresencialWrap.style.background = 'var(--ink)';
+      modPresencialWrap.style.color      = 'white';
+      modPresencialWrap.style.borderColor = 'var(--ink)';
+      modOnlineWrap.style.background    = 'white';
+      modOnlineWrap.style.color         = 'var(--stone)';
+      modOnlineWrap.style.borderColor   = 'var(--dust)';
+      meetHint.style.display = 'none';
+    }
+    updatePreview();
+  }
+
+  modPresencial.addEventListener('change', updateModalityUI);
+  modOnline.addEventListener('change', updateModalityUI);
 
   serviceSelect.addEventListener('change', function () {
     const opt = this.options[this.selectedIndex];
@@ -455,7 +512,9 @@ const servicesJson  = JSON.stringify(services  ?? []);
     const amountFmt   = new Intl.NumberFormat('es-CL').format(amount);
     const dateLabel   = formatDateLabel(date, time);
     const dateLineFmt = dateLabel ? `📅 ${dateLabel}\n` : '';
-    const previewMsg  = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${desc}*\n${dateLineFmt}💰 $${amountFmt} CLP\n\n🔗 [enlace de pago]\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
+    const modalityFmt = selectedModality === 'online' ? '🎥 Sesión online (Meet)\n' : '📍 Sesión presencial\n';
+    const meetLineFmt = selectedModality === 'online' ? '🔗 Link de Meet: se enviará al confirmar el pago\n' : '';
+    const previewMsg  = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${desc}*\n${modalityFmt}${dateLineFmt}💰 $${amountFmt} CLP\n\n🔗 [enlace de pago]${meetLineFmt ? '\n' + meetLineFmt : ''}\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
     waPreview.textContent       = previewMsg;
     waPreviewWrap.style.display = '';
   }
@@ -489,6 +548,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
           serviceType:  selectedServiceType,
           sessionDate:  cobroDate.value || null,
           sessionTime:  cobroTime.value || null,
+          modality:     selectedModality,
           force,
         }),
       });
@@ -518,6 +578,15 @@ const servicesJson  = JSON.stringify(services  ?? []);
       } else {
         waBtn.style.display    = 'none';
         noWaMsg.style.display  = '';
+      }
+
+      // Mostrar Meet link si se generó
+      if (data.meetLink) {
+        meetLinkA.href          = data.meetLink;
+        meetLinkA.textContent   = data.meetLink;
+        meetResult.style.display = '';
+      } else {
+        meetResult.style.display = 'none';
       }
 
       cobroResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

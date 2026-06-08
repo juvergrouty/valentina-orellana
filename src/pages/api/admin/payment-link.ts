@@ -1,13 +1,14 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
+import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 
 export const prerender = false;
 
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
-    const { name, email, phone, amount, description, serviceType, sessionDate, sessionTime, force } = body;
+    const { name, email, phone, amount, description, serviceType, sessionDate, sessionTime, modality, force } = body;
 
     // Validación básica
     if (!name?.trim() || !email?.trim() || !amount || !description?.trim()) {
@@ -119,18 +120,42 @@ export const POST: APIRoute = async ({ request }) => {
       .update({ mp_preference_id: order.token })
       .eq('id', bookingId);
 
-    // Mensaje de WhatsApp
-    const firstName  = name.trim().split(' ')[0];
-    const amountFmt  = new Intl.NumberFormat('es-CL').format(amountInt);
+    // Si es online con fecha/hora → crear evento en Google Calendar y obtener Meet link ahora
+    let meetLink: string | undefined;
+    const isOnline = modality === 'online';
+    if (isOnline && finalDate !== '2099-12-31') {
+      const calResult = await syncBookingToCalendar({
+        id:            bookingId,
+        session_type:  `${sessionType}-online`,   // solo para que syncBookingToCalendar active Meet
+        session_date:  finalDate,
+        session_time:  finalTime,
+        patient_name:  name.trim(),
+        patient_email: email.trim().toLowerCase(),
+        amount:        amountInt,
+      }).catch(() => ({ success: false as const }));
+
+      if ('meetLink' in calResult && calResult.meetLink) {
+        meetLink = calResult.meetLink;
+      }
+    }
+
+    // Construir mensaje de WhatsApp
+    const firstName = name.trim().split(' ')[0];
+    const amountFmt = new Intl.NumberFormat('es-CL').format(amountInt);
+    const months    = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
     let dateLine = '';
     if (sessionDate) {
-      const [y, m, d] = sessionDate.split('-');
-      const months = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const [, m, d] = sessionDate.split('-');
       dateLine = `📅 ${parseInt(d)} de ${months[parseInt(m) - 1]}`;
       if (sessionTime) dateLine += ` a las ${sessionTime}`;
       dateLine += '\n';
     }
-    const waMessage = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n${dateLine}💰 $${amountFmt} CLP\n\n🔗 ${paymentUrl}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
+
+    const modalityLine = isOnline ? '🎥 Sesión online\n' : '📍 Sesión presencial\n';
+    const meetLine     = meetLink  ? `\n🔗 Google Meet: ${meetLink}` : '';
+
+    const waMessage = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n${modalityLine}${dateLine}💰 $${amountFmt} CLP\n\n💳 Enlace de pago: ${paymentUrl}${meetLine}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
 
     const whatsappUrl = waPhone.length >= 11
       ? `https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}`
@@ -143,6 +168,7 @@ export const POST: APIRoute = async ({ request }) => {
       bookingId,
       waPhone,
       waMessage,
+      meetLink:     meetLink ?? null,
     });
 
   } catch (err: any) {
