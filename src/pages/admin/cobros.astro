@@ -1,0 +1,487 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+// Pacientes activos
+const { data: patients } = await supabase
+  .from('patients')
+  .select('id, name, email, phone')
+  .eq('active', true)
+  .order('name');
+
+// Servicios visibles
+const { data: services } = await supabase
+  .from('services_catalog')
+  .select('id, name, price, duration_min, type, modality')
+  .eq('visible', true)
+  .order('sort_order');
+
+// Historial de cobros manuales (últimos 30)
+const { data: cobros } = await supabase
+  .from('bookings')
+  .select('id, patient_name, patient_email, patient_phone, session_type, amount, status, created_at')
+  .like('notes', 'Cobro manual%')
+  .order('created_at', { ascending: false })
+  .limit(30);
+
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+
+const formatDate = (iso: string) => {
+  const d = new Date(iso);
+  return d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+// Serializar datos para el script
+const patientsJson  = JSON.stringify(patients  ?? []);
+const servicesJson  = JSON.stringify(services  ?? []);
+---
+
+<AdminLayout title="Cobros" current="/admin/cobros">
+
+  <div style="display:grid;grid-template-columns:480px 1fr;gap:2rem;align-items:start;" class="cobros-grid">
+
+    <!-- ── Panel izquierdo: formulario ──────────────────────────────────────── -->
+    <div>
+      <div class="card">
+        <p class="label" style="margin-bottom:1.25rem;">Generar enlace de cobro</p>
+
+        <!-- Toggle paciente registrado / personalizado -->
+        <div style="display:flex;gap:0;border:1.5px solid var(--dust);border-radius:var(--radius);overflow:hidden;margin-bottom:1.5rem;">
+          <button type="button" id="tab-registrado"
+            style="flex:1;padding:0.6rem;font-size:0.78rem;font-family:'Inter',sans-serif;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;border:none;cursor:pointer;transition:all .15s;background:var(--ink);color:white;">
+            Paciente registrado
+          </button>
+          <button type="button" id="tab-personalizado"
+            style="flex:1;padding:0.6rem;font-size:0.78rem;font-family:'Inter',sans-serif;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;border:none;cursor:pointer;transition:all .15s;background:white;color:var(--stone);">
+            Número personalizado
+          </button>
+        </div>
+
+        <!-- Sección: paciente registrado -->
+        <div id="section-registrado">
+          <div style="margin-bottom:1rem;">
+            <label class="label" style="display:block;margin-bottom:0.35rem;">Buscar paciente</label>
+            <input type="text" id="patient-search" placeholder="Escribe nombre o email..." autocomplete="off" />
+            <div id="patient-results"
+              style="display:none;position:absolute;z-index:50;background:white;border:1.5px solid var(--dust);border-radius:var(--radius);max-height:200px;overflow-y:auto;box-shadow:var(--shadow);width:100%;max-width:416px;">
+            </div>
+          </div>
+          <!-- Info del paciente seleccionado -->
+          <div id="patient-selected" style="display:none;padding:0.75rem 1rem;background:var(--warm);border-radius:var(--radius);margin-bottom:1rem;font-size:0.88rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <strong id="sel-name">—</strong>
+                <p style="color:var(--stone);font-size:0.8rem;margin-top:0.15rem;" id="sel-email">—</p>
+                <p style="color:var(--stone);font-size:0.8rem;" id="sel-phone">—</p>
+              </div>
+              <button type="button" id="clear-patient"
+                style="background:none;border:none;cursor:pointer;color:var(--stone);font-size:1.1rem;padding:0.25rem;">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sección: personalizado -->
+        <div id="section-personalizado" style="display:none;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem;">
+            <div style="grid-column:1/-1;">
+              <label class="label" style="display:block;margin-bottom:0.35rem;">Nombre completo *</label>
+              <input type="text" id="custom-name" placeholder="María González" />
+            </div>
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.35rem;">Email *</label>
+              <input type="email" id="custom-email" placeholder="correo@email.com" />
+            </div>
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.35rem;">Teléfono (WhatsApp)</label>
+              <input type="tel" id="custom-phone" placeholder="+56 9 1234 5678" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Servicio y monto -->
+        <div style="margin-bottom:1rem;">
+          <label class="label" style="display:block;margin-bottom:0.35rem;">Servicio (opcional)</label>
+          <select id="service-select">
+            <option value="">— Seleccionar servicio —</option>
+            {(services ?? []).map(s => (
+              <option value={s.id} data-price={s.price} data-name={s.name} data-duration={s.duration_min}>
+                {s.name} · {formatCLP(s.price)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem;">
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.35rem;">Monto CLP *</label>
+            <input type="number" id="cobro-amount" placeholder="55000" min="1000" step="500" />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.35rem;">Descripción *</label>
+            <input type="text" id="cobro-desc" placeholder="Sesión individual" />
+          </div>
+        </div>
+
+        <!-- Preview mensaje WhatsApp -->
+        <div id="wa-preview-wrap" style="display:none;margin-bottom:1.25rem;">
+          <label class="label" style="display:block;margin-bottom:0.35rem;">Vista previa del mensaje</label>
+          <div id="wa-preview"
+            style="background:#e7fdb9;border-radius:8px 8px 8px 0;padding:0.85rem 1rem;font-size:0.84rem;line-height:1.5;color:#111;border:1px solid #c5e896;white-space:pre-wrap;">
+          </div>
+        </div>
+
+        <!-- Botón generar -->
+        <button type="button" id="btn-generar" class="btn btn-dark btn-lg" style="width:100%;justify-content:center;">
+          Generar enlace de cobro
+        </button>
+
+        <!-- Error -->
+        <div id="cobro-error" style="display:none;" class="alert-error" style="margin-top:1rem;"></div>
+      </div>
+
+      <!-- Resultado -->
+      <div id="cobro-result" style="display:none;" class="card" style="margin-top:1.25rem;">
+        <p class="label" style="margin-bottom:1rem;color:var(--green);">✓ Enlace generado</p>
+
+        <!-- Botón WhatsApp principal -->
+        <a id="wa-btn" href="#" target="_blank"
+          style="display:flex;align-items:center;justify-content:center;gap:0.6rem;width:100%;padding:0.85rem;background:#25D366;color:white;border-radius:var(--radius);font-family:'Inter',sans-serif;font-size:0.9rem;font-weight:600;letter-spacing:0.04em;text-decoration:none;transition:background .15s;margin-bottom:1rem;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+          </svg>
+          Enviar por WhatsApp
+        </a>
+
+        <div style="display:flex;gap:0.5rem;">
+          <input type="text" id="payment-url-input" readonly
+            style="flex:1;font-size:0.82rem;color:var(--stone);background:var(--warm);" />
+          <button type="button" id="btn-copy"
+            class="btn btn-outline btn-sm" style="flex-shrink:0;white-space:nowrap;">
+            Copiar URL
+          </button>
+        </div>
+
+        <p id="no-wa-msg" style="display:none;font-size:0.8rem;color:var(--stone);margin-top:0.75rem;text-align:center;">
+          ⚠️ No hay teléfono asociado. Comparte el enlace de pago manualmente.
+        </p>
+      </div>
+    </div>
+
+    <!-- ── Panel derecho: historial ─────────────────────────────────────────── -->
+    <div>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div style="padding:1.25rem 1.5rem;border-bottom:1px solid var(--dust);display:flex;align-items:center;justify-content:space-between;">
+          <p class="label">Historial de cobros</p>
+          <span style="font-size:0.8rem;color:var(--stone);">{cobros?.length ?? 0} registros</span>
+        </div>
+
+        {!cobros?.length ? (
+          <div style="padding:3rem;text-align:center;">
+            <p style="color:var(--stone);font-size:0.9rem;">Aún no has generado ningún cobro.</p>
+          </div>
+        ) : (
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Paciente</th>
+                  <th>Descripción</th>
+                  <th>Monto</th>
+                  <th>Estado</th>
+                  <th>Fecha</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {cobros.map(c => {
+                  const phone = (c.patient_phone ?? '').replace(/\D/g, '');
+                  const waPhone = phone.length === 9 ? '56' + phone : phone;
+                  const waUrl = waPhone.length >= 11
+                    ? `https://wa.me/${waPhone}`
+                    : null;
+                  return (
+                    <tr>
+                      <td>
+                        <p style="font-weight:600;font-size:0.88rem;">{c.patient_name}</p>
+                        <p style="font-size:0.75rem;color:var(--stone);">{c.patient_email}</p>
+                        {c.patient_phone && (
+                          <p style="font-size:0.75rem;color:var(--stone);">{c.patient_phone}</p>
+                        )}
+                      </td>
+                      <td style="font-size:0.84rem;color:var(--stone);max-width:160px;">
+                        <span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{c.session_type}</span>
+                      </td>
+                      <td style="font-weight:600;font-size:0.88rem;white-space:nowrap;">{formatCLP(c.amount)}</td>
+                      <td>
+                        {c.status === 'confirmed' ? (
+                          <span class="badge badge-confirmed">Pagado</span>
+                        ) : c.status === 'cancelled' ? (
+                          <span class="badge badge-cancelled">Cancelado</span>
+                        ) : (
+                          <span class="badge badge-pending">Pendiente</span>
+                        )}
+                      </td>
+                      <td style="font-size:0.8rem;color:var(--stone);white-space:nowrap;">{formatDate(c.created_at)}</td>
+                      <td>
+                        {waUrl ? (
+                          <a href={waUrl} target="_blank"
+                            style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:#25D366;border-radius:50%;color:white;"
+                            title="Abrir WhatsApp">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                            </svg>
+                          </a>
+                        ) : (
+                          <span style="font-size:0.75rem;color:var(--dust);">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+
+  </div>
+
+</AdminLayout>
+
+<style>
+  @media (max-width: 900px) {
+    .cobros-grid { grid-template-columns: 1fr !important; }
+  }
+  #patient-results { position: absolute; }
+</style>
+
+<script define:vars={{ patientsJson, servicesJson }}>
+(function () {
+  const patients = JSON.parse(patientsJson);
+  const services = JSON.parse(servicesJson);
+
+  // ── Referencias DOM ──────────────────────────────────────────────────────
+  const tabRegistrado    = document.getElementById('tab-registrado');
+  const tabPersonalizado = document.getElementById('tab-personalizado');
+  const secRegistrado    = document.getElementById('section-registrado');
+  const secPersonalizado = document.getElementById('section-personalizado');
+  const patientSearch    = document.getElementById('patient-search');
+  const patientResults   = document.getElementById('patient-results');
+  const patientSelected  = document.getElementById('patient-selected');
+  const selName          = document.getElementById('sel-name');
+  const selEmail         = document.getElementById('sel-email');
+  const selPhone         = document.getElementById('sel-phone');
+  const clearPatient     = document.getElementById('clear-patient');
+  const customName       = document.getElementById('custom-name');
+  const customEmail      = document.getElementById('custom-email');
+  const customPhone      = document.getElementById('custom-phone');
+  const serviceSelect    = document.getElementById('service-select');
+  const cobroAmount      = document.getElementById('cobro-amount');
+  const cobroDesc        = document.getElementById('cobro-desc');
+  const waPreviewWrap    = document.getElementById('wa-preview-wrap');
+  const waPreview        = document.getElementById('wa-preview');
+  const btnGenerar       = document.getElementById('btn-generar');
+  const cobroError       = document.getElementById('cobro-error');
+  const cobroResult      = document.getElementById('cobro-result');
+  const waBtn            = document.getElementById('wa-btn');
+  const paymentUrlInput  = document.getElementById('payment-url-input');
+  const btnCopy          = document.getElementById('btn-copy');
+  const noWaMsg          = document.getElementById('no-wa-msg');
+
+  let mode = 'registrado';   // 'registrado' | 'personalizado'
+  let selectedPatient = null;
+
+  // ── Tabs ─────────────────────────────────────────────────────────────────
+  function setTab(t) {
+    mode = t;
+    if (t === 'registrado') {
+      tabRegistrado.style.background    = 'var(--ink)';
+      tabRegistrado.style.color         = 'white';
+      tabPersonalizado.style.background = 'white';
+      tabPersonalizado.style.color      = 'var(--stone)';
+      secRegistrado.style.display    = '';
+      secPersonalizado.style.display = 'none';
+    } else {
+      tabPersonalizado.style.background = 'var(--ink)';
+      tabPersonalizado.style.color      = 'white';
+      tabRegistrado.style.background    = 'white';
+      tabRegistrado.style.color         = 'var(--stone)';
+      secRegistrado.style.display    = 'none';
+      secPersonalizado.style.display = '';
+    }
+    updatePreview();
+  }
+  tabRegistrado.addEventListener('click',    () => setTab('registrado'));
+  tabPersonalizado.addEventListener('click', () => setTab('personalizado'));
+
+  // ── Búsqueda de pacientes ─────────────────────────────────────────────────
+  patientSearch.addEventListener('input', function () {
+    const q = this.value.trim().toLowerCase();
+    patientResults.innerHTML = '';
+    if (!q) { patientResults.style.display = 'none'; return; }
+
+    const matches = patients.filter(p =>
+      p.name.toLowerCase().includes(q) || (p.email ?? '').toLowerCase().includes(q)
+    ).slice(0, 8);
+
+    if (!matches.length) { patientResults.style.display = 'none'; return; }
+
+    matches.forEach(p => {
+      const item = document.createElement('div');
+      item.style.cssText = 'padding:0.65rem 1rem;cursor:pointer;font-size:0.88rem;border-bottom:1px solid var(--warm);';
+      item.innerHTML = `<strong>${p.name}</strong><br><span style="color:var(--stone);font-size:0.78rem;">${p.email ?? '—'} · ${p.phone ?? '—'}</span>`;
+      item.addEventListener('mouseenter', () => item.style.background = 'var(--warm)');
+      item.addEventListener('mouseleave', () => item.style.background = '');
+      item.addEventListener('click', () => selectPatient(p));
+      patientResults.appendChild(item);
+    });
+    patientResults.style.display = 'block';
+  });
+
+  document.addEventListener('click', e => {
+    if (!patientSearch.contains(e.target) && !patientResults.contains(e.target)) {
+      patientResults.style.display = 'none';
+    }
+  });
+
+  function selectPatient(p) {
+    selectedPatient = p;
+    patientSearch.value          = '';
+    patientResults.style.display = 'none';
+    selName.textContent          = p.name;
+    selEmail.textContent         = p.email  ?? '—';
+    selPhone.textContent         = p.phone  ?? '—';
+    patientSelected.style.display = '';
+    patientSearch.style.display   = 'none';
+    updatePreview();
+  }
+
+  clearPatient.addEventListener('click', () => {
+    selectedPatient               = null;
+    patientSelected.style.display = 'none';
+    patientSearch.style.display   = '';
+    patientSearch.value           = '';
+    updatePreview();
+  });
+
+  // ── Autocompletar desde servicio ─────────────────────────────────────────
+  serviceSelect.addEventListener('change', function () {
+    const opt = this.options[this.selectedIndex];
+    const price = opt.dataset.price;
+    const name  = opt.dataset.name;
+    if (price) cobroAmount.value = price;
+    if (name)  cobroDesc.value   = name;
+    updatePreview();
+  });
+
+  // ── Preview en tiempo real ────────────────────────────────────────────────
+  [cobroAmount, cobroDesc, customName, customPhone].forEach(el =>
+    el?.addEventListener('input', updatePreview)
+  );
+
+  function getFormData() {
+    if (mode === 'registrado') {
+      return {
+        name:  selectedPatient?.name  ?? '',
+        email: selectedPatient?.email ?? '',
+        phone: selectedPatient?.phone ?? '',
+      };
+    } else {
+      return {
+        name:  customName.value.trim(),
+        email: customEmail.value.trim(),
+        phone: customPhone.value.trim(),
+      };
+    }
+  }
+
+  function updatePreview() {
+    const { name, phone } = getFormData();
+    const amount = parseInt(cobroAmount.value ?? '0');
+    const desc   = cobroDesc.value.trim();
+
+    if (!name || !amount || !desc) {
+      waPreviewWrap.style.display = 'none';
+      return;
+    }
+
+    const firstName  = name.split(' ')[0];
+    const amountFmt  = new Intl.NumberFormat('es-CL').format(amount);
+    const previewMsg = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${desc}*\n💰 $${amountFmt} CLP\n\n🔗 [enlace de pago]\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
+    waPreview.textContent       = previewMsg;
+    waPreviewWrap.style.display = '';
+  }
+
+  // ── Generar cobro ─────────────────────────────────────────────────────────
+  btnGenerar.addEventListener('click', async () => {
+    const { name, email, phone } = getFormData();
+    const amount = cobroAmount.value;
+    const desc   = cobroDesc.value.trim();
+
+    // Validación cliente
+    if (!name) { showError('Selecciona un paciente o ingresa un nombre.'); return; }
+    if (!email) { showError('El email es requerido para generar el cobro en Flow.'); return; }
+    if (!amount || parseInt(amount) < 1000) { showError('Ingresa un monto válido (mínimo $1.000 CLP).'); return; }
+    if (!desc) { showError('Ingresa una descripción del cobro.'); return; }
+
+    cobroError.style.display  = 'none';
+    cobroResult.style.display = 'none';
+    btnGenerar.textContent    = 'Generando…';
+    btnGenerar.disabled       = true;
+
+    try {
+      const res  = await fetch('/api/admin/payment-link', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ name, email, phone, amount: parseInt(amount), description: desc }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        showError(data.error ?? 'Error al generar el cobro.');
+        return;
+      }
+
+      // Mostrar resultado
+      paymentUrlInput.value = data.paymentUrl;
+      cobroResult.style.display = '';
+
+      if (data.whatsappUrl) {
+        waBtn.href             = data.whatsappUrl;
+        waBtn.style.display    = 'flex';
+        noWaMsg.style.display  = 'none';
+      } else {
+        waBtn.style.display    = 'none';
+        noWaMsg.style.display  = '';
+      }
+
+      // Scroll al resultado
+      cobroResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    } catch (e) {
+      showError('Error de conexión. Intenta nuevamente.');
+    } finally {
+      btnGenerar.textContent = 'Generar enlace de cobro';
+      btnGenerar.disabled    = false;
+    }
+  });
+
+  // ── Copiar URL ────────────────────────────────────────────────────────────
+  btnCopy.addEventListener('click', () => {
+    navigator.clipboard.writeText(paymentUrlInput.value).then(() => {
+      btnCopy.textContent = '¡Copiado!';
+      setTimeout(() => { btnCopy.textContent = 'Copiar URL'; }, 2000);
+    });
+  });
+
+  function showError(msg) {
+    cobroError.textContent    = msg;
+    cobroError.style.display  = '';
+    cobroError.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+})();
+</script>
