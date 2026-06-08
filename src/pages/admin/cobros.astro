@@ -122,6 +122,14 @@ const servicesJson  = JSON.stringify(services  ?? []);
             <label class="label" style="display:block;margin-bottom:0.35rem;">Descripción *</label>
             <input type="text" id="cobro-desc" placeholder="Sesión individual" />
           </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.35rem;">Fecha de sesión</label>
+            <input type="date" id="cobro-date" />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.35rem;">Hora de sesión</label>
+            <input type="time" id="cobro-time" step="900" />
+          </div>
         </div>
 
         <!-- Preview mensaje WhatsApp -->
@@ -295,6 +303,8 @@ const servicesJson  = JSON.stringify(services  ?? []);
   const serviceSelect    = document.getElementById('service-select');
   const cobroAmount      = document.getElementById('cobro-amount');
   const cobroDesc        = document.getElementById('cobro-desc');
+  const cobroDate        = document.getElementById('cobro-date');
+  const cobroTime        = document.getElementById('cobro-time');
   const waPreviewWrap    = document.getElementById('wa-preview-wrap');
   const waPreview        = document.getElementById('wa-preview');
   const btnGenerar       = document.getElementById('btn-generar');
@@ -400,7 +410,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
   });
 
   // ── Preview en tiempo real ────────────────────────────────────────────────
-  [cobroAmount, cobroDesc, customName, customPhone].forEach(el =>
+  [cobroAmount, cobroDesc, cobroDate, cobroTime, customName, customPhone].forEach(el =>
     el?.addEventListener('input', updatePreview)
   );
 
@@ -420,19 +430,32 @@ const servicesJson  = JSON.stringify(services  ?? []);
     }
   }
 
+  function formatDateLabel(dateStr, timeStr) {
+    if (!dateStr) return null;
+    const [y, m, d] = dateStr.split('-');
+    const months = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    let label = `${parseInt(d)} de ${months[parseInt(m) - 1]}`;
+    if (timeStr) label += ` a las ${timeStr}`;
+    return label;
+  }
+
   function updatePreview() {
-    const { name, phone } = getFormData();
+    const { name } = getFormData();
     const amount = parseInt(cobroAmount.value ?? '0');
     const desc   = cobroDesc.value.trim();
+    const date   = cobroDate.value;
+    const time   = cobroTime.value;
 
     if (!name || !amount || !desc) {
       waPreviewWrap.style.display = 'none';
       return;
     }
 
-    const firstName  = name.split(' ')[0];
-    const amountFmt  = new Intl.NumberFormat('es-CL').format(amount);
-    const previewMsg = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${desc}*\n💰 $${amountFmt} CLP\n\n🔗 [enlace de pago]\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
+    const firstName   = name.split(' ')[0];
+    const amountFmt   = new Intl.NumberFormat('es-CL').format(amount);
+    const dateLabel   = formatDateLabel(date, time);
+    const dateLineFmt = dateLabel ? `📅 ${dateLabel}\n` : '';
+    const previewMsg  = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${desc}*\n${dateLineFmt}💰 $${amountFmt} CLP\n\n🔗 [enlace de pago]\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
     waPreview.textContent       = previewMsg;
     waPreviewWrap.style.display = '';
   }
@@ -461,9 +484,11 @@ const servicesJson  = JSON.stringify(services  ?? []);
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           name, email, phone,
-          amount:      parseInt(amount),
-          description: desc,
-          serviceType: selectedServiceType,
+          amount:       parseInt(amount),
+          description:  desc,
+          serviceType:  selectedServiceType,
+          sessionDate:  cobroDate.value || null,
+          sessionTime:  cobroTime.value || null,
           force,
         }),
       });

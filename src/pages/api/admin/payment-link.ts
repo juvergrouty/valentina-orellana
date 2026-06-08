@@ -7,7 +7,7 @@ export const prerender = false;
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
-    const { name, email, phone, amount, description, serviceType, force } = body;
+    const { name, email, phone, amount, description, serviceType, sessionDate, sessionTime, force } = body;
 
     // Validación básica
     if (!name?.trim() || !email?.trim() || !amount || !description?.trim()) {
@@ -73,11 +73,15 @@ export const POST: APIRoute = async ({ request }) => {
     // El índice único idx_bookings_slot excluye esa fecha → sin colisiones.
     const bookingId = crypto.randomUUID();
 
+    // Si no se indica fecha, usar marcador 2099-12-31 (excluido del índice único)
+    const finalDate = sessionDate ?? '2099-12-31';
+    const finalTime = sessionTime ?? '00:00';
+
     const { error: bookingErr } = await supabase.from('bookings').insert({
       id:             bookingId,
       session_type:   sessionType,
-      session_date:   '2099-12-31',
-      session_time:   '00:00',
+      session_date:   finalDate,
+      session_time:   finalTime,
       patient_name:   name.trim(),
       patient_email:  email.trim().toLowerCase(),
       patient_phone:  phone?.trim() ?? '',
@@ -118,7 +122,15 @@ export const POST: APIRoute = async ({ request }) => {
     // Mensaje de WhatsApp
     const firstName  = name.trim().split(' ')[0];
     const amountFmt  = new Intl.NumberFormat('es-CL').format(amountInt);
-    const waMessage  = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n💰 $${amountFmt} CLP\n\n🔗 ${paymentUrl}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
+    let dateLine = '';
+    if (sessionDate) {
+      const [y, m, d] = sessionDate.split('-');
+      const months = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      dateLine = `📅 ${parseInt(d)} de ${months[parseInt(m) - 1]}`;
+      if (sessionTime) dateLine += ` a las ${sessionTime}`;
+      dateLine += '\n';
+    }
+    const waMessage = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n${dateLine}💰 $${amountFmt} CLP\n\n🔗 ${paymentUrl}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
 
     const whatsappUrl = waPhone.length >= 11
       ? `https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}`
