@@ -67,8 +67,9 @@ export const POST: APIRoute = async ({ request }) => {
       return Response.json({ error: 'Error al registrar cobro: ' + bookingErr.message }, { status: 500 });
     }
 
-    // URL base del sitio
-    const siteUrl = (import.meta.env.SITE_URL ?? 'https://psicologavalentinaorellana.com').replace(/\/$/, '');
+    // URL base del sitio — se deriva del request para funcionar en cualquier dominio
+    const reqUrl  = new URL(request.url);
+    const siteUrl = `${reqUrl.protocol}//${reqUrl.host}`;
 
     // Crear orden en Flow
     const order = await createPaymentOrder({
