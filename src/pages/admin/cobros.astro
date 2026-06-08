@@ -106,7 +106,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
           <select id="service-select">
             <option value="">— Seleccionar servicio —</option>
             {(services ?? []).map(s => (
-              <option value={s.id} data-price={s.price} data-name={s.name} data-duration={s.duration_min}>
+              <option value={s.id} data-price={s.price} data-name={s.name} data-duration={s.duration_min} data-type={s.type}>
                 {s.name} · {formatCLP(s.price)}
               </option>
             ))}
@@ -368,12 +368,16 @@ const servicesJson  = JSON.stringify(services  ?? []);
   });
 
   // ── Autocompletar desde servicio ─────────────────────────────────────────
+  let selectedServiceType = 'individual';
+
   serviceSelect.addEventListener('change', function () {
     const opt = this.options[this.selectedIndex];
     const price = opt.dataset.price;
     const name  = opt.dataset.name;
-    if (price) cobroAmount.value = price;
-    if (name)  cobroDesc.value   = name;
+    const type  = opt.dataset.type;
+    if (price) cobroAmount.value  = price;
+    if (name)  cobroDesc.value    = name;
+    if (type)  selectedServiceType = type;
     updatePreview();
   });
 
@@ -436,7 +440,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
       const res  = await fetch('/api/admin/payment-link', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ name, email, phone, amount: parseInt(amount), description: desc }),
+        body:    JSON.stringify({ name, email, phone, amount: parseInt(amount), description: desc, serviceType: selectedServiceType }),
       });
       const data = await res.json();
 

@@ -7,7 +7,7 @@ export const prerender = false;
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
-    const { name, email, phone, amount, description } = body;
+    const { name, email, phone, amount, description, serviceType } = body;
 
     // Validación básica
     if (!name?.trim() || !email?.trim() || !amount || !description?.trim()) {
@@ -44,9 +44,13 @@ export const POST: APIRoute = async ({ request }) => {
     const bookingId  = crypto.randomUUID();
     const today      = new Date().toISOString().split('T')[0];
 
+    // session_type debe ser uno de los valores permitidos por el CHECK constraint
+    const validTypes = ['individual', 'pareja', 'grupal', 'paquete'];
+    const sessionType = validTypes.includes(serviceType) ? serviceType : 'individual';
+
     const { error: bookingErr } = await supabase.from('bookings').insert({
       id:             bookingId,
-      session_type:   description,
+      session_type:   sessionType,
       session_date:   today,
       session_time:   '00:00',
       patient_name:   name.trim(),
