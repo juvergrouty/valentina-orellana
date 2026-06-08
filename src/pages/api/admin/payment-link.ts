@@ -69,15 +69,15 @@ export const POST: APIRoute = async ({ request }) => {
     const sessionType = validTypes.includes(serviceType) ? serviceType : 'individual';
 
     // Crear registro en bookings (para trazabilidad)
-    // session_date y session_time = NULL para cobros manuales:
-    // el UNIQUE idx_bookings_slot trata NULLs como distintos → sin colisiones entre cobros
+    // Usamos session_date = '2099-12-31' como marcador de cobro manual.
+    // El índice único idx_bookings_slot excluye esa fecha → sin colisiones.
     const bookingId = crypto.randomUUID();
 
     const { error: bookingErr } = await supabase.from('bookings').insert({
       id:             bookingId,
       session_type:   sessionType,
-      session_date:   null,
-      session_time:   null,
+      session_date:   '2099-12-31',
+      session_time:   '00:00',
       patient_name:   name.trim(),
       patient_email:  email.trim().toLowerCase(),
       patient_phone:  phone?.trim() ?? '',
