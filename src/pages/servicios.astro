@@ -2,15 +2,59 @@
 export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
-import { services } from '../data/services';
-import { getSiteConfig } from '../lib/siteConfig';
+import { supabase } from '../lib/supabase';
 
-const { durations } = await getSiteConfig();
-// Mapear la duración según tipo de servicio
-function getDuration(serviceId: string): string {
-  if (serviceId === 'terapia-pareja') return durations.pareja;
-  return durations.individual;
-}
+// Leer servicios visibles desde la base de datos
+const { data: dbServices } = await supabase
+  .from('services_catalog')
+  .select('id, name, description, type, modality, location, duration_min, price, image_url, sort_order')
+  .eq('visible', true)
+  .order('sort_order')
+  .order('created_at');
+
+// Fallback si la BD está vacía
+const fallback = [
+  {
+    id: 'psicologia-adultos',
+    name: 'Psicología de Adultos',
+    description: 'Acompañamiento terapéutico individual para el manejo de ansiedad, depresión, estrés, duelo y bienestar emocional en general.',
+    type: 'individual', modality: 'ambos', location: null,
+    duration_min: 50, price: 45000,
+    image_url: '/images/servicio-adultos.jpg', sort_order: 0,
+  },
+  {
+    id: 'terapia-pareja',
+    name: 'Terapia de Pareja',
+    description: 'Espacio de escucha y trabajo conjunto para mejorar la comunicación, resolver conflictos y fortalecer el vínculo.',
+    type: 'pareja', modality: 'ambos', location: null,
+    duration_min: 60, price: 60000,
+    image_url: '/images/servicio-pareja.jpg', sort_order: 1,
+  },
+  {
+    id: 'trauma',
+    name: 'Trauma y PSA',
+    description: 'Tratamiento especializado para personas que han vivido experiencias traumáticas o que se reconocen como Personas Altamente Sensibles (PAS).',
+    type: 'individual', modality: 'ambos', location: null,
+    duration_min: 50, price: 45000,
+    image_url: '/images/servicio-trauma.jpg', sort_order: 2,
+  },
+  {
+    id: 'parentalidad',
+    name: 'Parentalidad y Apego',
+    description: 'Orientación para padres y madres que buscan fortalecer el vínculo con sus hijos y desarrollar una crianza consciente.',
+    type: 'individual', modality: 'ambos', location: null,
+    duration_min: 50, price: 45000,
+    image_url: '/images/servicio-parentalidad.jpg', sort_order: 3,
+  },
+];
+
+const services = (dbServices && dbServices.length > 0 ? dbServices : fallback);
+
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+
+const modalityLabel = (m: string) =>
+  m === 'online' ? 'Online' : m === 'presencial' ? 'Presencial' : 'Online · Presencial';
 ---
 
 <BaseLayout title="Servicios" description="Servicios de psicología clínica: adultos, parejas, trauma y personas altamente sensibles.">
@@ -24,32 +68,42 @@ function getDuration(serviceId: string): string {
           <div class="relative overflow-hidden rounded-[10px] group min-h-[420px] flex flex-col justify-end">
 
             <!-- Imagen de fondo -->
-            {service.image && (
-              <img
-                src={service.image}
-                alt={service.title}
-                class="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
-              />
-            )}
+            <img
+              src={service.image_url ?? '/images/consultorio-individual.jpg'}
+              alt={service.name}
+              class="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
+            />
 
             <!-- Degradado inferior para legibilidad -->
             <div class="absolute inset-0 bg-gradient-to-t from-ink/90 via-ink/40 to-transparent"></div>
+
+            <!-- Badge modalidad -->
+            <div class="absolute top-4 left-4 z-10">
+              <span class="font-body text-xs font-medium px-3 py-1 rounded-full bg-white/15 backdrop-blur-sm text-white border border-white/20">
+                {modalityLabel(service.modality)}
+              </span>
+            </div>
 
             <!-- Contenido sobre la imagen -->
             <div class="relative z-10 p-8 md:p-10">
               <p class="label text-white/50 mb-3">0{i + 1}</p>
               <h2 class="font-heading font-light text-3xl md:text-4xl text-white leading-tight mb-3">
-                {service.title}
+                {service.name}
               </h2>
               <p class="font-body text-sm text-white/70 font-light leading-relaxed mb-6 max-w-sm">
                 {service.description}
               </p>
+              {service.location && (
+                <p class="font-body text-xs text-white/50 mb-4">📍 {service.location}</p>
+              )}
               <div class="flex items-center justify-between pt-5 border-t border-white/20">
                 <div>
-                  <p class="label text-white/40 mb-0.5">Duración</p>
-                  <p class="font-heading font-light text-lg text-white">{getDuration(service.id)}</p>
+                  <p class="label text-white/40 mb-0.5">Duración · Valor</p>
+                  <p class="font-heading font-light text-lg text-white">
+                    {service.duration_min} min · {formatCLP(service.price)}
+                  </p>
                 </div>
-                <a href={`/agenda?grupo=${service.grupo}`}
+                <a href={`/agenda?grupo=${service.type === 'pareja' ? 'pareja' : 'individual'}`}
                   class="font-body text-xs tracking-widest uppercase py-2.5 px-5 border border-white/40 text-white hover:bg-white hover:text-ink transition-all duration-200">
                   Reservar
                 </a>

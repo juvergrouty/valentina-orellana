@@ -160,7 +160,7 @@ const TYPE_ICON: Record<string, string> = {
   </div>
 
   <p style="margin-top:0.75rem;font-size:0.78rem;color:var(--stone);">
-    {services?.length ?? 0} servicio{services?.length !== 1 ? 's' : ''} · ★ = mostrar en inicio
+    {services?.length ?? 0} servicio{services?.length !== 1 ? 's' : ''} · ★ = carrusel inicio · Visible = página /servicios
   </p>
 
 </AdminLayout>
@@ -239,11 +239,11 @@ const TYPE_ICON: Record<string, string> = {
         <div style="display:flex;flex-direction:column;gap:0.75rem;justify-content:flex-end;">
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;">
             <input type="checkbox" name="visible" style="width:auto;" checked={editService?.visible ?? true} />
-            Visible en la web
+            Mostrar en página Servicios
           </label>
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;">
             <input type="checkbox" name="show_home" style="width:auto;" checked={editService?.show_home ?? false} />
-            Mostrar en inicio (carrusel)
+            Mostrar en carrusel del inicio
           </label>
         </div>
 
