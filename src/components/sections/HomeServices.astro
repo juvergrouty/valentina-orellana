@@ -70,8 +70,8 @@ const cards = raw.map(s => ({
       style="scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;cursor:grab;">
 
       {cards.map(card => (
-        <div class="flex-shrink-0 w-[280px] md:w-[300px] lg:w-[22vw] bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-lg transition-all duration-300"
-             style="scroll-snap-align:start;">
+        <div class="flex-shrink-0 w-[80vw] sm:w-[calc(50%-10px)] lg:w-[calc(33.333%-13.4px)] bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-lg transition-all duration-300"
+             style="scroll-snap-align:start;scroll-snap-stop:always;">
 
           <!-- Imagen -->
           <div class="relative h-[170px] overflow-hidden">
@@ -128,7 +128,10 @@ const cards = raw.map(s => ({
 
   const cardW = () => {
     const c = track.querySelector('.flex-shrink-0') as HTMLElement;
-    return c ? c.offsetWidth + 20 : 320;
+    if (!c) return 320;
+    // gap-5 = 20px; usar offsetWidth del card real para snap exacto
+    const gap = parseInt(getComputedStyle(track).gap) || 20;
+    return c.offsetWidth + gap;
   };
 
   // Flechas
