@@ -63,8 +63,8 @@ const cards = raw.map(s => ({
 
   </div>
 
-  <!-- Carrusel full-bleed desde el container -->
-  <div class="pl-6 md:pl-12 lg:pl-20 xl:pl-[max(5rem,calc((100vw-1600px)/2+5rem))]">
+  <!-- Carrusel contenido — mismo padding que container-site en ambos lados -->
+  <div class="px-6 md:px-12 lg:px-20 xl:px-[max(5rem,calc((100vw-1600px)/2+5rem))]">
     <div id="svc-track"
       class="flex gap-5 overflow-x-auto pb-4"
       style="scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;cursor:grab;">
@@ -109,8 +109,6 @@ const cards = raw.map(s => ({
         </div>
       ))}
 
-      <!-- Espaciado final para ver el último card completo -->
-      <div class="flex-shrink-0 w-6 md:w-12 lg:w-20"></div>
     </div>
   </div>
 
