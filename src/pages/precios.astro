@@ -2,15 +2,33 @@
 export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
-import { getSiteConfig, formatCLP } from '../lib/siteConfig';
+import { supabase } from '../lib/supabase';
 
-const cfg = await getSiteConfig();
-const { prices, durations } = cfg;
+const { data: services } = await supabase
+  .from('services_catalog')
+  .select('name, price, duration_min, type, modality')
+  .eq('visible', true)
+  .order('sort_order')
+  .order('created_at');
+
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+
+const formatDuration = (min: number) =>
+  min >= 60 ? `${Math.floor(min / 60)} hora${min >= 120 ? 's' : ''}${min % 60 ? ` ${min % 60} min` : ''}` : `${min} minutos`;
+
+const serviceLines = (services ?? [])
+  .map(s => `• ${s.name} — ${formatCLP(s.price)} · ${formatDuration(s.duration_min)}`)
+  .join('\n');
+
+const priceAnswer = serviceLines
+  ? `Los valores de las sesiones son:\n\n${serviceLines}`
+  : 'Consulta los valores directamente en la agenda o escríbeme por WhatsApp.';
 
 const faq = [
   {
     q: '¿Cuáles son los valores de las sesiones?',
-    a: `Los valores dependen del tipo de sesión:\n\n• Terapia Individual Online — ${formatCLP(prices.online)} · ${durations.individual}\n• Terapia Individual Presencial — ${formatCLP(prices.presencial)} · ${durations.individual}\n• Terapia de Pareja Online — ${formatCLP(prices.parejaOnline)} · ${durations.pareja}\n• Terapia de Pareja Presencial — ${formatCLP(prices.parejaPresencial)} · ${durations.pareja}`,
+    a: priceAnswer,
   },
   {
     q: '¿Cómo puedo pagar?',
