@@ -769,8 +769,21 @@ const priceByType: Record<string, number> = {};
       const data = await res.json();
 
       if (!res.ok || !data.checkoutUrl) {
+        // Email inválido → volver al paso 3 y marcar el campo
+        if (data.errorType === 'invalid_email') {
+          goToStep(3);
+          const emailInput = document.getElementById('patient_email');
+          const emailErr   = emailInput?.nextElementSibling;
+          if (emailErr) {
+            emailErr.textContent = 'Correo no válido para el pago. Usa un correo real (ej: nombre@gmail.com).';
+            emailErr.classList.remove('hidden');
+          }
+          emailInput?.focus();
+          emailInput?.select();
+          return; // finally re-habilitará el botón
+        }
         const msg = data.error ?? 'Error desconocido';
-        const detail = data.detail ? ` (${data.detail})` : '';
+        const detail = data.detail ? ` — ${data.detail}` : '';
         throw new Error(msg + detail);
       }
 

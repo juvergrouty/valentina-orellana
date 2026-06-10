@@ -260,14 +260,31 @@ async function handleBooking(request: Request) {
     });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    logError('bookings/flow', 'Error creando orden Flow', {
-      bookingId: booking.id,
+    const isEmailError = errMsg.includes('1620') || errMsg.toLowerCase().includes('useremail') || errMsg.toLowerCase().includes('email');
+
+    await logError('bookings/flow', 'Error creando orden Flow', {
+      bookingId: booking?.id,
       amount: finalPrice,
       session_type,
+      isEmailError,
       error: errMsg,
     });
-    await supabase.from('bookings').delete().eq('id', booking.id);
-    return json({ error: 'Error al conectar con el sistema de pago.', detail: errMsg }, 502);
+
+    // Siempre eliminar la reserva para no dejar slots bloqueados
+    if (booking?.id) {
+      const { error: delErr } = await supabase.from('bookings').delete().eq('id', booking.id);
+      if (delErr) await logError('bookings', 'Error eliminando reserva fallida', { bookingId: booking.id, error: delErr.message });
+    }
+
+    if (isEmailError) {
+      return json({
+        error: 'El correo electrónico no es válido para el sistema de pago. Por favor usa un correo real.',
+        detail: errMsg,
+        errorType: 'invalid_email',
+      }, 400);
+    }
+
+    return json({ error: 'Error al conectar con el sistema de pago.', detail: errMsg, errorType: 'flow_error' }, 502);
   }
 
   // Guardar el token de Flow en la reserva (para luego recuperarla desde el webhook/confirmación)

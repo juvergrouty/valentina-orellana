@@ -2,16 +2,14 @@ import { supabase } from './supabase';
 
 type Level = 'info' | 'warn' | 'error';
 
-// No bloqueante — falla silenciosamente para no romper el flujo principal
-export function log(level: Level, context: string, message: string, data?: unknown) {
-  supabase.from('admin_logs').insert({
+export async function log(level: Level, context: string, message: string, data?: unknown): Promise<void> {
+  const { error } = await supabase.from('admin_logs').insert({
     level,
     context,
     message,
     data: data !== undefined ? data : null,
-  }).then(({ error }) => {
-    if (error) console.warn('[logger] could not write log:', error.message);
   });
+  if (error) console.warn('[logger] could not write log:', error.message);
 }
 
 export const logInfo  = (ctx: string, msg: string, data?: unknown) => log('info',  ctx, msg, data);
