@@ -121,22 +121,18 @@ async function handleBooking(request: Request) {
 
     if (svc) {
       if (svc.modality === 'ambos') {
-        durationMin  = svc[durCol]   ?? svc.duration_min ?? 50;
-        catalogPrice = svc[priceCol] ?? null;
+        // Usar columna específica (price_online / price_presencial) si existe,
+        // si no caer a la columna price principal (servicios guardados antes del dual-price)
+        durationMin  = svc[durCol]             ?? svc.duration_min ?? 50;
+        catalogPrice = svc[priceCol] ?? svc.price ?? null;
       } else {
         durationMin  = svc.duration_min ?? 50;
-        catalogPrice = svc.price       ?? null;
+        catalogPrice = svc.price        ?? null;
       }
     }
   }
 
-  // Fallback: settings legacy (si existe y es > 0) → hardcoded de pricingPlans
-  const priceKey      = `price_${session_type.replace(/-/g, '_')}`;
-  const settingsPrice = settings[priceKey] ? parseInt(settings[priceKey]) : null;
-  const finalPrice    = (catalogPrice && catalogPrice > 0)
-    ? catalogPrice
-    : (settingsPrice && !isNaN(settingsPrice) && settingsPrice > 1000 ? settingsPrice : null)
-    ?? plan.price;
+  const finalPrice = (catalogPrice && catalogPrice > 0) ? catalogPrice : plan.price;
 
   // ── Crear reserva en Supabase ────────────────────────────────────────────────
   const { data: booking, error: insertError } = await supabase
