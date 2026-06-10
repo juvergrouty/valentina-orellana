@@ -769,7 +769,9 @@ const priceByType: Record<string, number> = {};
       const data = await res.json();
 
       if (!res.ok || !data.checkoutUrl) {
-        throw new Error(data.error ?? 'Error desconocido');
+        const msg = data.error ?? 'Error desconocido';
+        const detail = data.detail ? ` (${data.detail})` : '';
+        throw new Error(msg + detail);
       }
 
       // Guardar el bookingId para usarlo en "Pagar en consulta"

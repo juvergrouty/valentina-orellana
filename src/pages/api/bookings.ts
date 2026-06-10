@@ -235,6 +235,13 @@ async function handleBooking(request: Request) {
     return json({ error: 'El pago online está temporalmente deshabilitado. Por favor coordina tu sesión por WhatsApp.' }, 503);
   }
 
+  // ── Validar precio antes de llamar a Flow ────────────────────────────────────
+  if (!finalPrice || isNaN(finalPrice) || finalPrice < 100) {
+    logError('bookings', 'Precio inválido antes de Flow', { finalPrice, catalogPrice, session_type });
+    await supabase.from('bookings').delete().eq('id', booking.id);
+    return json({ error: `Precio inválido (${finalPrice}). Actualiza el precio del servicio en el admin.` }, 400);
+  }
+
   // ── Crear orden de pago en Flow ──────────────────────────────────────────────
   const siteUrl = import.meta.env.PUBLIC_SITE_URL?.replace(/\/$/, '') ?? 'http://localhost:4321';
 
