@@ -22,9 +22,9 @@ const currentPath = Astro.url.pathname;
 
     <!-- Nav desktop -->
     <nav class="hidden lg:flex items-center gap-7">
-      {navLinks.map(({ href, label, hash }) => (
+      {navLinks.map(({ href, label }) => (
         <a
-          href={hash ? href + hash : href}
+          href={href}
           class={`font-body text-sm tracking-wide transition-colors duration-200
             ${currentPath === href
               ? 'text-forest font-medium'
@@ -54,9 +54,9 @@ const currentPath = Astro.url.pathname;
   <!-- Mobile menu -->
   <div id="mobile-menu" class="hidden lg:hidden bg-sand border-t border-dust">
     <nav class="container-site py-8 flex flex-col gap-5">
-      {navLinks.map(({ href, label, hash }) => (
+      {navLinks.map(({ href, label }) => (
         <a
-          href={hash ? href + hash : href}
+          href={href}
           class={`font-body text-sm tracking-wide transition-colors
             ${currentPath === href ? 'text-forest' : 'text-stone hover:text-ink'}`}
         >
