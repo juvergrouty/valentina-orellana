@@ -5,13 +5,18 @@ const items = [
   { icon: '/images/enfoque-basado.svg',            title: 'Enfoque basado',             sub: 'en evidencia' },
   { icon: '/images/reloj.svg',         title: 'Sesiones presenciales',      sub: 'y online' },
 ];
+
+// Bordes izquierdos por índice:
+// i=1,3: siempre (segunda columna en cualquier layout)
+// i=2:   solo en md+ (primera columna de fila 2 en mobile no lleva borde)
+const borderClass = ['', 'border-l border-dust', 'md:border-l md:border-dust', 'border-l border-dust'];
 ---
 
 <section class="bg-warm border-b border-dust">
   <div class="container-site">
-    <div class="grid grid-cols-2 md:grid-cols-4 divide-x divide-dust">
-      {items.map((item) => (
-        <div class="flex flex-col items-center text-center py-14 px-4 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-4">
+      {items.map((item, i) => (
+        <div class={`flex flex-col items-center text-center py-14 px-4 gap-4 ${borderClass[i]}`}>
           <img
             src={item.icon}
             alt={item.title}

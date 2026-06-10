@@ -8,13 +8,13 @@ interface Props {
 const { label, title, description, image = '/images/hero-paginas.jpg' } = Astro.props;
 ---
 
-<section class="relative overflow-hidden min-h-[300px] md:min-h-[360px] flex items-end border-b border-dust">
+<section class="relative overflow-hidden min-h-[380px] md:min-h-[420px] flex items-end border-b border-dust">
 
-  <!-- Imagen de fondo -->
+  <!-- Imagen de fondo: object-[50%_25%] muestra la parte superior de imágenes panorámicas -->
   <img
     src={image}
     alt=""
-    class="absolute inset-0 w-full h-full object-cover object-center"
+    class="absolute inset-0 w-full h-full object-cover object-[50%_25%]"
     aria-hidden="true"
   />
 
