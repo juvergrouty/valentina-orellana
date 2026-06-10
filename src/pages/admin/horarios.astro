@@ -10,19 +10,26 @@ const { data: slots } = await supabase
   .order('start_time');
 
 const DAYS = [
-  { n: 0, label: 'Domingo' },
-  { n: 1, label: 'Lunes' },
-  { n: 2, label: 'Martes' },
-  { n: 3, label: 'Miércoles' },
-  { n: 4, label: 'Jueves' },
-  { n: 5, label: 'Viernes' },
-  { n: 6, label: 'Sábado' },
+  { n: 1, short: 'Lu' },
+  { n: 2, short: 'Ma' },
+  { n: 3, short: 'Mi' },
+  { n: 4, short: 'Ju' },
+  { n: 5, short: 'Vi' },
+  { n: 6, short: 'Sá' },
+  { n: 0, short: 'Do' },
 ];
 
-// Agrupar slots por día
-const byDay = new Map<number, typeof slots>();
+const DAY_LABELS: Record<number, string> = {
+  0: 'Domingo', 1: 'Lunes', 2: 'Martes', 3: 'Miércoles',
+  4: 'Jueves', 5: 'Viernes', 6: 'Sábado',
+};
+
+// Agrupar slots activos por día
+const byDay = new Map<number, string[]>();
 DAYS.forEach(d => byDay.set(d.n, []));
-(slots ?? []).forEach(s => byDay.get(s.day_of_week)?.push(s));
+(slots ?? []).forEach(s => {
+  if (s.active) byDay.get(s.day_of_week)?.push(s.start_time.slice(0, 5));
+});
 
 const saved = Astro.url.searchParams.get('saved') === '1';
 ---
@@ -31,103 +38,297 @@ const saved = Astro.url.searchParams.get('saved') === '1';
 
   {saved && (
     <div style="background:#f0fdf4;border:1px solid #86efac;color:#15803d;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
-      ✓ Cambio guardado.
+      ✓ Plantilla aplicada correctamente.
     </div>
   )}
 
-  <div style="margin-bottom:1.5rem;">
-    <p style="font-size:0.95rem;color:var(--stone);line-height:1.6;">
-      Activa o desactiva horarios individuales. Los horarios inactivos no aparecen en la agenda pública.
-      Usa <strong>Horario extendido</strong> para agregar horas fuera del rango habitual.
-    </p>
-  </div>
+  <div style="display:grid;grid-template-columns:1fr 340px;gap:1.5rem;align-items:start;">
 
-  <!-- Grid semanal -->
-  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:0.75rem;margin-bottom:2rem;">
-    {DAYS.map(({ n, label }) => {
-      const daySlots = byDay.get(n) ?? [];
-      return (
-        <div class="card" style="padding:1rem;">
-          <p class="label" style="margin-bottom:0.75rem;text-align:center;">{label}</p>
+    <!-- ── Columna izquierda: plantilla ────────────────────── -->
+    <div>
+      <div class="card" style="margin-bottom:1.5rem;">
+        <p class="label" style="margin-bottom:0.25rem;">Plantilla de horario</p>
+        <p style="font-size:0.78rem;color:var(--stone);margin-bottom:1.5rem;line-height:1.5;">
+          Configura el horario base y aplícalo. Se reemplazarán los slots existentes de los días seleccionados.
+        </p>
 
-          <!-- Slots existentes -->
-          <div style="display:flex;flex-direction:column;gap:0.4rem;margin-bottom:0.75rem;min-height:2rem;">
-            {daySlots.length === 0 && (
-              <p style="font-size:0.7rem;color:var(--dust);text-align:center;padding:0.5rem 0;">—</p>
-            )}
-            {daySlots.map(slot => (
-              <div style={`display:flex;align-items:center;justify-content:space-between;gap:0.25rem;padding:0.3rem 0.5rem;border:1px solid ${slot.active ? 'var(--green)' : 'var(--dust)'};background:${slot.active ? '#f0fdf4' : 'var(--sand)'};`}>
-                <span style={`font-size:0.95rem;font-family:'Cormorant Garamond',serif;font-weight:500;${!slot.active ? 'color:var(--stone);text-decoration:line-through;' : ''}`}>
-                  {slot.start_time.slice(0,5)}
-                </span>
-                <div style="display:flex;gap:0.2rem;">
-                  <!-- Toggle activo -->
-                  <form method="POST" action="/api/admin/slots" style="margin:0;">
-                    <input type="hidden" name="action" value="toggle" />
-                    <input type="hidden" name="id" value={slot.id} />
-                    <input type="hidden" name="active" value={String(slot.active)} />
-                    <input type="hidden" name="redirect" value="/admin/horarios?saved=1" />
-                    <button type="submit" title={slot.active ? 'Desactivar' : 'Activar'}
-                      style={`background:none;border:none;cursor:pointer;font-size:0.7rem;padding:0;color:${slot.active ? 'var(--green)' : 'var(--stone)'};`}>
-                      {slot.active ? '●' : '○'}
-                    </button>
-                  </form>
-                  <!-- Eliminar -->
-                  <form method="POST" action="/api/admin/slots" style="margin:0;">
-                    <input type="hidden" name="action" value="delete" />
-                    <input type="hidden" name="id" value={slot.id} />
-                    <input type="hidden" name="redirect" value="/admin/horarios?saved=1" />
-                    <button type="submit" title="Eliminar"
-                      style="background:none;border:none;cursor:pointer;font-size:0.7rem;padding:0;color:var(--dust);"
-                      onclick="return confirm('¿Eliminar este horario?')">
-                      ✕
-                    </button>
-                  </form>
-                </div>
-              </div>
+        <!-- Días activos -->
+        <div style="margin-bottom:1.25rem;">
+          <label class="label" style="display:block;margin-bottom:0.6rem;">Días de atención</label>
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+            {DAYS.map(({ n, short }) => (
+              <button
+                type="button"
+                data-day={n}
+                class="day-chip"
+                style={`padding:0.45rem 0.9rem;border-radius:99px;font-size:0.78rem;font-weight:500;cursor:pointer;border:1.5px solid var(--dust);background:var(--sand);color:var(--stone);transition:all 0.15s;`}
+              >
+                {short}
+              </button>
             ))}
           </div>
-
-          <!-- Agregar hora -->
-          <form method="POST" action="/api/admin/slots" style="display:flex;gap:0.4rem;align-items:center;margin-top:0.25rem;">
-            <input type="hidden" name="action" value="create" />
-            <input type="hidden" name="day_of_week" value={String(n)} />
-            <input type="hidden" name="redirect" value="/admin/horarios?saved=1" />
-            <input type="time" name="start_time" step="300" style="flex:1;min-width:0;" />
-            <button type="submit" class="btn btn-dark btn-sm" style="flex-shrink:0;padding:0.45rem 0.7rem;">+</button>
-          </form>
         </div>
-      );
-    })}
-  </div>
 
-  <!-- Acciones rápidas -->
-  <div class="card" style="max-width:500px;">
-    <p class="label" style="margin-bottom:1rem;">Horario extendido — agregar a varios días a la vez</p>
-    <form method="POST" action="/api/admin/slots/bulk" style="display:flex;flex-direction:column;gap:1rem;">
-      <input type="hidden" name="redirect" value="/admin/horarios?saved=1" />
+        <!-- Rango horario -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem;">
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.4rem;">Hora inicio</label>
+            <input type="time" id="start-time" value="09:00" step="900" />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.4rem;">Hora término</label>
+            <input type="time" id="end-time" value="19:00" step="900" />
+          </div>
+        </div>
 
-      <div>
-        <label class="label" style="margin-bottom:0.4rem;display:block;">Hora a agregar</label>
-        <input type="time" name="start_time" step="300" required />
-      </div>
-
-      <div>
-        <label class="label" style="margin-bottom:0.5rem;display:block;">Días</label>
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-          {DAYS.map(({ n, label }) => (
-            <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;cursor:pointer;">
-              <input type="checkbox" name="days" value={String(n)} style="width:auto;" />
-              {label.slice(0, 2)}
+        <!-- Colación -->
+        <div style="margin-bottom:1.25rem;">
+          <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
+            <label class="label" style="margin:0;cursor:pointer;display:flex;align-items:center;gap:0.5rem;">
+              <input type="checkbox" id="break-toggle" style="width:auto;" />
+              Colación / pausa
             </label>
-          ))}
+          </div>
+          <div id="break-fields" style="display:none;grid-template-columns:1fr 1fr;gap:1rem;">
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.4rem;">Inicio colación</label>
+              <input type="time" id="break-start" value="13:00" step="900" />
+            </div>
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.4rem;">Fin colación</label>
+              <input type="time" id="break-end" value="14:00" step="900" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Intervalo entre citas -->
+        <div style="margin-bottom:1.5rem;">
+          <label class="label" style="display:block;margin-bottom:0.4rem;">Intervalo entre citas</label>
+          <select id="interval" style="width:100%;">
+            <option value="30">Cada 30 minutos</option>
+            <option value="45">Cada 45 minutos</option>
+            <option value="55">Cada 55 minutos</option>
+            <option value="60" selected>Cada 60 minutos (1 hora)</option>
+            <option value="90">Cada 90 minutos</option>
+          </select>
+          <p style="font-size:0.7rem;color:var(--stone);margin-top:0.35rem;">
+            Cada slot es una hora de inicio disponible para agendar.
+          </p>
+        </div>
+
+        <!-- Preview -->
+        <div id="preview-box" style="background:var(--warm);padding:0.75rem 1rem;border-radius:var(--radius);margin-bottom:1.25rem;font-size:0.8rem;color:var(--stone);">
+          <span id="preview-text">Selecciona días para ver el resumen.</span>
+        </div>
+
+        <!-- Slots preview list -->
+        <div id="preview-slots" style="margin-bottom:1.25rem;display:none;">
+          <p class="label" style="margin-bottom:0.6rem;">Slots que se generarán</p>
+          <div id="preview-slots-list" style="display:flex;flex-wrap:wrap;gap:0.35rem;"></div>
+        </div>
+
+        <button id="btn-apply" type="button"
+          style="width:100%;padding:0.85rem;background:var(--ink);color:white;border:none;cursor:pointer;font-family:'Inter',sans-serif;font-size:0.7rem;letter-spacing:0.15em;text-transform:uppercase;border-radius:var(--radius);opacity:0.4;pointer-events:none;transition:opacity 0.2s;">
+          Aplicar plantilla
+        </button>
+
+        <div id="apply-status" style="display:none;margin-top:0.75rem;font-size:0.8rem;text-align:center;"></div>
+      </div>
+    </div>
+
+    <!-- ── Columna derecha: resumen actual ─────────────────── -->
+    <div>
+      <div class="card">
+        <p class="label" style="margin-bottom:1.25rem;">Horario actual</p>
+
+        {DAYS.map(({ n, short }) => {
+          const times = byDay.get(n) ?? [];
+          return (
+            <div style={`padding:0.6rem 0;${n !== 0 ? 'border-bottom:1px solid var(--warm);' : ''}`}>
+              <div style="display:flex;align-items:baseline;gap:0.75rem;">
+                <span style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:var(--stone);width:22px;flex-shrink:0;">
+                  {short}
+                </span>
+                {times.length === 0
+                  ? <span style="font-size:0.75rem;color:var(--dust);">Sin horario</span>
+                  : <div style="display:flex;flex-wrap:wrap;gap:0.25rem;">
+                      {times.map(t => (
+                        <span style="font-size:0.72rem;background:var(--warm);padding:0.2rem 0.45rem;border-radius:3px;color:var(--ink);">{t}</span>
+                      ))}
+                    </div>
+                }
+              </div>
+            </div>
+          );
+        })}
+
+        <div style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--dust);">
+          <p style="font-size:0.72rem;color:var(--stone);">
+            Total slots activos: <strong style="color:var(--ink);">{(slots ?? []).filter(s => s.active).length}</strong>
+          </p>
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.25rem;">
+            Para bloquear días específicos → <a href="/admin/bloqueos" style="color:var(--forest);">Bloqueos</a>
+          </p>
         </div>
       </div>
+    </div>
 
-      <button type="submit" class="btn btn-dark">
-        Agregar a días seleccionados
-      </button>
-    </form>
   </div>
 
 </AdminLayout>
+
+<script>
+const DAYS_ORDER = [1,2,3,4,5,6,0]; // Lu-Do
+const selectedDays = new Set<number>([1,2,3,4,5]); // Lu-Vi por defecto
+
+// Activar Lu-Vi por defecto
+document.querySelectorAll<HTMLButtonElement>('.day-chip').forEach(btn => {
+  const day = parseInt(btn.dataset.day!);
+  if (selectedDays.has(day)) activateChip(btn, true);
+  btn.addEventListener('click', () => {
+    if (selectedDays.has(day)) {
+      selectedDays.delete(day);
+      activateChip(btn, false);
+    } else {
+      selectedDays.add(day);
+      activateChip(btn, true);
+    }
+    updatePreview();
+  });
+});
+
+function activateChip(btn: HTMLButtonElement, on: boolean) {
+  btn.style.background = on ? 'var(--ink)' : 'var(--sand)';
+  btn.style.color = on ? 'white' : 'var(--stone)';
+  btn.style.borderColor = on ? 'var(--ink)' : 'var(--dust)';
+}
+
+// Colación toggle
+const breakToggle = document.getElementById('break-toggle') as HTMLInputElement;
+const breakFields = document.getElementById('break-fields') as HTMLElement;
+breakToggle.addEventListener('change', () => {
+  breakFields.style.display = breakToggle.checked ? 'grid' : 'none';
+  updatePreview();
+});
+
+// Escuchar cambios en todos los inputs
+['start-time','end-time','break-start','break-end','interval'].forEach(id => {
+  document.getElementById(id)?.addEventListener('change', updatePreview);
+});
+
+function toMin(t: string) {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+function toLabel(min: number) {
+  return `${String(Math.floor(min/60)).padStart(2,'0')}:${String(min%60).padStart(2,'0')}`;
+}
+
+function generateSlots(): string[] {
+  const start   = toMin((document.getElementById('start-time') as HTMLInputElement).value || '09:00');
+  const end     = toMin((document.getElementById('end-time') as HTMLInputElement).value || '19:00');
+  const interval= parseInt((document.getElementById('interval') as HTMLSelectElement).value || '60');
+  const useBreak = breakToggle.checked;
+  const bs = useBreak ? toMin((document.getElementById('break-start') as HTMLInputElement).value || '13:00') : null;
+  const be = useBreak ? toMin((document.getElementById('break-end')   as HTMLInputElement).value || '14:00') : null;
+
+  const slots: string[] = [];
+  let cur = start;
+  while (cur < end) {
+    const inBreak = bs !== null && be !== null && cur >= bs && cur < be;
+    if (!inBreak) slots.push(toLabel(cur));
+    cur += interval;
+  }
+  return slots;
+}
+
+function updatePreview() {
+  const previewText  = document.getElementById('preview-text')!;
+  const previewBox   = document.getElementById('preview-box')!;
+  const previewSlots = document.getElementById('preview-slots')!;
+  const slotsList    = document.getElementById('preview-slots-list')!;
+  const applyBtn     = document.getElementById('btn-apply') as HTMLButtonElement;
+
+  if (selectedDays.size === 0) {
+    previewText.textContent = 'Selecciona al menos un día.';
+    previewBox.style.background = 'var(--warm)';
+    applyBtn.style.opacity = '0.4';
+    applyBtn.style.pointerEvents = 'none';
+    previewSlots.style.display = 'none';
+    return;
+  }
+
+  const slotsPerDay = generateSlots();
+  const total = slotsPerDay.length * selectedDays.size;
+
+  const DAY_NAMES: Record<number,string> = {0:'Dom',1:'Lu',2:'Ma',3:'Mi',4:'Ju',5:'Vi',6:'Sá'};
+  const dayNames = [...selectedDays].sort((a,b)=> {
+    const order = [1,2,3,4,5,6,0];
+    return order.indexOf(a) - order.indexOf(b);
+  }).map(d => DAY_NAMES[d]).join(', ');
+
+  previewText.textContent = `${dayNames} · ${slotsPerDay.length} slots/día · ${total} slots totales`;
+  previewBox.style.background = total > 0 ? '#f0fdf4' : '#fef2f2';
+
+  // Mostrar slots de ejemplo (un día)
+  slotsList.innerHTML = slotsPerDay.map(t =>
+    `<span style="font-size:0.72rem;background:var(--warm);padding:0.2rem 0.45rem;border-radius:3px;color:var(--ink);">${t}</span>`
+  ).join('');
+  previewSlots.style.display = slotsPerDay.length > 0 ? 'block' : 'none';
+
+  applyBtn.style.opacity = total > 0 ? '1' : '0.4';
+  applyBtn.style.pointerEvents = total > 0 ? 'auto' : 'none';
+}
+
+// Aplicar plantilla
+document.getElementById('btn-apply')?.addEventListener('click', async () => {
+  if (selectedDays.size === 0) return;
+
+  const status = document.getElementById('apply-status')!;
+  const applyBtn = document.getElementById('btn-apply') as HTMLButtonElement;
+
+  applyBtn.textContent = 'Aplicando...';
+  applyBtn.style.opacity = '0.7';
+  applyBtn.style.pointerEvents = 'none';
+  status.style.display = 'none';
+
+  const useBreak = breakToggle.checked;
+  const payload = {
+    days: [...selectedDays],
+    start_time: (document.getElementById('start-time') as HTMLInputElement).value,
+    end_time:   (document.getElementById('end-time')   as HTMLInputElement).value,
+    break_start: useBreak ? (document.getElementById('break-start') as HTMLInputElement).value : undefined,
+    break_end:   useBreak ? (document.getElementById('break-end')   as HTMLInputElement).value : undefined,
+    interval: parseInt((document.getElementById('interval') as HTMLSelectElement).value),
+  };
+
+  try {
+    const res = await fetch('/api/admin/slots/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      window.location.href = '/admin/horarios?saved=1';
+    } else {
+      status.textContent = '⚠ ' + (data.error ?? 'Error desconocido.');
+      status.style.display = 'block';
+      status.style.color = '#ef4444';
+      applyBtn.textContent = 'Aplicar plantilla';
+      applyBtn.style.opacity = '1';
+      applyBtn.style.pointerEvents = 'auto';
+    }
+  } catch {
+    status.textContent = '⚠ Error de conexión.';
+    status.style.display = 'block';
+    status.style.color = '#ef4444';
+    applyBtn.textContent = 'Aplicar plantilla';
+    applyBtn.style.opacity = '1';
+    applyBtn.style.pointerEvents = 'auto';
+  }
+});
+
+// Inicializar preview
+updatePreview();
+</script>
