@@ -1,7 +1,6 @@
 ---
 export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { pricingPlans } from '../data/services';
 import { supabase } from '../lib/supabase';
 
 const formatCLP = (n: number) =>
@@ -16,33 +15,12 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
 // Pre-selección de grupo desde URL (ej: /agenda?grupo=individual)
 const grupoParam = Astro.url.searchParams.get('grupo') ?? null; // 'individual' | 'pareja' | null
 
-// Precio y duración real por session_type desde services_catalog
 const { data: catalogServices } = await supabase
   .from('services_catalog')
-  .select('type, modality, price, duration_min, price_online, price_presencial, duration_min_online, duration_min_presencial')
+  .select('id, name, description, type, modality, price, duration_min, price_online, price_presencial, duration_min_online, duration_min_presencial')
   .eq('visible', true)
-  .order('duration_min');
-
-const durationByType: Record<string, number> = {
-  'online': 50, 'presencial': 50, 'pareja-online': 60, 'pareja-presencial': 60,
-};
-const priceByType: Record<string, number> = {};
-
-(catalogServices ?? []).forEach((s: { type: string; modality: string; price: number; duration_min: number; price_online?: number | null; price_presencial?: number | null; duration_min_online?: number | null; duration_min_presencial?: number | null }) => {
-  if (s.modality === 'ambos') {
-    const durOnline     = s.duration_min_online     ?? s.duration_min;
-    const durPresencial = s.duration_min_presencial ?? s.duration_min;
-    const priceOnline   = s.price_online     ?? s.price;
-    const pricePres     = s.price_presencial ?? s.price;
-    const keyOnline     = s.type === 'individual' ? 'online'     : 'pareja-online';
-    const keyPresencial = s.type === 'individual' ? 'presencial' : 'pareja-presencial';
-    if (keyOnline     in durationByType) { durationByType[keyOnline]     = durOnline;     priceByType[keyOnline]     = priceOnline; }
-    if (keyPresencial in durationByType) { durationByType[keyPresencial] = durPresencial; priceByType[keyPresencial] = pricePres; }
-  } else {
-    const key = s.type === 'individual' ? s.modality : `pareja-${s.modality}`;
-    if (key in durationByType) { durationByType[key] = s.duration_min; priceByType[key] = s.price; }
-  }
-});
+  .order('sort_order')
+  .order('created_at');
 ---
 
 <BaseLayout
@@ -116,27 +94,12 @@ const priceByType: Record<string, number> = {};
           </button>
         </div>
 
-        <!-- 1b: Elegir modalidad (Online / Presencial) — aparece al elegir grupo -->
-        <div id="modality-selection" class="hidden mt-10">
+        <!-- 1b: Elegir servicio — aparece al elegir grupo -->
+        <div id="service-selection" class="hidden mt-10">
           <button type="button" id="back-to-group" class="label text-stone hover:text-ink transition-colors mb-6 flex items-center gap-2">← Volver</button>
-          <h2 class="font-heading font-light text-3xl text-ink mb-2">¿Online o presencial?</h2>
-          <p id="modality-subtitle" class="font-body text-sm text-stone mb-8"></p>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
-            <button type="button" class="modality-card bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer" data-modality="online">
-              <p class="label text-forest mb-3">Desde cualquier lugar</p>
-              <p class="font-heading font-semibold text-2xl text-ink mb-1">Online</p>
-              <p id="price-online" class="font-heading font-light text-xl text-ink mb-3"></p>
-              <div class="h-px bg-dust my-3"></div>
-              <p class="font-body text-sm text-stone">Videollamada · Zoom o Meet</p>
-            </button>
-            <button type="button" class="modality-card bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer" data-modality="presencial">
-              <p class="label text-gold mb-3">Más solicitado</p>
-              <p class="font-heading font-semibold text-2xl text-ink mb-1">Presencial</p>
-              <p id="price-presencial" class="font-heading font-light text-xl text-ink mb-3"></p>
-              <div class="h-px bg-dust my-3"></div>
-              <p class="font-body text-sm text-stone">Vitacura · Las Condes · La Reina</p>
-            </button>
-          </div>
+          <h2 class="font-heading font-light text-3xl text-ink mb-2">¿Qué tipo de sesión necesitas?</h2>
+          <p id="service-subtitle" class="font-body text-sm text-stone mb-8"></p>
+          <div id="service-cards" class="flex flex-col gap-4 max-w-2xl"></div>
         </div>
       </div>
 
@@ -340,22 +303,23 @@ const priceByType: Record<string, number> = {};
   }
 </style>
 
-<script define:vars={{ plans: JSON.stringify(pricingPlans), preselectedGroup: grupoParam, durationByType, priceByType }}>
+<script define:vars={{ catalogServicesRaw: JSON.stringify(catalogServices ?? []), preselectedGroup: grupoParam }}>
   // ─── Estado ───────────────────────────────────────────────────────────────
   const state = {
-    step: 1,
-    sessionType: null,
-    sessionTitle: null,
-    sessionPrice: null,
-    selectedDate: null,   // 'YYYY-MM-DD'
-    selectedTime: null,   // 'HH:MM'
-    calendarYear: null,
-    calendarMonth: null,
-    availableDates: new Set(), // días con slots
-    loadedSlots: {},           // { 'YYYY-MM-DD': ['09:00', ...] }
+    step:            1,
+    serviceId:       null,
+    modalityChoice:  null,
+    sessionTitle:    null,
+    sessionPrice:    null,
+    sessionDuration: null,
+    selectedDate:    null,  // 'YYYY-MM-DD'
+    selectedTime:    null,  // 'HH:MM'
+    calendarYear:    null,
+    calendarMonth:   null,
+    loadedSlots:     {},    // { 'YYYY-MM-DD': ['09:00', ...] }
   };
 
-  const pricingPlans = JSON.parse(plans);
+  const catalogServices = JSON.parse(catalogServicesRaw);
 
   const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -410,106 +374,131 @@ const priceByType: Record<string, number> = {};
     }
   }
 
-  // ─── PASO 1: Grupo → Modalidad → Paso 2 ─────────────────────────────────
+  // ─── PASO 1: Grupo → Servicio → Paso 2 ──────────────────────────────────
   let selectedGroup = null; // 'individual' | 'pareja'
 
-  // Función para activar un grupo programáticamente
-  function catalogPrices(group) {
-    const keyOnline = group === 'pareja' ? 'pareja-online'     : 'online';
-    const keyPres   = group === 'pareja' ? 'pareja-presencial' : 'presencial';
-    const durOnline = (durationByType[keyOnline] ?? 50) + ' minutos';
-    const durPres   = (durationByType[keyPres]   ?? 50) + ' minutos';
-    return {
-      online:     priceByType[keyOnline] ?? (group === 'pareja' ? 60000 : 45000),
-      presencial: priceByType[keyPres]   ?? (group === 'pareja' ? 70000 : 55000),
-      durationOnline:     durOnline,
-      durationPresencial: durPres,
-    };
+  function renderServiceCards(group) {
+    const container = $('service-cards');
+    if (!container) return;
+    const services = catalogServices.filter((s) => s.type === group);
+    container.innerHTML = '';
+
+    if (!services.length) {
+      container.innerHTML = '<p class="font-body text-sm text-stone py-4">No hay servicios disponibles.</p>';
+      return;
+    }
+
+    services.forEach((svc) => {
+      const card = document.createElement('div');
+      card.className = 'bg-white border border-dust p-8 transition-all duration-200';
+
+      if (svc.modality === 'ambos') {
+        const priceOnline = svc.price_online     ?? svc.price;
+        const pricePres   = svc.price_presencial ?? svc.price;
+        const durOnline   = svc.duration_min_online     ?? svc.duration_min ?? 50;
+        const durPres     = svc.duration_min_presencial ?? svc.duration_min ?? 50;
+
+        card.innerHTML = `
+          <p class="font-heading font-semibold text-xl text-ink mb-1">${svc.name}</p>
+          ${svc.description ? `<p class="font-body text-sm text-stone mb-5 leading-relaxed">${svc.description}</p>` : '<div class="mb-5"></div>'}
+          <div class="h-px bg-dust mb-5"></div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button type="button" class="svc-opt-btn text-left border border-dust p-5 bg-sand hover:bg-warm hover:border-forest/40 transition-all cursor-pointer"
+                    data-svc-id="${svc.id}" data-modality="online" data-price="${priceOnline}" data-dur="${durOnline}" data-title="${svc.name}">
+              <p class="label text-forest mb-2">Online</p>
+              <p class="font-heading font-semibold text-xl text-ink">${formatCLP(priceOnline)}</p>
+              <p class="font-body text-xs text-stone mt-1">${durOnline} min · Videollamada</p>
+            </button>
+            <button type="button" class="svc-opt-btn text-left border border-dust p-5 bg-sand hover:bg-warm hover:border-forest/40 transition-all cursor-pointer"
+                    data-svc-id="${svc.id}" data-modality="presencial" data-price="${pricePres}" data-dur="${durPres}" data-title="${svc.name}">
+              <p class="label text-gold mb-2">Presencial</p>
+              <p class="font-heading font-semibold text-xl text-ink">${formatCLP(pricePres)}</p>
+              <p class="font-body text-xs text-stone mt-1">${durPres} min · Vitacura · Las Condes</p>
+            </button>
+          </div>
+        `;
+      } else {
+        const price    = svc.price;
+        const dur      = svc.duration_min ?? 50;
+        const tagColor = svc.modality === 'online' ? 'text-forest' : 'text-gold';
+        const tagText  = svc.modality === 'online' ? 'Online' : 'Presencial';
+        const modLabel = svc.modality === 'online' ? 'Videollamada · Zoom o Meet' : 'Vitacura · Las Condes · La Reina';
+
+        card.className += ' cursor-pointer hover:border-forest/40 hover:bg-warm';
+        card.innerHTML = `
+          <p class="label ${tagColor} mb-2">${tagText}</p>
+          <p class="font-heading font-semibold text-2xl text-ink mb-1">${svc.name}</p>
+          ${svc.description ? `<p class="font-body text-sm text-stone mb-4 leading-relaxed">${svc.description}</p>` : '<div class="mb-4"></div>'}
+          <div class="h-px bg-dust my-4"></div>
+          <p class="font-heading font-light text-xl text-ink">${formatCLP(price)} · ${dur} min</p>
+          <p class="font-body text-xs text-stone mt-1">${modLabel}</p>
+        `;
+        card.addEventListener('click', () =>
+          selectService(svc.id, svc.modality, price, dur, svc.name)
+        );
+      }
+
+      container.appendChild(card);
+    });
+
+    container.querySelectorAll('.svc-opt-btn').forEach((btn) => {
+      btn.addEventListener('click', () =>
+        selectService(btn.dataset.svcId, btn.dataset.modality, parseInt(btn.dataset.price), parseInt(btn.dataset.dur), btn.dataset.title)
+      );
+    });
+  }
+
+  function selectService(serviceId, modality, price, duration, name) {
+    state.serviceId       = serviceId;
+    state.modalityChoice  = modality;
+    state.sessionPrice    = price;
+    state.sessionDuration = duration;
+    state.sessionTitle    = name + (modality === 'online' ? ' Online' : ' Presencial');
+    state.loadedSlots     = {};
+
+    updateMotivoSelect(selectedGroup);
+
+    const now = new Date();
+    state.calendarYear  = now.getFullYear();
+    state.calendarMonth = now.getMonth();
+
+    goToStep(2);
+    renderCalendar();
   }
 
   function activateGroup(group) {
     selectedGroup = group;
-    const p = catalogPrices(group);
-    if ($('price-online'))     $('price-online').textContent     = formatCLP(p.online)     + ' · ' + p.durationOnline;
-    if ($('price-presencial')) $('price-presencial').textContent = formatCLP(p.presencial) + ' · ' + p.durationPresencial;
-    if ($('modality-subtitle')) $('modality-subtitle').textContent = group === 'individual'
-      ? 'Sesión Individual — elige cómo quieres conectar'
-      : 'Sesión de Pareja — elige cómo quieren conectar';
+    if ($('service-subtitle')) $('service-subtitle').textContent = group === 'individual'
+      ? 'Sesión Individual — elige el tipo de terapia'
+      : 'Sesión de Pareja — elige el tipo de terapia';
     $('group-selection')?.classList.add('hidden');
-    $('modality-selection')?.classList.remove('hidden');
+    $('service-selection')?.classList.remove('hidden');
+    renderServiceCards(group);
   }
 
-  // Si viene con grupo pre-seleccionado desde la página de servicios → saltar paso 1a
   if (preselectedGroup === 'individual' || preselectedGroup === 'pareja') {
     activateGroup(preselectedGroup);
   }
 
   document.querySelectorAll('.group-card').forEach((btn) => {
     btn.addEventListener('click', () => {
-      selectedGroup = btn.dataset.group;
-
-      // Marcar seleccionado
       document.querySelectorAll('.group-card').forEach((b) => b.classList.remove('border-forest', 'bg-warm'));
       btn.classList.add('border-forest', 'bg-warm');
-
-      // Mostrar precios según grupo
-      const p = catalogPrices(selectedGroup);
-      $('price-online').textContent     = formatCLP(p.online)     + ' · ' + p.durationOnline;
-      $('price-presencial').textContent = formatCLP(p.presencial) + ' · ' + p.durationPresencial;
-      $('modality-subtitle').textContent = selectedGroup === 'individual'
-        ? 'Sesión Individual — elige cómo quieres conectar'
-        : 'Sesión de Pareja — elige cómo quieren conectar';
-
-      // Mostrar selección de modalidad
-      $('group-selection').classList.add('hidden');
-      $('modality-selection').classList.remove('hidden');
+      activateGroup(btn.dataset.group);
     });
   });
 
   $('back-to-group')?.addEventListener('click', () => {
     if (preselectedGroup) {
-      // Vino desde servicios → volver a servicios
       window.location.href = '/servicios';
     } else {
-      $('modality-selection').classList.add('hidden');
+      $('service-selection').classList.add('hidden');
       $('group-selection').classList.remove('hidden');
+      selectedGroup = null;
     }
   });
 
-  document.querySelectorAll('.modality-card').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const modality = btn.dataset.modality; // 'online' | 'presencial'
-      const typeId   = selectedGroup === 'pareja' ? `pareja-${modality}` : modality;
-      const plan     = pricingPlans.find((p) => p.id === typeId);
-      if (!plan) return;
-
-      state.sessionType     = plan.id;
-      state.sessionTitle    = plan.title;
-      state.sessionPrice    = priceByType[plan.id] ?? plan.price;
-      state.sessionDuration = durationByType[plan.id] ?? 50;
-      state.loadedSlots     = {}; // limpiar caché al cambiar tipo
-
-      // Marcar seleccionado visualmente
-      document.querySelectorAll('.modality-card').forEach((b) => b.classList.remove('border-forest', 'bg-warm'));
-      btn.classList.add('border-forest', 'bg-warm');
-
-      // Actualizar motivos de consulta según grupo
-      updateMotivoSelect(selectedGroup);
-
-      // Iniciar calendario en mes actual
-      const now = new Date();
-      state.calendarYear  = now.getFullYear();
-      state.calendarMonth = now.getMonth();
-
-      goToStep(2);
-      renderCalendar();
-    });
-  });
-
   $('back-to-1')?.addEventListener('click', () => {
-    // Al volver al paso 1, resetear selección de grupo
-    $('modality-selection').classList.add('hidden');
-    $('group-selection').classList.remove('hidden');
     goToStep(1);
   });
   $('back-to-2')?.addEventListener('click', () => goToStep(2));
@@ -708,10 +697,9 @@ const priceByType: Record<string, number> = {};
   }
 
   function buildBookingSummary() {
-    const sessionLabel = { online: 'Sesión Online', presencial: 'Sesión Presencial', pareja: 'Sesión de Pareja' }[state.sessionType] ?? state.sessionTitle;
     $('booking-summary').innerHTML = `
       <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        <span class="text-muted">Sesión:</span>     <span class="font-medium">${sessionLabel}</span>
+        <span class="text-muted">Sesión:</span>     <span class="font-medium">${state.sessionTitle}</span>
         <span class="text-muted">Fecha:</span>       <span class="font-medium">${formatDateEs(state.selectedDate)}</span>
         <span class="text-muted">Hora:</span>        <span class="font-medium">${state.selectedTime}</span>
         <span class="text-muted">Valor:</span>       <span class="font-medium text-primary">${formatCLP(state.sessionPrice)}</span>
@@ -756,12 +744,13 @@ const priceByType: Record<string, number> = {};
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session_type:  state.sessionType,
-          session_date:  state.selectedDate,
-          session_time:  state.selectedTime,
-          patient_name:  name,
-          patient_email: email,
-          patient_phone: phone,
+          service_id:      state.serviceId,
+          modality_choice: state.modalityChoice,
+          session_date:    state.selectedDate,
+          session_time:    state.selectedTime,
+          patient_name:    name,
+          patient_email:   email,
+          patient_phone:   phone,
           notes,
         }),
       });

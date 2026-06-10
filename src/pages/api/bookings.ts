@@ -1,20 +1,10 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
 import { createPaymentOrder } from '../../lib/flow';
-import { pricingPlans } from '../../data/services';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
 import { logInfo, logWarn, logError } from '../../lib/logger';
 
 export const prerender = false;
-
-const SESSION_LABELS: Record<string, string> = {
-  'online':            'Sesión Individual Online',
-  'presencial':        'Sesión Individual Presencial',
-  'pareja-online':     'Sesión de Pareja Online',
-  'pareja-presencial': 'Sesión de Pareja Presencial',
-};
-
-const VALID_TYPES = Object.keys(SESSION_LABELS);
 
 // ─── POST /api/bookings ───────────────────────────────────────────────────────
 // Crea una reserva en BD (status=pending_payment) y devuelve la URL de pago de Flow
@@ -38,7 +28,8 @@ async function handleBooking(request: Request) {
   }
 
   const {
-    session_type,
+    service_id,
+    modality_choice,
     session_date,
     session_time,
     patient_name,
@@ -48,12 +39,12 @@ async function handleBooking(request: Request) {
   } = body as Record<string, string>;
 
   // ── Validación ───────────────────────────────────────────────────────────────
-  if (!session_type || !session_date || !session_time || !patient_name || !patient_email || !patient_phone) {
+  if (!service_id || !modality_choice || !session_date || !session_time || !patient_name || !patient_email || !patient_phone) {
     return json({ error: 'Faltan campos obligatorios.' }, 400);
   }
 
-  if (!VALID_TYPES.includes(session_type)) {
-    return json({ error: 'Tipo de sesión inválido.' }, 400);
+  if (!['online', 'presencial'].includes(modality_choice)) {
+    return json({ error: 'Modalidad inválida.' }, 400);
   }
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(session_date) || !/^\d{2}:\d{2}$/.test(session_time)) {
@@ -84,78 +75,53 @@ async function handleBooking(request: Request) {
     return json({ error: 'Ese horario ya fue reservado. Por favor elige otro.' }, 409);
   }
 
-  // ── Cargar settings primero ──────────────────────────────────────────────────
+  // ── Cargar settings ──────────────────────────────────────────────────────────
   const { data: settingsRows } = await supabase.from('settings').select('key, value');
   const settings: Record<string, string> = {};
   (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
 
-  // ── Buscar precio y duración desde services_catalog ────────────────────────
-  const plan = pricingPlans.find((p) => p.id === session_type);
-  if (!plan) return json({ error: 'Plan no encontrado.' }, 400);
+  // ── Buscar servicio por ID ────────────────────────────────────────────────────
+  const { data: svc, error: svcErr } = await supabase
+    .from('services_catalog')
+    .select('*')
+    .eq('id', service_id)
+    .eq('visible', true)
+    .single();
 
-  const typeMap: Record<string, { type: string; modality: string }> = {
-    'online':            { type: 'individual', modality: 'online' },
-    'presencial':        { type: 'individual', modality: 'presencial' },
-    'pareja-online':     { type: 'pareja',     modality: 'online' },
-    'pareja-presencial': { type: 'pareja',     modality: 'presencial' },
-  };
-  const typeInfo = typeMap[session_type];
-
-  let durationMin   = 50;
-  let catalogPrice: number | null = null;
-
-  if (typeInfo) {
-    // select('*') evita errores si las columnas nuevas aún no existen en DB
-    const { data: svcs, error: svcsErr } = await supabase
-      .from('services_catalog')
-      .select('*')
-      .eq('type', typeInfo.type)
-      .in('modality', [typeInfo.modality, 'ambos'])
-      .eq('visible', true)
-      .order('sort_order');
-
-    if (svcsErr) {
-      await logError('bookings', 'Error buscando servicio en catálogo', { error: svcsErr.message, session_type });
-    }
-
-    const list = svcs ?? [];
-    const priceCol = typeInfo.modality === 'online' ? 'price_online' : 'price_presencial';
-    const durCol   = typeInfo.modality === 'online' ? 'duration_min_online' : 'duration_min_presencial';
-
-    // Prioridad: 1) modalidad exacta  2) "ambos" con la columna de precio específica rellena  3) cualquier "ambos"
-    const svc = list.find((s: any) => s.modality === typeInfo.modality)
-             ?? list.find((s: any) => s.modality === 'ambos' && s[priceCol] != null)
-             ?? list.find((s: any) => s.modality === 'ambos')
-             ?? null;
-
-    if (svc) {
-      if (svc.modality === 'ambos') {
-        durationMin  = svc[durCol]             ?? svc.duration_min ?? 50;
-        catalogPrice = svc[priceCol] ?? svc.price ?? null;
-      } else {
-        durationMin  = svc.duration_min ?? 50;
-        catalogPrice = svc.price        ?? null;
-      }
-      await logInfo('bookings', 'Servicio encontrado', {
-        session_type,
-        servicio: svc.name,
-        modality: svc.modality,
-        [priceCol]: svc[priceCol],
-        price: svc.price,
-        catalogPrice,
-        durationMin,
-      });
-    } else {
-      await logWarn('bookings', 'Ningún servicio encontrado en catálogo', { session_type, typeInfo });
-    }
+  if (svcErr || !svc) {
+    await logError('bookings', 'Servicio no encontrado', { service_id, error: svcErr?.message });
+    return json({ error: 'Servicio no encontrado.' }, 400);
   }
 
-  const finalPrice = (catalogPrice && catalogPrice > 0) ? catalogPrice : plan.price;
-  await logInfo('bookings', 'Precio final calculado', { session_type, catalogPrice, finalPrice });
+  // Derivar session_type para la tabla bookings (compatibilidad admin)
+  const session_type = svc.type === 'pareja'
+    ? `pareja-${modality_choice}`
+    : modality_choice;
+
+  // Precio y duración según modalidad elegida
+  let finalPrice: number;
+  let durationMin: number;
+
+  if (svc.modality === 'ambos') {
+    finalPrice  = modality_choice === 'online'
+      ? (svc.price_online     ?? svc.price)
+      : (svc.price_presencial ?? svc.price);
+    durationMin = modality_choice === 'online'
+      ? (svc.duration_min_online     ?? svc.duration_min ?? 50)
+      : (svc.duration_min_presencial ?? svc.duration_min ?? 50);
+  } else {
+    finalPrice  = svc.price;
+    durationMin = svc.duration_min ?? 50;
+  }
+
+  await logInfo('bookings', 'Servicio y precio', {
+    service_id, name: svc.name, modality_choice, session_type, finalPrice, durationMin,
+  });
 
   // ── Crear reserva en Supabase ────────────────────────────────────────────────
   const bookingPayload: Record<string, unknown> = {
     session_type,
+    service_id,
     session_date,
     session_time,
     patient_name:   patient_name.trim(),
@@ -177,13 +143,18 @@ async function handleBooking(request: Request) {
 
   let { data: bookingData, error: insertError } = await tryInsert(bookingPayload);
 
-  // Si falla por columna inexistente, reintentar sin duration_min
+  // Si falla por columna inexistente, reintentar quitando columnas opcionales
   if (insertError?.code === '42703') {
-    await logWarn('bookings', 'Columna duration_min no existe, reintentando sin ella', { error: insertError.message });
-    const { duration_min, ...payloadWithoutDur } = bookingPayload;
-    const retry = await tryInsert(payloadWithoutDur);
-    bookingData  = retry.data;
-    insertError  = retry.error;
+    await logWarn('bookings', 'Columna desconocida, reintentando sin columnas opcionales', { error: insertError.message });
+    const { duration_min, ...withoutDur } = bookingPayload;
+    let retry = await tryInsert(withoutDur);
+    if (retry.error?.code === '42703') {
+      // service_id column also missing
+      const { service_id: _sid, ...withoutBoth } = withoutDur as Record<string, unknown>;
+      retry = await tryInsert(withoutBoth);
+    }
+    bookingData = retry.data;
+    insertError = retry.error;
   }
 
   if (insertError || !bookingData) {
@@ -256,7 +227,7 @@ async function handleBooking(request: Request) {
   let flowOrder;
   try {
     flowOrder = await createPaymentOrder({
-      subject:         `${SESSION_LABELS[session_type]} — Ps. Valentina Orellana`,
+      subject:         `${svc.name} — Ps. Valentina Orellana`,
       amount:          finalPrice,
       email:           patient_email.trim().toLowerCase(),
       orderId:         booking.id,
