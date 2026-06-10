@@ -6,7 +6,7 @@ export const prerender = false;
 export const POST: APIRoute = async ({ request, redirect }) => {
   const form   = await request.formData();
   const action = form.get('action')?.toString();
-  const dest   = '/admin/bloqueos';
+  const dest   = form.get('_redirect')?.toString() ?? '/admin/horarios';
 
   // ── Quitar bloqueo ────────────────────────────────────────────────────────
   if (action === 'delete') {
