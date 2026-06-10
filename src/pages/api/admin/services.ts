@@ -19,33 +19,55 @@ export const POST: APIRoute = async ({ request }) => {
     const durOnline       = parseInt(get('duration_min_online') ?? '50') || 50;
     const durPresencial   = parseInt(get('duration_min_presencial') ?? '50') || 50;
 
-    const data = {
-      name:                   get('name')!,
-      description:            get('description'),
-      type:                   get('type') ?? 'individual',
+    // Para "ambos": price = presencial como columna principal (fallback para bookings sin migration)
+    const mainPrice = isAmbos ? (pricePresencial || priceOnline) : (parseInt(get('price') ?? '0') || 0);
+    const mainDur   = isAmbos ? (durPresencial || durOnline)     : (parseInt(get('duration_min') ?? '50') || 50);
+
+    const data: Record<string, unknown> = {
+      name:                    get('name')!,
+      description:             get('description'),
+      type:                    get('type') ?? 'individual',
       modality,
-      location:               get('location'),
-      // Precio/duración principal (fallback para módulos que solo lean price/duration_min)
-      price:                  isAmbos ? priceOnline  : (parseInt(get('price') ?? '0') || 0),
-      duration_min:           isAmbos ? durOnline    : (parseInt(get('duration_min') ?? '50') || 50),
-      // Columnas específicas por modalidad (solo para "ambos")
-      price_online:           isAmbos ? priceOnline     : null,
-      price_presencial:       isAmbos ? pricePresencial : null,
-      duration_min_online:    isAmbos ? durOnline        : null,
-      duration_min_presencial: isAmbos ? durPresencial   : null,
-      visible:      form.get('visible') === 'on',
-      show_home:    form.get('show_home') === 'on',
-      image_url:    get('image_url'),
-      sort_order:   parseInt(get('sort_order') ?? '0'),
+      location:                get('location'),
+      price:                   mainPrice,
+      duration_min:            mainDur,
+      price_online:            isAmbos ? priceOnline     : null,
+      price_presencial:        isAmbos ? pricePresencial : null,
+      duration_min_online:     isAmbos ? durOnline        : null,
+      duration_min_presencial: isAmbos ? durPresencial    : null,
+      visible:                 form.get('visible') === 'on',
+      show_home:               form.get('show_home') === 'on',
+      image_url:               get('image_url'),
+      sort_order:              parseInt(get('sort_order') ?? '0'),
+    };
+
+    // Columnas que requieren la migration SQL
+    const newCols = ['price_online', 'price_presencial', 'duration_min_online', 'duration_min_presencial'];
+    const basicData = Object.fromEntries(Object.entries(data).filter(([k]) => !newCols.includes(k)));
+
+    const saveRow = async (payload: Record<string, unknown>, id?: string) => {
+      const op = id
+        ? supabase.from('services_catalog').update(payload).eq('id', id)
+        : supabase.from('services_catalog').insert(payload);
+      const { error } = await op;
+      if (error) {
+        if (error.code === '42703') {
+          // Columnas nuevas no existen todavía → guardar sin ellas (SQL migration pendiente)
+          const op2 = id
+            ? supabase.from('services_catalog').update(basicData).eq('id', id)
+            : supabase.from('services_catalog').insert(basicData);
+          const { error: e2 } = await op2;
+          if (e2) console.error('[services] save fallback:', e2.message);
+        } else {
+          console.error('[services] save:', error.message);
+        }
+      }
     };
 
     if (action === 'create') {
-      const { error } = await supabase.from('services_catalog').insert(data);
-      if (error) console.error('[services] create:', error.message);
+      await saveRow(data);
     } else {
-      const id = get('id')!;
-      const { error } = await supabase.from('services_catalog').update(data).eq('id', id);
-      if (error) console.error('[services] update:', error.message);
+      await saveRow(data, get('id')!);
     }
   }
 
