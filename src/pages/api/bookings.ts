@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { createPaymentOrder } from '../../lib/flow';
 import { pricingPlans } from '../../data/services';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
+import { logInfo, logWarn, logError } from '../../lib/logger';
 
 export const prerender = false;
 
@@ -107,7 +108,9 @@ async function handleBooking(request: Request) {
       .eq('visible', true)
       .order('sort_order');
 
-    if (svcsErr) console.warn('[bookings] service lookup:', svcsErr.message);
+    if (svcsErr) {
+      logError('bookings', 'Error buscando servicio en catálogo', { error: svcsErr.message, session_type });
+    }
 
     const list = svcs ?? [];
     const priceCol = typeInfo.modality === 'online' ? 'price_online' : 'price_presencial';
@@ -121,18 +124,28 @@ async function handleBooking(request: Request) {
 
     if (svc) {
       if (svc.modality === 'ambos') {
-        // Usar columna específica (price_online / price_presencial) si existe,
-        // si no caer a la columna price principal (servicios guardados antes del dual-price)
         durationMin  = svc[durCol]             ?? svc.duration_min ?? 50;
         catalogPrice = svc[priceCol] ?? svc.price ?? null;
       } else {
         durationMin  = svc.duration_min ?? 50;
         catalogPrice = svc.price        ?? null;
       }
+      logInfo('bookings', 'Servicio encontrado', {
+        session_type,
+        servicio: svc.name,
+        modality: svc.modality,
+        [priceCol]: svc[priceCol],
+        price: svc.price,
+        catalogPrice,
+        durationMin,
+      });
+    } else {
+      logWarn('bookings', 'Ningún servicio encontrado en catálogo', { session_type, typeInfo });
     }
   }
 
   const finalPrice = (catalogPrice && catalogPrice > 0) ? catalogPrice : plan.price;
+  logInfo('bookings', 'Precio final calculado', { session_type, catalogPrice, finalPrice });
 
   // ── Crear reserva en Supabase ────────────────────────────────────────────────
   const { data: booking, error: insertError } = await supabase
@@ -209,6 +222,8 @@ async function handleBooking(request: Request) {
   // ── Crear orden de pago en Flow ──────────────────────────────────────────────
   const siteUrl = import.meta.env.PUBLIC_SITE_URL?.replace(/\/$/, '') ?? 'http://localhost:4321';
 
+  logInfo('bookings', 'Creando orden Flow', { bookingId: booking.id, amount: finalPrice, email: patient_email.trim().toLowerCase() });
+
   let flowOrder;
   try {
     flowOrder = await createPaymentOrder({
@@ -222,8 +237,12 @@ async function handleBooking(request: Request) {
     });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error('Error creando orden Flow:', errMsg);
-    // Eliminar la reserva creada para evitar slots bloqueados sin pago
+    logError('bookings/flow', 'Error creando orden Flow', {
+      bookingId: booking.id,
+      amount: finalPrice,
+      session_type,
+      error: errMsg,
+    });
     await supabase.from('bookings').delete().eq('id', booking.id);
     return json({ error: 'Error al conectar con el sistema de pago.', detail: errMsg }, 502);
   }

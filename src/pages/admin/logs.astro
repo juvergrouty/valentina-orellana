@@ -1,0 +1,131 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+const filtro  = Astro.url.searchParams.get('filtro') ?? 'todos';
+const ctx     = Astro.url.searchParams.get('ctx') ?? '';
+const cleared = Astro.url.searchParams.get('cleared') === '1';
+
+// Acción: limpiar logs
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  if (form.get('action') === 'clear') {
+    await supabase.from('admin_logs').delete().lt('created_at', new Date().toISOString());
+  }
+  return Astro.redirect('/admin/logs?cleared=1');
+}
+
+let query = supabase
+  .from('admin_logs')
+  .select('*')
+  .order('created_at', { ascending: false })
+  .limit(200);
+
+if (filtro !== 'todos') query = query.eq('level', filtro);
+if (ctx) query = query.ilike('context', `%${ctx}%`);
+
+const { data: logs } = await query;
+
+const LEVEL_COLOR: Record<string, string> = {
+  info:  '#f0fdf4;color:#166534',
+  warn:  '#fffbeb;color:#92400e',
+  error: '#fef2f2;color:#991b1b',
+};
+const LEVEL_LABEL: Record<string, string> = {
+  info: 'INFO', warn: 'WARN', error: 'ERROR',
+};
+
+function formatDate(ts: string) {
+  return new Date(ts).toLocaleString('es-CL', {
+    day: '2-digit', month: '2-digit', year: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+}
+---
+
+<AdminLayout title="Logs del sistema" current="/admin/logs">
+
+  {cleared && <div class="alert-success">✓ Logs eliminados.</div>}
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap;">
+
+    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+      {[
+        { key: 'todos',  label: 'Todos' },
+        { key: 'error',  label: 'Errores' },
+        { key: 'warn',   label: 'Warnings' },
+        { key: 'info',   label: 'Info' },
+      ].map(f => (
+        <a href={`/admin/logs?filtro=${f.key}`}
+           class={`btn btn-sm ${filtro === f.key ? 'btn-dark' : 'btn-outline'}`}>
+          {f.label}
+        </a>
+      ))}
+    </div>
+
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+      <form method="GET" style="margin:0;display:flex;gap:0.4rem;">
+        <input type="hidden" name="filtro" value={filtro} />
+        <input type="text" name="ctx" value={ctx} placeholder="Filtrar contexto…"
+          style="font-size:0.8rem;padding:0.3rem 0.6rem;border:1px solid var(--dust);border-radius:var(--radius);width:160px;" />
+        <button type="submit" class="btn btn-outline btn-sm">Buscar</button>
+      </form>
+
+      <form method="POST" style="margin:0;" onsubmit="return confirm('¿Eliminar todos los logs?')">
+        <input type="hidden" name="action" value="clear" />
+        <button type="submit" class="btn btn-outline btn-sm" style="color:var(--red);border-color:var(--red);">
+          Limpiar
+        </button>
+      </form>
+
+      <a href={Astro.url.pathname + '?' + Astro.url.searchParams.toString()} class="btn btn-outline btn-sm">↺ Actualizar</a>
+    </div>
+  </div>
+
+  {!logs?.length ? (
+    <div class="card" style="padding:3rem;text-align:center;">
+      <p style="color:var(--stone);font-size:0.9rem;">Sin logs registrados.</p>
+    </div>
+  ) : (
+    <div class="card" style="padding:0;overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table style="font-size:0.8rem;">
+          <thead>
+            <tr>
+              <th style="white-space:nowrap;">Fecha</th>
+              <th>Nivel</th>
+              <th>Contexto</th>
+              <th>Mensaje</th>
+              <th>Datos</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map(log => (
+              <tr>
+                <td style="white-space:nowrap;color:var(--stone);">{formatDate(log.created_at)}</td>
+                <td>
+                  <span style={`padding:0.15rem 0.5rem;border-radius:99px;font-size:0.7rem;font-weight:700;letter-spacing:0.05em;background:${(LEVEL_COLOR[log.level] ?? 'var(--warm);color:var(--ink)').split(';')[0]};${(LEVEL_COLOR[log.level] ?? '').split(';')[1] ?? ''}`}>
+                    {LEVEL_LABEL[log.level] ?? log.level}
+                  </span>
+                </td>
+                <td style="color:var(--stone);white-space:nowrap;">{log.context}</td>
+                <td style="max-width:260px;">{log.message}</td>
+                <td style="max-width:320px;">
+                  {log.data && (
+                    <pre style="margin:0;font-size:0.7rem;white-space:pre-wrap;word-break:break-all;color:var(--stone);background:var(--warm);padding:0.3rem 0.5rem;border-radius:4px;max-height:80px;overflow-y:auto;">{JSON.stringify(log.data, null, 2)}</pre>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+
+  <p style="margin-top:0.75rem;font-size:0.78rem;color:var(--stone);">
+    {logs?.length ?? 0} registros · últimas 200 entradas
+  </p>
+
+</AdminLayout>
