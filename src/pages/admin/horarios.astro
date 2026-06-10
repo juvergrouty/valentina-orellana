@@ -238,7 +238,7 @@ const feriados: [string, string][] = [
 
   <!-- ── SECCIÓN 2: Semana actual ──────────────────────────────── -->
   <div class="card" style="margin-bottom:1.5rem;">
-    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:1.25rem;">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap;">
       <div>
         <p class="label" style="margin-bottom:0.1rem;">Semana actual</p>
         <p style="font-size:0.75rem;color:var(--stone);margin:0;">
@@ -248,7 +248,14 @@ const feriados: [string, string][] = [
           </span>
         </p>
       </div>
-      <div id="toggle-status" style="font-size:0.75rem;color:var(--stone);"></div>
+      <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+        <div id="toggle-status" style="font-size:0.75rem;color:var(--stone);"></div>
+        {(slots ?? []).some(s => !s.active) && (
+          <button id="btn-reset-slots" type="button" class="btn btn-outline btn-sm">
+            Reactivar todos
+          </button>
+        )}
+      </div>
     </div>
 
     {slots?.length === 0 ? (
@@ -624,6 +631,34 @@ document.getElementById('btn-apply')?.addEventListener('click', async () => {
 });
 
 updatePreview();
+
+// ── Reactivar todos los slots ────────────────────────────────────────────────
+
+document.getElementById('btn-reset-slots')?.addEventListener('click', async () => {
+  const inactive = document.querySelectorAll<HTMLButtonElement>('.slot-chip[data-active="false"]');
+  if (!inactive.length) return;
+  if (!confirm(`¿Reactivar ${inactive.length} slot${inactive.length !== 1 ? 's' : ''} desactivado${inactive.length !== 1 ? 's' : ''}?`)) return;
+
+  try {
+    const res  = await fetch('/api/admin/slots/reset', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      inactive.forEach(btn => {
+        btn.dataset.active = 'true';
+        applySlotStyle(btn, true);
+      });
+      toggleStatus.textContent = `✓ ${data.count} slot${data.count !== 1 ? 's' : ''} reactivado${data.count !== 1 ? 's' : ''}.`;
+      toggleStatus.style.color = '#15803d';
+      // Ocultar el botón ya que no quedan slots inactivos
+      document.getElementById('btn-reset-slots')?.remove();
+      setTimeout(() => { toggleStatus.textContent = ''; }, 4000);
+    } else {
+      alert('Error: ' + data.error);
+    }
+  } catch {
+    alert('Error de conexión.');
+  }
+});
 
 // ── Slot chips (toggle individual) ─────────────────────────────────────────
 

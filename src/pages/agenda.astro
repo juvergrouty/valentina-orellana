@@ -141,32 +141,44 @@ const durationByType: Record<string, number> = {
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-dust">
           <!-- Calendario -->
-          <div class="bg-white p-8">
-            <div class="flex items-center justify-between mb-6">
-              <button id="prev-month" type="button" class="w-8 h-8 flex items-center justify-center hover:text-gold transition-colors text-stone text-lg">‹</button>
-              <p id="calendar-title" class="font-heading font-light text-base text-ink"></p>
-              <button id="next-month" type="button" class="w-8 h-8 flex items-center justify-center hover:text-gold transition-colors text-stone text-lg">›</button>
+          <div class="bg-white p-8 md:p-10">
+            <div class="flex items-center justify-between mb-7">
+              <button id="prev-month" type="button"
+                class="w-9 h-9 flex items-center justify-center hover:bg-warm transition-colors text-stone hover:text-ink text-xl rounded-sm">
+                ‹
+              </button>
+              <p id="calendar-title" class="font-heading font-semibold text-xl text-ink tracking-wide"></p>
+              <button id="next-month" type="button"
+                class="w-9 h-9 flex items-center justify-center hover:bg-warm transition-colors text-stone hover:text-ink text-xl rounded-sm">
+                ›
+              </button>
             </div>
-            <div class="grid grid-cols-7 gap-1 mb-3">
+            <div class="grid grid-cols-7 gap-1 mb-2">
               {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map((d) => (
-                <div class="text-center font-body text-[10px] tracking-widest text-stone py-1">{d}</div>
+                <div class="text-center font-body text-[11px] tracking-widest text-stone/60 py-1.5 uppercase">{d}</div>
               ))}
             </div>
             <div id="calendar-grid" class="grid grid-cols-7 gap-1"></div>
           </div>
 
           <!-- Slots de hora -->
-          <div class="bg-sand p-8">
-            <div id="slots-placeholder" class="h-full flex items-center justify-center text-center py-8">
+          <div class="bg-sand p-8 md:p-10 flex flex-col">
+            <div id="slots-placeholder" class="flex-1 flex items-center justify-center text-center py-8">
               <div>
-                <div class="divider-center mb-5"></div>
-                <p class="body-text text-sm">Selecciona un día para<br />ver los horarios disponibles</p>
+                <p class="font-heading font-light text-2xl text-ink/30 mb-2">—</p>
+                <p class="font-body text-sm text-stone/60 leading-relaxed">Selecciona un día<br />para ver los horarios</p>
               </div>
             </div>
-            <div id="slots-container" class="hidden">
-              <p id="slots-date-label" class="font-heading font-light text-lg text-ink mb-5"></p>
-              <div id="slots-grid" class="grid grid-cols-3 gap-2"></div>
-              <p id="no-slots-msg" class="hidden label text-stone text-center py-6">Sin horarios disponibles para este día.</p>
+            <div id="slots-container" class="hidden flex-col flex-1">
+              <!-- Header horarios -->
+              <div class="mb-6 pb-5 border-b border-dust">
+                <p class="label text-stone mb-1">Horarios disponibles</p>
+                <p id="slots-date-label" class="font-heading font-semibold text-2xl text-ink"></p>
+              </div>
+              <div id="slots-grid" class="grid grid-cols-3 gap-2.5"></div>
+              <p id="no-slots-msg" class="hidden font-body text-sm text-stone/60 text-center py-8 leading-relaxed">
+                Sin horarios disponibles<br />para este día.
+              </p>
             </div>
           </div>
         </div>
@@ -291,23 +303,30 @@ const durationByType: Record<string, number> = {
 
 <style>
   .day-btn {
-    @apply w-full aspect-square text-xs font-body flex items-center justify-center transition-all duration-150;
+    @apply w-full aspect-square text-sm font-body flex items-center justify-center transition-all duration-150 rounded-sm;
   }
   .day-available {
     @apply text-ink hover:bg-warm cursor-pointer;
   }
   .day-past {
-    @apply text-dust cursor-default;
+    @apply text-dust/50 cursor-default;
   }
   .day-selected {
     @apply bg-ink text-sand font-medium;
   }
+  .day-today {
+    @apply font-semibold text-forest;
+  }
   .slot-btn {
-    @apply py-2.5 px-1 text-[10px] tracking-widest font-body border border-dust text-stone
-           hover:border-ink hover:text-ink transition-all duration-150 cursor-pointer uppercase;
+    @apply py-3.5 w-full font-heading font-light text-base text-ink border border-dust bg-white
+           hover:border-forest hover:text-forest transition-all duration-150 cursor-pointer;
+    letter-spacing: 0.01em;
   }
   .slot-selected {
-    @apply bg-ink text-sand border-ink;
+    @apply bg-ink text-sand border-ink font-normal;
+  }
+  .slot-selected:hover {
+    @apply text-sand border-ink;
   }
 </style>
 
@@ -532,6 +551,7 @@ const durationByType: Record<string, number> = {
       const isPast   = dateObj < today;
       const isSelected = iso === state.selectedDate;
 
+      const isToday = iso === new Date().toISOString().slice(0, 10);
       let cls = 'day-btn ';
       if (isPast) {
         cls += 'day-past';
@@ -539,6 +559,7 @@ const durationByType: Record<string, number> = {
         cls += 'day-selected';
       } else {
         cls += 'day-available';
+        if (isToday) cls += ' day-today';
       }
 
       const btn = document.createElement('button');
@@ -572,7 +593,8 @@ const durationByType: Record<string, number> = {
 
     // Mostrar slots
     hide('slots-placeholder');
-    show('slots-container');
+    const sc = $('slots-container');
+    if (sc) { sc.classList.remove('hidden'); sc.style.display = 'flex'; sc.style.flexDirection = 'column'; }
     $('slots-date-label').textContent = formatDateEs(iso);
     $('slots-grid').innerHTML = '<p class="col-span-3 text-xs text-muted py-2">Cargando horarios...</p>';
     hide('no-slots-msg');
