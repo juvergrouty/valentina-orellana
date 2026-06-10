@@ -103,22 +103,23 @@ async function handleBooking(request: Request) {
       .select('modality, price, duration_min, price_online, price_presencial, duration_min_online, duration_min_presencial')
       .eq('type', typeInfo.type)
       .in('modality', [typeInfo.modality, 'ambos'])
-      .eq('visible', true);
+      .eq('visible', true)
+      .order('sort_order');
 
-    // Preferir coincidencia exacta de modalidad; si no, usar "ambos"
-    const svc = (svcs ?? []).find(s => s.modality === typeInfo.modality)
-             ?? (svcs ?? []).find(s => s.modality === 'ambos')
+    const list = svcs ?? [];
+    const priceCol = typeInfo.modality === 'online' ? 'price_online' : 'price_presencial';
+    const durCol   = typeInfo.modality === 'online' ? 'duration_min_online' : 'duration_min_presencial';
+
+    // Prioridad: 1) modalidad exacta  2) "ambos" con columna de precio rellena  3) cualquier "ambos"
+    const svc = list.find(s => s.modality === typeInfo.modality)
+             ?? list.find(s => s.modality === 'ambos' && s[priceCol] != null)
+             ?? list.find(s => s.modality === 'ambos')
              ?? null;
 
     if (svc) {
       if (svc.modality === 'ambos') {
-        if (typeInfo.modality === 'online') {
-          durationMin  = svc.duration_min_online  ?? svc.duration_min ?? 50;
-          catalogPrice = svc.price_online  ?? null;
-        } else {
-          durationMin  = svc.duration_min_presencial ?? svc.duration_min ?? 50;
-          catalogPrice = svc.price_presencial ?? null;
-        }
+        durationMin  = svc[durCol]   ?? svc.duration_min ?? 50;
+        catalogPrice = svc[priceCol] ?? null;
       } else {
         durationMin  = svc.duration_min ?? 50;
         catalogPrice = svc.price ?? null;
@@ -126,12 +127,8 @@ async function handleBooking(request: Request) {
     }
   }
 
-  // Fallback: settings (legacy) → pricingPlans hardcoded
-  const priceKey      = `price_${session_type.replace(/-/g, '_')}`;
-  const settingsPrice = settings[priceKey] ? parseInt(settings[priceKey]) : null;
-  const finalPrice    = catalogPrice
-    ?? (settingsPrice && !isNaN(settingsPrice) ? settingsPrice : null)
-    ?? plan.price;
+  // Fallback solo a pricingPlans (los settings de precios legacy ya no aplican)
+  const finalPrice = catalogPrice ?? plan.price;
 
   // ── Crear reserva en Supabase ────────────────────────────────────────────────
   const { data: booking, error: insertError } = await supabase
