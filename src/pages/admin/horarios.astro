@@ -320,44 +320,32 @@ const feriados: [string, string][] = [
   <div class="card" style="margin-bottom:1.5rem;">
     <p class="label" style="margin-bottom:0.15rem;">Configuración de sesiones</p>
     <p style="font-size:0.75rem;color:var(--stone);margin-bottom:1.5rem;line-height:1.5;">
-      Define la duración y el descanso. Cuando hay una reserva a las 9:00, el siguiente slot disponible en la agenda será
-      <strong id="cfg-example" style="color:var(--ink);">9:00 + {sessionDurationMin} + {prepDurationMin} min</strong>.
+      La duración de cada sesión viene del servicio reservado. Este campo solo define el margen de descanso que se agrega al terminar.
+      Ejemplo con servicio de 30 min + {prepDurationMin} min descanso: reserva a las 9:00 → próximo disponible a las
+      <strong id="cfg-example" style="color:var(--forest);">—</strong>.
     </p>
 
     <form method="POST" action="/api/admin/settings">
       <input type="hidden" name="redirect" value="/admin/horarios?saved=cfg" />
 
-      <div style="display:grid;grid-template-columns:160px 160px 1fr;gap:1rem;align-items:end;margin-bottom:1.25rem;">
-        <div>
-          <label class="label" style="display:block;margin-bottom:0.4rem;">Duración sesión</label>
-          <div style="display:flex;align-items:center;gap:0.4rem;">
-            <input type="number" id="cfg-session" name="session_duration_min"
-              value={sessionDurationMin} min="10" max="180" step="5"
-              style="text-align:right;" />
-            <span style="font-size:0.78rem;color:var(--stone);flex-shrink:0;">min</span>
-          </div>
-        </div>
-
+      <div style="display:flex;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin-bottom:1.25rem;">
         <div>
           <label class="label" style="display:block;margin-bottom:0.4rem;">Descanso entre citas</label>
           <div style="display:flex;align-items:center;gap:0.4rem;">
             <input type="number" id="cfg-prep" name="prep_duration_min"
               value={prepDurationMin} min="0" max="120" step="5"
-              style="text-align:right;" />
-            <span style="font-size:0.78rem;color:var(--stone);flex-shrink:0;">min</span>
+              style="text-align:right;width:80px;" />
+            <span style="font-size:0.78rem;color:var(--stone);flex-shrink:0;">minutos</span>
           </div>
         </div>
 
-        <div>
-          <label class="label" style="display:block;margin-bottom:0.4rem;">Ejemplo</label>
-          <div id="timing-preview"
-            style="background:var(--warm);padding:0.5rem 0.85rem;border-radius:var(--radius);font-size:0.8rem;color:var(--ink);font-weight:500;height:38px;display:flex;align-items:center;">
-            9:00 → próximo: <span id="timing-result" style="margin-left:0.35rem;color:var(--forest);">—</span>
-          </div>
+        <div style="background:var(--warm);padding:0.5rem 0.85rem;border-radius:var(--radius);font-size:0.8rem;color:var(--ink);height:38px;display:flex;align-items:center;gap:0.4rem;">
+          Sesión 30 min + descanso →
+          <span id="timing-result" style="font-weight:600;color:var(--forest);">—</span>
         </div>
       </div>
 
-      <button type="submit" class="btn btn-dark" style="align-self:flex-start;">
+      <button type="submit" class="btn btn-dark">
         Guardar
       </button>
     </form>
@@ -694,23 +682,22 @@ const rangeStatus = document.getElementById('range-status')!;
 
 // ── Configuración de sesiones: preview en tiempo real ───────────────────────
 
-const cfgSession = document.getElementById('cfg-session') as HTMLInputElement;
-const cfgPrep    = document.getElementById('cfg-prep')    as HTMLInputElement;
+const cfgPrep      = document.getElementById('cfg-prep') as HTMLInputElement;
 const timingResult = document.getElementById('timing-result')!;
+const cfgExample   = document.getElementById('cfg-example')!;
 
 function updateTimingPreview() {
-  const session = parseInt(cfgSession?.value) || 0;
-  const prep    = parseInt(cfgPrep?.value)    || 0;
-  const total   = session + prep;
-  const startMin = 9 * 60; // ejemplo fijo 9:00
-  const endMin   = startMin + total;
+  const prep    = parseInt(cfgPrep?.value) || 0;
+  const total   = 30 + prep; // 30 min = ejemplo fijo de sesión
+  const endMin  = 9 * 60 + total;
   const h = Math.floor(endMin / 60);
   const m = endMin % 60;
-  timingResult.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  const result = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  timingResult.textContent = result;
+  if (cfgExample) cfgExample.textContent = result;
 }
 
-cfgSession?.addEventListener('input', updateTimingPreview);
-cfgPrep?.addEventListener('input',    updateTimingPreview);
+cfgPrep?.addEventListener('input', updateTimingPreview);
 updateTimingPreview();
 
 // ── Desactivar por rango de horas ───────────────────────────────────────────

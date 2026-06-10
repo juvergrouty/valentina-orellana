@@ -42,7 +42,10 @@ export const GET: APIRoute = async ({ url }) => {
 
   const dayOfWeek = requested.getDay();
 
-  // Cargar en paralelo: slots, fecha bloqueada, reservas del día y settings
+  // duration_min del servicio que el usuario quiere reservar (para check inverso)
+  const newDuration = parseInt(url.searchParams.get('duration') ?? '0') || null;
+
+  // Cargar en paralelo: slots, fecha bloqueada, reservas del día y prep_duration_min
   const [
     { data: slots, error: slotsError },
     { data: blockedDate },
@@ -51,9 +54,8 @@ export const GET: APIRoute = async ({ url }) => {
   ] = await Promise.all([
     supabase.from('availability_slots').select('start_time').eq('day_of_week', dayOfWeek).eq('active', true).order('start_time'),
     supabase.from('blocked_dates').select('id').eq('date', dateParam).maybeSingle(),
-    // Solo bloquear: confirmadas + pending_payment creadas hace menos de 30 min
     supabase.from('bookings')
-      .select('session_time')
+      .select('session_time, duration_min')
       .eq('session_date', dateParam)
       .neq('status', 'cancelled')
       .or(`status.eq.confirmed,and(status.eq.pending_payment,created_at.gte.${new Date(Date.now() - 30 * 60 * 1000).toISOString()})`),
@@ -65,22 +67,19 @@ export const GET: APIRoute = async ({ url }) => {
   if (blockedDate) return new Response(JSON.stringify({ slots: [], blocked: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   if (bookedError) return new Response(JSON.stringify({ error: 'Error consultando reservas.' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 
-  // Duración total = sesión + preparación (desde settings o por defecto 55+20=75)
   const cfg: Record<string, string> = {};
   (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { cfg[key] = value; });
-  const sessionMin = parseInt(cfg['session_duration_min'] ?? '55');
-  const prepMin    = parseInt(cfg['prep_duration_min']    ?? '20');
-  const totalMin   = sessionMin + prepMin;
+  const prepMin = parseInt(cfg['prep_duration_min'] ?? '20');
 
-  // Convertir reservas a minutos desde medianoche
-  const bookedMinutes = (booked ?? []).map((b) => {
+  // Reservas existentes con su duración real (fallback 50 min para bookings antiguos sin duration_min)
+  const bookedSessions = (booked ?? []).map((b) => {
     const [h, m] = b.session_time.slice(0, 5).split(':').map(Number);
-    return h * 60 + m;
+    return { startMin: h * 60 + m, duration: b.duration_min ?? 50 };
   });
 
-  const nowHour  = new Date();
-  const isToday  = dateParam === nowHour.toISOString().slice(0, 10);
-  const nowMin   = nowHour.getHours() * 60 + nowHour.getMinutes() + 60; // +60 min buffer
+  const nowHour = new Date();
+  const isToday = dateParam === nowHour.toISOString().slice(0, 10);
+  const nowMin  = nowHour.getHours() * 60 + nowHour.getMinutes() + 60; // +60 min buffer
 
   const available = slots
     .map((s) => s.start_time.slice(0, 5))
@@ -88,16 +87,13 @@ export const GET: APIRoute = async ({ url }) => {
       const [h, m] = time.split(':').map(Number);
       const slotMin = h * 60 + m;
 
-      // Filtrar horas pasadas si es hoy
       if (isToday && slotMin <= nowMin) return false;
 
-      // Bloquear si el slot cae dentro de la duración de una reserva existente
-      // O si una reserva existente caería dentro de la duración de este slot
-      for (const bMin of bookedMinutes) {
-        // Slot dentro del bloque de una reserva: bMin <= slotMin < bMin + totalMin
-        if (slotMin >= bMin && slotMin < bMin + totalMin) return false;
-        // Reserva existente dentro del bloque de este slot: bMin >= slotMin && bMin < slotMin + totalMin
-        if (bMin >= slotMin && bMin < slotMin + totalMin) return false;
+      for (const { startMin: bMin, duration: bDur } of bookedSessions) {
+        // Este slot cae dentro de la ventana de una reserva existente
+        if (slotMin >= bMin && slotMin < bMin + bDur + prepMin) return false;
+        // Una reserva existente cae dentro de la ventana de este slot (si se conoce la duración nueva)
+        if (newDuration && bMin >= slotMin && bMin < slotMin + newDuration + prepMin) return false;
       }
 
       return true;

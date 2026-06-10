@@ -90,6 +90,28 @@ async function handleBooking(request: Request) {
   const settingsPrice = settings[priceKey] ? parseInt(settings[priceKey]) : null;
   const finalPrice    = (settingsPrice && !isNaN(settingsPrice)) ? settingsPrice : plan.price;
 
+  // ── Buscar duración del servicio en services_catalog ────────────────────────
+  const typeMap: Record<string, { type: string; modality: string }> = {
+    'online':            { type: 'individual', modality: 'online' },
+    'presencial':        { type: 'individual', modality: 'presencial' },
+    'pareja-online':     { type: 'pareja',     modality: 'online' },
+    'pareja-presencial': { type: 'pareja',     modality: 'presencial' },
+  };
+  const typeInfo = typeMap[session_type];
+  let durationMin = 50; // fallback
+  if (typeInfo) {
+    const { data: svc } = await supabase
+      .from('services_catalog')
+      .select('duration_min')
+      .eq('type', typeInfo.type)
+      .in('modality', [typeInfo.modality, 'ambos'])
+      .eq('visible', true)
+      .order('duration_min')
+      .limit(1)
+      .maybeSingle();
+    if (svc?.duration_min) durationMin = svc.duration_min;
+  }
+
   // ── Crear reserva en Supabase ────────────────────────────────────────────────
   const { data: booking, error: insertError } = await supabase
     .from('bookings')
@@ -104,6 +126,7 @@ async function handleBooking(request: Request) {
       status:         'pending_payment',
       payment_method: 'flow',
       amount:         finalPrice,
+      duration_min:   durationMin,
     })
     .select('id')
     .single();

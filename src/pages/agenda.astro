@@ -15,6 +15,24 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
 
 // Pre-selección de grupo desde URL (ej: /agenda?grupo=individual)
 const grupoParam = Astro.url.searchParams.get('grupo') ?? null; // 'individual' | 'pareja' | null
+
+// Duración real por session_type desde services_catalog
+const { data: catalogServices } = await supabase
+  .from('services_catalog')
+  .select('type, modality, duration_min')
+  .eq('visible', true)
+  .order('duration_min');
+
+const durationByType: Record<string, number> = {
+  'online': 50, 'presencial': 50, 'pareja-online': 60, 'pareja-presencial': 60,
+};
+(catalogServices ?? []).forEach((s: { type: string; modality: string; duration_min: number }) => {
+  const modalities = s.modality === 'ambos' ? ['online','presencial'] : [s.modality];
+  modalities.forEach(mod => {
+    const key = s.type === 'individual' ? mod : `pareja-${mod}`;
+    if (key in durationByType) durationByType[key] = s.duration_min;
+  });
+});
 ---
 
 <BaseLayout
@@ -293,7 +311,7 @@ const grupoParam = Astro.url.searchParams.get('grupo') ?? null; // 'individual' 
   }
 </style>
 
-<script define:vars={{ plans: JSON.stringify(pricingPlans), preselectedGroup: grupoParam }}>
+<script define:vars={{ plans: JSON.stringify(pricingPlans), preselectedGroup: grupoParam, durationByType }}>
   // ─── Estado ───────────────────────────────────────────────────────────────
   const state = {
     step: 1,
@@ -431,9 +449,11 @@ const grupoParam = Astro.url.searchParams.get('grupo') ?? null; // 'individual' 
       const plan     = pricingPlans.find((p) => p.id === typeId);
       if (!plan) return;
 
-      state.sessionType  = plan.id;
-      state.sessionTitle = plan.title;
-      state.sessionPrice = plan.price;
+      state.sessionType     = plan.id;
+      state.sessionTitle    = plan.title;
+      state.sessionPrice    = plan.price;
+      state.sessionDuration = durationByType[plan.id] ?? 50;
+      state.loadedSlots     = {}; // limpiar caché al cambiar tipo
 
       // Marcar seleccionado visualmente
       document.querySelectorAll('.modality-card').forEach((b) => b.classList.remove('border-forest', 'bg-warm'));
@@ -561,7 +581,8 @@ const grupoParam = Astro.url.searchParams.get('grupo') ?? null; // 'individual' 
     let slots = state.loadedSlots[iso];
     if (!slots) {
       try {
-        const res = await fetch(`/api/availability?date=${iso}`);
+        const dur = state.sessionDuration ? `&duration=${state.sessionDuration}` : '';
+        const res = await fetch(`/api/availability?date=${iso}${dur}`);
         const data = await res.json();
         slots = data.slots ?? [];
         state.loadedSlots[iso] = slots;
