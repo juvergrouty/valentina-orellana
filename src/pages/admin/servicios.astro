@@ -323,9 +323,7 @@ const TYPE_ICON: Record<string, string> = {
 </div>
 
 <style>
-  .dropdown-menu { display: none !important; }
-  .dropdown-wrap:hover .dropdown-menu,
-  .dropdown-wrap:focus-within .dropdown-menu { display: block !important; }
+  .dropdown-menu { display: none; }
 </style>
 
 <script>
@@ -443,4 +441,33 @@ const TYPE_ICON: Record<string, string> = {
     uploadStatus.style.display = 'none';
     if (fileInput) fileInput.value = '';
   });
+
+  // ── Dropdowns con position:fixed para salir del overflow ───────────────────
+  function closeAllDropdowns() {
+    document.querySelectorAll('.dropdown-menu').forEach((m: Element) => {
+      (m as HTMLElement).style.display = 'none';
+    });
+  }
+
+  document.querySelectorAll('.dropdown-btn').forEach((btn: Element) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = (btn as HTMLElement).nextElementSibling as HTMLElement | null;
+      if (!menu) return;
+
+      const isOpen = menu.style.display === 'block';
+      closeAllDropdowns();
+      if (isOpen) return;
+
+      const rect = (btn as HTMLElement).getBoundingClientRect();
+      menu.style.position = 'fixed';
+      menu.style.top      = (rect.bottom + 4) + 'px';
+      menu.style.left     = 'auto';
+      menu.style.right    = (window.innerWidth - rect.right) + 'px';
+      menu.style.zIndex   = '9999';
+      menu.style.display  = 'block';
+    });
+  });
+
+  document.addEventListener('click', closeAllDropdowns);
 </script>
