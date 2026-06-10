@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 
 const { data: services } = await supabase
   .from('services_catalog')
-  .select('name, price, duration_min, type, modality')
+  .select('name, price, duration_min, type, modality, price_online, price_presencial, duration_min_online, duration_min_presencial')
   .eq('visible', true)
   .order('sort_order')
   .order('created_at');
@@ -18,7 +18,12 @@ const formatDuration = (min: number) =>
   min >= 60 ? `${Math.floor(min / 60)} hora${min >= 120 ? 's' : ''}${min % 60 ? ` ${min % 60} min` : ''}` : `${min} minutos`;
 
 const serviceLines = (services ?? [])
-  .map(s => `• ${s.name} — ${formatCLP(s.price)} · ${formatDuration(s.duration_min)}`)
+  .map(s => {
+    if (s.modality === 'ambos' && s.price_online && s.price_presencial) {
+      return `• ${s.name} — Online: ${formatCLP(s.price_online)} (${formatDuration(s.duration_min_online ?? s.duration_min)}) · Presencial: ${formatCLP(s.price_presencial)} (${formatDuration(s.duration_min_presencial ?? s.duration_min)})`;
+    }
+    return `• ${s.name} — ${formatCLP(s.price)} · ${formatDuration(s.duration_min)}`;
+  })
   .join('\n');
 
 const priceAnswer = serviceLines

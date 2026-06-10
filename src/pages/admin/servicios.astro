@@ -93,8 +93,16 @@ const TYPE_ICON: Record<string, string> = {
                   {TYPE_ICON[s.type]} {TYPE_LABEL[s.type] ?? s.type}
                 </td>
                 <td style="font-size:0.82rem;color:var(--stone);">{MODALITY_LABEL[s.modality] ?? s.modality}</td>
-                <td style="font-size:0.82rem;color:var(--stone);">{s.duration_min} min</td>
-                <td style="font-weight:600;font-size:0.88rem;">{formatCLP(s.price)}</td>
+                <td style="font-size:0.82rem;color:var(--stone);">
+                  {s.modality === 'ambos' && s.duration_min_online && s.duration_min_presencial
+                    ? `${s.duration_min_online}/${s.duration_min_presencial} min`
+                    : `${s.duration_min} min`}
+                </td>
+                <td style="font-weight:600;font-size:0.88rem;">
+                  {s.modality === 'ambos' && s.price_online && s.price_presencial
+                    ? <span style="font-size:0.8rem;line-height:1.5;">{formatCLP(s.price_online)}<br/><span style="color:var(--stone);font-weight:500;">pres. {formatCLP(s.price_presencial)}</span></span>
+                    : formatCLP(s.price)}
+                </td>
                 <td>
                   <form method="POST" action="/api/admin/services" style="margin:0;">
                     <input type="hidden" name="action" value="toggle_home" />
@@ -205,14 +213,50 @@ const TYPE_ICON: Record<string, string> = {
           </select>
         </div>
 
-        <div>
+        {/* ── Precio y duración: simple (presencial/online) o dual (ambos) ── */}
+
+        <div id="price-single" style={editService?.modality === 'ambos' ? 'display:none' : ''}>
           <label class="label" style="display:block;margin-bottom:0.3rem;">Precio (CLP)</label>
-          <input type="number" name="price" value={editService?.price ?? ''} min="0" step="1000" required placeholder="55000" />
+          <input type="number" name="price"
+            value={editService?.modality !== 'ambos' ? (editService?.price ?? '') : ''}
+            min="0" step="1000" placeholder="55000" />
         </div>
 
-        <div>
+        <div id="duration-single" style={editService?.modality === 'ambos' ? 'display:none' : ''}>
           <label class="label" style="display:block;margin-bottom:0.3rem;">Duración (minutos)</label>
-          <input type="number" name="duration_min" value={editService?.duration_min ?? 50} min="10" step="5" />
+          <input type="number" name="duration_min"
+            value={editService?.modality !== 'ambos' ? (editService?.duration_min ?? 50) : 50}
+            min="10" step="5" />
+        </div>
+
+        <div id="price-dual" style={`grid-column:1/-1;display:${editService?.modality === 'ambos' ? 'grid' : 'none'};grid-template-columns:1fr 1fr;gap:1rem;`}>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Precio Online (CLP)</label>
+            <input type="number" name="price_online"
+              value={editService?.price_online ?? ''}
+              min="0" step="1000" placeholder="55000" />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Precio Presencial (CLP)</label>
+            <input type="number" name="price_presencial"
+              value={editService?.price_presencial ?? ''}
+              min="0" step="1000" placeholder="65000" />
+          </div>
+        </div>
+
+        <div id="duration-dual" style={`grid-column:1/-1;display:${editService?.modality === 'ambos' ? 'grid' : 'none'};grid-template-columns:1fr 1fr;gap:1rem;`}>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Duración Online (min)</label>
+            <input type="number" name="duration_min_online"
+              value={editService?.duration_min_online ?? 50}
+              min="10" step="5" />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Duración Presencial (min)</label>
+            <input type="number" name="duration_min_presencial"
+              value={editService?.duration_min_presencial ?? 50}
+              min="10" step="5" />
+          </div>
         </div>
 
         <div style="grid-column:1/-1;">
@@ -288,7 +332,29 @@ const TYPE_ICON: Record<string, string> = {
   const modal    = document.getElementById('modal-service');
   const closeBtn = document.getElementById('close-service-modal');
 
-  const openModal = () => { modal.style.display = 'flex'; document.body.style.overflow = 'hidden'; };
+  // ── Toggle precio/duración según modalidad ──────────────────────────────
+  const priceSingle    = document.getElementById('price-single');
+  const durationSingle = document.getElementById('duration-single');
+  const priceDual      = document.getElementById('price-dual');
+  const durationDual   = document.getElementById('duration-dual');
+
+  function togglePriceFields(modality) {
+    const isAmbos = modality === 'ambos';
+    priceSingle.style.display    = isAmbos ? 'none'  : '';
+    durationSingle.style.display = isAmbos ? 'none'  : '';
+    priceDual.style.display      = isAmbos ? 'grid'  : 'none';
+    durationDual.style.display   = isAmbos ? 'grid'  : 'none';
+  }
+
+  const modalitySelect = modal?.querySelector('[name="modality"]');
+  modalitySelect?.addEventListener('change', () => togglePriceFields(modalitySelect.value));
+
+  const openModal = () => {
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    // Para nuevo servicio el select empieza en "presencial"
+    if (modalitySelect) togglePriceFields(modalitySelect.value);
+  };
   const closeModal = () => { modal.style.display = 'none'; document.body.style.overflow = ''; };
 
   document.getElementById('open-new')?.addEventListener('click', openModal);

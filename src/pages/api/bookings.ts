@@ -82,15 +82,10 @@ async function handleBooking(request: Request) {
   const settings: Record<string, string> = {};
   (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
 
-  // ── Obtener precio ───────────────────────────────────────────────────────────
+  // ── Buscar precio y duración desde services_catalog ────────────────────────
   const plan = pricingPlans.find((p) => p.id === session_type);
   if (!plan) return json({ error: 'Plan no encontrado.' }, 400);
 
-  const priceKey      = `price_${session_type.replace(/-/g, '_')}`;
-  const settingsPrice = settings[priceKey] ? parseInt(settings[priceKey]) : null;
-  const finalPrice    = (settingsPrice && !isNaN(settingsPrice)) ? settingsPrice : plan.price;
-
-  // ── Buscar duración del servicio en services_catalog ────────────────────────
   const typeMap: Record<string, { type: string; modality: string }> = {
     'online':            { type: 'individual', modality: 'online' },
     'presencial':        { type: 'individual', modality: 'presencial' },
@@ -98,19 +93,45 @@ async function handleBooking(request: Request) {
     'pareja-presencial': { type: 'pareja',     modality: 'presencial' },
   };
   const typeInfo = typeMap[session_type];
-  let durationMin = 50; // fallback
+
+  let durationMin   = 50;
+  let catalogPrice: number | null = null;
+
   if (typeInfo) {
-    const { data: svc } = await supabase
+    const { data: svcs } = await supabase
       .from('services_catalog')
-      .select('duration_min')
+      .select('modality, price, duration_min, price_online, price_presencial, duration_min_online, duration_min_presencial')
       .eq('type', typeInfo.type)
       .in('modality', [typeInfo.modality, 'ambos'])
-      .eq('visible', true)
-      .order('duration_min')
-      .limit(1)
-      .maybeSingle();
-    if (svc?.duration_min) durationMin = svc.duration_min;
+      .eq('visible', true);
+
+    // Preferir coincidencia exacta de modalidad; si no, usar "ambos"
+    const svc = (svcs ?? []).find(s => s.modality === typeInfo.modality)
+             ?? (svcs ?? []).find(s => s.modality === 'ambos')
+             ?? null;
+
+    if (svc) {
+      if (svc.modality === 'ambos') {
+        if (typeInfo.modality === 'online') {
+          durationMin  = svc.duration_min_online  ?? svc.duration_min ?? 50;
+          catalogPrice = svc.price_online  ?? null;
+        } else {
+          durationMin  = svc.duration_min_presencial ?? svc.duration_min ?? 50;
+          catalogPrice = svc.price_presencial ?? null;
+        }
+      } else {
+        durationMin  = svc.duration_min ?? 50;
+        catalogPrice = svc.price ?? null;
+      }
+    }
   }
+
+  // Fallback: settings (legacy) → pricingPlans hardcoded
+  const priceKey      = `price_${session_type.replace(/-/g, '_')}`;
+  const settingsPrice = settings[priceKey] ? parseInt(settings[priceKey]) : null;
+  const finalPrice    = catalogPrice
+    ?? (settingsPrice && !isNaN(settingsPrice) ? settingsPrice : null)
+    ?? plan.price;
 
   // ── Crear reserva en Supabase ────────────────────────────────────────────────
   const { data: booking, error: insertError } = await supabase

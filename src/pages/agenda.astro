@@ -19,19 +19,26 @@ const grupoParam = Astro.url.searchParams.get('grupo') ?? null; // 'individual' 
 // Duración real por session_type desde services_catalog
 const { data: catalogServices } = await supabase
   .from('services_catalog')
-  .select('type, modality, duration_min')
+  .select('type, modality, duration_min, duration_min_online, duration_min_presencial')
   .eq('visible', true)
   .order('duration_min');
 
 const durationByType: Record<string, number> = {
   'online': 50, 'presencial': 50, 'pareja-online': 60, 'pareja-presencial': 60,
 };
-(catalogServices ?? []).forEach((s: { type: string; modality: string; duration_min: number }) => {
-  const modalities = s.modality === 'ambos' ? ['online','presencial'] : [s.modality];
-  modalities.forEach(mod => {
-    const key = s.type === 'individual' ? mod : `pareja-${mod}`;
+(catalogServices ?? []).forEach((s: { type: string; modality: string; duration_min: number; duration_min_online?: number | null; duration_min_presencial?: number | null }) => {
+  if (s.modality === 'ambos') {
+    // Usar columnas específicas si existen; si no, la general
+    const durOnline     = s.duration_min_online     ?? s.duration_min;
+    const durPresencial = s.duration_min_presencial ?? s.duration_min;
+    const keyOnline     = s.type === 'individual' ? 'online'     : 'pareja-online';
+    const keyPresencial = s.type === 'individual' ? 'presencial' : 'pareja-presencial';
+    if (keyOnline     in durationByType) durationByType[keyOnline]     = durOnline;
+    if (keyPresencial in durationByType) durationByType[keyPresencial] = durPresencial;
+  } else {
+    const key = s.type === 'individual' ? s.modality : `pareja-${s.modality}`;
     if (key in durationByType) durationByType[key] = s.duration_min;
-  });
+  }
 });
 ---
 

@@ -11,14 +11,28 @@ export const POST: APIRoute = async ({ request }) => {
   const get = (k: string) => (form.get(k) as string)?.trim() || null;
 
   if (action === 'create' || action === 'update') {
+    const modality = get('modality') ?? 'presencial';
+    const isAmbos  = modality === 'ambos';
+
+    const priceOnline     = parseInt(get('price_online')        ?? '0')  || 0;
+    const pricePresencial = parseInt(get('price_presencial')    ?? '0')  || 0;
+    const durOnline       = parseInt(get('duration_min_online') ?? '50') || 50;
+    const durPresencial   = parseInt(get('duration_min_presencial') ?? '50') || 50;
+
     const data = {
-      name:         get('name')!,
-      description:  get('description'),
-      type:         get('type') ?? 'individual',
-      modality:     get('modality') ?? 'presencial',
-      location:     get('location'),
-      duration_min: parseInt(get('duration_min') ?? '50'),
-      price:        parseInt(get('price') ?? '0'),
+      name:                   get('name')!,
+      description:            get('description'),
+      type:                   get('type') ?? 'individual',
+      modality,
+      location:               get('location'),
+      // Precio/duración principal (fallback para módulos que solo lean price/duration_min)
+      price:                  isAmbos ? priceOnline  : (parseInt(get('price') ?? '0') || 0),
+      duration_min:           isAmbos ? durOnline    : (parseInt(get('duration_min') ?? '50') || 50),
+      // Columnas específicas por modalidad (solo para "ambos")
+      price_online:           isAmbos ? priceOnline     : null,
+      price_presencial:       isAmbos ? pricePresencial : null,
+      duration_min_online:    isAmbos ? durOnline        : null,
+      duration_min_presencial: isAmbos ? durPresencial   : null,
       visible:      form.get('visible') === 'on',
       show_home:    form.get('show_home') === 'on',
       image_url:    get('image_url'),
@@ -66,17 +80,21 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Extraer solo los campos del servicio (sin id ni created_at)
     const { error: insertErr } = await supabase.from('services_catalog').insert({
-      name:         orig.name + ' (copia)',
-      description:  orig.description,
-      type:         orig.type,
-      modality:     orig.modality,
-      location:     orig.location,
-      duration_min: orig.duration_min,
-      price:        orig.price,
-      visible:      orig.visible,
-      show_home:    orig.show_home,
-      image_url:    orig.image_url,
-      sort_order:   (orig.sort_order ?? 0) + 1,
+      name:                    orig.name + ' (copia)',
+      description:             orig.description,
+      type:                    orig.type,
+      modality:                orig.modality,
+      location:                orig.location,
+      duration_min:            orig.duration_min,
+      price:                   orig.price,
+      price_online:            orig.price_online,
+      price_presencial:        orig.price_presencial,
+      duration_min_online:     orig.duration_min_online,
+      duration_min_presencial: orig.duration_min_presencial,
+      visible:                 orig.visible,
+      show_home:               orig.show_home,
+      image_url:               orig.image_url,
+      sort_order:              (orig.sort_order ?? 0) + 1,
     });
 
     if (insertErr) console.error('[services] duplicate insert:', insertErr.message, insertErr.code);
