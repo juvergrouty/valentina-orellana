@@ -65,6 +65,12 @@ async function handleBooking(request: Request) {
     return json({ error: 'No puedes reservar en una fecha pasada.' }, 400);
   }
 
+  // ── Limpiar reservas pending_payment expiradas (>30 min) ─────────────────────
+  const expiry = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  await supabase.from('bookings').delete()
+    .eq('status', 'pending_payment')
+    .lt('created_at', expiry);
+
   // ── Verificar disponibilidad ─────────────────────────────────────────────────
   const { data: existing } = await supabase
     .from('bookings')
@@ -109,7 +115,7 @@ async function handleBooking(request: Request) {
       .order('sort_order');
 
     if (svcsErr) {
-      logError('bookings', 'Error buscando servicio en catálogo', { error: svcsErr.message, session_type });
+      await logError('bookings', 'Error buscando servicio en catálogo', { error: svcsErr.message, session_type });
     }
 
     const list = svcs ?? [];
@@ -130,7 +136,7 @@ async function handleBooking(request: Request) {
         durationMin  = svc.duration_min ?? 50;
         catalogPrice = svc.price        ?? null;
       }
-      logInfo('bookings', 'Servicio encontrado', {
+      await logInfo('bookings', 'Servicio encontrado', {
         session_type,
         servicio: svc.name,
         modality: svc.modality,
@@ -140,12 +146,12 @@ async function handleBooking(request: Request) {
         durationMin,
       });
     } else {
-      logWarn('bookings', 'Ningún servicio encontrado en catálogo', { session_type, typeInfo });
+      await logWarn('bookings', 'Ningún servicio encontrado en catálogo', { session_type, typeInfo });
     }
   }
 
   const finalPrice = (catalogPrice && catalogPrice > 0) ? catalogPrice : plan.price;
-  logInfo('bookings', 'Precio final calculado', { session_type, catalogPrice, finalPrice });
+  await logInfo('bookings', 'Precio final calculado', { session_type, catalogPrice, finalPrice });
 
   // ── Crear reserva en Supabase ────────────────────────────────────────────────
   const bookingPayload: Record<string, unknown> = {
@@ -173,7 +179,7 @@ async function handleBooking(request: Request) {
 
   // Si falla por columna inexistente, reintentar sin duration_min
   if (insertError?.code === '42703') {
-    logWarn('bookings', 'Columna duration_min no existe, reintentando sin ella', { error: insertError.message });
+    await logWarn('bookings', 'Columna duration_min no existe, reintentando sin ella', { error: insertError.message });
     const { duration_min, ...payloadWithoutDur } = bookingPayload;
     const retry = await tryInsert(payloadWithoutDur);
     bookingData  = retry.data;
@@ -181,7 +187,7 @@ async function handleBooking(request: Request) {
   }
 
   if (insertError || !bookingData) {
-    logError('bookings', 'Error insertando reserva', { error: insertError?.message, code: insertError?.code, session_type, session_date, session_time });
+    await logError('bookings', 'Error insertando reserva', { error: insertError?.message, code: insertError?.code, session_type, session_date, session_time });
     console.error('Error insertando reserva:', insertError);
     return json({ error: 'Error al crear la reserva. Intenta nuevamente.' }, 500);
   }
@@ -237,7 +243,7 @@ async function handleBooking(request: Request) {
 
   // ── Validar precio antes de llamar a Flow ────────────────────────────────────
   if (!finalPrice || isNaN(finalPrice) || finalPrice < 100) {
-    logError('bookings', 'Precio inválido antes de Flow', { finalPrice, catalogPrice, session_type });
+    await logError('bookings', 'Precio inválido antes de Flow', { finalPrice, catalogPrice, session_type });
     await supabase.from('bookings').delete().eq('id', booking.id);
     return json({ error: `Precio inválido (${finalPrice}). Actualiza el precio del servicio en el admin.` }, 400);
   }
@@ -245,7 +251,7 @@ async function handleBooking(request: Request) {
   // ── Crear orden de pago en Flow ──────────────────────────────────────────────
   const siteUrl = import.meta.env.PUBLIC_SITE_URL?.replace(/\/$/, '') ?? 'http://localhost:4321';
 
-  logInfo('bookings', 'Creando orden Flow', { bookingId: booking.id, amount: finalPrice, email: patient_email.trim().toLowerCase() });
+  await logInfo('bookings', 'Creando orden Flow', { bookingId: booking.id, amount: finalPrice, email: patient_email.trim().toLowerCase() });
 
   let flowOrder;
   try {
