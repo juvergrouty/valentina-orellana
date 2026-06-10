@@ -167,12 +167,9 @@ const saved = Astro.url.searchParams.get('saved') === '1';
             Al confirmar una sesión se crea automáticamente un evento en Google Calendar.
             Las sesiones online incluyen un link de Google Meet.
           </p>
-          <form method="POST" action="/api/admin/google/disconnect" style="margin:0;">
-            <button type="submit" class="btn btn-danger btn-sm"
-              onclick="return confirm('¿Desconectar Google Calendar?')">
-              Desconectar cuenta
-            </button>
-          </form>
+          <button type="button" id="btn-google-disconnect" class="btn btn-danger btn-sm">
+            Desconectar cuenta
+          </button>
         </div>
       ) : (
         <div>
@@ -280,6 +277,17 @@ const saved = Astro.url.searchParams.get('saved') === '1';
           : 'https://sandbox.flow.cl/api';
       }
     });
+  });
+
+  // Desconectar Google Calendar sin form anidado
+  document.getElementById('btn-google-disconnect')?.addEventListener('click', async () => {
+    if (!confirm('¿Desconectar Google Calendar?')) return;
+    const res = await fetch('/api/admin/google/disconnect', { method: 'POST' });
+    if (res.ok || res.redirected) {
+      window.location.href = '/admin/configuracion?google=disconnected';
+    } else {
+      alert('Error al desconectar. Intenta nuevamente.');
+    }
   });
 
   const checkbox = document.getElementById('toggle-manual') as HTMLInputElement | null;
