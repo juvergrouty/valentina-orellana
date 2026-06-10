@@ -133,14 +133,6 @@ const TYPE_ICON: Record<string, string> = {
                     <div style="position:relative;" class="dropdown-wrap">
                       <button class="btn btn-outline btn-sm dropdown-btn">▾</button>
                       <div class="dropdown-menu" style="display:none;position:absolute;right:0;top:100%;background:white;border:1px solid var(--dust);border-radius:var(--radius);box-shadow:var(--shadow);min-width:180px;z-index:50;padding:0.4rem 0;">
-                        <form method="POST" action="/api/admin/services">
-                          <input type="hidden" name="action" value="duplicate" />
-                          <input type="hidden" name="id" value={s.id} />
-                          <input type="hidden" name="redirect" value={`/admin/servicios?filtro=${filtro}&saved=1`} />
-                          <button type="submit" style="width:100%;text-align:left;background:none;border:none;padding:0.6rem 1rem;font-size:0.82rem;cursor:pointer;color:var(--ink);">
-                            Duplicar
-                          </button>
-                        </form>
                         <a href={`https://wa.me/?text=${encodeURIComponent(`${s.name} — ${formatCLP(s.price)} · psicologavalentinaorellana.com/agenda`)}`}
                            target="_blank"
                            style="display:block;padding:0.6rem 1rem;font-size:0.82rem;color:var(--ink);text-decoration:none;">
