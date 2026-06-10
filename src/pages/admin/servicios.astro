@@ -175,7 +175,7 @@ const TYPE_ICON: Record<string, string> = {
       <button id="close-service-modal" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--stone);">✕</button>
     </div>
 
-    <form method="POST" action="/api/admin/services" style="display:flex;flex-direction:column;gap:1rem;">
+    <form method="POST" action="/api/admin/services" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:1rem;">
       <input type="hidden" name="action" value={editService ? 'update' : 'create'} />
       {editService && <input type="hidden" name="id" value={editService.id} />}
       <input type="hidden" name="redirect" value="/admin/servicios?saved=1" />
@@ -226,9 +226,31 @@ const TYPE_ICON: Record<string, string> = {
         </div>
 
         <div style="grid-column:1/-1;">
-          <label class="label" style="display:block;margin-bottom:0.3rem;">URL de imagen (opcional)</label>
-          <input type="url" name="image_url" value={editService?.image_url ?? ''} placeholder="https://..." />
-          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.3rem;">Pega la URL de una imagen subida a la carpeta /public/images/</p>
+          <label class="label" style="display:block;margin-bottom:0.5rem;">Imagen del servicio</label>
+
+          <!-- Preview -->
+          <div id="img-preview-wrap" style={`display:${editService?.image_url ? 'block' : 'none'};margin-bottom:0.75rem;position:relative;width:100%;height:160px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--dust);`}>
+            <img id="img-preview" src={editService?.image_url ?? ''} alt="" style="width:100%;height:100%;object-fit:cover;" />
+            <button type="button" id="btn-remove-img"
+              style="position:absolute;top:0.5rem;right:0.5rem;background:rgba(0,0,0,.55);border:none;color:white;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;line-height:1;">
+              ✕
+            </button>
+          </div>
+
+          <!-- Zona de carga -->
+          <div id="upload-zone"
+            style={`border:2px dashed var(--dust);border-radius:var(--radius);padding:1.5rem;text-align:center;cursor:pointer;transition:border-color .2s;${editService?.image_url ? 'display:none' : ''}`}>
+            <p style="font-size:0.85rem;color:var(--stone);margin-bottom:0.4rem;">Arrastra una imagen o</p>
+            <button type="button" id="btn-pick-img" class="btn btn-outline btn-sm">Seleccionar archivo</button>
+            <p style="font-size:0.72rem;color:var(--dust);margin-top:0.5rem;">JPG, PNG, WebP — máx. 3 MB</p>
+          </div>
+
+          <!-- Inputs ocultos -->
+          <input type="file" id="image-file-input" name="image_file" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none;" />
+          <input type="hidden" name="image_url" id="image-url-hidden" value={editService?.image_url ?? ''} />
+
+          <!-- Estado de carga -->
+          <p id="upload-status" style="display:none;font-size:0.8rem;color:var(--forest);margin-top:0.4rem;"></p>
         </div>
 
         <div>
@@ -273,4 +295,86 @@ const TYPE_ICON: Record<string, string> = {
   document.getElementById('open-new-2')?.addEventListener('click', openModal);
   closeBtn?.addEventListener('click', closeModal);
   modal?.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+
+  // ── Upload de imagen ────────────────────────────────────────────────────
+  const fileInput     = document.getElementById('image-file-input');
+  const btnPick       = document.getElementById('btn-pick-img');
+  const btnRemove     = document.getElementById('btn-remove-img');
+  const previewWrap   = document.getElementById('img-preview-wrap');
+  const previewImg    = document.getElementById('img-preview');
+  const uploadZone    = document.getElementById('upload-zone');
+  const hiddenUrl     = document.getElementById('image-url-hidden');
+  const uploadStatus  = document.getElementById('upload-status');
+
+  btnPick?.addEventListener('click', () => fileInput?.click());
+
+  // Drag & drop
+  uploadZone?.addEventListener('dragover',  e => { e.preventDefault(); uploadZone.style.borderColor = 'var(--forest)'; });
+  uploadZone?.addEventListener('dragleave', () => { uploadZone.style.borderColor = 'var(--dust)'; });
+  uploadZone?.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.style.borderColor = 'var(--dust)';
+    const file = e.dataTransfer?.files?.[0];
+    if (file) handleFile(file);
+  });
+
+  fileInput?.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    if (file) handleFile(file);
+  });
+
+  async function handleFile(file) {
+    if (file.size > 3 * 1024 * 1024) {
+      uploadStatus.textContent  = '⚠️ El archivo supera los 3 MB.';
+      uploadStatus.style.color  = 'var(--red)';
+      uploadStatus.style.display = '';
+      return;
+    }
+
+    // Preview local inmediato
+    const reader = new FileReader();
+    reader.onload = e => {
+      previewImg.src           = e.target.result;
+      previewWrap.style.display = '';
+      uploadZone.style.display  = 'none';
+    };
+    reader.readAsDataURL(file);
+
+    // Subir al servidor
+    uploadStatus.textContent  = 'Subiendo imagen…';
+    uploadStatus.style.color  = 'var(--forest)';
+    uploadStatus.style.display = '';
+
+    const fd = new FormData();
+    fd.append('file', file);
+
+    try {
+      const res  = await fetch('/api/admin/upload-image', { method: 'POST', body: fd });
+      const data = await res.json();
+
+      if (!res.ok || !data.url) {
+        uploadStatus.textContent = '⚠️ Error al subir: ' + (data.error ?? 'intenta de nuevo.');
+        uploadStatus.style.color = 'var(--red)';
+        return;
+      }
+
+      hiddenUrl.value           = data.url;
+      previewImg.src            = data.url;
+      uploadStatus.textContent  = '✓ Imagen subida correctamente.';
+      uploadStatus.style.color  = 'var(--green)';
+    } catch {
+      uploadStatus.textContent = '⚠️ Error de conexión al subir imagen.';
+      uploadStatus.style.color = 'var(--red)';
+    }
+  }
+
+  // Quitar imagen
+  btnRemove?.addEventListener('click', () => {
+    hiddenUrl.value           = '';
+    previewImg.src            = '';
+    previewWrap.style.display  = 'none';
+    uploadZone.style.display   = '';
+    uploadStatus.style.display = 'none';
+    if (fileInput) fileInput.value = '';
+  });
 </script>
