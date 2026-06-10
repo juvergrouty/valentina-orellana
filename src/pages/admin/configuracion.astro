@@ -13,9 +13,6 @@ const flowEnabled       = settings['flow_enabled'] !== 'false';
 const flowEnv           = settings['flow_env'] ?? 'sandbox'; // default sandbox si no hay fila
 const notificationEmail = settings['notification_email'] ?? 'juver@grouty.cl';
 const emailFrom         = settings['email_from'] ?? '';
-const sessionDuration = settings['session_duration_min'] ?? '55';
-const prepDuration    = settings['prep_duration_min'] ?? '20';
-
 // Google Calendar
 const googleEmail    = settings['google_user_email'] ?? null;
 const googleName     = settings['google_user_name'] ?? null;
@@ -144,33 +141,6 @@ const saved = Astro.url.searchParams.get('saved') === '1';
       </div>
     </div>
 
-    <!-- Duración de sesiones -->
-    <div class="card">
-      <p class="label" style="margin-bottom:1.25rem;">Duración de sesiones</p>
-      <p style="font-size:0.78rem;color:var(--stone);margin-bottom:1.25rem;line-height:1.5;">
-        Controla cuánto tiempo bloquea cada sesión en el calendario público.
-        Los horarios siguientes no estarán disponibles hasta que pase el tiempo total.
-      </p>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-bottom:1rem;">
-        <div>
-          <label class="label" style="margin-bottom:0.4rem;display:block;">Duración sesión (min)</label>
-          <input type="number" name="session_duration_min" value={sessionDuration} min="30" max="120" step="5" required />
-          <p style="font-size:0.7rem;color:var(--stone);margin-top:0.3rem;">Ej: 55 minutos</p>
-        </div>
-        <div>
-          <label class="label" style="margin-bottom:0.4rem;display:block;">Preparación siguiente (min)</label>
-          <input type="number" name="prep_duration_min" value={prepDuration} min="0" max="60" step="5" required />
-          <p style="font-size:0.7rem;color:var(--stone);margin-top:0.3rem;">Ej: 20 min entre sesiones</p>
-        </div>
-      </div>
-
-      <div style="background:var(--sand);padding:0.75rem 1rem;font-size:0.8rem;color:var(--stone);border-radius:var(--radius);">
-        Total bloqueado por sesión: <strong id="total-blocked">{parseInt(sessionDuration) + parseInt(prepDuration)} minutos</strong>
-      </div>
-
-    </div>
-
     <!-- Google Calendar -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
@@ -271,18 +241,6 @@ const saved = Astro.url.searchParams.get('saved') === '1';
 </AdminLayout>
 
 <script>
-  // Calcular total bloqueado en tiempo real
-  const sessionInput = document.querySelector('input[name="session_duration_min"]');
-  const prepInput    = document.querySelector('input[name="prep_duration_min"]');
-  const totalLabel   = document.getElementById('total-blocked');
-  function updateTotal() {
-    const s = parseInt(sessionInput?.value ?? '55');
-    const p = parseInt(prepInput?.value ?? '20');
-    if (totalLabel) totalLabel.textContent = (s + p) + ' minutos';
-  }
-  sessionInput?.addEventListener('input', updateTotal);
-  prepInput?.addEventListener('input', updateTotal);
-
   // Toggle Flow
   const flowChk   = document.getElementById('toggle-flow');
   const flowTrack = document.getElementById('toggle-flow-track');
@@ -291,7 +249,7 @@ const saved = Astro.url.searchParams.get('saved') === '1';
   const flowUrlPreview = document.getElementById('flow-url-preview');
 
   function updateFlowToggle() {
-    const on = flowChk?.checked;
+    const on = (flowChk as HTMLInputElement | null)?.checked;
     if (flowTrack) flowTrack.style.background = on ? '#576352' : '#DDD8CF';
     if (flowThumb) flowThumb.style.left = on ? '21px' : '3px';
     if (flowEnvSection) {
@@ -299,10 +257,8 @@ const saved = Astro.url.searchParams.get('saved') === '1';
       flowEnvSection.style.pointerEvents = on ? 'auto' : 'none';
     }
   }
+  // El <label> padre activa el checkbox — solo escuchar change para actualizar visual
   flowChk?.addEventListener('change', updateFlowToggle);
-  flowTrack?.addEventListener('click', () => {
-    if (flowChk) { flowChk.checked = !flowChk.checked; updateFlowToggle(); }
-  });
 
   // Radio entorno Flow — actualizar estilos y URL preview
   document.querySelectorAll('input[name="flow_env"]').forEach(radio => {
@@ -326,19 +282,14 @@ const saved = Astro.url.searchParams.get('saved') === '1';
     });
   });
 
-  const checkbox = document.getElementById('toggle-manual');
-  const track    = document.getElementById('toggle-track') as HTMLElement;
-  const thumb    = document.getElementById('toggle-thumb') as HTMLElement;
+  const checkbox = document.getElementById('toggle-manual') as HTMLInputElement | null;
+  const track    = document.getElementById('toggle-track') as HTMLElement | null;
+  const thumb    = document.getElementById('toggle-thumb') as HTMLElement | null;
 
+  // El <label> padre ya activa el checkbox al hacer clic — solo escuchar change para actualizar visual
   checkbox?.addEventListener('change', () => {
-    const on = checkbox.checked;
-    track.style.background = on ? '#576352' : '#DDD8CF';
-    thumb.style.left       = on ? '21px' : '3px';
-  });
-
-  // Clic en el track también activa el checkbox
-  track?.addEventListener('click', () => {
-    checkbox.checked = !checkbox.checked;
-    checkbox.dispatchEvent(new Event('change'));
+    const on = (checkbox as HTMLInputElement).checked;
+    if (track) track.style.background = on ? '#576352' : '#DDD8CF';
+    if (thumb) thumb.style.left = on ? '21px' : '3px';
   });
 </script>
