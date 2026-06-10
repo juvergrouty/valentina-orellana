@@ -148,28 +148,44 @@ async function handleBooking(request: Request) {
   logInfo('bookings', 'Precio final calculado', { session_type, catalogPrice, finalPrice });
 
   // ── Crear reserva en Supabase ────────────────────────────────────────────────
-  const { data: booking, error: insertError } = await supabase
-    .from('bookings')
-    .insert({
-      session_type,
-      session_date,
-      session_time,
-      patient_name:   patient_name.trim(),
-      patient_email:  patient_email.trim().toLowerCase(),
-      patient_phone:  patient_phone.trim(),
-      notes:          notes?.trim() ?? null,
-      status:         'pending_payment',
-      payment_method: 'flow',
-      amount:         finalPrice,
-      duration_min:   durationMin,
-    })
-    .select('id')
-    .single();
+  const bookingPayload: Record<string, unknown> = {
+    session_type,
+    session_date,
+    session_time,
+    patient_name:   patient_name.trim(),
+    patient_email:  patient_email.trim().toLowerCase(),
+    patient_phone:  patient_phone.trim(),
+    notes:          notes?.trim() ?? null,
+    status:         'pending_payment',
+    payment_method: 'flow',
+    amount:         finalPrice,
+    duration_min:   durationMin,
+  };
 
-  if (insertError || !booking) {
+  let booking: { id: string } | null = null;
+
+  const tryInsert = async (payload: Record<string, unknown>) => {
+    const { data, error } = await supabase.from('bookings').insert(payload).select('id').single();
+    return { data, error };
+  };
+
+  let { data: bookingData, error: insertError } = await tryInsert(bookingPayload);
+
+  // Si falla por columna inexistente, reintentar sin duration_min
+  if (insertError?.code === '42703') {
+    logWarn('bookings', 'Columna duration_min no existe, reintentando sin ella', { error: insertError.message });
+    const { duration_min, ...payloadWithoutDur } = bookingPayload;
+    const retry = await tryInsert(payloadWithoutDur);
+    bookingData  = retry.data;
+    insertError  = retry.error;
+  }
+
+  if (insertError || !bookingData) {
+    logError('bookings', 'Error insertando reserva', { error: insertError?.message, code: insertError?.code, session_type, session_date, session_time });
     console.error('Error insertando reserva:', insertError);
     return json({ error: 'Error al crear la reserva. Intenta nuevamente.' }, 500);
   }
+  booking = bookingData;
 
   // ── Leer config desde settings ───────────────────────────────────────────────
   const notificationEmail  = settings['notification_email'] ?? 'juver@grouty.cl';
