@@ -103,7 +103,7 @@ const modalityLabel = (m: string) =>
                     {service.duration_min} min · {formatCLP(service.price)}
                   </p>
                 </div>
-                <a href={`/agenda?grupo=${service.type === 'pareja' ? 'pareja' : 'individual'}`}
+                <a href={`/agenda?servicio=${service.id}`}
                   class="font-body text-xs tracking-widest uppercase py-2.5 px-5 border border-white/40 text-white hover:bg-white hover:text-ink transition-all duration-200">
                   Reservar
                 </a>

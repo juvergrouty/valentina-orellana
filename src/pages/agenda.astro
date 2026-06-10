@@ -13,7 +13,8 @@ const settings: Record<string, string> = {};
 const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
 
 // Pre-selección de grupo desde URL (ej: /agenda?grupo=individual)
-const grupoParam = Astro.url.searchParams.get('grupo') ?? null; // 'individual' | 'pareja' | null
+const grupoParam    = Astro.url.searchParams.get('grupo')    ?? null;
+const servicioParam = Astro.url.searchParams.get('servicio') ?? null;
 
 const { data: catalogServices } = await supabase
   .from('services_catalog')
@@ -100,6 +101,34 @@ const { data: catalogServices } = await supabase
           <h2 class="font-heading font-light text-3xl text-ink mb-2">¿Qué tipo de sesión necesitas?</h2>
           <p id="service-subtitle" class="font-body text-sm text-stone mb-8"></p>
           <div id="service-cards" class="flex flex-col gap-4 max-w-2xl"></div>
+        </div>
+
+        <!-- 1c: Modalidad para servicio pre-seleccionado (viene de /servicios) -->
+        <div id="modality-for-service" class="hidden mt-4">
+          <button type="button" id="back-to-servicios" class="label text-stone hover:text-ink transition-colors mb-8 flex items-center gap-2">← Volver a servicios</button>
+          <p class="label text-stone mb-4">Paso 1</p>
+          <div class="divider mb-6"></div>
+          <p id="presel-service-name" class="font-heading font-semibold text-2xl text-ink mb-2"></p>
+          <p id="presel-service-desc" class="font-body text-sm text-stone mb-8 leading-relaxed"></p>
+          <h2 class="font-heading font-light text-3xl text-ink mb-8">¿Online o presencial?</h2>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+            <button type="button" id="presel-online-btn"
+              class="bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer">
+              <p class="label text-forest mb-3">Desde cualquier lugar</p>
+              <p class="font-heading font-semibold text-2xl text-ink mb-1">Online</p>
+              <p id="presel-price-online" class="font-heading font-light text-xl text-ink mb-3"></p>
+              <div class="h-px bg-dust my-3"></div>
+              <p class="font-body text-sm text-stone">Videollamada · Zoom o Meet</p>
+            </button>
+            <button type="button" id="presel-presencial-btn"
+              class="bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer">
+              <p class="label text-gold mb-3">Más solicitado</p>
+              <p class="font-heading font-semibold text-2xl text-ink mb-1">Presencial</p>
+              <p id="presel-price-presencial" class="font-heading font-light text-xl text-ink mb-3"></p>
+              <div class="h-px bg-dust my-3"></div>
+              <p class="font-body text-sm text-stone">Vitacura · Las Condes · La Reina</p>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -303,7 +332,7 @@ const { data: catalogServices } = await supabase
   }
 </style>
 
-<script define:vars={{ catalogServicesRaw: JSON.stringify(catalogServices ?? []), preselectedGroup: grupoParam }}>
+<script define:vars={{ catalogServicesRaw: JSON.stringify(catalogServices ?? []), preselectedGroup: grupoParam, preselectedServicioId: servicioParam }}>
   // ─── Estado ───────────────────────────────────────────────────────────────
   const state = {
     step:            1,
@@ -476,9 +505,43 @@ const { data: catalogServices } = await supabase
     renderServiceCards(group);
   }
 
-  if (preselectedGroup === 'individual' || preselectedGroup === 'pareja') {
+  // ── Servicio pre-seleccionado desde /servicios (?servicio=UUID) ──────────────
+  if (preselectedServicioId) {
+    const svc = catalogServices.find((s) => s.id === preselectedServicioId);
+    if (svc) {
+      selectedGroup = svc.type;
+      if (svc.modality === 'ambos') {
+        const priceOnline = svc.price_online     ?? svc.price;
+        const pricePres   = svc.price_presencial ?? svc.price;
+        const durOnline   = svc.duration_min_online     ?? svc.duration_min ?? 50;
+        const durPres     = svc.duration_min_presencial ?? svc.duration_min ?? 50;
+
+        $('presel-service-name').textContent  = svc.name;
+        $('presel-service-desc').textContent  = svc.description ?? '';
+        $('presel-price-online').textContent     = formatCLP(priceOnline) + ' · ' + durOnline + ' min';
+        $('presel-price-presencial').textContent = formatCLP(pricePres)   + ' · ' + durPres   + ' min';
+
+        $('presel-online-btn').addEventListener('click', () =>
+          selectService(svc.id, 'online', priceOnline, durOnline, svc.name)
+        );
+        $('presel-presencial-btn').addEventListener('click', () =>
+          selectService(svc.id, 'presencial', pricePres, durPres, svc.name)
+        );
+
+        $('group-selection').classList.add('hidden');
+        $('modality-for-service').classList.remove('hidden');
+      } else {
+        // Modalidad única → saltar directo al paso 2
+        selectService(svc.id, svc.modality, svc.price, svc.duration_min ?? 50, svc.name);
+      }
+    }
+  } else if (preselectedGroup === 'individual' || preselectedGroup === 'pareja') {
     activateGroup(preselectedGroup);
   }
+
+  $('back-to-servicios')?.addEventListener('click', () => {
+    window.location.href = '/servicios';
+  });
 
   document.querySelectorAll('.group-card').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -500,6 +563,12 @@ const { data: catalogServices } = await supabase
 
   $('back-to-1')?.addEventListener('click', () => {
     goToStep(1);
+    // Si venía con servicio pre-seleccionado, asegurarse de mostrar 1c
+    if (preselectedServicioId) {
+      $('group-selection')?.classList.add('hidden');
+      $('service-selection')?.classList.add('hidden');
+      $('modality-for-service')?.classList.remove('hidden');
+    }
   });
   $('back-to-2')?.addEventListener('click', () => goToStep(2));
 
