@@ -16,28 +16,31 @@ const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
 // Pre-selección de grupo desde URL (ej: /agenda?grupo=individual)
 const grupoParam = Astro.url.searchParams.get('grupo') ?? null; // 'individual' | 'pareja' | null
 
-// Duración real por session_type desde services_catalog
+// Precio y duración real por session_type desde services_catalog
 const { data: catalogServices } = await supabase
   .from('services_catalog')
-  .select('type, modality, duration_min, duration_min_online, duration_min_presencial')
+  .select('type, modality, price, duration_min, price_online, price_presencial, duration_min_online, duration_min_presencial')
   .eq('visible', true)
   .order('duration_min');
 
 const durationByType: Record<string, number> = {
   'online': 50, 'presencial': 50, 'pareja-online': 60, 'pareja-presencial': 60,
 };
-(catalogServices ?? []).forEach((s: { type: string; modality: string; duration_min: number; duration_min_online?: number | null; duration_min_presencial?: number | null }) => {
+const priceByType: Record<string, number> = {};
+
+(catalogServices ?? []).forEach((s: { type: string; modality: string; price: number; duration_min: number; price_online?: number | null; price_presencial?: number | null; duration_min_online?: number | null; duration_min_presencial?: number | null }) => {
   if (s.modality === 'ambos') {
-    // Usar columnas específicas si existen; si no, la general
     const durOnline     = s.duration_min_online     ?? s.duration_min;
     const durPresencial = s.duration_min_presencial ?? s.duration_min;
+    const priceOnline   = s.price_online     ?? s.price;
+    const pricePres     = s.price_presencial ?? s.price;
     const keyOnline     = s.type === 'individual' ? 'online'     : 'pareja-online';
     const keyPresencial = s.type === 'individual' ? 'presencial' : 'pareja-presencial';
-    if (keyOnline     in durationByType) durationByType[keyOnline]     = durOnline;
-    if (keyPresencial in durationByType) durationByType[keyPresencial] = durPresencial;
+    if (keyOnline     in durationByType) { durationByType[keyOnline]     = durOnline;     priceByType[keyOnline]     = priceOnline; }
+    if (keyPresencial in durationByType) { durationByType[keyPresencial] = durPresencial; priceByType[keyPresencial] = pricePres; }
   } else {
     const key = s.type === 'individual' ? s.modality : `pareja-${s.modality}`;
-    if (key in durationByType) durationByType[key] = s.duration_min;
+    if (key in durationByType) { durationByType[key] = s.duration_min; priceByType[key] = s.price; }
   }
 });
 ---
@@ -337,7 +340,7 @@ const durationByType: Record<string, number> = {
   }
 </style>
 
-<script define:vars={{ plans: JSON.stringify(pricingPlans), preselectedGroup: grupoParam, durationByType }}>
+<script define:vars={{ plans: JSON.stringify(pricingPlans), preselectedGroup: grupoParam, durationByType, priceByType }}>
   // ─── Estado ───────────────────────────────────────────────────────────────
   const state = {
     step: 1,
@@ -411,15 +414,24 @@ const durationByType: Record<string, number> = {
   let selectedGroup = null; // 'individual' | 'pareja'
 
   // Función para activar un grupo programáticamente
+  function catalogPrices(group) {
+    const keyOnline = group === 'pareja' ? 'pareja-online'     : 'online';
+    const keyPres   = group === 'pareja' ? 'pareja-presencial' : 'presencial';
+    const durOnline = (durationByType[keyOnline] ?? 50) + ' minutos';
+    const durPres   = (durationByType[keyPres]   ?? 50) + ' minutos';
+    return {
+      online:     priceByType[keyOnline] ?? (group === 'pareja' ? 60000 : 45000),
+      presencial: priceByType[keyPres]   ?? (group === 'pareja' ? 70000 : 55000),
+      durationOnline:     durOnline,
+      durationPresencial: durPres,
+    };
+  }
+
   function activateGroup(group) {
     selectedGroup = group;
-    const prices = {
-      individual: { online: 45000, presencial: 55000, duration: '50 minutos' },
-      pareja:     { online: 60000, presencial: 70000, duration: '60 minutos' },
-    };
-    const p = prices[group] ?? prices.individual;
-    if ($('price-online'))     $('price-online').textContent     = formatCLP(p.online) + ' · ' + p.duration;
-    if ($('price-presencial')) $('price-presencial').textContent = formatCLP(p.presencial) + ' · ' + p.duration;
+    const p = catalogPrices(group);
+    if ($('price-online'))     $('price-online').textContent     = formatCLP(p.online)     + ' · ' + p.durationOnline;
+    if ($('price-presencial')) $('price-presencial').textContent = formatCLP(p.presencial) + ' · ' + p.durationPresencial;
     if ($('modality-subtitle')) $('modality-subtitle').textContent = group === 'individual'
       ? 'Sesión Individual — elige cómo quieres conectar'
       : 'Sesión de Pareja — elige cómo quieren conectar';
@@ -441,13 +453,9 @@ const durationByType: Record<string, number> = {
       btn.classList.add('border-forest', 'bg-warm');
 
       // Mostrar precios según grupo
-      const prices = {
-        individual: { online: 45000, presencial: 55000, duration: '50 minutos' },
-        pareja:     { online: 60000, presencial: 70000, duration: '60 minutos' },
-      };
-      const p = prices[selectedGroup];
-      $('price-online').textContent     = formatCLP(p.online) + ' · ' + p.duration;
-      $('price-presencial').textContent = formatCLP(p.presencial) + ' · ' + p.duration;
+      const p = catalogPrices(selectedGroup);
+      $('price-online').textContent     = formatCLP(p.online)     + ' · ' + p.durationOnline;
+      $('price-presencial').textContent = formatCLP(p.presencial) + ' · ' + p.durationPresencial;
       $('modality-subtitle').textContent = selectedGroup === 'individual'
         ? 'Sesión Individual — elige cómo quieres conectar'
         : 'Sesión de Pareja — elige cómo quieren conectar';
@@ -477,7 +485,7 @@ const durationByType: Record<string, number> = {
 
       state.sessionType     = plan.id;
       state.sessionTitle    = plan.title;
-      state.sessionPrice    = plan.price;
+      state.sessionPrice    = priceByType[plan.id] ?? plan.price;
       state.sessionDuration = durationByType[plan.id] ?? 50;
       state.loadedSlots     = {}; // limpiar caché al cambiar tipo
 
