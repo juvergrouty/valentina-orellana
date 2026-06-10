@@ -9,11 +9,18 @@ const [
   { data: slots },
   { data: blocked },
   { data: past },
+  { data: settingsRows },
 ] = await Promise.all([
   supabase.from('availability_slots').select('*').order('day_of_week').order('start_time'),
   supabase.from('blocked_dates').select('*').gte('date', today).order('date'),
   supabase.from('blocked_dates').select('*').lt('date', today).order('date', { ascending: false }).limit(5),
+  supabase.from('settings').select('key, value'),
 ]);
+
+const cfg: Record<string, string> = {};
+(settingsRows ?? []).forEach(({ key, value }) => { cfg[key] = value; });
+const sessionDurationMin = parseInt(cfg['session_duration_min'] ?? '55');
+const prepDurationMin    = parseInt(cfg['prep_duration_min']    ?? '20');
 
 const DAYS = [
   { n: 1, short: 'Lu', long: 'Lunes' },
@@ -124,6 +131,11 @@ const feriados: [string, string][] = [
   {savedMsg === 'blocked' && (
     <div style="background:#f0fdf4;border:1px solid #86efac;color:#15803d;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
       ✓ Fecha bloqueada correctamente.
+    </div>
+  )}
+  {savedMsg === 'cfg' && (
+    <div style="background:#f0fdf4;border:1px solid #86efac;color:#15803d;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
+      ✓ Configuración de sesiones guardada.
     </div>
   )}
 
@@ -304,7 +316,54 @@ const feriados: [string, string][] = [
     )}
   </div>
 
-  <!-- ── SECCIÓN 3: Días bloqueados ───────────────────────────── -->
+  <!-- ── SECCIÓN 3: Configuración de sesiones ────────────────── -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <p class="label" style="margin-bottom:0.15rem;">Configuración de sesiones</p>
+    <p style="font-size:0.75rem;color:var(--stone);margin-bottom:1.5rem;line-height:1.5;">
+      Define la duración y el descanso. Cuando hay una reserva a las 9:00, el siguiente slot disponible en la agenda será
+      <strong id="cfg-example" style="color:var(--ink);">9:00 + {sessionDurationMin} + {prepDurationMin} min</strong>.
+    </p>
+
+    <form method="POST" action="/api/admin/settings">
+      <input type="hidden" name="redirect" value="/admin/horarios?saved=cfg" />
+
+      <div style="display:grid;grid-template-columns:160px 160px 1fr;gap:1rem;align-items:end;margin-bottom:1.25rem;">
+        <div>
+          <label class="label" style="display:block;margin-bottom:0.4rem;">Duración sesión</label>
+          <div style="display:flex;align-items:center;gap:0.4rem;">
+            <input type="number" id="cfg-session" name="session_duration_min"
+              value={sessionDurationMin} min="10" max="180" step="5"
+              style="text-align:right;" />
+            <span style="font-size:0.78rem;color:var(--stone);flex-shrink:0;">min</span>
+          </div>
+        </div>
+
+        <div>
+          <label class="label" style="display:block;margin-bottom:0.4rem;">Descanso entre citas</label>
+          <div style="display:flex;align-items:center;gap:0.4rem;">
+            <input type="number" id="cfg-prep" name="prep_duration_min"
+              value={prepDurationMin} min="0" max="120" step="5"
+              style="text-align:right;" />
+            <span style="font-size:0.78rem;color:var(--stone);flex-shrink:0;">min</span>
+          </div>
+        </div>
+
+        <div>
+          <label class="label" style="display:block;margin-bottom:0.4rem;">Ejemplo</label>
+          <div id="timing-preview"
+            style="background:var(--warm);padding:0.5rem 0.85rem;border-radius:var(--radius);font-size:0.8rem;color:var(--ink);font-weight:500;height:38px;display:flex;align-items:center;">
+            9:00 → próximo: <span id="timing-result" style="margin-left:0.35rem;color:var(--forest);">—</span>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-dark" style="align-self:flex-start;">
+        Guardar
+      </button>
+    </form>
+  </div>
+
+  <!-- ── SECCIÓN 4: Días bloqueados ───────────────────────────── -->
   <div style="display:grid;grid-template-columns:1fr 360px;gap:1.5rem;align-items:start;">
 
     <!-- Lista -->
@@ -632,6 +691,29 @@ const rangeDay    = document.getElementById('range-day')    as HTMLSelectElement
 const rangeFrom   = document.getElementById('range-from')   as HTMLInputElement;
 const rangeTo     = document.getElementById('range-to')     as HTMLInputElement;
 const rangeStatus = document.getElementById('range-status')!;
+
+// ── Configuración de sesiones: preview en tiempo real ───────────────────────
+
+const cfgSession = document.getElementById('cfg-session') as HTMLInputElement;
+const cfgPrep    = document.getElementById('cfg-prep')    as HTMLInputElement;
+const timingResult = document.getElementById('timing-result')!;
+
+function updateTimingPreview() {
+  const session = parseInt(cfgSession?.value) || 0;
+  const prep    = parseInt(cfgPrep?.value)    || 0;
+  const total   = session + prep;
+  const startMin = 9 * 60; // ejemplo fijo 9:00
+  const endMin   = startMin + total;
+  const h = Math.floor(endMin / 60);
+  const m = endMin % 60;
+  timingResult.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+cfgSession?.addEventListener('input', updateTimingPreview);
+cfgPrep?.addEventListener('input',    updateTimingPreview);
+updateTimingPreview();
+
+// ── Desactivar por rango de horas ───────────────────────────────────────────
 
 document.getElementById('btn-deactivate-range')?.addEventListener('click', async () => {
   const day = parseInt(rangeDay.value);
