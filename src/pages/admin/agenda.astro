@@ -376,13 +376,48 @@ const errorParam = Astro.url.searchParams.get('error');
 
     <!-- Bloquear hora tab body -->
     <div class="sp-body" id="bp-block-body" style="display:none">
-      <p style="color:#6b7280;font-size:0.85rem;line-height:1.6;">
-        Para bloquear horarios, usa la sección de <strong>Bloqueos</strong> en el menú lateral.<br><br>
-        Puedes marcar vacaciones, reuniones u otros eventos que impidan recibir pacientes en ese horario.
-      </p>
-      <a href="/admin/bloqueos" class="bp-submit-btn" style="display:block;text-align:center;text-decoration:none;margin-top:1rem;">
-        Ir a Bloqueos →
-      </a>
+      <p class="bp-blk-desc">Bloquea espacios en el periodo que necesites para no recibir nuevos agendamientos.</p>
+      <p class="bp-blk-subdesc">Las citas existentes en ese tiempo se mantendrán sin cambios.</p>
+
+      <form method="POST" action="/api/admin/bloqueos" id="bp-blk-form">
+        <input type="hidden" name="action" value="block-slot">
+        <input type="hidden" name="_redirect" value={`/admin/agenda?w=${weekOffset}`}>
+
+        <label class="bp-allday-check">
+          <input type="checkbox" name="all_day" id="bp-allday" value="1">
+          <span>Bloquea todo el día</span>
+        </label>
+
+        <div class="bp-blk-grid">
+          <div></div>
+          <div class="bp-blk-grid-hdr">Fecha</div>
+          <div class="bp-blk-grid-hdr" id="bp-blk-time-hdr">Hora</div>
+
+          <div class="bp-blk-grid-lbl">Desde</div>
+          <div><input type="date" name="date_from" id="bp-blk-dfrom" required></div>
+          <div id="bp-blk-tfrom-wrap"><input type="time" name="time_from" id="bp-blk-tfrom" step="900"></div>
+
+          <div class="bp-blk-grid-lbl">Hasta</div>
+          <div><input type="date" name="date_to" id="bp-blk-dto" required></div>
+          <div id="bp-blk-tto-wrap"><input type="time" name="time_to" id="bp-blk-tto" step="900"></div>
+        </div>
+
+        <div class="bp-field">
+          <label>Nombre bloqueo (opcional)</label>
+          <input type="text" name="label" id="bp-blk-label" placeholder="Ej: Vacaciones, Reunión...">
+        </div>
+
+        <div class="bp-feriados-box" id="bp-feriados-box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <div style="flex:1;min-width:0;">
+            <p class="bp-feriados-text">Bloquea los feriados y evita nuevos agendamientos esos días</p>
+            <button type="button" id="bp-btn-feriados" class="bp-feriados-btn">Bloquear feriados</button>
+          </div>
+          <button type="button" id="bp-dismiss-feriados" class="bp-feriados-x" title="Cerrar">✕</button>
+        </div>
+
+        <button type="submit" class="bp-submit-btn">Confirmar bloqueo</button>
+      </form>
     </div>
   </div>
 
@@ -678,6 +713,43 @@ const errorParam = Astro.url.searchParams.get('error');
 .sp-btn-cancel { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: #ef4444; background: none; border: none; cursor: pointer; padding: 0.25rem 0; }
 .sp-btn-cancel:hover { opacity: 0.75; }
 
+/* ── Drag overlay ─────────────────────────────────────────────────────────── */
+.cal-drag-overlay {
+  position: absolute; left: 1px; right: 1px;
+  background: rgba(79,92,232,0.12); border: 1.5px solid rgba(79,92,232,0.45);
+  border-radius: 4px; pointer-events: none; z-index: 5;
+}
+
+/* ── Bloquear hora form ───────────────────────────────────────────────────── */
+.bp-blk-desc    { font-size: 0.82rem; color: #374151; line-height: 1.55; margin-bottom: 0.2rem; }
+.bp-blk-subdesc { font-size: 0.75rem; color: #9ca3af; line-height: 1.5; margin-bottom: 0.875rem; }
+.bp-allday-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: #374151; cursor: pointer; margin-bottom: 0.75rem; user-select: none; }
+.bp-allday-check input { accent-color: #4f5ce8; width: 14px; height: 14px; flex-shrink: 0; }
+
+.bp-blk-grid { display: grid; grid-template-columns: 42px 1fr 76px; gap: 5px 5px; align-items: center; }
+.bp-blk-grid-hdr { font-size: 0.62rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.07em; }
+.bp-blk-grid-lbl { font-size: 0.75rem; font-weight: 600; color: #374151; }
+.bp-blk-grid input[type="date"],
+.bp-blk-grid input[type="time"] { width: 100%; font-size: 0.77rem; padding: 0.28rem 0.35rem; }
+
+.bp-feriados-box {
+  display: flex; align-items: flex-start; gap: 0.5rem;
+  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+  padding: 0.6rem 0.65rem; margin: 0.75rem 0 0.15rem;
+}
+.bp-feriados-text { font-size: 0.74rem; color: #374151; line-height: 1.45; margin-bottom: 0.4rem; }
+.bp-feriados-btn {
+  font-size: 0.72rem; font-weight: 600; color: #4f5ce8; background: none;
+  border: 1px solid #c7d2fe; border-radius: 5px; padding: 3px 8px;
+  cursor: pointer; transition: background .1s;
+}
+.bp-feriados-btn:hover { background: #eff6ff; }
+.bp-feriados-x {
+  background: none; border: none; color: #9ca3af; cursor: pointer;
+  font-size: 0.875rem; padding: 0; flex-shrink: 0; line-height: 1;
+}
+.bp-feriados-x:hover { color: #374151; }
+
 /* Shared bp-field inside session panel reschedule form */
 #sp-rsc-form .bp-field label { font-size: 0.68rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; display: block; }
 </style>
@@ -753,27 +825,92 @@ document.addEventListener('click', e => {
   }
 });
 
-// ── Click on empty slot ───────────────────────────────────────────────────────
+// ── Drag-to-block / click-to-book ────────────────────────────────────────────
 const calGrid = document.getElementById('cal-grid');
+
+function getTimeFromClientY(clientY) {
+  const gridRect = calGrid.getBoundingClientRect();
+  const relY     = Math.max(0, Math.min(1019, clientY - gridRect.top));
+  const snapped  = Math.floor(relY / 15) * 15;
+  const h        = 6 + Math.floor(snapped / 60);
+  const m        = snapped % 60;
+  return { time: `${String(Math.min(h,22)).padStart(2,'0')}:${String(m).padStart(2,'0')}`, snapped };
+}
+
+let dragState = null;
+
 document.querySelectorAll('.cal-col').forEach(col => {
-  col.addEventListener('click', e => {
+  col.addEventListener('mousedown', e => {
     if (e.target.closest('.cal-event')) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
 
-    const gridRect = calGrid.getBoundingClientRect();
-    const relY     = e.clientY - gridRect.top;
-    const snapped  = Math.floor(relY / 15) * 15;
-    const h        = 6 + Math.floor(snapped / 60);
-    const m        = snapped % 60;
-    const time     = `${String(Math.min(h, 23)).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-    const date     = col.dataset.date;
+    const { time, snapped } = getTimeFromClientY(e.clientY);
+    const ov = document.createElement('div');
+    ov.className = 'cal-drag-overlay';
+    ov.style.top    = `${snapped}px`;
+    ov.style.height = '0px';
+    col.appendChild(ov);
 
-    // Pre-fill form
+    dragState = {
+      startDate:  col.dataset.date,
+      startTime:  time,
+      startY:     e.clientY,
+      startSnap:  snapped,
+      startCol:   col,
+      overlay:    ov,
+      isDragging: false,
+    };
+  });
+});
+
+document.addEventListener('mousemove', e => {
+  if (!dragState) return;
+  if (Math.abs(e.clientY - dragState.startY) > 12) dragState.isDragging = true;
+  if (dragState.isDragging) {
+    document.body.style.cursor = 'copy';
+    const { snapped } = getTimeFromClientY(e.clientY);
+    const from = Math.min(dragState.startSnap, snapped);
+    const to   = Math.max(dragState.startSnap, snapped);
+    dragState.overlay.style.top    = `${from}px`;
+    dragState.overlay.style.height = `${Math.max(15, to - from)}px`;
+  }
+});
+
+document.addEventListener('mouseup', e => {
+  if (!dragState) return;
+  document.body.style.cursor = '';
+  dragState.overlay?.remove();
+
+  const state = dragState;
+  dragState   = null;
+
+  if (state.isDragging) {
+    const endCol  = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.cal-col') ?? state.startCol;
+    const endDate = endCol?.dataset.date ?? state.startDate;
+    const { time: endTime } = getTimeFromClientY(e.clientY);
+
+    let fromDate = state.startDate, fromTime = state.startTime;
+    let toDate   = endDate,         toTime   = endTime;
+    if (fromDate > toDate || (fromDate === toDate && fromTime > toTime)) {
+      [fromDate, toDate] = [toDate, fromDate];
+      [fromTime, toTime] = [toTime, fromTime];
+    }
+    openBloqueoPanel(fromDate, fromTime, toDate, toTime);
+  } else {
+    if (e.target?.closest?.('.cal-event')) return;
+    const date = state.startDate;
+    const time = state.startTime;
     document.getElementById('bp-date').value = date;
     document.getElementById('bp-time').value = time;
     document.getElementById('bp-date-label').textContent = isoToLabel(date);
-
+    // Ensure agendar tab is active
+    document.getElementById('bp-tab-agenda').classList.add('active');
+    document.getElementById('bp-tab-block').classList.remove('active');
+    document.getElementById('bp-agenda-body').style.display = '';
+    document.getElementById('bp-block-body').style.display  = 'none';
     openBookingPanel(date, time);
-  });
+  }
 });
 
 // Toolbar "+ Agendar" button
@@ -853,6 +990,62 @@ document.getElementById('bp-tab-block')?.addEventListener('click', () => {
   document.getElementById('bp-tab-agenda').classList.remove('active');
   document.getElementById('bp-block-body').style.display  = '';
   document.getElementById('bp-agenda-body').style.display = 'none';
+});
+
+// ── openBloqueoPanel ──────────────────────────────────────────────────────────
+function openBloqueoPanel(fromDate, fromTime, toDate, toTime) {
+  document.getElementById('bp-tab-block').classList.add('active');
+  document.getElementById('bp-tab-agenda').classList.remove('active');
+  document.getElementById('bp-block-body').style.display  = '';
+  document.getElementById('bp-agenda-body').style.display = 'none';
+
+  document.getElementById('bp-blk-dfrom').value = fromDate;
+  document.getElementById('bp-blk-dto').value   = toDate;
+  document.getElementById('bp-blk-tfrom').value = fromTime;
+  document.getElementById('bp-blk-tto').value   = toTime;
+  document.getElementById('bp-blk-label').value = '';
+  document.getElementById('bp-allday').checked  = false;
+  // Ensure time fields visible
+  document.getElementById('bp-blk-tfrom-wrap').style.visibility = '';
+  document.getElementById('bp-blk-tto-wrap').style.visibility   = '';
+
+  const label = fromDate === toDate ? isoToLabel(fromDate) : `${isoToLabel(fromDate)} – ${isoToLabel(toDate)}`;
+  document.getElementById('bp-date-label').textContent = label;
+
+  sessionPanel.classList.remove('open');
+  bookingPanel.classList.add('open');
+}
+
+// ── Bloquear hora: all-day toggle ─────────────────────────────────────────────
+document.getElementById('bp-allday')?.addEventListener('change', function() {
+  const hide = this.checked;
+  document.getElementById('bp-blk-tfrom-wrap').style.visibility = hide ? 'hidden' : '';
+  document.getElementById('bp-blk-tto-wrap').style.visibility   = hide ? 'hidden' : '';
+  document.getElementById('bp-blk-time-hdr').style.visibility   = hide ? 'hidden' : '';
+});
+
+// ── Bloquear feriados ─────────────────────────────────────────────────────────
+document.getElementById('bp-dismiss-feriados')?.addEventListener('click', () => {
+  document.getElementById('bp-feriados-box').style.display = 'none';
+});
+document.getElementById('bp-btn-feriados')?.addEventListener('click', async () => {
+  const btn = document.getElementById('bp-btn-feriados');
+  btn.textContent = 'Bloqueando…';
+  btn.disabled    = true;
+  try {
+    const fd = new FormData();
+    fd.set('action', 'block-feriados');
+    fd.set('_redirect', window.location.pathname + window.location.search);
+    const res = await fetch('/api/admin/bloqueos', { method: 'POST', body: fd });
+    if (res.ok || res.redirected) {
+      btn.textContent = '✓ Feriados bloqueados';
+      btn.style.color = '#15803d';
+      btn.style.borderColor = '#86efac';
+    }
+  } catch {
+    btn.textContent = 'Error — intenta de nuevo';
+    btn.disabled    = false;
+  }
 });
 
 // ── Session panel: click on event ─────────────────────────────────────────────
