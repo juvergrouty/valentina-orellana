@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
 import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar } from '../../../lib/syncCalendar';
+import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
 
 export const prerender = false;
 
@@ -14,14 +15,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   if (action === 'confirm') {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
-
     await supabase.from('bookings').update({ status: 'confirmed' }).eq('id', id);
-
-    // Sincronizar con Google Calendar
-    const { data: booking } = await supabase
-      .from('bookings').select('*').eq('id', id).single();
+    const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
     if (booking) syncBookingToCalendar(booking).catch(console.error);
-
     return redirect(dest);
   }
 
@@ -38,9 +34,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   if (action === 'reschedule') {
     const id           = form.get('id')?.toString();
     const session_date = form.get('session_date')?.toString() ?? '';
-    const rawTime      = form.get('session_time')?.toString() ?? '';
-    const custom_time  = form.get('custom_time')?.toString() ?? '';
-    const session_time = rawTime === 'custom' ? custom_time : rawTime;
+    const session_time = form.get('session_time')?.toString() ?? '';
 
     if (!id || !session_date || !session_time) return redirect(dest);
 
@@ -54,16 +48,12 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (conflict) return redirect(dest + '&error=conflict');
 
-    await supabase.from('bookings')
-      .update({ session_date, session_time }).eq('id', id);
-
-    // Actualizar el evento en Google Calendar
+    await supabase.from('bookings').update({ session_date, session_time }).eq('id', id);
     rescheduleBookingInCalendar(id, session_date, session_time).catch(console.error);
-
     return redirect(dest);
   }
 
-  // ── Crear reserva manual ────────────────────────────────────────────────────
+  // ── Crear reserva manual (modal simple, tipo legacy) ─────────────────────
   if (action === 'create') {
     const session_type  = form.get('session_type')?.toString() ?? '';
     const session_date  = form.get('session_date')?.toString() ?? '';
@@ -79,7 +69,6 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       return redirect(dest + '&error=missing_fields');
     }
 
-    // Leer precio desde settings (con fallback a services.ts)
     const { data: priceRows } = await supabase.from('settings').select('key, value')
       .eq('key', `price_${session_type.replace(/-/g, '_')}`);
     const settingsPrice = priceRows?.[0]?.value ? parseInt(priceRows[0].value) : null;
@@ -87,25 +76,127 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const amount = (settingsPrice && !isNaN(settingsPrice)) ? settingsPrice : (plan?.price ?? 0);
 
     const { data: booking, error } = await supabase.from('bookings').insert({
-      session_type,
-      session_date,
-      session_time,
-      patient_name,
-      patient_email,
-      patient_phone,
-      notes:          notes || null,
-      status:         'confirmed',
-      payment_method: 'manual',
-      amount,
+      session_type, session_date, session_time,
+      patient_name, patient_email, patient_phone,
+      notes: notes || null,
+      status: 'confirmed', payment_method: 'manual', amount,
     }).select().single();
 
-    if (error || !booking) {
-      console.error('Error creando reserva manual:', error?.message);
-      return redirect(dest + '&error=conflict');
+    if (error || !booking) return redirect(dest + '&error=conflict');
+    syncBookingToCalendar(booking).catch(console.error);
+    return redirect(dest);
+  }
+
+  // ── Crear desde panel admin (booking panel, con packs y servicio) ──────────
+  if (action === 'create-admin') {
+    const service_id      = form.get('service_id')?.toString() ?? '';
+    const patient_id      = form.get('patient_id')?.toString() ?? '';
+    const session_date    = form.get('session_date')?.toString() ?? '';
+    const session_time    = form.get('session_time')?.toString() ?? '';
+    const sessions_raw    = parseInt(form.get('sessions_count')?.toString() ?? '1');
+    const sessions_count  = Math.min(Math.max(isNaN(sessions_raw) ? 1 : sessions_raw, 1), 52);
+    const modality_choice = form.get('modality_choice')?.toString() ?? 'presencial';
+    const sendConf        = form.get('send_confirmation') !== null;
+
+    if (!service_id || !session_date || !session_time) {
+      return redirect(dest + '&error=missing_fields');
     }
 
-    // Sincronizar con Google Calendar en segundo plano
-    syncBookingToCalendar(booking).catch(console.error);
+    // Lookup service
+    const { data: svc } = await supabase
+      .from('services_catalog').select('*').eq('id', service_id).single();
+    if (!svc) return redirect(dest + '&error=service_not_found');
+
+    // Patient info: from patients table OR form fields
+    let finalName  = form.get('patient_name')?.toString()?.trim()  ?? '';
+    let finalEmail = form.get('patient_email')?.toString()?.trim().toLowerCase() ?? '';
+    let finalPhone = form.get('patient_phone')?.toString()?.trim() ?? '';
+
+    if (patient_id && patient_id !== '_new') {
+      const { data: p } = await supabase
+        .from('patients').select('name, email, phone').eq('id', patient_id).single();
+      if (p) { finalName = p.name; finalEmail = p.email ?? finalEmail; finalPhone = p.phone ?? finalPhone; }
+    }
+
+    if (!finalName) return redirect(dest + '&error=missing_fields');
+
+    // Determine session_type from service modality
+    const svcModality = svc.modality === 'ambos' ? modality_choice : svc.modality;
+    const sessionType = svc.type === 'pareja' ? `pareja-${svcModality}` : svcModality;
+
+    // Price per session (total pack price on first booking, $0 on rest for pack tracking)
+    const totalPrice = svc.price;
+    const durMin     = svc.duration_min ?? 50;
+
+    // Notification email
+    const { data: settingsRows } = await supabase.from('settings').select('key, value').in('key', ['notification_email']);
+    const notifEmail = settingsRows?.find((r: { key: string }) => r.key === 'notification_email')?.value ?? 'juver@grouty.cl';
+
+    const bookingIds: string[] = [];
+
+    for (let i = 0; i < sessions_count; i++) {
+      const d = new Date(`${session_date}T00:00:00`);
+      d.setDate(d.getDate() + i * 7);
+      const bDate = d.toISOString().split('T')[0];
+
+      // Check for conflict at this slot
+      const { data: conflict } = await supabase
+        .from('bookings').select('id')
+        .eq('session_date', bDate)
+        .eq('session_time', session_time)
+        .neq('status', 'cancelled')
+        .maybeSingle();
+
+      if (conflict) continue; // Skip slots with conflicts (pack continues)
+
+      const payload: Record<string, unknown> = {
+        session_type:   sessionType,
+        service_id:     svc.id,
+        session_date:   bDate,
+        session_time,
+        patient_name:   finalName,
+        patient_email:  finalEmail,
+        patient_phone:  finalPhone,
+        status:         'confirmed',
+        payment_method: 'manual',
+        amount:         i === 0 ? totalPrice : 0,
+        duration_min:   durMin,
+      };
+
+      // Try to insert, degrade gracefully if optional columns missing
+      let { data: booking, error: insErr } = await supabase.from('bookings').insert(payload).select().single();
+      if (insErr?.code === '42703') {
+        const { service_id: _s, duration_min: _d, ...base } = payload;
+        const retry = await supabase.from('bookings').insert(base).select().single();
+        booking = retry.data;
+        insErr  = retry.error;
+      }
+      if (booking) bookingIds.push(booking.id);
+    }
+
+    // Sync FIRST booking to Google Calendar (creates Meet link if online)
+    if (bookingIds.length > 0) {
+      const { data: first } = await supabase.from('bookings').select('*').eq('id', bookingIds[0]).single();
+      if (first) {
+        syncBookingToCalendar(first).catch(console.error);
+
+        if (sendConf && finalEmail) {
+          const emailData = {
+            patient_name:   finalName,
+            patient_email:  finalEmail,
+            patient_phone:  finalPhone,
+            session_type:   sessionType,
+            session_date,
+            session_time,
+            amount:         totalPrice,
+            payment_method: 'manual',
+            service_name:   svc.name,
+          };
+          sendConfirmationToClient(emailData).catch(console.error);
+          sendNotificationToAdmin(emailData, notifEmail).catch(console.error);
+        }
+      }
+    }
 
     return redirect(dest);
   }

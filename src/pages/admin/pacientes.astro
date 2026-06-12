@@ -3,13 +3,16 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 
-const q = Astro.url.searchParams.get('q') ?? '';
+const q      = Astro.url.searchParams.get('q') ?? '';
 const filtro = Astro.url.searchParams.get('filtro') ?? 'activos';
 
 let query = supabase.from('patients').select('*').order('name');
-if (filtro === 'activos')   query = query.eq('active', true);
+if (filtro === 'activos')    query = query.eq('active', true);
 if (filtro === 'archivados') query = query.eq('active', false);
-if (q) query = query.ilike('name', `%${q}%`);
+if (q) {
+  // Search by name OR email (useful when linking from booking panel)
+  query = query.or(`name.ilike.%${q}%,email.ilike.%${q}%`);
+}
 
 const { data: patients } = await query;
 

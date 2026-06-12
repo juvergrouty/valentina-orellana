@@ -13,7 +13,7 @@ const todayStr = NOW.toISOString().split('T')[0];
 
 function getWeekStart(offset: number): Date {
   const d = new Date(NOW);
-  const dow = d.getDay(); // 0=Sun … 6=Sat
+  const dow = d.getDay();
   const toMon = dow === 0 ? -6 : 1 - dow;
   d.setDate(d.getDate() + toMon + offset * 7);
   return d;
@@ -26,7 +26,7 @@ const weekStartStr = weekStart.toISOString().split('T')[0];
 const weekEndStr   = weekEnd.toISOString().split('T')[0];
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
-const [bookingsRes, svcRes, slotsRes] = await Promise.all([
+const [bookingsRes, svcRes, patientRes, allSvcRes] = await Promise.all([
   supabase
     .from('bookings')
     .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method')
@@ -35,28 +35,33 @@ const [bookingsRes, svcRes, slotsRes] = await Promise.all([
     .neq('status', 'cancelled')
     .order('session_time'),
   supabase.from('services_catalog').select('id, name'),
-  supabase
-    .from('availability_slots')
-    .select('start_time')
-    .eq('day_of_week', NOW.getDay())
-    .eq('active', true)
-    .order('start_time'),
+  supabase.from('patients').select('id, name, email, phone').eq('active', true).order('name'),
+  supabase.from('services_catalog')
+    .select('id, name, price, price_online, price_presencial, modality, type, duration_min')
+    .eq('visible', true).order('sort_order'),
 ]);
 
-const bookings = bookingsRes.data ?? [];
+const bookings    = bookingsRes.data ?? [];
 const svcMap: Record<string, string> = {};
 (svcRes.data ?? []).forEach((s: { id: string; name: string }) => { svcMap[s.id] = s.name; });
-const availableSlots = (slotsRes.data ?? []).map((s: { start_time: string }) => s.start_time.slice(0, 5));
+const patientList = patientRes.data ?? [];
+const allServices = allSvcRes.data ?? [];
 
 // ── Week days ─────────────────────────────────────────────────────────────────
-const DAYS_ES   = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
-const MONTHS_ES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+const DAYS_ES      = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
+const MONTHS_ES    = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+const MONTHS_LONG  = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const DAYS_LONG    = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
 
 const weekDays = Array.from({ length: 7 }, (_, i) => {
   const d = new Date(weekStart);
   d.setDate(weekStart.getDate() + i);
   const iso = d.toISOString().split('T')[0];
-  return { dayName: DAYS_ES[i], dayNum: d.getDate(), isoDate: iso, isToday: iso === todayStr };
+  return {
+    dayName: DAYS_ES[i], dayNum: d.getDate(),
+    month: d.getMonth(), year: d.getFullYear(),
+    isoDate: iso, isToday: iso === todayStr,
+  };
 });
 
 const weekLabel = `${weekStart.getDate()} – ${weekEnd.getDate()} ${MONTHS_ES[weekEnd.getMonth()]} ${weekEnd.getFullYear()}`;
@@ -86,6 +91,7 @@ function svcLabel(b: BRow): string {
 }
 
 const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
+const errorParam = Astro.url.searchParams.get('error');
 ---
 
 <AdminLayout title="Agenda" current="/admin/agenda" fullHeight={true}>
@@ -94,6 +100,9 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
 
     <!-- ── Toolbar ──────────────────────────────────────────────────────── -->
     <div class="cal-toolbar">
+      {errorParam === 'conflict' && (
+        <div class="cal-error-banner">⚠ Conflicto de horario — elige otro.</div>
+      )}
       <div class="cal-nav-group">
         <a href="?w=0" class="cal-btn-today">Hoy</a>
         <div class="cal-arrows">
@@ -106,9 +115,7 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
         </div>
         <span class="cal-week-label">{weekLabel}</span>
       </div>
-
       <div style="flex:1"></div>
-
       <div class="cal-toolbar-right">
         <div class="cal-view-chip">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
@@ -116,16 +123,16 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
         </div>
         <a href="/agenda" target="_blank" class="cal-link-btn">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-          Mi link de reservas
+          Mi link
         </a>
-        <button id="open-modal" class="cal-btn-new">
+        <button id="open-new-btn" class="cal-btn-new">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Agendar
         </button>
       </div>
     </div>
 
-    <!-- ── Calendar scroll area ─────────────────────────────────────────── -->
+    <!-- ── Calendar ─────────────────────────────────────────────────────── -->
     <div class="cal-scroll" id="cal-scroll">
 
       <!-- Sticky headers -->
@@ -146,18 +153,21 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
       </div>
 
       <!-- Time grid -->
-      <div class="cal-grid">
-
-        <!-- Time labels -->
+      <div class="cal-grid" id="cal-grid">
         <div class="cal-time-col">
           {HOURS.map(h => (
             <div class="cal-time-lbl" style={`top:${(h - 6) * 60}px`}>{h}:00</div>
           ))}
         </div>
 
-        <!-- Day columns -->
         {weekDays.map(day => (
-          <div class={`cal-col${day.isToday ? ' today' : ''}`} data-date={day.isoDate}>
+          <div
+            class={`cal-col${day.isToday ? ' today' : ''}`}
+            data-date={day.isoDate}
+            data-daynum={day.dayNum}
+            data-month={day.month}
+            data-year={day.year}
+          >
             {HOURS.map(h => (
               <div class="h-line" style={`top:${(h - 6) * 60}px`}></div>
             ))}
@@ -182,6 +192,7 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
                   duration_min:   b.duration_min,
                   payment_method: b.payment_method,
                   service_label:  svcLabel(b),
+                  notes:          b.notes,
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}`}
               >
@@ -194,13 +205,191 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
             {day.isToday && <div class="cal-now-line" id="now-line"></div>}
           </div>
         ))}
-
       </div>
     </div>
   </div>
 
-  <!-- ── Session detail panel ─────────────────────────────────────────────── -->
-  <div class="session-panel" id="session-panel">
+  <!-- ════════════════════════════════════════════════════════════════════
+       BOOKING PANEL — agendar nueva hora (click en slot vacío)
+       ════════════════════════════════════════════════════════════════════ -->
+  <div class="side-panel" id="booking-panel">
+    <div class="sp-header">
+      <div style="flex:1;min-width:0;">
+        <div class="bp-date-label" id="bp-date-label">Nueva sesión</div>
+        <div class="bp-tabs">
+          <button class="bp-tab active" id="bp-tab-agenda">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            Agendar hora
+          </button>
+          <button class="bp-tab" id="bp-tab-block">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            Bloquear hora
+          </button>
+        </div>
+      </div>
+      <button class="sp-close-btn" id="bp-close">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Agendar hora form -->
+    <div class="sp-body" id="bp-agenda-body">
+      <form method="POST" action="/api/admin/bookings" id="bp-form">
+        <input type="hidden" name="action" value="create-admin">
+        <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+
+        <!-- Paciente -->
+        <div class="bp-field">
+          <label>Paciente</label>
+          <select name="patient_id" id="bp-patient-sel" required>
+            <option value="">Selecciona una opción...</option>
+            {patientList.map(p => (
+              <option value={p.id} data-email={p.email ?? ''} data-phone={p.phone ?? ''}>
+                {p.name}
+              </option>
+            ))}
+            <option value="_new">+ Ingresar nuevo paciente</option>
+          </select>
+        </div>
+
+        <!-- Nuevo paciente (hidden by default) -->
+        <div id="bp-new-patient" style="display:none">
+          <div class="bp-field">
+            <label>Nombre completo *</label>
+            <input type="text" name="patient_name" id="bp-pname" placeholder="Nombre Apellido">
+          </div>
+          <div class="bp-field-row">
+            <div class="bp-field">
+              <label>Teléfono *</label>
+              <input type="tel" name="patient_phone" id="bp-pphone" placeholder="+56 9 XXXX XXXX">
+            </div>
+            <div class="bp-field">
+              <label>Correo</label>
+              <input type="email" name="patient_email" id="bp-pemail" placeholder="correo@mail.cl">
+            </div>
+          </div>
+        </div>
+
+        <!-- Servicio -->
+        <div class="bp-field">
+          <label>Servicio</label>
+          <select name="service_id" id="bp-service-sel" required>
+            <option value="">Selecciona un servicio...</option>
+            {allServices.map(s => (
+              <option
+                value={s.id}
+                data-price={s.price}
+                data-price-online={s.price_online ?? s.price}
+                data-price-pres={s.price_presencial ?? s.price}
+                data-modality={s.modality}
+                data-type={s.type}
+                data-dur={s.duration_min ?? 50}
+              >
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <!-- Modalidad (solo si modality=ambos) -->
+        <div class="bp-field-row" id="bp-modality-row" style="display:none">
+          <div class="bp-field">
+            <label>Modalidad</label>
+            <div class="bp-radio-group">
+              <label class="bp-radio-opt">
+                <input type="radio" name="modality_choice" value="presencial" id="bp-mod-pres" checked> Presencial
+              </label>
+              <label class="bp-radio-opt">
+                <input type="radio" name="modality_choice" value="online" id="bp-mod-online"> Online
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fecha y hora -->
+        <div class="bp-field-row">
+          <div class="bp-field">
+            <label>Fecha</label>
+            <input type="date" name="session_date" id="bp-date" required>
+          </div>
+          <div class="bp-field">
+            <label>Hora</label>
+            <input type="time" name="session_time" id="bp-time" required step="900">
+          </div>
+        </div>
+
+        <!-- Repetir / packs -->
+        <div class="bp-field">
+          <label>Sesiones (packs)</label>
+          <select name="sessions_count" id="bp-sessions">
+            <option value="1">1 sesión individual</option>
+            <option value="4">4 sesiones — semana a semana</option>
+            <option value="6">6 sesiones — semana a semana</option>
+            <option value="8">8 sesiones — semana a semana</option>
+            <option value="12">12 sesiones — semana a semana</option>
+          </select>
+        </div>
+
+        <!-- Precio -->
+        <div class="bp-price-block">
+          <div class="bp-price-value" id="bp-price-value">—</div>
+          <div class="bp-price-note" id="bp-price-note">Selecciona un servicio para ver el precio</div>
+        </div>
+
+        <!-- Comunicaciones -->
+        <div class="bp-comms-block">
+          <div class="bp-comms-title">Comunicaciones al paciente</div>
+          <div class="bp-comm-item">
+            <label class="bp-comm-label">
+              <input type="checkbox" name="send_confirmation" value="on" checked>
+              <div>
+                <div class="bp-comm-name">Enviar correo de confirmación</div>
+                <div class="bp-comm-desc">Se enviará de inmediato al confirmar</div>
+              </div>
+            </label>
+          </div>
+          <div class="bp-comm-item bp-comm-disabled">
+            <label class="bp-comm-label">
+              <input type="checkbox" disabled>
+              <div>
+                <div class="bp-comm-name">Correo de recordatorio <span class="bp-soon-chip">Próximo</span></div>
+                <div class="bp-comm-desc">Se enviará 24 horas antes de la sesión</div>
+              </div>
+            </label>
+          </div>
+          <div class="bp-comm-item bp-comm-disabled">
+            <label class="bp-comm-label">
+              <input type="checkbox" disabled>
+              <div>
+                <div class="bp-comm-name">WhatsApp de recordatorio <span class="bp-soon-chip">Próximo</span></div>
+                <div class="bp-comm-desc">Se enviará 4 horas antes</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <button type="submit" class="bp-submit-btn" id="bp-submit">
+          Confirmar agendamiento
+        </button>
+      </form>
+    </div>
+
+    <!-- Bloquear hora tab body -->
+    <div class="sp-body" id="bp-block-body" style="display:none">
+      <p style="color:#6b7280;font-size:0.85rem;line-height:1.6;">
+        Para bloquear horarios, usa la sección de <strong>Bloqueos</strong> en el menú lateral.<br><br>
+        Puedes marcar vacaciones, reuniones u otros eventos que impidan recibir pacientes en ese horario.
+      </p>
+      <a href="/admin/bloqueos" class="bp-submit-btn" style="display:block;text-align:center;text-decoration:none;margin-top:1rem;">
+        Ir a Bloqueos →
+      </a>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       SESSION PANEL — detalle de cita existente
+       ════════════════════════════════════════════════════════════════════ -->
+  <div class="side-panel" id="session-panel">
     <div class="sp-header">
       <div style="flex:1;min-width:0;">
         <div class="sp-service" id="sp-service">—</div>
@@ -216,17 +405,23 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
       <div class="sp-section">
         <div class="sp-patient-name" id="sp-patient-name"></div>
         <div class="sp-patient-info" id="sp-patient-info"></div>
+        <div id="sp-meet-link" style="display:none;margin-top:0.5rem;">
+          <a href="#" id="sp-meet-href" target="_blank" class="sp-meet-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            Unirse al Meet
+          </a>
+        </div>
       </div>
 
-      <!-- Acciones rápidas -->
+      <!-- Acciones -->
       <div class="sp-section">
+        <a href="#" id="sp-btn-ficha" class="sp-action-row">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+          Ver ficha del paciente
+        </a>
         <button class="sp-action-row">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
           Escribir evolución
-        </button>
-        <button class="sp-action-row">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
-          Ver ficha completa
         </button>
       </div>
 
@@ -246,15 +441,37 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
         </div>
       </div>
 
-      <!-- Fecha y hora -->
+      <!-- Fecha / hora -->
       <div class="sp-section">
         <div class="sp-datetime" id="sp-datetime"></div>
         <div class="sp-duration" id="sp-duration"></div>
+        <div class="sp-location" id="sp-location" style="margin-top:4px;"></div>
       </div>
 
-      <!-- Modalidad -->
+      <!-- Reagendar -->
       <div class="sp-section">
-        <div class="sp-location" id="sp-location"></div>
+        <button class="sp-action-row" id="sp-toggle-rsc">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+          Reagendar sesión
+        </button>
+        <div id="sp-rsc-form" style="display:none;margin-top:0.75rem;">
+          <form method="POST" action="/api/admin/bookings" style="margin:0;display:flex;flex-direction:column;gap:0.6rem;">
+            <input type="hidden" name="action" value="reschedule">
+            <input type="hidden" name="id" id="sp-rsc-id">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+            <div class="bp-field-row">
+              <div class="bp-field">
+                <label style="font-size:0.68rem;">Nueva fecha</label>
+                <input type="date" name="session_date" id="sp-rsc-date" required>
+              </div>
+              <div class="bp-field">
+                <label style="font-size:0.68rem;">Nueva hora</label>
+                <input type="time" name="session_time" id="sp-rsc-time" required step="900">
+              </div>
+            </div>
+            <button type="submit" class="sp-btn-confirm">Confirmar reagendamiento</button>
+          </form>
+        </div>
       </div>
 
       <!-- Anular -->
@@ -264,8 +481,7 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
           <input type="hidden" name="id" id="sp-cancel-id">
           <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
           <button
-            type="submit"
-            class="sp-btn-cancel"
+            type="submit" class="sp-btn-cancel"
             onclick="return confirm('¿Cancelar esta reserva? Esta acción no se puede deshacer.')"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
@@ -278,192 +494,89 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
 
 </AdminLayout>
 
-<!-- ── Modal nueva reserva ────────────────────────────────────────────────── -->
-<div id="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:center;justify-content:center;padding:1rem;">
-  <div class="modal-box">
-    <div class="modal-hdr">
-      <span>Nueva reserva</span>
-      <button id="close-modal" class="sp-close-btn">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-    <form method="POST" action="/api/admin/bookings" class="modal-form">
-      <input type="hidden" name="action" value="create" />
-      <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`} />
-
-      <div class="form-row">
-        <label>Fecha</label>
-        <input type="date" id="modal-date" name="session_date" value={todayStr} required />
-      </div>
-      <div class="form-row">
-        <label>Tipo de sesión</label>
-        <select name="session_type" required>
-          {pricingPlans.map(p => (
-            <option value={p.id}>{p.title} — {formatCLP(p.price)}</option>
-          ))}
-        </select>
-      </div>
-      <div class="form-row">
-        <label>Hora</label>
-        <select id="modal-time" name="session_time" required>
-          {availableSlots.length === 0
-            ? <option value="">Sin slots configurados</option>
-            : availableSlots.map(t => <option value={t}>{t}</option>)
-          }
-          <option value="custom">— Horario personalizado</option>
-        </select>
-      </div>
-      <div id="custom-time-wrap" style="display:none;" class="form-row">
-        <label>Hora personalizada</label>
-        <input type="time" id="modal-custom-time" name="custom_time" step="300" />
-      </div>
-      <div class="form-row">
-        <label>Nombre *</label>
-        <input type="text" name="patient_name" required placeholder="Nombre completo" />
-      </div>
-      <div class="form-row">
-        <label>Teléfono *</label>
-        <input type="tel" name="patient_phone" required placeholder="+56 9 XXXX XXXX" />
-      </div>
-      <div class="form-row">
-        <label>Correo *</label>
-        <input type="email" name="patient_email" required placeholder="correo@ejemplo.cl" />
-      </div>
-      <div class="form-row">
-        <label>Notas</label>
-        <textarea name="notes" rows="2" placeholder="Observaciones internas..."></textarea>
-      </div>
-      <button type="submit" class="cal-btn-new" style="width:100%;justify-content:center;margin-top:0.25rem;">
-        Crear reserva confirmada
-      </button>
-    </form>
-  </div>
-</div>
-
 <style>
-/* ── Wrapper fills enc-main ──────────────────────────────────────────────── */
+/* ── Wrapper ─────────────────────────────────────────────────────────────── */
 .cal-wrap {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  background: white;
+  display: flex; flex-direction: column;
+  height: 100vh; overflow: hidden; background: white;
 }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 .cal-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid #e5e7eb;
-  background: white;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  min-height: 48px;
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 1rem; border-bottom: 1px solid #e5e7eb;
+  background: white; flex-shrink: 0; min-height: 48px;
+}
+.cal-error-banner {
+  background: #fef2f2; border: 1px solid #fca5a5; color: #ef4444;
+  padding: 0.25rem 0.75rem; border-radius: 5px; font-size: 0.8rem;
 }
 .cal-nav-group { display: flex; align-items: center; gap: 0.35rem; }
 .cal-btn-today {
-  height: 30px; padding: 0 0.75rem;
-  border: 1px solid #d1d5db; border-radius: 6px;
+  height: 30px; padding: 0 0.75rem; border: 1px solid #d1d5db; border-radius: 6px;
   background: white; font-size: 0.8rem; font-weight: 500; color: #374151;
-  cursor: pointer; text-decoration: none; display: flex; align-items: center;
-  transition: background .1s;
+  cursor: pointer; text-decoration: none; display: flex; align-items: center; transition: background .1s;
 }
 .cal-btn-today:hover { background: #f9fafb; }
 .cal-arrows { display: flex; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden; }
 .cal-arrow {
   display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px;
-  background: white; color: #374151; text-decoration: none; transition: background .1s;
+  width: 30px; height: 30px; background: white; color: #374151; text-decoration: none; transition: background .1s;
 }
 .cal-arrow:hover { background: #f9fafb; }
 .cal-arrow + .cal-arrow { border-left: 1px solid #d1d5db; }
-.cal-week-label { font-size: 0.925rem; font-weight: 600; color: #111827; padding: 0 0.2rem; white-space: nowrap; }
+.cal-week-label { font-size: 0.925rem; font-weight: 600; color: #111827; padding: 0 0.25rem; white-space: nowrap; }
 .cal-toolbar-right { display: flex; align-items: center; gap: 0.4rem; }
 .cal-view-chip {
   height: 30px; padding: 0 0.7rem; border: 1px solid #d1d5db; border-radius: 6px;
-  display: flex; align-items: center; gap: 0.35rem;
-  font-size: 0.8rem; color: #374151; cursor: default; user-select: none;
+  display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: #374151; user-select: none;
 }
 .cal-link-btn {
   display: flex; align-items: center; gap: 0.3rem;
-  height: 30px; padding: 0 0.7rem;
-  font-size: 0.8rem; color: #4f5ce8; text-decoration: none;
-  border-radius: 6px; transition: background .1s;
+  height: 30px; padding: 0 0.7rem; font-size: 0.8rem; color: #4f5ce8;
+  text-decoration: none; border-radius: 6px; transition: background .1s;
 }
 .cal-link-btn:hover { background: #f0f4ff; }
 .cal-btn-new {
   display: flex; align-items: center; gap: 0.3rem;
-  height: 30px; padding: 0 0.8rem;
-  background: #4f5ce8; color: white; border: none; border-radius: 6px;
-  font-size: 0.8rem; font-weight: 600; cursor: pointer;
-  text-decoration: none; transition: background .1s;
+  height: 30px; padding: 0 0.8rem; background: #4f5ce8; color: white;
+  border: none; border-radius: 6px; font-size: 0.8rem; font-weight: 600;
+  cursor: pointer; transition: background .1s;
 }
 .cal-btn-new:hover { background: #3a4fde; }
 
-/* ── Scroll area ─────────────────────────────────────────────────────────── */
-.cal-scroll {
-  flex: 1; min-height: 0;
-  overflow-y: auto; overflow-x: hidden;
-}
+/* ── Scroll & grid ───────────────────────────────────────────────────────── */
+.cal-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .cal-scroll::-webkit-scrollbar { width: 6px; }
 .cal-scroll::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 3px; }
 .cal-scroll::-webkit-scrollbar-track { background: transparent; }
 
-/* ── Sticky day headers ──────────────────────────────────────────────────── */
 .cal-headers {
-  display: flex; background: white;
-  border-bottom: 1px solid #e5e7eb;
+  display: flex; background: white; border-bottom: 1px solid #e5e7eb;
   position: sticky; top: 0; z-index: 20;
 }
 .cal-gutter-head { width: 52px; flex-shrink: 0; border-right: 1px solid #f3f4f6; }
-.cal-day-hdr {
-  flex: 1; text-align: center; padding: 0.45rem 0.2rem;
-  border-left: 1px solid #f3f4f6; min-width: 0;
-}
-.hdr-dayname {
-  display: block; font-size: 0.625rem; font-weight: 600; color: #9ca3af;
-  text-transform: uppercase; letter-spacing: 0.07em; line-height: 1; margin-bottom: 3px;
-}
+.cal-day-hdr { flex: 1; text-align: center; padding: 0.45rem 0.2rem; border-left: 1px solid #f3f4f6; min-width: 0; }
+.hdr-dayname { display: block; font-size: 0.625rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.07em; line-height: 1; margin-bottom: 3px; }
 .cal-day-hdr.today .hdr-dayname { color: #4f5ce8; }
-.hdr-daynum {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 50%;
-  font-size: 0.925rem; font-weight: 700; color: #111827; line-height: 1;
-}
+.hdr-daynum { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; font-size: 0.925rem; font-weight: 700; color: #111827; line-height: 1; }
 .hdr-daynum.today-circle { background: #4f5ce8; color: white; }
 
-/* ── All-day row ─────────────────────────────────────────────────────────── */
-.cal-allday-row { display: flex; border-bottom: 1px solid #e5e7eb; background: white; flex-shrink: 0; }
-.cal-gutter-allday {
-  width: 52px; flex-shrink: 0; border-right: 1px solid #f3f4f6;
-  display: flex; align-items: center; justify-content: flex-end; padding: 3px 8px;
-}
+.cal-allday-row { display: flex; border-bottom: 1px solid #e5e7eb; background: white; }
+.cal-gutter-allday { width: 52px; flex-shrink: 0; border-right: 1px solid #f3f4f6; display: flex; align-items: center; justify-content: flex-end; padding: 3px 8px; }
 .cal-gutter-allday span { font-size: 0.57rem; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
 .cal-allday-cell { flex: 1; min-height: 20px; border-left: 1px solid #f3f4f6; }
 
-/* ── Time grid ───────────────────────────────────────────────────────────── */
 .cal-grid { display: flex; position: relative; height: 1020px; }
 .cal-time-col { width: 52px; flex-shrink: 0; position: relative; border-right: 1px solid #f3f4f6; }
-.cal-time-lbl {
-  position: absolute; right: 7px;
-  transform: translateY(-50%);
-  font-size: 0.6rem; color: #9ca3af; font-weight: 500;
-  white-space: nowrap; user-select: none; pointer-events: none;
-}
-.cal-col { flex: 1; position: relative; border-left: 1px solid #f3f4f6; min-width: 0; }
+.cal-time-lbl { position: absolute; right: 7px; transform: translateY(-50%); font-size: 0.6rem; color: #9ca3af; font-weight: 500; white-space: nowrap; user-select: none; pointer-events: none; }
+.cal-col { flex: 1; position: relative; border-left: 1px solid #f3f4f6; min-width: 0; cursor: crosshair; }
 .cal-col.today { background: #fafbff; }
 .h-line { position: absolute; left: 0; right: 0; height: 1px; background: #f3f4f6; pointer-events: none; }
 .h-half { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed #efefef; pointer-events: none; }
 
-/* ── Session blocks ──────────────────────────────────────────────────────── */
-.cal-event {
-  position: absolute; left: 2px; right: 2px;
-  border-radius: 4px; padding: 2px 5px;
-  cursor: pointer; overflow: hidden; border: 1px solid;
-  transition: filter .1s, box-shadow .1s; z-index: 1;
-}
+/* ── Events ──────────────────────────────────────────────────────────────── */
+.cal-event { position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px; cursor: pointer; overflow: hidden; border: 1px solid; transition: filter .1s, box-shadow .1s; z-index: 1; }
 .cal-event:hover { filter: brightness(0.95); box-shadow: 0 2px 8px rgba(0,0,0,.1); z-index: 3; }
 .ev-confirmed { background: #dcfce7; border-color: #86efac; color: #166534; }
 .ev-pending   { background: #dbeafe; border-color: #93c5fd; color: #1e40af; border-style: dashed; }
@@ -476,36 +589,80 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
 .cal-now-line { position: absolute; left: -1px; right: 0; height: 2px; background: #ef4444; z-index: 10; pointer-events: none; }
 .cal-now-line::before { content: ''; position: absolute; left: -3px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
 
-/* ── Session panel ───────────────────────────────────────────────────────── */
-.session-panel {
-  position: fixed; right: 0; top: 0; bottom: 0; width: 290px;
+/* ── Shared side panel base ──────────────────────────────────────────────── */
+.side-panel {
+  position: fixed; right: 0; top: 0; bottom: 0; width: 308px;
   background: white; border-left: 1px solid #e5e7eb; z-index: 100;
   display: flex; flex-direction: column;
   transform: translateX(100%); transition: transform .22s ease;
   box-shadow: -4px 0 24px rgba(0,0,0,.07);
 }
-.session-panel.open { transform: translateX(0); }
+.side-panel.open { transform: translateX(0); }
 .sp-header {
   display: flex; align-items: flex-start; justify-content: space-between;
   padding: 1rem; border-bottom: 1px solid #f3f4f6; gap: 0.5rem; flex-shrink: 0;
 }
-.sp-service { font-size: 0.875rem; font-weight: 600; color: #111827; line-height: 1.3; }
-.sp-status  { font-size: 0.72rem; margin-top: 3px; }
-.status-confirmed { color: #15803d; font-weight: 600; }
-.status-pending   { color: #b45309; font-weight: 600; }
 .sp-close-btn { background: none; border: none; cursor: pointer; color: #9ca3af; padding: 2px; border-radius: 4px; display: flex; flex-shrink: 0; margin-top: 1px; }
 .sp-close-btn:hover { color: #374151; background: #f3f4f6; }
 .sp-body { flex: 1; overflow-y: auto; padding: 0.875rem 1rem; }
 .sp-section { padding-bottom: 0.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #f3f4f6; }
-.sp-patient-name { font-size: 0.875rem; font-weight: 600; color: #111827; }
-.sp-patient-info { font-size: 0.75rem; color: #6b7280; line-height: 1.7; margin-top: 3px; white-space: pre-line; }
-.sp-action-row {
-  display: flex; align-items: center; gap: 0.4rem;
-  font-size: 0.78rem; color: #374151;
-  background: none; border: none; cursor: pointer;
-  padding: 0.3rem 0; width: 100%; text-align: left;
-}
+.sp-action-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: #374151; background: none; border: none; cursor: pointer; padding: 0.3rem 0; width: 100%; text-align: left; text-decoration: none; }
 .sp-action-row:hover { color: #4f5ce8; }
+
+/* ── Booking panel specific ──────────────────────────────────────────────── */
+.bp-date-label { font-size: 0.875rem; font-weight: 600; color: #111827; margin-bottom: 0.5rem; }
+.bp-tabs { display: flex; gap: 0.25rem; }
+.bp-tab {
+  display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem;
+  border: 1px solid #d1d5db; border-radius: 6px; background: white;
+  font-size: 0.75rem; font-weight: 500; color: #374151; cursor: pointer; transition: all .1s;
+}
+.bp-tab.active { background: #eff6ff; border-color: #93c5fd; color: #1e40af; }
+.bp-tab:hover:not(.active) { background: #f9fafb; }
+
+.bp-field { display: flex; flex-direction: column; gap: 0.2rem; flex: 1; }
+.bp-field label { font-size: 0.68rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+.bp-field-row { display: flex; gap: 0.6rem; }
+.bp-radio-group { display: flex; gap: 0.75rem; align-items: center; padding: 0.5rem 0; }
+.bp-radio-opt { display: flex; align-items: center; gap: 0.3rem; font-size: 0.82rem; color: #374151; cursor: pointer; }
+.bp-radio-opt input { accent-color: #4f5ce8; }
+
+.bp-price-block { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.75rem; margin: 0.25rem 0; }
+.bp-price-value { font-size: 1.35rem; font-weight: 700; color: #111827; }
+.bp-price-note { font-size: 0.72rem; color: #6b7280; margin-top: 2px; }
+
+.bp-comms-block { margin-top: 0.25rem; }
+.bp-comms-title { font-size: 0.75rem; font-weight: 700; color: #111827; margin-bottom: 0.15rem; }
+.bp-comm-item { padding: 0.5rem 0; border-bottom: 1px solid #f3f4f6; }
+.bp-comm-item:last-child { border-bottom: none; }
+.bp-comm-disabled { opacity: 0.5; }
+.bp-comm-label { display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; }
+.bp-comm-label input { margin-top: 2px; accent-color: #4f5ce8; flex-shrink: 0; }
+.bp-comm-name { font-size: 0.8rem; font-weight: 500; color: #111827; }
+.bp-comm-desc { font-size: 0.72rem; color: #9ca3af; margin-top: 1px; }
+.bp-soon-chip { font-size: 0.62rem; background: #e5e7eb; color: #6b7280; border-radius: 99px; padding: 1px 6px; margin-left: 4px; font-weight: 600; }
+
+.bp-submit-btn {
+  width: 100%; padding: 0.6rem; background: #4f5ce8; color: white; border: none;
+  border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  margin-top: 0.875rem; transition: background .1s;
+}
+.bp-submit-btn:hover { background: #3a4fde; }
+
+/* ── Session panel specific ──────────────────────────────────────────────── */
+.sp-service  { font-size: 0.875rem; font-weight: 600; color: #111827; line-height: 1.3; }
+.sp-status   { font-size: 0.72rem; margin-top: 3px; }
+.status-confirmed { color: #15803d; font-weight: 600; }
+.status-pending   { color: #b45309; font-weight: 600; }
+.sp-patient-name  { font-size: 0.875rem; font-weight: 600; color: #111827; }
+.sp-patient-info  { font-size: 0.75rem; color: #6b7280; line-height: 1.7; margin-top: 3px; white-space: pre-line; }
+.sp-meet-btn {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  font-size: 0.75rem; color: #4f5ce8; text-decoration: none; font-weight: 600;
+  background: #eff6ff; border: 1px solid #93c5fd; border-radius: 5px; padding: 3px 8px;
+  transition: background .1s;
+}
+.sp-meet-btn:hover { background: #dbeafe; }
 .sp-amount-row { display: flex; align-items: center; gap: 0.5rem; }
 .sp-amount { font-size: 1.05rem; font-weight: 700; color: #111827; }
 .sp-pay-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 99px; font-size: 0.7rem; font-weight: 600; }
@@ -513,41 +670,45 @@ const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
 .badge-pending  { background: #fef9c3; color: #92400e; }
 .badge-manual   { background: #dbeafe; color: #1e40af; }
 .badge-transfer { background: #ede9fe; color: #5b21b6; }
-.sp-btn-confirm {
-  width: 100%; padding: 0.45rem;
-  background: #4f5ce8; color: white; border: none; border-radius: 6px;
-  font-size: 0.8rem; font-weight: 600; cursor: pointer;
-}
+.sp-btn-confirm { width: 100%; padding: 0.45rem; background: #4f5ce8; color: white; border: none; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
 .sp-btn-confirm:hover { background: #3a4fde; }
 .sp-datetime { font-size: 0.85rem; font-weight: 600; color: #111827; line-height: 1.4; }
 .sp-duration { font-size: 0.75rem; color: #6b7280; margin-top: 3px; }
 .sp-location { font-size: 0.78rem; color: #374151; }
-.sp-btn-cancel {
-  display: flex; align-items: center; gap: 0.35rem;
-  font-size: 0.78rem; color: #ef4444; background: none; border: none; cursor: pointer; padding: 0.25rem 0;
-}
+.sp-btn-cancel { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: #ef4444; background: none; border: none; cursor: pointer; padding: 0.25rem 0; }
 .sp-btn-cancel:hover { opacity: 0.75; }
 
-/* ── Modal ───────────────────────────────────────────────────────────────── */
-.modal-box {
-  background: white; width: 100%; max-width: 432px; max-height: 90vh;
-  overflow-y: auto; padding: 1.5rem; border-radius: 8px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.2);
-}
-.modal-hdr {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 1.25rem;
-  font-size: 0.95rem; font-weight: 700; color: #111827;
-}
-.modal-form { display: flex; flex-direction: column; gap: 0.875rem; }
-.form-row label {
-  display: block; font-size: 0.7rem; font-weight: 600; color: #374151;
-  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem;
-}
+/* Shared bp-field inside session panel reschedule form */
+#sp-rsc-form .bp-field label { font-size: 0.68rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; display: block; }
 </style>
 
 <script>
-// ── Now line ─────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
+const MONTHS_LONG = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const DAYS_LONG   = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+const DAYS_CAP    = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+
+function formatCLP(n) {
+  return new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP',maximumFractionDigits:0}).format(n ?? 0);
+}
+function addMins(t, mins) {
+  const [h, m] = t.split(':').map(Number);
+  const tot = h * 60 + m + mins;
+  return `${String(Math.floor(tot/60)%24).padStart(2,'0')}:${String(tot%60).padStart(2,'0')}`;
+}
+function isoToLong(iso) {
+  const [y, mo, d] = iso.split('-').map(Number);
+  const date = new Date(y, mo - 1, d);
+  return `${DAYS_CAP[date.getDay()]}, ${d} de ${MONTHS_LONG[mo-1]} de ${y}`;
+}
+function isoToLabel(iso) {
+  // "Viernes 12 de junio del 2026"
+  const [y, mo, d] = iso.split('-').map(Number);
+  const date = new Date(y, mo - 1, d);
+  return `${DAYS_CAP[date.getDay()]} ${d} de ${MONTHS_LONG[mo-1]} de ${y}`;
+}
+
+// ── Now line ──────────────────────────────────────────────────────────────────
 const nowLine = document.getElementById('now-line');
 function updateNowLine() {
   if (!nowLine) return;
@@ -560,43 +721,153 @@ function updateNowLine() {
 updateNowLine();
 setInterval(updateNowLine, 60_000);
 
-// Scroll to current hour on load
+// Scroll to current hour
 const calScroll = document.getElementById('cal-scroll');
-if (calScroll) {
-  const h = new Date().getHours();
-  calScroll.scrollTop = Math.max(0, (h - 8) * 60);
+if (calScroll) calScroll.scrollTop = Math.max(0, (new Date().getHours() - 8) * 60);
+
+// ── Panel helpers ─────────────────────────────────────────────────────────────
+const bookingPanel = document.getElementById('booking-panel');
+const sessionPanel = document.getElementById('session-panel');
+
+function openBookingPanel(date, time) {
+  sessionPanel.classList.remove('open');
+  bookingPanel.classList.add('open');
+}
+function openSessionPanel() {
+  bookingPanel.classList.remove('open');
+  sessionPanel.classList.add('open');
+}
+function closeAll() {
+  bookingPanel.classList.remove('open');
+  sessionPanel.classList.remove('open');
 }
 
-// ── Session panel ─────────────────────────────────────────────────────────────
-const panel    = document.getElementById('session-panel');
-const spClose  = document.getElementById('sp-close');
+document.getElementById('bp-close')?.addEventListener('click', closeAll);
+document.getElementById('sp-close')?.addEventListener('click', closeAll);
 
-const MONTHS_FULL = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-const DAYS_FULL   = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+document.addEventListener('click', e => {
+  if (bookingPanel.classList.contains('open') || sessionPanel.classList.contains('open')) {
+    if (!bookingPanel.contains(e.target) && !sessionPanel.contains(e.target) && !e.target.closest('.cal-event') && !e.target.closest('.cal-col') && !e.target.closest('#open-new-btn')) {
+      closeAll();
+    }
+  }
+});
 
-function formatCLP(n) {
-  return new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP',maximumFractionDigits:0}).format(n);
-}
-function addMins(t, mins) {
-  const [h, m] = t.split(':').map(Number);
-  const tot = h * 60 + m + mins;
-  return `${String(Math.floor(tot/60)%24).padStart(2,'0')}:${String(tot%60).padStart(2,'0')}`;
-}
+// ── Click on empty slot ───────────────────────────────────────────────────────
+const calGrid = document.getElementById('cal-grid');
+document.querySelectorAll('.cal-col').forEach(col => {
+  col.addEventListener('click', e => {
+    if (e.target.closest('.cal-event')) return;
 
-document.querySelectorAll('.cal-event').forEach(el => {
-  el.addEventListener('click', e => {
-    e.stopPropagation();
-    try {
-      const b = JSON.parse(el.dataset.booking || '{}');
-      openPanel(b);
-    } catch {}
+    const gridRect = calGrid.getBoundingClientRect();
+    const relY     = e.clientY - gridRect.top;
+    const snapped  = Math.floor(relY / 15) * 15;
+    const h        = 6 + Math.floor(snapped / 60);
+    const m        = snapped % 60;
+    const time     = `${String(Math.min(h, 23)).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    const date     = col.dataset.date;
+
+    // Pre-fill form
+    document.getElementById('bp-date').value = date;
+    document.getElementById('bp-time').value = time;
+    document.getElementById('bp-date-label').textContent = isoToLabel(date);
+
+    openBookingPanel(date, time);
   });
 });
 
-function openPanel(b) {
+// Toolbar "+ Agendar" button
+document.getElementById('open-new-btn')?.addEventListener('click', () => {
+  const today = new Date().toISOString().split('T')[0];
+  const now   = new Date();
+  const roundedH = now.getHours();
+  const time  = `${String(roundedH).padStart(2,'0')}:00`;
+  document.getElementById('bp-date').value = today;
+  document.getElementById('bp-time').value = time;
+  document.getElementById('bp-date-label').textContent = isoToLabel(today);
+  openBookingPanel(today, time);
+});
+
+// ── Booking panel: patient selector ──────────────────────────────────────────
+const bpPatientSel = document.getElementById('bp-patient-sel');
+const bpNewPatient = document.getElementById('bp-new-patient');
+bpPatientSel?.addEventListener('change', () => {
+  const isNew = bpPatientSel.value === '_new';
+  bpNewPatient.style.display = isNew ? 'block' : 'none';
+  const opt = bpPatientSel.selectedOptions[0];
+  if (!isNew && bpPatientSel.value) {
+    // existing patient — clear new-patient hidden fields
+    document.getElementById('bp-pname').value  = '';
+    document.getElementById('bp-pemail').value = '';
+    document.getElementById('bp-pphone').value = '';
+  }
+});
+
+// ── Booking panel: service selector → price ──────────────────────────────────
+const bpServiceSel = document.getElementById('bp-service-sel');
+const bpSessionsSel = document.getElementById('bp-sessions');
+const bpPriceValue  = document.getElementById('bp-price-value');
+const bpPriceNote   = document.getElementById('bp-price-note');
+const bpModalityRow = document.getElementById('bp-modality-row');
+
+function updatePrice() {
+  const opt    = bpServiceSel?.selectedOptions[0];
+  if (!opt || !opt.value) {
+    bpPriceValue.textContent = '—';
+    bpPriceNote.textContent  = 'Selecciona un servicio para ver el precio';
+    return;
+  }
+  const modality = opt.dataset.modality;
+  let price;
+  if (modality === 'ambos') {
+    const isOnline = document.getElementById('bp-mod-online')?.checked;
+    price = parseInt(isOnline ? (opt.dataset.priceOnline || opt.dataset.price) : (opt.dataset.pricePres || opt.dataset.price));
+  } else {
+    price = parseInt(opt.dataset.price || '0');
+  }
+  const count = parseInt(bpSessionsSel?.value || '1');
+  bpPriceValue.textContent = formatCLP(price);
+  bpPriceNote.textContent  = count > 1
+    ? `Precio total del paquete · ${count} sesiones semanales`
+    : 'Precio de la sesión';
+}
+
+bpServiceSel?.addEventListener('change', () => {
+  const opt      = bpServiceSel.selectedOptions[0];
+  const modality = opt?.dataset.modality;
+  bpModalityRow.style.display = modality === 'ambos' ? 'flex' : 'none';
+  updatePrice();
+});
+bpSessionsSel?.addEventListener('change', updatePrice);
+document.querySelectorAll('input[name="modality_choice"]').forEach(r => r.addEventListener('change', updatePrice));
+
+// ── Booking panel: tabs ───────────────────────────────────────────────────────
+document.getElementById('bp-tab-agenda')?.addEventListener('click', () => {
+  document.getElementById('bp-tab-agenda').classList.add('active');
+  document.getElementById('bp-tab-block').classList.remove('active');
+  document.getElementById('bp-agenda-body').style.display = '';
+  document.getElementById('bp-block-body').style.display  = 'none';
+});
+document.getElementById('bp-tab-block')?.addEventListener('click', () => {
+  document.getElementById('bp-tab-block').classList.add('active');
+  document.getElementById('bp-tab-agenda').classList.remove('active');
+  document.getElementById('bp-block-body').style.display  = '';
+  document.getElementById('bp-agenda-body').style.display = 'none';
+});
+
+// ── Session panel: click on event ─────────────────────────────────────────────
+document.querySelectorAll('.cal-event').forEach(el => {
+  el.addEventListener('click', e => {
+    e.stopPropagation();
+    try { openSessionDetail(JSON.parse(el.dataset.booking || '{}')); }
+    catch {}
+  });
+});
+
+function openSessionDetail(b) {
   document.getElementById('sp-service').textContent = b.service_label || b.session_type;
 
-  const isPaid   = b.status === 'confirmed';
+  const isPaid = b.status === 'confirmed';
   const isManual = b.payment_method === 'manual';
   const isXfer   = b.payment_method === 'transferencia';
   const statusEl = document.getElementById('sp-status');
@@ -606,56 +877,61 @@ function openPanel(b) {
   document.getElementById('sp-patient-name').textContent = b.patient_name;
   document.getElementById('sp-patient-info').textContent = [b.patient_email, b.patient_phone].filter(Boolean).join('\n');
 
-  document.getElementById('sp-amount').textContent = formatCLP(b.amount ?? 0);
+  // Meet link (stored as "Meet: https://..." in notes)
+  const meetMatch = b.notes?.match(/Meet:\s*(https:\/\/\S+)/);
+  const meetDiv  = document.getElementById('sp-meet-link');
+  if (meetMatch) {
+    document.getElementById('sp-meet-href').href = meetMatch[1];
+    meetDiv.style.display = '';
+  } else {
+    meetDiv.style.display = 'none';
+  }
+
+  // Ver ficha link
+  const fichaBtn = document.getElementById('sp-btn-ficha');
+  if (b.patient_email) {
+    fichaBtn.href = `/admin/pacientes?q=${encodeURIComponent(b.patient_email)}`;
+  } else {
+    fichaBtn.href = `/admin/pacientes?q=${encodeURIComponent(b.patient_name)}`;
+  }
+
+  // Amount & badge
+  document.getElementById('sp-amount').textContent = formatCLP(b.amount);
   const badge = document.getElementById('sp-pay-badge');
-  if (isPaid && isManual)      { badge.textContent='En consulta';   badge.className='sp-pay-badge badge-manual'; }
-  else if (isPaid && isXfer)   { badge.textContent='Transferencia'; badge.className='sp-pay-badge badge-transfer'; }
-  else if (isPaid)             { badge.textContent='Pagado';        badge.className='sp-pay-badge badge-paid'; }
-  else                         { badge.textContent='Pendiente';     badge.className='sp-pay-badge badge-pending'; }
+  if (isPaid && isManual)  { badge.textContent='En consulta';   badge.className='sp-pay-badge badge-manual'; }
+  else if (isPaid && isXfer){ badge.textContent='Transferencia'; badge.className='sp-pay-badge badge-transfer'; }
+  else if (isPaid)         { badge.textContent='Pagado';        badge.className='sp-pay-badge badge-paid'; }
+  else                     { badge.textContent='Pendiente';     badge.className='sp-pay-badge badge-pending'; }
 
   document.getElementById('sp-confirm-form').style.display = isPaid ? 'none' : 'block';
   document.getElementById('sp-confirm-id').value = b.id;
-  document.getElementById('sp-cancel-id').value  = b.id;
 
-  const [y, mo, d] = b.session_date.split('-').map(Number);
-  const date   = new Date(y, mo - 1, d);
-  const dur    = b.duration_min ?? 50;
-  const t5     = b.session_time.slice(0, 5);
-  const endT   = addMins(t5, dur);
-  document.getElementById('sp-datetime').textContent = `${DAYS_FULL[date.getDay()]}, ${d} de ${MONTHS_FULL[mo-1]} de ${y}`;
-  document.getElementById('sp-duration').textContent = `${t5} – ${endT} · ${dur} min`;
+  // Date / time
+  const dur  = b.duration_min ?? 50;
+  const t5   = b.session_time.slice(0, 5);
+  document.getElementById('sp-datetime').textContent = isoToLong(b.session_date);
+  document.getElementById('sp-duration').textContent = `${t5} – ${addMins(t5, dur)} · ${dur} min`;
 
   const isOnline = b.session_type?.includes('online');
   document.getElementById('sp-location').innerHTML = isOnline
-    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:4px"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Sesión online'
-    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>En mi consulta · Las Condes';
+    ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:3px"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Sesión online'
+    : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:3px"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>En mi consulta · Las Condes';
 
-  panel.classList.add('open');
+  // Reagendar pre-fill
+  document.getElementById('sp-rsc-id').value   = b.id;
+  document.getElementById('sp-rsc-date').value = b.session_date;
+  document.getElementById('sp-rsc-time').value = t5;
+  document.getElementById('sp-rsc-form').style.display = 'none';
+
+  // Cancel
+  document.getElementById('sp-cancel-id').value = b.id;
+
+  openSessionPanel();
 }
 
-spClose?.addEventListener('click', () => panel.classList.remove('open'));
-document.addEventListener('click', e => {
-  if (panel.classList.contains('open') &&
-      !panel.contains(e.target) &&
-      !e.target.closest('.cal-event')) {
-    panel.classList.remove('open');
-  }
-});
-
-// ── Modal nueva reserva ───────────────────────────────────────────────────────
-const overlay    = document.getElementById('modal-overlay');
-const openBtn    = document.getElementById('open-modal');
-const closeBtn   = document.getElementById('close-modal');
-const modalTime  = document.getElementById('modal-time');
-const customWrap = document.getElementById('custom-time-wrap');
-
-function openModal() { overlay.style.display = 'flex'; document.body.style.overflow = 'hidden'; }
-function closeModal() { overlay.style.display = 'none'; document.body.style.overflow = ''; }
-
-openBtn?.addEventListener('click', openModal);
-closeBtn?.addEventListener('click', closeModal);
-overlay?.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
-modalTime?.addEventListener('change', () => {
-  customWrap.style.display = modalTime.value === 'custom' ? 'block' : 'none';
+// ── Reagendar toggle ──────────────────────────────────────────────────────────
+document.getElementById('sp-toggle-rsc')?.addEventListener('click', () => {
+  const form = document.getElementById('sp-rsc-form');
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
 });
 </script>
