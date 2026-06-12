@@ -825,7 +825,7 @@ document.addEventListener('click', e => {
   }
 });
 
-// ── Drag-to-block / click-to-book (pointer capture) ──────────────────────────
+// ── Click-to-book + drag-to-block ────────────────────────────────────────────
 const calGrid = document.getElementById('cal-grid');
 
 function getTimeFromClientY(clientY) {
@@ -838,14 +838,31 @@ function getTimeFromClientY(clientY) {
 }
 
 let dragState = null;
+let didDrag   = false;   // suppresses the click that fires after a drag
 
 document.querySelectorAll('.cal-col').forEach(col => {
 
-  col.addEventListener('pointerdown', e => {
+  // ── Click → Agendar hora ─────────────────────────────────────────────────
+  col.addEventListener('click', e => {
+    if (e.target.closest('.cal-event')) return;
+    if (didDrag) { didDrag = false; return; }
+
+    const { time } = getTimeFromClientY(e.clientY);
+    const date = col.dataset.date;
+    document.getElementById('bp-date').value = date;
+    document.getElementById('bp-time').value = time;
+    document.getElementById('bp-date-label').textContent = isoToLabel(date);
+    document.getElementById('bp-tab-agenda').classList.add('active');
+    document.getElementById('bp-tab-block').classList.remove('active');
+    document.getElementById('bp-agenda-body').style.display = '';
+    document.getElementById('bp-block-body').style.display  = 'none';
+    openBookingPanel(date, time);
+  });
+
+  // ── Mousedown → watch for drag ────────────────────────────────────────────
+  col.addEventListener('mousedown', e => {
     if (e.target.closest('.cal-event')) return;
     if (e.button !== 0) return;
-    e.preventDefault();
-    col.setPointerCapture(e.pointerId);   // all future pointer events → this col
 
     const { time, snapped } = getTimeFromClientY(e.clientY);
     const ov = document.createElement('div');
@@ -859,35 +876,38 @@ document.querySelectorAll('.cal-col').forEach(col => {
       startY: e.clientY, startSnap: snapped,
       startCol: col, overlay: ov, isDragging: false,
     };
-  });
 
-  col.addEventListener('pointermove', e => {
-    if (!dragState || dragState.startCol !== col) return;
-    if (Math.abs(e.clientY - dragState.startY) > 12) dragState.isDragging = true;
-    if (dragState.isDragging) {
-      col.style.cursor = 'copy';
-      const { snapped } = getTimeFromClientY(e.clientY);
-      const from = Math.min(dragState.startSnap, snapped);
-      const to   = Math.max(dragState.startSnap, snapped);
-      dragState.overlay.style.top    = `${from}px`;
-      dragState.overlay.style.height = `${Math.max(15, to - from)}px`;
+    function onMove(ev) {
+      if (!dragState) return;
+      if (Math.abs(ev.clientY - dragState.startY) > 20) {
+        dragState.isDragging = true;
+        document.body.style.cursor = 'copy';
+      }
+      if (dragState.isDragging) {
+        const { snapped: s } = getTimeFromClientY(ev.clientY);
+        const from = Math.min(dragState.startSnap, s);
+        const to   = Math.max(dragState.startSnap, s);
+        dragState.overlay.style.top    = `${from}px`;
+        dragState.overlay.style.height = `${Math.max(15, to - from)}px`;
+      }
     }
-  });
 
-  col.addEventListener('pointerup', e => {
-    if (!dragState || dragState.startCol !== col) return;
-    col.style.cursor = '';
-    col.releasePointerCapture(e.pointerId);
-    dragState.overlay.remove();
+    function onUp(ev) {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup',   onUp);
+      document.body.style.cursor = '';
+      if (!dragState) return;
 
-    const state = dragState;
-    dragState   = null;
+      dragState.overlay.remove();
+      const state = dragState;
+      dragState   = null;
 
-    if (state.isDragging) {
-      // elementFromPoint ignores pointer capture — returns actual element under cursor
-      const endCol  = document.elementFromPoint(e.clientX, e.clientY)?.closest('.cal-col') ?? col;
+      if (!state.isDragging) return;   // plain click — let the click event handle it
+
+      didDrag = true;   // tell the upcoming click to skip
+      const endCol  = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.cal-col') ?? state.startCol;
       const endDate = endCol.dataset.date ?? state.startDate;
-      const { time: endTime } = getTimeFromClientY(e.clientY);
+      const { time: endTime } = getTimeFromClientY(ev.clientY);
 
       let fromDate = state.startDate, fromTime = state.startTime;
       let toDate   = endDate,         toTime   = endTime;
@@ -896,25 +916,10 @@ document.querySelectorAll('.cal-col').forEach(col => {
         [fromTime, toTime] = [toTime, fromTime];
       }
       openBloqueoPanel(fromDate, fromTime, toDate, toTime);
-    } else {
-      const date = state.startDate;
-      const time = state.startTime;
-      document.getElementById('bp-date').value = date;
-      document.getElementById('bp-time').value = time;
-      document.getElementById('bp-date-label').textContent = isoToLabel(date);
-      document.getElementById('bp-tab-agenda').classList.add('active');
-      document.getElementById('bp-tab-block').classList.remove('active');
-      document.getElementById('bp-agenda-body').style.display = '';
-      document.getElementById('bp-block-body').style.display  = 'none';
-      openBookingPanel(date, time);
     }
-  });
 
-  col.addEventListener('pointercancel', e => {
-    if (!dragState || dragState.startCol !== col) return;
-    col.style.cursor = '';
-    dragState.overlay?.remove();
-    dragState = null;
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup',   onUp);
   });
 });
 
