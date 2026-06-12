@@ -605,7 +605,7 @@ const errorParam = Astro.url.searchParams.get('error');
 .cal-grid { display: flex; position: relative; height: 1020px; }
 .cal-time-col { width: 52px; flex-shrink: 0; position: relative; border-right: 1px solid #f3f4f6; }
 .cal-time-lbl { position: absolute; right: 7px; transform: translateY(-50%); font-size: 0.6rem; color: #9ca3af; font-weight: 500; white-space: nowrap; user-select: none; pointer-events: none; }
-.cal-col { flex: 1; position: relative; border-left: 1px solid #f3f4f6; min-width: 0; cursor: crosshair; }
+.cal-col { flex: 1; position: relative; border-left: 1px solid #f3f4f6; min-width: 0; cursor: crosshair; user-select: none; -webkit-user-select: none; touch-action: none; }
 .cal-col.today { background: #fafbff; }
 .h-line { position: absolute; left: 0; right: 0; height: 1px; background: #f3f4f6; pointer-events: none; }
 .h-half { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed #efefef; pointer-events: none; }
@@ -825,7 +825,7 @@ document.addEventListener('click', e => {
   }
 });
 
-// ── Drag-to-block / click-to-book ────────────────────────────────────────────
+// ── Drag-to-block / click-to-book (pointer capture) ──────────────────────────
 const calGrid = document.getElementById('cal-grid');
 
 function getTimeFromClientY(clientY) {
@@ -840,10 +840,12 @@ function getTimeFromClientY(clientY) {
 let dragState = null;
 
 document.querySelectorAll('.cal-col').forEach(col => {
-  col.addEventListener('mousedown', e => {
+
+  col.addEventListener('pointerdown', e => {
     if (e.target.closest('.cal-event')) return;
     if (e.button !== 0) return;
     e.preventDefault();
+    col.setPointerCapture(e.pointerId);   // all future pointer events → this col
 
     const { time, snapped } = getTimeFromClientY(e.clientY);
     const ov = document.createElement('div');
@@ -853,64 +855,67 @@ document.querySelectorAll('.cal-col').forEach(col => {
     col.appendChild(ov);
 
     dragState = {
-      startDate:  col.dataset.date,
-      startTime:  time,
-      startY:     e.clientY,
-      startSnap:  snapped,
-      startCol:   col,
-      overlay:    ov,
-      isDragging: false,
+      startDate: col.dataset.date, startTime: time,
+      startY: e.clientY, startSnap: snapped,
+      startCol: col, overlay: ov, isDragging: false,
     };
   });
-});
 
-document.addEventListener('mousemove', e => {
-  if (!dragState) return;
-  if (Math.abs(e.clientY - dragState.startY) > 12) dragState.isDragging = true;
-  if (dragState.isDragging) {
-    document.body.style.cursor = 'copy';
-    const { snapped } = getTimeFromClientY(e.clientY);
-    const from = Math.min(dragState.startSnap, snapped);
-    const to   = Math.max(dragState.startSnap, snapped);
-    dragState.overlay.style.top    = `${from}px`;
-    dragState.overlay.style.height = `${Math.max(15, to - from)}px`;
-  }
-});
-
-document.addEventListener('mouseup', e => {
-  if (!dragState) return;
-  document.body.style.cursor = '';
-  dragState.overlay?.remove();
-
-  const state = dragState;
-  dragState   = null;
-
-  if (state.isDragging) {
-    const endCol  = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.cal-col') ?? state.startCol;
-    const endDate = endCol?.dataset.date ?? state.startDate;
-    const { time: endTime } = getTimeFromClientY(e.clientY);
-
-    let fromDate = state.startDate, fromTime = state.startTime;
-    let toDate   = endDate,         toTime   = endTime;
-    if (fromDate > toDate || (fromDate === toDate && fromTime > toTime)) {
-      [fromDate, toDate] = [toDate, fromDate];
-      [fromTime, toTime] = [toTime, fromTime];
+  col.addEventListener('pointermove', e => {
+    if (!dragState || dragState.startCol !== col) return;
+    if (Math.abs(e.clientY - dragState.startY) > 12) dragState.isDragging = true;
+    if (dragState.isDragging) {
+      col.style.cursor = 'copy';
+      const { snapped } = getTimeFromClientY(e.clientY);
+      const from = Math.min(dragState.startSnap, snapped);
+      const to   = Math.max(dragState.startSnap, snapped);
+      dragState.overlay.style.top    = `${from}px`;
+      dragState.overlay.style.height = `${Math.max(15, to - from)}px`;
     }
-    openBloqueoPanel(fromDate, fromTime, toDate, toTime);
-  } else {
-    if (e.target?.closest?.('.cal-event')) return;
-    const date = state.startDate;
-    const time = state.startTime;
-    document.getElementById('bp-date').value = date;
-    document.getElementById('bp-time').value = time;
-    document.getElementById('bp-date-label').textContent = isoToLabel(date);
-    // Ensure agendar tab is active
-    document.getElementById('bp-tab-agenda').classList.add('active');
-    document.getElementById('bp-tab-block').classList.remove('active');
-    document.getElementById('bp-agenda-body').style.display = '';
-    document.getElementById('bp-block-body').style.display  = 'none';
-    openBookingPanel(date, time);
-  }
+  });
+
+  col.addEventListener('pointerup', e => {
+    if (!dragState || dragState.startCol !== col) return;
+    col.style.cursor = '';
+    col.releasePointerCapture(e.pointerId);
+    dragState.overlay.remove();
+
+    const state = dragState;
+    dragState   = null;
+
+    if (state.isDragging) {
+      // elementFromPoint ignores pointer capture — returns actual element under cursor
+      const endCol  = document.elementFromPoint(e.clientX, e.clientY)?.closest('.cal-col') ?? col;
+      const endDate = endCol.dataset.date ?? state.startDate;
+      const { time: endTime } = getTimeFromClientY(e.clientY);
+
+      let fromDate = state.startDate, fromTime = state.startTime;
+      let toDate   = endDate,         toTime   = endTime;
+      if (fromDate > toDate || (fromDate === toDate && fromTime > toTime)) {
+        [fromDate, toDate] = [toDate, fromDate];
+        [fromTime, toTime] = [toTime, fromTime];
+      }
+      openBloqueoPanel(fromDate, fromTime, toDate, toTime);
+    } else {
+      const date = state.startDate;
+      const time = state.startTime;
+      document.getElementById('bp-date').value = date;
+      document.getElementById('bp-time').value = time;
+      document.getElementById('bp-date-label').textContent = isoToLabel(date);
+      document.getElementById('bp-tab-agenda').classList.add('active');
+      document.getElementById('bp-tab-block').classList.remove('active');
+      document.getElementById('bp-agenda-body').style.display = '';
+      document.getElementById('bp-block-body').style.display  = 'none';
+      openBookingPanel(date, time);
+    }
+  });
+
+  col.addEventListener('pointercancel', e => {
+    if (!dragState || dragState.startCol !== col) return;
+    col.style.cursor = '';
+    dragState.overlay?.remove();
+    dragState = null;
+  });
 });
 
 // Toolbar "+ Agendar" button
