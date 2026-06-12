@@ -175,15 +175,27 @@ async function handleBooking(request: Request) {
     ? 'https://sandbox.flow.cl/api'
     : undefined; // usa el valor del env var FLOW_ENV
 
+  // Verificar si es paciente nuevo (sin reservas confirmadas previas)
+  const emailLower = patient_email.trim().toLowerCase();
+  const { count: prevCount } = await supabase
+    .from('bookings')
+    .select('id', { count: 'exact', head: true })
+    .eq('patient_email', emailLower)
+    .in('status', ['confirmed', 'paid'])
+    .neq('id', booking.id);
+  const isNewPatient = (prevCount ?? 0) === 0;
+
   const emailData = {
     patient_name:   patient_name.trim(),
-    patient_email:  patient_email.trim().toLowerCase(),
+    patient_email:  emailLower,
     patient_phone:  patient_phone.trim(),
     session_type,
     session_date,
     session_time,
     amount:         finalPrice,
     payment_method: 'flow',
+    is_new_patient: isNewPatient,
+    service_name:   svc.name,
   };
 
   // ── Pago en consulta (manual) ─────────────────────────────────────────────────
@@ -214,7 +226,7 @@ async function handleBooking(request: Request) {
 
   // ── Validar precio antes de llamar a Flow ────────────────────────────────────
   if (!finalPrice || isNaN(finalPrice) || finalPrice < 100) {
-    await logError('bookings', 'Precio inválido antes de Flow', { finalPrice, catalogPrice, session_type });
+    await logError('bookings', 'Precio inválido antes de Flow', { finalPrice, service_id, session_type });
     await supabase.from('bookings').delete().eq('id', booking.id);
     return json({ error: `Precio inválido (${finalPrice}). Actualiza el precio del servicio en el admin.` }, 400);
   }

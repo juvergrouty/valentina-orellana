@@ -11,8 +11,9 @@ import Icon from '../components/ui/Icon.astro';
 import { supabase } from '../lib/supabase';
 import { getPaymentStatus } from '../lib/flow';
 
-const token  = Astro.url.searchParams.get('token') ?? '';
-const manual = Astro.url.searchParams.get('manual') === '1';
+const token        = Astro.url.searchParams.get('token') ?? '';
+const manual       = Astro.url.searchParams.get('manual') === '1';
+const transferencia = Astro.url.searchParams.get('transferencia') === '1';
 
 const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
@@ -37,7 +38,19 @@ let pageState: PageState = 'error';
 let booking: Record<string, string | number> | null = null;
 let paymentMedia: string | null = null;
 
-if (manual) {
+// Cargar settings para datos de transferencia
+const { data: settingsRowsCfm } = await supabase.from('settings').select('key, value');
+const settingsCfm: Record<string, string> = {};
+(settingsRowsCfm ?? []).forEach(({ key, value }: { key: string; value: string }) => { settingsCfm[key] = value; });
+
+const transferBankName     = settingsCfm['transfer_bank_name']      ?? '';
+const transferHolder       = settingsCfm['transfer_account_holder'] ?? 'Valentina Orellana';
+const transferRut          = settingsCfm['transfer_rut']            ?? '';
+const transferAccountNum   = settingsCfm['transfer_account_number'] ?? '';
+const transferAccountType  = settingsCfm['transfer_account_type']   ?? '';
+const transferEmail        = settingsCfm['transfer_email']          ?? '';
+
+if (manual || transferencia) {
   pageState = 'paid';
 } else if (!token) {
   pageState = 'error';
@@ -115,6 +128,8 @@ const titles: Record<PageState, string> = {
             <p class="font-body text-stone font-light text-base">
               {manual
                 ? 'El pago se realizará en consulta. Te esperamos.'
+                : transferencia
+                ? 'Realiza la transferencia para confirmar tu sesión.'
                 : 'Recibirás un recordatorio antes de tu sesión.'}
             </p>
           </div>
@@ -141,6 +156,51 @@ const titles: Record<PageState, string> = {
               {paymentMedia && (
                 <p class="label text-stone/60 text-right">Vía {paymentMedia}</p>
               )}
+            </div>
+          )}
+
+          {transferencia && (transferBankName || transferAccountNum) && (
+            <div class="w-full bg-forest/5 border border-forest/20 p-6 text-left space-y-2">
+              <p class="label text-forest mb-3">Datos para la transferencia</p>
+              {transferHolder && (
+                <div class="flex justify-between text-sm">
+                  <span class="text-stone">Titular</span>
+                  <span class="font-medium">{transferHolder}</span>
+                </div>
+              )}
+              {transferRut && (
+                <div class="flex justify-between text-sm">
+                  <span class="text-stone">RUT</span>
+                  <span class="font-medium">{transferRut}</span>
+                </div>
+              )}
+              {transferBankName && (
+                <div class="flex justify-between text-sm">
+                  <span class="text-stone">Banco</span>
+                  <span class="font-medium">{transferBankName}</span>
+                </div>
+              )}
+              {transferAccountType && (
+                <div class="flex justify-between text-sm">
+                  <span class="text-stone">Tipo de cuenta</span>
+                  <span class="font-medium">{transferAccountType}</span>
+                </div>
+              )}
+              {transferAccountNum && (
+                <div class="flex justify-between text-sm">
+                  <span class="text-stone">N° de cuenta</span>
+                  <span class="font-medium">{transferAccountNum}</span>
+                </div>
+              )}
+              {transferEmail && (
+                <div class="flex justify-between text-sm">
+                  <span class="text-stone">Email</span>
+                  <span class="font-medium">{transferEmail}</span>
+                </div>
+              )}
+              <p class="font-body text-xs text-stone mt-3 pt-3 border-t border-forest/20">
+                Envía el comprobante a <a href="https://wa.me/56961273907" class="text-forest">WhatsApp</a> para confirmar tu sesión.
+              </p>
             </div>
           )}
 

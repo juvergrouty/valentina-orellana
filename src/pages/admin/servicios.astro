@@ -50,7 +50,10 @@ const TYPE_ICON: Record<string, string> = {
         </a>
       ))}
     </div>
-    <button id="open-new" class="btn btn-dark">+ Nuevo servicio</button>
+    <div style="display:flex;gap:0.5rem;">
+      <a href="/servicios" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Ver página →</a>
+      <button id="open-new" class="btn btn-dark">+ Nuevo servicio</button>
+    </div>
   </div>
 
   <!-- Tabla de servicios -->
@@ -259,6 +262,12 @@ const TYPE_ICON: Record<string, string> = {
         <div style="grid-column:1/-1;">
           <label class="label" style="display:block;margin-bottom:0.3rem;">Descripción</label>
           <textarea name="description" rows="3" placeholder="Descripción del servicio...">{editService?.description ?? ''}</textarea>
+        </div>
+
+        <div style="grid-column:1/-1;">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Descripción Fonasa (código / glosa)</label>
+          <textarea name="fonasa_description" rows="2" placeholder="Ej: 12-01-001 · Psicoterapia individual 50 min">{(editService as Record<string, unknown>)?.fonasa_description as string ?? ''}</textarea>
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.3rem;">Se usa para emisión de boleta y registros Fonasa. No visible en el sitio.</p>
         </div>
 
         <div style="grid-column:1/-1;">

@@ -39,10 +39,11 @@ export const POST: APIRoute = async ({ request }) => {
       show_home:               form.get('show_home') === 'on',
       image_url:               get('image_url'),
       sort_order:              parseInt(get('sort_order') ?? '0'),
+      fonasa_description:      get('fonasa_description') || null,
     };
 
     // Columnas que requieren la migration SQL
-    const newCols = ['price_online', 'price_presencial', 'duration_min_online', 'duration_min_presencial'];
+    const newCols = ['price_online', 'price_presencial', 'duration_min_online', 'duration_min_presencial', 'fonasa_description'];
     const basicData = Object.fromEntries(Object.entries(data).filter(([k]) => !newCols.includes(k)));
 
     const saveRow = async (payload: Record<string, unknown>, id?: string) => {

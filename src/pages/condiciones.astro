@@ -1,0 +1,80 @@
+---
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero   from '../components/sections/PageHero.astro';
+---
+
+<BaseLayout
+  title="Condiciones del servicio"
+  description="Condiciones de atención psicológica con Ps. Valentina Orellana: política de reagendamiento, pagos y confirmación de reservas."
+>
+
+  <PageHero label="Información importante" title="Condiciones del servicio" />
+
+  <section class="py-section bg-sand">
+    <div class="container-site max-w-2xl">
+
+      <div class="space-y-12">
+
+        <!-- Pagos -->
+        <div>
+          <p class="label text-stone mb-4">01 · Pagos</p>
+          <div class="divider mb-6"></div>
+          <h2 class="font-heading font-light text-2xl text-ink mb-4">Confirmación de reserva</h2>
+          <p class="font-body text-sm text-stone leading-relaxed">
+            Tu reserva se confirma únicamente cuando el pago es procesado correctamente.
+            Un horario sin pago confirmado sigue disponible para otras personas.
+          </p>
+        </div>
+
+        <!-- Cancelaciones -->
+        <div>
+          <p class="label text-stone mb-4">02 · Cancelaciones</p>
+          <div class="divider mb-6"></div>
+          <h2 class="font-heading font-light text-2xl text-ink mb-4">Sin reembolso por cancelación</h2>
+          <p class="font-body text-sm text-stone leading-relaxed">
+            Una vez confirmado el pago, las sesiones no tienen reembolso en caso de cancelación.
+            Si no puedes asistir, escríbeme para ver opciones de reagendamiento.
+          </p>
+        </div>
+
+        <!-- Reagendamiento -->
+        <div>
+          <p class="label text-stone mb-4">03 · Reagendamiento</p>
+          <div class="divider mb-6"></div>
+          <h2 class="font-heading font-light text-2xl text-ink mb-4">Aviso con 24 horas de anticipación</h2>
+          <p class="font-body text-sm text-stone leading-relaxed">
+            Si necesitas cambiar el horario de tu sesión, comunícate con al menos
+            <strong>24 horas de anticipación</strong>. Reagendamientos sin aviso previo
+            pueden no ser posibles y la sesión se considera realizada.
+          </p>
+        </div>
+
+        <!-- Confidencialidad -->
+        <div>
+          <p class="label text-stone mb-4">04 · Confidencialidad</p>
+          <div class="divider mb-6"></div>
+          <h2 class="font-heading font-light text-2xl text-ink mb-4">Privacidad y secreto profesional</h2>
+          <p class="font-body text-sm text-stone leading-relaxed">
+            Todo lo tratado en sesión está resguardado por el secreto profesional.
+            Tu información personal y datos de salud son tratados con total confidencialidad,
+            conforme a la ética profesional y la normativa vigente en Chile.
+          </p>
+        </div>
+
+      </div>
+
+      <div class="mt-16 pt-10 border-t border-dust text-center">
+        <p class="font-body text-sm text-stone mb-6">
+          ¿Tienes dudas sobre alguna condición?
+        </p>
+        <a href="https://wa.me/56961273907" target="_blank" rel="noopener noreferrer"
+           class="btn-dark text-[10px] py-3.5 px-8">
+          Consultar por WhatsApp
+        </a>
+      </div>
+
+    </div>
+  </section>
+
+</BaseLayout>

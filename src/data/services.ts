@@ -93,7 +93,7 @@ export const pricingPlans: PricingPlan[] = [
     price: 500,
     currency: 'CLP',
     duration: '50 minutos',
-    modality: 'Vitacura · Las Condes · La Reina · Peñalolén',
+    modality: 'Las Condes',
     features: [
       'Consulta en Santiago',
       'Ambiente cómodo y privado',
@@ -122,7 +122,7 @@ export const pricingPlans: PricingPlan[] = [
     price: 70000,
     currency: 'CLP',
     duration: '60 minutos',
-    modality: 'Vitacura · Las Condes · La Reina · Peñalolén',
+    modality: 'Las Condes',
     features: [
       'Sesión para ambos',
       'Consulta en Santiago',

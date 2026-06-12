@@ -26,14 +26,16 @@ function formatCLP(n: number) {
 }
 
 export interface BookingEmailData {
-  patient_name:  string;
-  patient_email: string;
-  patient_phone: string;
-  session_type:  string;
-  session_date:  string;
-  session_time:  string;
-  amount:        number;
+  patient_name:   string;
+  patient_email:  string;
+  patient_phone:  string;
+  session_type:   string;
+  session_date:   string;
+  session_time:   string;
+  amount:         number;
   payment_method: string;
+  is_new_patient?: boolean;
+  service_name?:  string;
 }
 
 const SESSION_LABELS: Record<string, string> = {
@@ -48,8 +50,12 @@ export async function sendConfirmationToClient(data: BookingEmailData) {
   const client = getResend();
   if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
 
-  const sessionLabel = SESSION_LABELS[data.session_type] ?? data.session_type;
-  const payLabel = data.payment_method === 'manual' ? 'Pago en consulta' : 'Pagado con Flow';
+  const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
+  const payLabel = data.payment_method === 'manual'
+    ? 'Pago en consulta'
+    : data.payment_method === 'transferencia'
+    ? 'Transferencia bancaria'
+    : 'Pagado con Flow';
 
   await client.emails.send({
     from: FROM,
@@ -89,10 +95,25 @@ export async function sendConfirmationToClient(data: BookingEmailData) {
           </table>
         </div>
 
+        ${data.is_new_patient ? `
+        <div style="background:#F4F0EC;padding:1.25rem 1.5rem;margin-bottom:1.5rem;border-left:3px solid #576352;">
+          <p style="font-family:'Inter',sans-serif;font-size:0.8rem;font-weight:600;color:#1A1A18;margin-bottom:0.75rem;text-transform:uppercase;letter-spacing:0.06em;">
+            Condiciones del servicio
+          </p>
+          <ul style="font-family:'Inter',sans-serif;font-size:0.82rem;color:#6B6860;line-height:1.7;margin:0;padding-left:1.1rem;">
+            <li>Para <strong>reagendar</strong> avísame con al menos <strong>24 horas de anticipación</strong>.</li>
+            <li>Las sesiones <strong>no se reembolsan</strong> por cancelación una vez confirmado el pago.</li>
+            <li>Tu reserva está confirmada porque el <strong>pago fue procesado</strong>. Sin pago, el horario queda libre.</li>
+          </ul>
+          <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#9B9485;margin-top:0.75rem;">
+            <a href="https://valentina-orellana.vercel.app/condiciones" style="color:#576352;">Ver condiciones completas →</a>
+          </p>
+        </div>
+        ` : `
         <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#6B6860;line-height:1.6;margin-bottom:1.5rem;">
-          Si necesitas cancelar o reprogramar, escríbeme <strong>con al menos 24 horas de anticipación</strong>
-          para coordinar sin costo.
+          Si necesitas reagendar, escríbeme <strong>con al menos 24 horas de anticipación</strong>.
         </p>
+        `}
 
         <a href="https://wa.me/56961273907"
            style="display:inline-block;background:#576352;color:white;padding:0.75rem 1.5rem;

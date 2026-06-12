@@ -8,8 +8,9 @@ const { data: rows } = await supabase.from('settings').select('key, value');
 const settings: Record<string, string> = {};
 (rows ?? []).forEach(({ key, value }) => { settings[key] = value; });
 
-const manualEnabled     = settings['manual_payment_enabled'] !== 'false';
-const flowEnabled       = settings['flow_enabled'] !== 'false';
+const manualEnabled      = settings['manual_payment_enabled'] !== 'false';
+const transferEnabled    = settings['transfer_payment_enabled'] === 'true';
+const flowEnabled        = settings['flow_enabled'] !== 'false';
 const flowEnv           = settings['flow_env'] ?? 'sandbox'; // default sandbox si no hay fila
 const notificationEmail = settings['notification_email'] ?? 'juver@grouty.cl';
 const emailFrom         = settings['email_from'] ?? '';
@@ -56,6 +57,50 @@ const saved = Astro.url.searchParams.get('saved') === '1';
           <span id="toggle-track" style={`position:absolute;inset:0;border-radius:22px;cursor:pointer;transition:background 0.2s;background:${manualEnabled ? '#576352' : '#DDD8CF'};`}></span>
           <span id="toggle-thumb" style={`position:absolute;top:3px;width:16px;height:16px;border-radius:50%;background:white;transition:left 0.2s;left:${manualEnabled ? '21px' : '3px'};`}></span>
         </label>
+      </div>
+
+      <!-- Transferencia bancaria -->
+      <div style="padding:0.75rem 0;border-bottom:1px solid var(--warm);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
+          <div>
+            <p style="font-size:0.85rem;font-weight:500;">Transferencia bancaria</p>
+            <p style="font-size:0.72rem;color:var(--stone);margin-top:0.2rem;">
+              Permite a los clientes pagar por transferencia. Configura los datos bancarios abajo.
+            </p>
+          </div>
+          <label style="position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;margin-left:1rem;">
+            <input type="checkbox" name="transfer_payment_enabled" value="true"
+              checked={transferEnabled} style="opacity:0;width:0;height:0;" id="toggle-transfer" />
+            <span id="toggle-transfer-track" style={`position:absolute;inset:0;border-radius:22px;cursor:pointer;transition:background 0.2s;background:${transferEnabled ? '#576352' : '#DDD8CF'};`}></span>
+            <span id="toggle-transfer-thumb" style={`position:absolute;top:3px;width:16px;height:16px;border-radius:50%;background:white;transition:left 0.2s;left:${transferEnabled ? '21px' : '3px'};`}></span>
+          </label>
+        </div>
+        <div id="transfer-details-section" style={`display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;${!transferEnabled ? 'opacity:0.4;pointer-events:none;' : ''}`}>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Titular de la cuenta</label>
+            <input type="text" name="transfer_account_holder" value={settings['transfer_account_holder'] ?? ''} placeholder="Valentina Orellana" />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">RUT</label>
+            <input type="text" name="transfer_rut" value={settings['transfer_rut'] ?? ''} placeholder="12.345.678-9" />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Banco</label>
+            <input type="text" name="transfer_bank_name" value={settings['transfer_bank_name'] ?? ''} placeholder="Banco de Chile" />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Tipo de cuenta</label>
+            <input type="text" name="transfer_account_type" value={settings['transfer_account_type'] ?? ''} placeholder="Cuenta Vista" />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">N° de cuenta</label>
+            <input type="text" name="transfer_account_number" value={settings['transfer_account_number'] ?? ''} placeholder="123456789" />
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:0.3rem;">Email para comprobante</label>
+            <input type="email" name="transfer_email" value={settings['transfer_email'] ?? ''} placeholder="valentina@correo.cl" />
+          </div>
+        </div>
       </div>
 
       <!-- Flow toggle -->
@@ -288,6 +333,18 @@ const saved = Astro.url.searchParams.get('saved') === '1';
     } else {
       alert('Error al desconectar. Intenta nuevamente.');
     }
+  });
+
+  // Toggle transferencia
+  const transferChk    = document.getElementById('toggle-transfer') as HTMLInputElement | null;
+  const transferTrack  = document.getElementById('toggle-transfer-track') as HTMLElement | null;
+  const transferThumb  = document.getElementById('toggle-transfer-thumb') as HTMLElement | null;
+  const transferSection = document.getElementById('transfer-details-section') as HTMLElement | null;
+  transferChk?.addEventListener('change', () => {
+    const on = transferChk.checked;
+    if (transferTrack) transferTrack.style.background = on ? '#576352' : '#DDD8CF';
+    if (transferThumb) transferThumb.style.left = on ? '21px' : '3px';
+    if (transferSection) { transferSection.style.opacity = on ? '1' : '0.4'; transferSection.style.pointerEvents = on ? 'auto' : 'none'; }
   });
 
   const checkbox = document.getElementById('toggle-manual') as HTMLInputElement | null;

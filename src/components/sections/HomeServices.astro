@@ -30,7 +30,7 @@ const cards = raw.map(s => ({
   ...s,
   href:       `/agenda?grupo=${s.type === 'pareja' ? 'pareja' : 'individual'}`,
   badge:      s.modality === 'online' ? 'Online' : s.modality === 'presencial' ? 'Presencial' : 'Online · Presencial',
-  priceLabel: s.modality === 'ambos' ? `Desde ${formatCLP(s.price)}` : formatCLP(s.price),
+  priceLabel: formatCLP(s.price),
 }));
 ---
 

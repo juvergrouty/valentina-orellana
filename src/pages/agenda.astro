@@ -10,7 +10,8 @@ const formatCLP = (n: number) =>
 const { data: settingsRows } = await supabase.from('settings').select('key, value');
 const settings: Record<string, string> = {};
 (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
-const manualPaymentEnabled = settings['manual_payment_enabled'] !== 'false';
+const manualPaymentEnabled    = settings['manual_payment_enabled'] !== 'false';
+const transferPaymentEnabled  = settings['transfer_payment_enabled'] === 'true';
 
 // Pre-selección de grupo desde URL (ej: /agenda?grupo=individual)
 const grupoParam    = Astro.url.searchParams.get('grupo')    ?? null;
@@ -126,7 +127,7 @@ const { data: catalogServices } = await supabase
               <p class="font-heading font-semibold text-2xl text-ink mb-1">Presencial</p>
               <p id="presel-price-presencial" class="font-heading font-light text-xl text-ink mb-3"></p>
               <div class="h-px bg-dust my-3"></div>
-              <p class="font-body text-sm text-stone">Vitacura · Las Condes · La Reina</p>
+              <p class="font-body text-sm text-stone">Las Condes</p>
             </button>
           </div>
         </div>
@@ -236,6 +237,14 @@ const { data: catalogServices } = await supabase
               placeholder="Puedes describir brevemente tu situación..."
               class="field resize-none"></textarea>
           </div>
+          <div class="bg-warm border border-dust p-4 text-left">
+            <p class="label text-stone mb-2">Condiciones del servicio</p>
+            <ul class="font-body text-xs text-stone leading-relaxed space-y-1 pl-3 list-disc">
+              <li>Para reagendar, avísame con al menos <strong>24 horas de anticipación</strong>.</li>
+              <li>Las sesiones no tienen reembolso por cancelación una vez confirmado el pago.</li>
+              <li>Tu reserva se confirma solo cuando el pago es procesado.</li>
+            </ul>
+          </div>
           <div>
             <button type="submit" id="submit-patient" class="btn-dark text-[10px] py-3.5 px-8 w-full">
               Continuar al pago
@@ -266,6 +275,12 @@ const { data: catalogServices } = await supabase
               <button id="manual-pay-btn" type="button"
                 class="w-full text-center font-body text-xs tracking-widest uppercase py-3.5 border border-dust text-stone hover:border-ink hover:text-ink transition-colors duration-200">
                 Pagar en consulta
+              </button>
+            )}
+            {transferPaymentEnabled && (
+              <button id="transfer-pay-btn" type="button"
+                class="w-full text-center font-body text-xs tracking-widest uppercase py-3.5 border border-dust text-stone hover:border-forest hover:text-forest hover:border-forest/60 transition-colors duration-200">
+                Pagar por transferencia
               </button>
             )}
             <p class="label text-stone leading-relaxed text-center">
@@ -442,7 +457,7 @@ const { data: catalogServices } = await supabase
                     data-svc-id="${svc.id}" data-modality="presencial" data-price="${pricePres}" data-dur="${durPres}" data-title="${svc.name}">
               <p class="label text-gold mb-2">Presencial</p>
               <p class="font-heading font-semibold text-xl text-ink">${formatCLP(pricePres)}</p>
-              <p class="font-body text-xs text-stone mt-1">${durPres} min · Vitacura · Las Condes</p>
+              <p class="font-body text-xs text-stone mt-1">${durPres} min · Las Condes</p>
             </button>
           </div>
         `;
@@ -451,7 +466,7 @@ const { data: catalogServices } = await supabase
         const dur      = svc.duration_min ?? 50;
         const tagColor = svc.modality === 'online' ? 'text-forest' : 'text-gold';
         const tagText  = svc.modality === 'online' ? 'Online' : 'Presencial';
-        const modLabel = svc.modality === 'online' ? 'Videollamada · Zoom o Meet' : 'Vitacura · Las Condes · La Reina';
+        const modLabel = svc.modality === 'online' ? 'Videollamada · Zoom o Meet' : 'Las Condes';
 
         card.className += ' cursor-pointer hover:border-forest/40 hover:bg-warm';
         card.innerHTML = `
@@ -897,6 +912,36 @@ const { data: catalogServices } = await supabase
       show('payment-error');
       $('payment-error-msg').textContent = err.message ?? 'Error al procesar. Intenta nuevamente.';
       btn.textContent = 'Pagar en consulta';
+      btn.disabled = false;
+    }
+  });
+
+  // ─── Pago por transferencia ───────────────────────────────────────────────
+  document.getElementById('transfer-pay-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('transfer-pay-btn') as HTMLButtonElement | null;
+    if (!btn) return;
+    btn.textContent = 'Confirmando...';
+    btn.disabled = true;
+
+    try {
+      if (!state.bookingId) throw new Error('Reserva no encontrada.');
+
+      const res = await fetch('/api/bookings/confirm-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId: state.bookingId, paymentMethod: 'transferencia' }),
+      });
+
+      const data = await res.json();
+      if (data.confirmed) {
+        window.location.href = '/confirmacion?transferencia=1';
+      } else {
+        throw new Error(data.error ?? 'Error al confirmar');
+      }
+    } catch (err) {
+      show('payment-error');
+      $('payment-error-msg').textContent = err.message ?? 'Error al procesar. Intenta nuevamente.';
+      btn.textContent = 'Pagar por transferencia';
       btn.disabled = false;
     }
   });

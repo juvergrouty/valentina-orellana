@@ -1,11 +1,1 @@
-{
-  "version": "0.0.1",
-  "configurations": [
-    {
-      "name": "valentina-orellana",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 4321
-    }
-  ]
-}
+﻿{"version":"0.0.1","configurations":[{"name":"valentina-dev","runtimeExecutable":"npm","runtimeArgs":["run","dev","--","--port","4322"],"port":4322}]}
