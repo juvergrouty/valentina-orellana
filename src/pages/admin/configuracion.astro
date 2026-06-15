@@ -240,6 +240,39 @@ const saved = Astro.url.searchParams.get('saved') === '1';
       )}
     </div>
 
+    <!-- Reseñas de Google -->
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <p class="label" style="margin:0;">Reseñas de Google</p>
+        {(settings['google_place_id'] && settings['google_places_api_key'])
+          ? <span style="font-size:0.72rem;background:#f0fdf4;color:var(--green);border:1px solid #86efac;padding:0.2rem 0.6rem;border-radius:99px;font-weight:600;">● Conectado</span>
+          : <span style="font-size:0.72rem;background:var(--warm);color:var(--stone);border:1px solid var(--dust);padding:0.2rem 0.6rem;border-radius:99px;">○ No conectado</span>}
+      </div>
+      <p style="font-size:0.85rem;color:var(--stone);margin-bottom:1.25rem;line-height:1.6;">
+        Conecta tu ficha de Google para mostrar tus reseñas reales en la sección
+        <a href="/admin/evaluaciones" style="color:var(--forest);">Evaluaciones</a>.
+        Necesitas tu <strong>Place ID</strong> y una <strong>API key</strong> con la <em>Places API</em> habilitada.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:1rem;">
+        <div>
+          <label class="label" style="margin-bottom:0.4rem;display:block;">Place ID</label>
+          <input type="text" name="google_place_id" value={settings['google_place_id'] ?? ''} placeholder="ChIJ..." />
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.4rem;">
+            Búscalo en el
+            <a href="https://developers.google.com/maps/documentation/places/web-service/place-id" target="_blank" rel="noopener" style="color:var(--forest);">Place ID Finder</a> de Google.
+          </p>
+        </div>
+        <div>
+          <label class="label" style="margin-bottom:0.4rem;display:block;">API Key de Google Places</label>
+          <input type="password" name="google_places_api_key" value={settings['google_places_api_key'] ?? ''} placeholder="AIza..." />
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.4rem;">
+            Créala en <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" style="color:var(--forest);">Google Cloud Console</a> con la <em>Places API</em> activada. La cuota gratuita cubre el uso normal.
+          </p>
+        </div>
+      </div>
+    </div>
+
     <!-- reCAPTCHA -->
     <div class="card">
       <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1.25rem;">
