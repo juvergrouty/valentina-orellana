@@ -858,17 +858,19 @@ document.querySelectorAll('.cal-col').forEach(col => {
 
     dragState = {
       startDate: col.dataset.date, startTime: time,
-      startY: e.clientY, startSnap: snapped,
+      startX: e.clientX, startY: e.clientY, startSnap: snapped,
       startCol: col, overlay: ov, isDragging: false,
     };
 
     function onMove(ev) {
       if (!dragState) return;
-      if (Math.abs(ev.clientY - dragState.startY) > 20) {
+      // Detect drag in ANY direction (horizontal = multi-day, vertical = multi-hour)
+      const dist = Math.hypot(ev.clientX - dragState.startX, ev.clientY - dragState.startY);
+      if (dist > 12) {
         if (!dragState.isDragging) {
           dragState.isDragging = true;
           document.body.style.cursor = 'copy';
-          calScrollEl.style.overflowY = 'hidden'; // lock scroll so it doesn't compete
+          calScrollEl.style.overflowY = 'hidden';
         }
       }
       if (dragState.isDragging) {
