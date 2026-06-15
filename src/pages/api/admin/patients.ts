@@ -48,6 +48,12 @@ export const POST: APIRoute = async ({ request }) => {
     await supabase.from('patients').update({ active: !active }).eq('id', id);
   }
 
+  // ── Eliminar paciente ───────────────────────────────────────────────────────
+  if (action === 'delete') {
+    const id = form.get('id') as string;
+    if (id) await supabase.from('patients').delete().eq('id', id);
+  }
+
   // ── Agregar nota de sesión ──────────────────────────────────────────────────
   if (action === 'add_note') {
     const bookingId = (form.get('booking_id') as string) || null;

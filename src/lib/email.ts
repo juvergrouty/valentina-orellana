@@ -131,6 +131,43 @@ export async function sendConfirmationToClient(data: BookingEmailData) {
   });
 }
 
+// ─── Correo masivo a pacientes ───────────────────────────────────────────────
+export interface BulkEmailResult { sent: number; failed: number; skipped: number; }
+
+export async function sendBulkEmail(
+  recipients: { name: string; email: string }[],
+  subject: string,
+  bodyHtml: string,
+): Promise<BulkEmailResult> {
+  const client = getResend();
+  if (!client) { console.warn('[email] RESEND_API_KEY no configurado — envío masivo omitido'); return { sent: 0, failed: 0, skipped: recipients.length }; }
+
+  let sent = 0, failed = 0, skipped = 0;
+
+  for (const r of recipients) {
+    if (!r.email) { skipped++; continue; }
+    const html = `
+      <div style="font-family:'Inter',sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        <p style="font-size:0.9rem;color:#6B6860;margin-bottom:1.5rem;">Hola ${r.name},</p>
+        <div style="font-size:0.92rem;line-height:1.7;color:#1A1A18;">${bodyHtml}</div>
+        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
+                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
+          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+        </p>
+      </div>`;
+    try {
+      const res = await client.emails.send({ from: FROM, to: r.email, subject, html });
+      if (res.error) { failed++; console.error('[email] bulk:', res.error); }
+      else sent++;
+    } catch (e) {
+      failed++;
+      console.error('[email] bulk exception:', e);
+    }
+  }
+
+  return { sent, failed, skipped };
+}
+
 // ─── Email al admin: nueva reserva ───────────────────────────────────────────
 export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail: string) {
   const client = getResend();

@@ -1,0 +1,197 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+// Ventana: últimos 3 meses
+const now      = new Date();
+const since    = new Date(now); since.setMonth(since.getMonth() - 3);
+const sinceStr = since.toISOString().split('T')[0];
+const todayStr = now.toISOString().split('T')[0];
+
+const { data: all } = await supabase
+  .from('bookings')
+  .select('patient_email, amount, status, payment_method, session_type, session_date')
+  .gte('session_date', sinceStr)
+  .neq('status', 'cancelled');
+const bookings = all ?? [];
+
+const isConfirmed = (s: string) => s === 'confirmed';
+
+// ── Métricas ───────────────────────────────────────────────────────────────
+const agendamientosTotales = bookings.length;
+const confirmados = bookings.filter(b => isConfirmed(b.status)).length;
+const ingresos    = bookings.filter(b => isConfirmed(b.status)).reduce((s, b) => s + (b.amount ?? 0), 0);
+
+// Retención: pacientes (por email) con 2+ sesiones / pacientes con 1+
+const sessionsByPatient: Record<string, number> = {};
+bookings.forEach(b => {
+  const k = (b.patient_email ?? '').toLowerCase();
+  if (k) sessionsByPatient[k] = (sessionsByPatient[k] ?? 0) + 1;
+});
+const pacientesUnicos   = Object.keys(sessionsByPatient).length;
+const pacientesRecurr   = Object.values(sessionsByPatient).filter(n => n >= 2).length;
+const retencion = pacientesUnicos > 0 ? (pacientesRecurr / pacientesUnicos) * 100 : 0;
+
+// Servicios/tipos más solicitados
+const ST_LABEL: Record<string, string> = {
+  'online': 'Individual Online', 'presencial': 'Individual Presencial',
+  'pareja-online': 'Pareja Online', 'pareja-presencial': 'Pareja Presencial',
+};
+const byType: Record<string, number> = {};
+bookings.forEach(b => { const k = b.session_type ?? 'otro'; byType[k] = (byType[k] ?? 0) + 1; });
+const topServicios = Object.entries(byType).sort((a, b) => b[1] - a[1]);
+const maxServicio = Math.max(1, ...topServicios.map(([, n]) => n));
+
+// Agendamientos por semana (últimas 12 semanas)
+const weeks: { label: string; count: number }[] = [];
+for (let i = 11; i >= 0; i--) {
+  const wEnd   = new Date(now); wEnd.setDate(wEnd.getDate() - i * 7);
+  const wStart = new Date(wEnd); wStart.setDate(wStart.getDate() - 6);
+  const s = wStart.toISOString().split('T')[0];
+  const e = wEnd.toISOString().split('T')[0];
+  const count = bookings.filter(b => b.session_date >= s && b.session_date <= e).length;
+  weeks.push({ label: `${wStart.getDate()}/${wStart.getMonth() + 1}`, count });
+}
+const maxWeek = Math.max(1, ...weeks.map(w => w.count));
+
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+---
+
+<AdminLayout title="Reportes" current="/admin/reportes" fullHeight={true}>
+
+  <div class="rep-wrap">
+    <div class="rep-head">
+      <div>
+        <h1>Reportes</h1>
+        <p class="rep-sub">Últimos 3 meses</p>
+      </div>
+    </div>
+
+    <div class="rep-scroll">
+
+      <!-- Tarjetas de métricas -->
+      <div class="rep-cards">
+        <div class="rep-card">
+          <div class="rep-card-top">
+            <span class="rep-card-label">Agendamientos totales</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.75"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          </div>
+          <div class="rep-card-value">{agendamientosTotales}</div>
+        </div>
+
+        <div class="rep-card">
+          <div class="rep-card-top">
+            <span class="rep-card-label">Sesiones confirmadas</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.75"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <div class="rep-card-value">{confirmados}</div>
+        </div>
+
+        <div class="rep-card">
+          <div class="rep-card-top">
+            <span class="rep-card-label">Retención de pacientes</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.75"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <div class="rep-card-value">{retencion.toFixed(1)}%</div>
+          <div class="rep-card-foot">{pacientesRecurr} de {pacientesUnicos} pacientes con 2+ sesiones</div>
+        </div>
+
+        <div class="rep-card">
+          <div class="rep-card-top">
+            <span class="rep-card-label">Ingresos confirmados</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.75"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+          </div>
+          <div class="rep-card-value" style="font-size:1.5rem;">{formatCLP(ingresos)}</div>
+        </div>
+      </div>
+
+      <!-- Gráficos -->
+      <div class="rep-charts">
+        <div class="rep-chart-card">
+          <p class="rep-chart-title">Agendamientos por semana</p>
+          <p class="rep-chart-sub">Últimas 12 semanas</p>
+          {agendamientosTotales === 0 ? (
+            <p class="rep-empty">Sin datos en este periodo.</p>
+          ) : (
+            <div class="rep-bars">
+              {weeks.map(w => (
+                <div class="rep-bar-col">
+                  <div class="rep-bar-wrap">
+                    <div class="rep-bar" style={`height:${(w.count / maxWeek) * 100}%`}>
+                      {w.count > 0 && <span class="rep-bar-val">{w.count}</span>}
+                    </div>
+                  </div>
+                  <span class="rep-bar-label">{w.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div class="rep-chart-card">
+          <p class="rep-chart-title">Servicios más solicitados</p>
+          <p class="rep-chart-sub">Por tipo de sesión</p>
+          {topServicios.length === 0 ? (
+            <p class="rep-empty">Sin datos en este periodo.</p>
+          ) : (
+            <div class="rep-hbars">
+              {topServicios.map(([k, n]) => (
+                <div class="rep-hbar-row">
+                  <span class="rep-hbar-label">{ST_LABEL[k] ?? k}</span>
+                  <div class="rep-hbar-track">
+                    <div class="rep-hbar-fill" style={`width:${(n / maxServicio) * 100}%`}></div>
+                  </div>
+                  <span class="rep-hbar-val">{n}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</AdminLayout>
+
+<style>
+.rep-wrap { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: white; }
+.rep-head { padding: 1.25rem 1.5rem 0.5rem; display: flex; justify-content: space-between; align-items: flex-start; }
+.rep-head h1 { font-size: 1.6rem; font-weight: 700; color: #111827; }
+.rep-sub { font-size: 0.85rem; color: #9ca3af; margin-top: 2px; }
+.rep-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0.5rem 1.5rem 2rem; }
+
+.rep-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+@media (max-width: 920px) { .rep-cards { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .rep-cards { grid-template-columns: 1fr; } }
+.rep-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.25rem; }
+.rep-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+.rep-card-label { font-size: 0.82rem; color: #6b7280; }
+.rep-card-value { font-size: 2rem; font-weight: 700; color: #111827; line-height: 1; }
+.rep-card-foot { font-size: 0.75rem; color: #9ca3af; margin-top: 0.5rem; }
+
+.rep-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 920px) { .rep-charts { grid-template-columns: 1fr; } }
+.rep-chart-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.5rem; }
+.rep-chart-title { font-size: 1rem; font-weight: 600; color: #111827; }
+.rep-chart-sub { font-size: 0.8rem; color: #9ca3af; margin-bottom: 1.25rem; }
+.rep-empty { color: #9ca3af; font-size: 0.875rem; padding: 2rem 0; text-align: center; }
+
+/* Bar chart */
+.rep-bars { display: flex; align-items: flex-end; gap: 0.4rem; height: 200px; }
+.rep-bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }
+.rep-bar-wrap { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+.rep-bar { width: 100%; background: #4f5ce8; border-radius: 4px 4px 0 0; min-height: 2px; position: relative; transition: height .3s; }
+.rep-bar-val { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font-size: 0.65rem; font-weight: 600; color: #4f5ce8; }
+.rep-bar-label { font-size: 0.6rem; color: #9ca3af; margin-top: 4px; white-space: nowrap; }
+
+/* Horizontal bars */
+.rep-hbars { display: flex; flex-direction: column; gap: 0.75rem; }
+.rep-hbar-row { display: grid; grid-template-columns: 130px 1fr 32px; align-items: center; gap: 0.6rem; }
+.rep-hbar-label { font-size: 0.8rem; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rep-hbar-track { background: #f3f4f6; border-radius: 99px; height: 10px; overflow: hidden; }
+.rep-hbar-fill { background: #4f5ce8; height: 100%; border-radius: 99px; transition: width .3s; }
+.rep-hbar-val { font-size: 0.8rem; font-weight: 600; color: #111827; text-align: right; }
+</style>

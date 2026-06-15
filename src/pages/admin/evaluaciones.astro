@@ -1,0 +1,176 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+// Config desde settings: Place ID + API key de Google
+const { data: settingsRows } = await supabase
+  .from('settings').select('key, value')
+  .in('key', ['google_place_id', 'google_places_api_key']);
+const cfg: Record<string, string> = {};
+(settingsRows ?? []).forEach((r: { key: string; value: string }) => { cfg[r.key] = r.value; });
+
+// La API key también puede venir de variable de entorno
+const placeId = cfg.google_place_id ?? '';
+const apiKey  = cfg.google_places_api_key ?? import.meta.env.GOOGLE_PLACES_API_KEY ?? '';
+
+interface GReview {
+  author_name: string;
+  rating: number;
+  text: string;
+  relative_time_description: string;
+  time: number;
+  profile_photo_url?: string;
+}
+
+let reviews: GReview[] = [];
+let placeRating: number | null = null;
+let placeTotal: number | null = null;
+let fetchError: string | null = null;
+const configured = Boolean(placeId && apiKey);
+
+if (configured) {
+  try {
+    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=rating,user_ratings_total,reviews&reviews_sort=newest&language=es&key=${apiKey}`;
+    const res  = await fetch(url);
+    const json = await res.json();
+    if (json.status === 'OK') {
+      reviews     = json.result?.reviews ?? [];
+      placeRating = json.result?.rating ?? null;
+      placeTotal  = json.result?.user_ratings_total ?? null;
+    } else {
+      fetchError = `Google respondió: ${json.status}${json.error_message ? ' — ' + json.error_message : ''}`;
+    }
+  } catch (e) {
+    fetchError = 'No se pudo conectar con Google Places.';
+    console.error('[evaluaciones]', e);
+  }
+}
+
+const MONTHS = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+function fmtDate(unixSec: number) {
+  const d = new Date(unixSec * 1000);
+  return `${d.getDate()} de ${MONTHS[d.getMonth()]} de ${d.getFullYear()}`;
+}
+function stars(n: number) {
+  return Array.from({ length: 5 }, (_, i) => i < Math.round(n));
+}
+---
+
+<AdminLayout title="Evaluaciones" current="/admin/evaluaciones" fullHeight={true}>
+
+  <div class="ev-wrap">
+    <div class="ev-head">
+      <div>
+        <h1>Evaluaciones</h1>
+        {configured && placeRating != null && (
+          <p class="ev-sub">
+            <span class="ev-rating-big">{placeRating.toFixed(1)}</span>
+            <span class="ev-stars-inline">
+              {stars(placeRating).map(on => (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill={on ? '#f59e0b' : 'none'} stroke="#f59e0b" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              ))}
+            </span>
+            {placeTotal != null && <span class="ev-total">· {placeTotal} reseñas en Google</span>}
+          </p>
+        )}
+      </div>
+      {configured && (
+        <a href={`https://search.google.com/local/reviews?placeid=${placeId}`} target="_blank" rel="noopener" class="btn btn-outline btn-sm">
+          Ver en Google →
+        </a>
+      )}
+    </div>
+
+    <div class="ev-scroll">
+
+      {!configured ? (
+        <div class="ev-setup">
+          <div class="ev-setup-icon">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.75"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </div>
+          <p class="ev-setup-title">Conecta tus reseñas de Google</p>
+          <p class="ev-setup-sub">
+            Para mostrar las reseñas reales de tu ficha de Google, agrega tu <strong>Place ID</strong> y una <strong>API key de Google Places</strong> en la configuración.
+          </p>
+          <ol class="ev-setup-steps">
+            <li>Obtén tu <strong>Place ID</strong> en <a href="https://developers.google.com/maps/documentation/places/web-service/place-id" target="_blank" rel="noopener">Place ID Finder</a>.</li>
+            <li>Crea una <strong>API key</strong> en <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> con la <em>Places API</em> habilitada.</li>
+            <li>Guárdalas en Configuración (claves <code>google_place_id</code> y <code>google_places_api_key</code>).</li>
+          </ol>
+          <a href="/admin/configuracion" class="btn btn-primary btn-sm" style="margin-top:0.5rem;">Ir a Configuración →</a>
+        </div>
+      ) : fetchError ? (
+        <div class="alert-error">⚠ {fetchError}</div>
+      ) : reviews.length === 0 ? (
+        <p class="ev-empty">Aún no hay reseñas en tu ficha de Google.</p>
+      ) : (
+        <>
+          <p class="ev-count">Mostrando {reviews.length} reseña{reviews.length !== 1 ? 's' : ''} recientes de Google</p>
+          <div class="ev-list">
+            {reviews.map(r => (
+              <div class="ev-card">
+                <div class="ev-card-head">
+                  {r.profile_photo_url
+                    ? <img src={r.profile_photo_url} alt="" class="ev-avatar" referrerpolicy="no-referrer" />
+                    : <div class="ev-avatar ev-avatar-fallback">{r.author_name.charAt(0)}</div>}
+                  <div>
+                    <p class="ev-author">{r.author_name}</p>
+                    <div class="ev-meta">
+                      <span class="ev-stars">
+                        {stars(r.rating).map(on => (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill={on ? '#f59e0b' : 'none'} stroke="#f59e0b" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                        ))}
+                      </span>
+                      <span class="ev-sep">·</span>
+                      <span class="ev-date">{r.relative_time_description || fmtDate(r.time)}</span>
+                    </div>
+                  </div>
+                </div>
+                {r.text && <p class="ev-text">{r.text}</p>}
+              </div>
+            ))}
+          </div>
+          <p class="ev-note">Google solo entrega las reseñas más recientes vía API. Para ver todas, abre tu ficha en Google.</p>
+        </>
+      )}
+
+    </div>
+  </div>
+
+</AdminLayout>
+
+<style>
+.ev-wrap { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: white; }
+.ev-head { padding: 1.25rem 1.5rem 0.5rem; display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.ev-head h1 { font-size: 1.6rem; font-weight: 700; color: #111827; }
+.ev-sub { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
+.ev-rating-big { font-size: 1.3rem; font-weight: 700; color: #111827; }
+.ev-stars-inline { display: inline-flex; gap: 1px; }
+.ev-total { font-size: 0.82rem; color: #9ca3af; }
+.ev-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0.75rem 1.5rem 2rem; }
+
+.ev-count { font-size: 0.85rem; color: #6b7280; margin-bottom: 1rem; }
+.ev-list { display: flex; flex-direction: column; gap: 1rem; }
+.ev-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.25rem 1.5rem; }
+.ev-card-head { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.ev-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.ev-avatar-fallback { background: #4f5ce8; color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1rem; }
+.ev-author { font-weight: 700; color: #111827; font-size: 0.95rem; }
+.ev-meta { display: flex; align-items: center; gap: 0.4rem; margin-top: 2px; }
+.ev-stars { display: inline-flex; gap: 1px; }
+.ev-sep { color: #d1d5db; }
+.ev-date { font-size: 0.78rem; color: #9ca3af; }
+.ev-text { font-size: 0.92rem; color: #374151; line-height: 1.6; }
+.ev-note { font-size: 0.78rem; color: #9ca3af; margin-top: 1.25rem; text-align: center; }
+.ev-empty { color: #9ca3af; padding: 3rem; text-align: center; }
+
+/* Setup */
+.ev-setup { max-width: 480px; margin: 1rem auto; text-align: center; }
+.ev-setup-icon { width: 56px; height: 56px; margin: 0 auto 1rem; border-radius: 12px; background: #fffbeb; display: flex; align-items: center; justify-content: center; }
+.ev-setup-title { font-size: 1.1rem; font-weight: 700; color: #111827; margin-bottom: 0.5rem; }
+.ev-setup-sub { font-size: 0.875rem; color: #6b7280; line-height: 1.6; margin-bottom: 1.25rem; }
+.ev-setup-steps { text-align: left; font-size: 0.85rem; color: #374151; line-height: 1.8; margin: 0 0 1rem 1.1rem; }
+.ev-setup-steps a { color: #4f5ce8; }
+.ev-setup-steps code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 0.8rem; }
+</style>

@@ -9,13 +9,13 @@ const { title, current, fullHeight = false } = Astro.props;
 const path = current ?? '';
 
 const navMain = [
-  { href: '/admin/agenda',        label: 'Calendario',     icon: 'calendar',   exact: true },
-  { href: '/admin/servicios',     label: 'Servicios',      icon: 'briefcase'               },
-  { href: '/admin/pacientes',     label: 'Pacientes',      icon: 'users'                   },
-  { href: '#',                    label: 'Comunicaciones', icon: 'message',    disabled: true },
-  { href: '/admin/cobros',        label: 'Finanzas',       icon: 'dollar'                  },
-  { href: '#',                    label: 'Evaluaciones',   icon: 'clipboard',  disabled: true },
-  { href: '#',                    label: 'Reportes',       icon: 'bar-chart',  disabled: true },
+  { href: '/admin/agenda',         label: 'Calendario',     icon: 'calendar',   exact: true },
+  { href: '/admin/servicios',      label: 'Servicios',      icon: 'briefcase'               },
+  { href: '/admin/pacientes',      label: 'Pacientes',      icon: 'users'                   },
+  { href: '/admin/comunicaciones', label: 'Comunicaciones', icon: 'message'                 },
+  { href: '/admin/finanzas',       label: 'Finanzas',       icon: 'dollar'                  },
+  { href: '/admin/evaluaciones',   label: 'Evaluaciones',   icon: 'clipboard'               },
+  { href: '/admin/reportes',       label: 'Reportes',       icon: 'bar-chart'               },
 ];
 
 const navSecondary = [
@@ -162,6 +162,21 @@ body {
   color: var(--enc-text-1);
 }
 .enc-logo-brand svg { flex-shrink: 0; }
+.enc-logo-mark {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: #4f5ce8;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Cormorant Garamond', 'Inter', serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+}
 .sidebar-logo-text {
   font-size: 0.9rem;
   font-weight: 600;
@@ -570,11 +585,8 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
     <!-- Logo -->
     <div class="enc-logo-area">
       <a href="/admin" class="enc-logo-brand">
-        <!-- Orange diamond logo -->
-        <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
-          <path d="M16 2L30 16L16 30L2 16L16 2Z" fill="#E8572A"/>
-          <path d="M16 8L24 16L16 24L8 16L16 8Z" fill="white" opacity="0.9"/>
-        </svg>
+        <!-- V de Valentina -->
+        <span class="enc-logo-mark">V</span>
         <span class="sidebar-logo-text">Valentina</span>
       </a>
       <button class="collapse-btn" id="sidebar-collapse-btn" title="Contraer menú">

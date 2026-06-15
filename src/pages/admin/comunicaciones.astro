@@ -1,0 +1,221 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+const sentParam   = Astro.url.searchParams.get('sent');
+const failedParam = Astro.url.searchParams.get('failed');
+const errorParam  = Astro.url.searchParams.get('error');
+
+// Historial de envíos (tabla opcional — si no existe, queda vacío)
+const { data: emails } = await supabase
+  .from('bulk_emails' as never)
+  .select('*')
+  .order('created_at', { ascending: false })
+  .limit(50) as { data: Array<Record<string, unknown>> | null };
+
+const history = emails ?? [];
+
+// Pacientes activos para el selector
+const { data: patients } = await supabase
+  .from('patients').select('name, email').eq('active', true).not('email', 'is', null).order('name');
+const patientList = (patients ?? []).filter(p => p.email);
+
+const MONTHS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function fmt(iso: string) {
+  const d = new Date(iso);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+---
+
+<AdminLayout title="Comunicaciones" current="/admin/comunicaciones" fullHeight={true}>
+
+  <div class="com-wrap">
+
+    {sentParam && (
+      <div class="alert-success" style="margin:1rem 1.5rem 0;">
+        ✓ Correo enviado a {sentParam} paciente{sentParam !== '1' ? 's' : ''}.
+        {failedParam && failedParam !== '0' && ` (${failedParam} fallaron)`}
+      </div>
+    )}
+    {errorParam === 'missing' && (
+      <div class="alert-error" style="margin:1rem 1.5rem 0;">⚠ Faltan el asunto o el contenido del correo.</div>
+    )}
+
+    <div class="com-head">
+      <h1>Comunicaciones</h1>
+    </div>
+
+    <div class="com-tabs">
+      <button class="com-tab active" id="tab-correos">Correos <span class="com-tab-count">({history.length})</span></button>
+      <button class="com-tab disabled" disabled>
+        WhatsApp
+        <span class="com-soon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Próximamente</span>
+      </button>
+    </div>
+
+    <div class="com-body">
+      {history.length === 0 ? (
+        <div class="com-empty">
+          <div class="com-empty-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.75"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
+          </div>
+          <p class="com-empty-title">No has enviado correos</p>
+          <p class="com-empty-sub">Envía información, novedades o recordatorios a varios pacientes al mismo tiempo</p>
+          <button id="open-compose" class="btn btn-outline com-send-btn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            Enviar correo
+          </button>
+        </div>
+      ) : (
+        <div class="com-list">
+          <div class="com-list-head">
+            <button id="open-compose" class="btn btn-primary btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              Enviar correo
+            </button>
+          </div>
+          <table class="com-table">
+            <thead><tr><th>Asunto</th><th>Destinatarios</th><th>Enviados</th><th>Fecha</th></tr></thead>
+            <tbody>
+              {history.map(e => (
+                <tr>
+                  <td style="font-weight:600;color:#111827;">{String(e.subject ?? '')}</td>
+                  <td style="color:#6b7280;text-transform:capitalize;">{String(e.target ?? '')}</td>
+                  <td style="color:#15803d;font-weight:600;">{String(e.sent_count ?? 0)}{e.failed_count && Number(e.failed_count) > 0 ? <span style="color:#dc2626;font-weight:400;"> · {String(e.failed_count)} fallaron</span> : null}</td>
+                  <td style="color:#6b7280;">{e.created_at ? fmt(String(e.created_at)) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <!-- Modal compositor -->
+  <div id="compose-modal" class="com-modal">
+    <div class="com-modal-box">
+      <div class="com-modal-head">
+        <p>Nuevo correo masivo</p>
+        <button id="close-compose" class="com-modal-x">✕</button>
+      </div>
+      <form method="POST" action="/api/admin/comunicaciones" class="com-form">
+        <input type="hidden" name="action" value="send-bulk">
+        <input type="hidden" name="redirect" value="/admin/comunicaciones">
+
+        <div class="com-field">
+          <label>Enviar a</label>
+          <select name="target" id="com-target">
+            <option value="activos">Todos los pacientes activos ({patientList.length})</option>
+            <option value="seleccion">Selección manual…</option>
+          </select>
+        </div>
+
+        <div class="com-field" id="com-sel-wrap" style="display:none;">
+          <label>Selecciona pacientes</label>
+          <div class="com-checklist">
+            {patientList.map(p => (
+              <label class="com-check-item">
+                <input type="checkbox" class="com-sel-cb" value={p.email} />
+                <span>{p.name} <em>{p.email}</em></span>
+              </label>
+            ))}
+          </div>
+          <input type="hidden" name="selected" id="com-selected">
+        </div>
+
+        <div class="com-field">
+          <label>Asunto *</label>
+          <input type="text" name="subject" required placeholder="Ej: Cambio de horario en julio">
+        </div>
+
+        <div class="com-field">
+          <label>Mensaje *</label>
+          <textarea name="body" rows="8" required placeholder="Escribe tu mensaje aquí. Se enviará personalizado con el nombre de cada paciente."></textarea>
+          <p class="com-hint">Se agrega automáticamente el saludo "Hola [nombre]," y la firma de Valentina.</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+          Enviar correo
+        </button>
+      </form>
+    </div>
+  </div>
+
+</AdminLayout>
+
+<style>
+.com-wrap { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: white; }
+.com-head { padding: 1.25rem 1.5rem 0.5rem; }
+.com-head h1 { font-size: 1.6rem; font-weight: 700; color: #111827; }
+
+.com-tabs { display: flex; gap: 0.4rem; padding: 0.5rem 1.5rem 0; }
+.com-tab {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.45rem 0.9rem; font-size: 0.85rem; font-weight: 500; color: #374151;
+  background: #f3f4f6; border: none; border-radius: 8px; cursor: pointer;
+}
+.com-tab.active { background: white; border: 1px solid #e5e7eb; color: #111827; font-weight: 600; }
+.com-tab.disabled { opacity: 0.6; cursor: default; }
+.com-tab-count { color: #9ca3af; font-weight: 400; }
+.com-soon { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.68rem; color: #9ca3af; background: #e5e7eb; border-radius: 99px; padding: 1px 7px; }
+
+.com-body { flex: 1; min-height: 0; overflow: auto; display: flex; }
+
+/* Empty state */
+.com-empty { margin: auto; text-align: center; padding: 2rem; max-width: 420px; }
+.com-empty-icon { width: 56px; height: 56px; margin: 0 auto 1rem; border-radius: 12px; background: #f3f4f6; display: flex; align-items: center; justify-content: center; }
+.com-empty-title { font-size: 1.05rem; font-weight: 700; color: #111827; margin-bottom: 0.4rem; }
+.com-empty-sub { font-size: 0.875rem; color: #6b7280; line-height: 1.5; margin-bottom: 1.25rem; }
+.com-send-btn { margin: 0 auto; }
+
+/* List */
+.com-list { width: 100%; padding: 1rem 1.5rem; }
+.com-list-head { display: flex; justify-content: flex-end; margin-bottom: 0.75rem; }
+.com-table { width: 100%; border-collapse: collapse; }
+.com-table th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; font-weight: 600; padding: 0.6rem 0.75rem; border-bottom: 1px solid #e5e7eb; }
+.com-table td { padding: 0.85rem 0.75rem; border-bottom: 1px solid #f3f4f6; font-size: 0.875rem; }
+
+/* Modal */
+.com-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 100; align-items: center; justify-content: center; padding: 1rem; }
+.com-modal.open { display: flex; }
+.com-modal-box { background: white; width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; border-radius: 10px; }
+.com-modal-head { display: flex; justify-content: space-between; align-items: center; padding: 1.25rem 1.5rem; border-bottom: 1px solid #f3f4f6; }
+.com-modal-head p { font-size: 1.1rem; font-weight: 600; }
+.com-modal-x { background: none; border: none; font-size: 1.3rem; cursor: pointer; color: #9ca3af; }
+.com-form { padding: 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
+.com-field { display: flex; flex-direction: column; gap: 0.35rem; }
+.com-field label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; }
+.com-hint { font-size: 0.72rem; color: #9ca3af; }
+.com-checklist { max-height: 180px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.5rem; }
+.com-check-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.4rem; font-size: 0.82rem; cursor: pointer; border-radius: 6px; }
+.com-check-item:hover { background: #f9fafb; }
+.com-check-item em { color: #9ca3af; font-style: normal; font-size: 0.75rem; }
+</style>
+
+<script>
+  const modal = document.getElementById('compose-modal');
+  const open  = () => modal.classList.add('open');
+  const close = () => modal.classList.remove('open');
+  document.querySelectorAll('#open-compose').forEach(b => b.addEventListener('click', open));
+  document.getElementById('close-compose')?.addEventListener('click', close);
+  modal?.addEventListener('click', e => { if (e.target === modal) close(); });
+
+  // Toggle selección manual
+  const target  = document.getElementById('com-target');
+  const selWrap = document.getElementById('com-sel-wrap');
+  target?.addEventListener('change', () => {
+    selWrap.style.display = target.value === 'seleccion' ? 'flex' : 'none';
+  });
+
+  // Recolectar emails seleccionados al enviar
+  const form = document.querySelector('.com-form');
+  form?.addEventListener('submit', () => {
+    if (target.value === 'seleccion') {
+      const emails = Array.from(document.querySelectorAll('.com-sel-cb'))
+        .filter(cb => cb.checked).map(cb => cb.value);
+      document.getElementById('com-selected').value = emails.join(',');
+    }
+  });
+</script>
