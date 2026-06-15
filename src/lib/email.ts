@@ -115,7 +115,7 @@ export async function sendConfirmationToClient(data: BookingEmailData) {
         </p>
         `}
 
-        <a href="https://wa.me/56961273907"
+        <a href="https://wa.me/56972735696"
            style="display:inline-block;background:#576352;color:white;padding:0.75rem 1.5rem;
                   text-decoration:none;font-family:'Inter',sans-serif;font-size:0.75rem;
                   letter-spacing:0.1em;text-transform:uppercase;">
