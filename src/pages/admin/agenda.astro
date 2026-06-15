@@ -815,6 +815,7 @@ function openSessionPanel() {
 function closeAll() {
   bookingPanel.classList.remove('open');
   sessionPanel.classList.remove('open');
+  if (typeof clearDragSel === 'function') clearDragSel();
 }
 
 document.getElementById('bp-close')?.addEventListener('click', closeAll);
@@ -852,12 +853,19 @@ function clearDragSel() {
   });
 }
 
-function applyDragSel(endCol, endSnapped) {
-  const si   = allCols.indexOf(dragState.startCol);
-  const ei   = allCols.indexOf(endCol);
-  const lo   = Math.min(si, ei), hi = Math.max(si, ei);
-  const from = Math.min(dragState.startSnap, endSnapped);
-  const to   = Math.max(dragState.startSnap, endSnapped);
+// Find column index whose horizontal span contains clientX (geometry — never fails)
+function colIndexAtX(clientX) {
+  for (let i = 0; i < allCols.length; i++) {
+    const r = allCols[i].getBoundingClientRect();
+    if (clientX < r.right) return i;
+  }
+  return allCols.length - 1;
+}
+
+function applyDragSel(startIdx, endIdx, fromSnap, toSnap) {
+  const lo   = Math.min(startIdx, endIdx), hi = Math.max(startIdx, endIdx);
+  const from = Math.min(fromSnap, toSnap);
+  const to   = Math.max(fromSnap, toSnap);
   allCols.forEach((c, i) => {
     if (i >= lo && i <= hi) {
       c.classList.add('drag-sel');
@@ -877,52 +885,58 @@ allCols.forEach(col => {
     if (e.button !== 0) return;
     e.preventDefault();
 
+    const startIdx = allCols.indexOf(col);
     const { time, snapped } = getTimeFromClientY(e.clientY);
     dragState = {
       startDate: col.dataset.date, startTime: time,
-      startX: e.clientX, startY: e.clientY, startSnap: snapped,
-      startCol: col, endCol: col, endSnap: snapped,
+      startX: e.clientX, startY: e.clientY,
+      startIdx, startSnap: snapped,
+      endIdx: startIdx, endSnap: snapped,
       isDragging: false,
     };
 
     function onMove(ev) {
       if (!dragState) return;
       const dist = Math.hypot(ev.clientX - dragState.startX, ev.clientY - dragState.startY);
-      if (dist > 10 && !dragState.isDragging) {
+      if (dist > 8 && !dragState.isDragging) {
         dragState.isDragging = true;
         document.body.style.cursor = 'copy';
         calScrollEl.style.overflowY = 'hidden';
       }
       if (!dragState.isDragging) return;
-      const hit      = document.elementFromPoint(ev.clientX, ev.clientY);
-      const hoverCol = hit?.closest('.cal-col') ?? dragState.endCol;
-      const { snapped: s } = getTimeFromClientY(ev.clientY);
-      dragState.endCol  = hoverCol;
-      dragState.endSnap = s;
-      applyDragSel(hoverCol, s);
+      dragState.endIdx  = colIndexAtX(ev.clientX);
+      dragState.endSnap = getTimeFromClientY(ev.clientY).snapped;
+      applyDragSel(dragState.startIdx, dragState.endIdx, dragState.startSnap, dragState.endSnap);
     }
 
-    function onUp(ev) {
+    function onUp() {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup',   onUp);
       document.body.style.cursor  = '';
       calScrollEl.style.overflowY = '';
-      clearDragSel();
       if (!dragState) return;
       const state = dragState;
       dragState   = null;
 
       if (state.isDragging) {
-        const endDate = state.endCol.dataset.date ?? state.startDate;
-        const { time: endTime } = getTimeFromClientY(ev.clientY);
-        let fromDate = state.startDate, fromTime = state.startTime;
-        let toDate   = endDate,         toTime   = endTime;
-        if (fromDate > toDate || (fromDate === toDate && fromTime > toTime)) {
-          [fromDate, toDate] = [toDate, fromDate];
-          [fromTime, toTime] = [toTime, fromTime];
-        }
+        // Keep highlight visible while the panel is open
+        applyDragSel(state.startIdx, state.endIdx, state.startSnap, state.endSnap);
+
+        const lo = Math.min(state.startIdx, state.endIdx);
+        const hi = Math.max(state.startIdx, state.endIdx);
+        const fromSnap = Math.min(state.startSnap, state.endSnap);
+        const toSnap   = Math.max(state.startSnap, state.endSnap);
+        const snapToTime = s => {
+          const h = 6 + Math.floor(s / 60), m = s % 60;
+          return `${String(Math.min(h,23)).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        };
+        const fromDate = allCols[lo].dataset.date;
+        const toDate   = allCols[hi].dataset.date;
+        const fromTime = snapToTime(fromSnap);
+        const toTime   = snapToTime(Math.max(toSnap, fromSnap + 15));
         openBloqueoPanel(fromDate, fromTime, toDate, toTime);
       } else {
+        clearDragSel();
         const date = state.startDate;
         const time = state.startTime;
         document.getElementById('bp-date').value = date;
