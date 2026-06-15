@@ -564,6 +564,66 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
 .enc-nav::-webkit-scrollbar { width: 4px; }
 .enc-nav::-webkit-scrollbar-track { background: transparent; }
 .enc-nav::-webkit-scrollbar-thumb { background: var(--enc-border); border-radius: 4px; }
+
+/* ── Paleta de comandos (⌘K) ─────────────────────────────────────────────── */
+.cmdk-overlay {
+  display: none; position: fixed; inset: 0; z-index: 200;
+  background: rgba(17,24,39,.4); backdrop-filter: blur(2px);
+  align-items: flex-start; justify-content: center; padding: 12vh 1rem 1rem;
+}
+.cmdk-overlay.open { display: flex; }
+.cmdk-box {
+  width: 100%; max-width: 560px; background: white; border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25); overflow: hidden;
+  display: flex; flex-direction: column; max-height: 70vh;
+}
+.cmdk-search {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.9rem 1.1rem; border-bottom: 1px solid var(--enc-border-2);
+}
+.cmdk-search svg { color: var(--enc-text-4); flex-shrink: 0; }
+.cmdk-search input {
+  flex: 1; border: none !important; outline: none !important; box-shadow: none !important;
+  font-size: 0.95rem !important; padding: 0 !important; background: transparent !important;
+}
+.cmdk-results { overflow-y: auto; padding: 0.4rem; }
+.cmdk-group-label {
+  font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--enc-text-4); padding: 0.6rem 0.75rem 0.3rem;
+}
+.cmdk-item {
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.6rem 0.75rem; border-radius: 8px; cursor: pointer; color: var(--enc-text-1);
+  font-size: 0.875rem; text-decoration: none;
+}
+.cmdk-item svg { color: var(--enc-nav-muted); flex-shrink: 0; }
+.cmdk-item:hover, .cmdk-item.active { background: var(--enc-nav-active-bg); color: var(--enc-nav-active-text); }
+.cmdk-item:hover svg, .cmdk-item.active svg { color: var(--enc-nav-active-text); }
+.cmdk-item-text { flex: 1; min-width: 0; }
+.cmdk-item-sub { font-size: 0.72rem; color: var(--enc-text-4); }
+.cmdk-item .cmdk-chev { color: var(--enc-text-4); opacity: 0.6; }
+.cmdk-empty { padding: 2rem; text-align: center; color: var(--enc-text-4); font-size: 0.85rem; }
+
+.cmdk-tutorial { padding: 1.1rem 1.25rem 1.25rem; overflow-y: auto; }
+.cmdk-back {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  background: none; border: none; cursor: pointer; color: var(--enc-text-3);
+  font-size: 0.8rem; padding: 0; margin-bottom: 0.75rem;
+}
+.cmdk-back:hover { color: var(--enc-nav-active-text); }
+.cmdk-tutorial h3 { font-size: 1.05rem; font-weight: 700; color: var(--enc-text-1); margin-bottom: 0.75rem; }
+.cmdk-tutorial ol { margin: 0 0 0 1.1rem; padding: 0; }
+.cmdk-tutorial li { font-size: 0.88rem; color: var(--enc-text-2); line-height: 1.6; margin-bottom: 0.5rem; }
+.cmdk-tutorial li strong { color: var(--enc-text-1); }
+
+.cmdk-foot {
+  display: flex; gap: 1rem; padding: 0.5rem 1rem; border-top: 1px solid var(--enc-border-2);
+  font-size: 0.7rem; color: var(--enc-text-4);
+}
+.cmdk-foot .kbd {
+  font-size: 0.62rem; color: var(--enc-text-3); background: var(--enc-body-bg);
+  border: 1px solid var(--enc-border); border-radius: 4px; padding: 0 4px; margin-right: 2px;
+}
 </style>
 
 <!doctype html>
@@ -681,6 +741,37 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
       : <div class="enc-content"><slot /></div>
     }
   </main>
+
+  <!-- ── Paleta de comandos / Ayuda (⌘K) ──────────────────────────────────── -->
+  <div class="cmdk-overlay" id="cmdk-overlay">
+    <div class="cmdk-box" role="dialog" aria-label="Ayuda y acciones rápidas">
+      <div class="cmdk-search">
+        <Fragment set:html={icons.search} />
+        <input type="text" id="cmdk-input" placeholder="Busca una acción o un tutorial..." autocomplete="off" />
+        <span class="kbd">ESC</span>
+      </div>
+
+      <!-- Lista (acciones + tutoriales) -->
+      <div class="cmdk-results" id="cmdk-results"></div>
+
+      <!-- Detalle del tutorial -->
+      <div class="cmdk-tutorial" id="cmdk-tutorial" style="display:none;">
+        <button class="cmdk-back" id="cmdk-back">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          Volver
+        </button>
+        <h3 id="cmdk-tut-title"></h3>
+        <ol id="cmdk-tut-steps"></ol>
+        <a id="cmdk-tut-cta" class="btn btn-primary btn-sm" style="display:none;margin-top:0.5rem;"></a>
+      </div>
+
+      <div class="cmdk-foot">
+        <span><span class="kbd">↑</span><span class="kbd">↓</span> navegar</span>
+        <span><span class="kbd">↵</span> abrir</span>
+        <span><span class="kbd">esc</span> cerrar</span>
+      </div>
+    </div>
+  </div>
 </body>
 <script>
   const sidebar  = document.getElementById('enc-sidebar');
@@ -715,6 +806,203 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
     collapsed = !collapsed;
     localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0');
     applyCollapse();
+  });
+
+  // ── Paleta de comandos / Ayuda (⌘K) ────────────────────────────────────────
+  const ICONS = {
+    calendar: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+    user: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    briefcase: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/></svg>',
+    dollar: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>',
+    mail: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>',
+    star: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+    lock: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',
+    book: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>',
+    chev: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>',
+  };
+
+  // Acciones rápidas (navegan)
+  const ACTIONS = [
+    { icon: 'calendar',  label: 'Agendar una cita',        sub: 'Ir al calendario',        href: '/admin/agenda' },
+    { icon: 'user',      label: 'Buscar un paciente',      sub: 'Ver pacientes',           href: '/admin/pacientes' },
+    { icon: 'briefcase', label: 'Crear un servicio',       sub: 'Catálogo de servicios',   href: '/admin/servicios' },
+    { icon: 'dollar',    label: 'Cobrar a un paciente',    sub: 'Generar link de pago',    href: '/admin/cobros' },
+    { icon: 'dollar',    label: 'Ver finanzas',            sub: 'Ingresos y por cobrar',   href: '/admin/finanzas' },
+    { icon: 'mail',      label: 'Enviar correo masivo',    sub: 'Comunicaciones',          href: '/admin/comunicaciones' },
+    { icon: 'star',      label: 'Ver evaluaciones',        sub: 'Reseñas de Google',       href: '/admin/evaluaciones' },
+    { icon: 'lock',      label: 'Bloquear un horario',     sub: 'Horarios y bloqueos',     href: '/admin/horarios' },
+  ];
+
+  // Tutoriales (preguntas frecuentes con pasos)
+  const TUTORIALS = [
+    { q: '¿Cómo agendo una cita?', steps: [
+      'Entra a <strong>Calendario</strong> en el menú lateral.',
+      'Haz <strong>clic</strong> en un espacio vacío de la hora y día que quieras.',
+      'Se abre el panel <strong>Agendar hora</strong>: elige el paciente (o crea uno nuevo) y el servicio.',
+      'Si es un pack, elige la cantidad de sesiones; se agendan semana a semana automáticamente.',
+      'Pulsa <strong>Confirmar agendamiento</strong>. Si es online, se crea el link de Meet solo.',
+    ], cta: { label: 'Ir al calendario →', href: '/admin/agenda' } },
+    { q: '¿Cómo bloqueo un horario?', steps: [
+      'En el <strong>Calendario</strong>, mantén presionado el clic y <strong>arrastra</strong> sobre las horas o días a bloquear.',
+      'Se abre el panel <strong>Bloquear hora</strong> con las fechas ya cargadas.',
+      'Marca "Bloquea todo el día" si aplica, o ajusta las horas.',
+      'Opcional: usa <strong>Bloquear feriados</strong> para bloquear todos los feriados de Chile del año.',
+      'Pulsa <strong>Confirmar bloqueo</strong>.',
+    ], cta: { label: 'Ir al calendario →', href: '/admin/agenda' } },
+    { q: '¿Cómo creo un servicio?', steps: [
+      'Entra a <strong>Servicios</strong> y pulsa <strong>+ Nuevo servicio</strong>.',
+      'Completa nombre, tipo (individual/pareja/grupal/paquete) y modalidad.',
+      'Pon el precio y la duración. Si es "ambos", define precio online y presencial.',
+      'Marca si va visible en la página pública y/o en el carrusel del inicio.',
+      'Guarda. Aparecerá disponible al agendar y en tu sitio.',
+    ], cta: { label: 'Ir a servicios →', href: '/admin/servicios' } },
+    { q: '¿Dónde veo la ficha de un paciente?', steps: [
+      'Entra a <strong>Pacientes</strong>.',
+      'Busca por nombre, RUT, teléfono o correo, o haz clic en una fila.',
+      'Verás su última y próxima sesión, estado de pago y total por cobrar.',
+      'Haz clic en el paciente para abrir su ficha completa con historial y notas.',
+    ], cta: { label: 'Ir a pacientes →', href: '/admin/pacientes' } },
+    { q: '¿Cómo cobro a un paciente?', steps: [
+      'Entra a <strong>Finanzas → Ir a cobrar</strong> (o directo a Cobros).',
+      'Elige el paciente o ingresa un número, y selecciona el servicio (se autocompleta el precio).',
+      'Genera el link de pago de Flow y compártelo por WhatsApp.',
+      'Cuando el paciente paga, la reserva queda confirmada automáticamente.',
+    ], cta: { label: 'Ir a cobrar →', href: '/admin/cobros' } },
+    { q: '¿Cómo envío un correo a varios pacientes?', steps: [
+      'Entra a <strong>Comunicaciones</strong> y pulsa <strong>Enviar correo</strong>.',
+      'Elige enviarlo a todos los pacientes activos o a una selección manual.',
+      'Escribe el asunto y el mensaje (se personaliza con el nombre de cada uno).',
+      'Pulsa <strong>Enviar correo</strong>. Se envían con la firma de Valentina.',
+    ], cta: { label: 'Ir a comunicaciones →', href: '/admin/comunicaciones' } },
+    { q: '¿Cómo conecto mis reseñas de Google?', steps: [
+      'Obtén tu <strong>Place ID</strong> en el buscador de Place ID de Google.',
+      'Crea una <strong>API key</strong> en Google Cloud con la Places API activada.',
+      'Guárdalas en <strong>Configuración</strong> (claves google_place_id y google_places_api_key).',
+      'Entra a <strong>Evaluaciones</strong> y verás tus reseñas reales de Google.',
+    ], cta: { label: 'Ir a evaluaciones →', href: '/admin/evaluaciones' } },
+    { q: '¿Cómo veo mi agenda de hoy?', steps: [
+      'Entra a <strong>Calendario</strong>: por defecto muestra la semana actual.',
+      'El día de hoy aparece resaltado y una línea roja marca la hora actual.',
+      'Haz clic en cualquier cita para ver el detalle, reagendar o anular.',
+    ], cta: { label: 'Ir al calendario →', href: '/admin/agenda' } },
+  ];
+
+  const cmdkOverlay = document.getElementById('cmdk-overlay');
+  const cmdkInput   = document.getElementById('cmdk-input');
+  const cmdkResults = document.getElementById('cmdk-results');
+  const cmdkTut     = document.getElementById('cmdk-tutorial');
+  const searchBar   = document.getElementById('enc-search-bar');
+
+  let cmdkActive = 0;   // índice resaltado
+  let cmdkFlat   = [];  // lista plana de items navegables
+
+  function renderCmdk(filter = '') {
+    const f = filter.trim().toLowerCase();
+    cmdkTut.style.display = 'none';
+    cmdkResults.style.display = '';
+    cmdkFlat = [];
+    let html = '';
+
+    const actions = ACTIONS.filter(a => !f || a.label.toLowerCase().includes(f) || a.sub.toLowerCase().includes(f));
+    const tuts    = TUTORIALS.filter((t, i) => !f || t.q.toLowerCase().includes(f));
+
+    if (actions.length) {
+      html += '<div class="cmdk-group-label">Acciones rápidas</div>';
+      actions.forEach(a => {
+        const idx = cmdkFlat.length;
+        cmdkFlat.push({ type: 'action', href: a.href });
+        html += `<div class="cmdk-item" data-idx="${idx}" data-href="${a.href}">
+          ${ICONS[a.icon]}
+          <div class="cmdk-item-text"><div>${a.label}</div><div class="cmdk-item-sub">${a.sub}</div></div>
+        </div>`;
+      });
+    }
+
+    if (tuts.length) {
+      html += '<div class="cmdk-group-label">Tutoriales</div>';
+      tuts.forEach(t => {
+        const tutIndex = TUTORIALS.indexOf(t);
+        const idx = cmdkFlat.length;
+        cmdkFlat.push({ type: 'tutorial', tutIndex });
+        html += `<div class="cmdk-item" data-idx="${idx}" data-tut="${tutIndex}">
+          ${ICONS.book}
+          <div class="cmdk-item-text">${t.q}</div>
+          <span class="cmdk-chev">${ICONS.chev}</span>
+        </div>`;
+      });
+    }
+
+    if (!actions.length && !tuts.length) {
+      html = '<div class="cmdk-empty">Sin resultados para "' + filter + '"</div>';
+    }
+
+    cmdkResults.innerHTML = html;
+    cmdkActive = 0;
+    highlight();
+
+    cmdkResults.querySelectorAll('.cmdk-item').forEach(el => {
+      el.addEventListener('click', () => activate(parseInt(el.dataset.idx)));
+      el.addEventListener('mousemove', () => { cmdkActive = parseInt(el.dataset.idx); highlight(); });
+    });
+  }
+
+  function highlight() {
+    cmdkResults.querySelectorAll('.cmdk-item').forEach(el => {
+      el.classList.toggle('active', parseInt(el.dataset.idx) === cmdkActive);
+    });
+  }
+
+  function activate(idx) {
+    const item = cmdkFlat[idx];
+    if (!item) return;
+    if (item.type === 'action') { window.location.href = item.href; }
+    else { showTutorial(item.tutIndex); }
+  }
+
+  function showTutorial(i) {
+    const t = TUTORIALS[i];
+    if (!t) return;
+    cmdkResults.style.display = 'none';
+    cmdkTut.style.display = '';
+    document.getElementById('cmdk-tut-title').textContent = t.q;
+    document.getElementById('cmdk-tut-steps').innerHTML = t.steps.map(s => `<li>${s}</li>`).join('');
+    const cta = document.getElementById('cmdk-tut-cta');
+    if (t.cta) { cta.style.display = ''; cta.textContent = t.cta.label; cta.href = t.cta.href; }
+    else cta.style.display = 'none';
+  }
+
+  function openCmdk() {
+    cmdkOverlay.classList.add('open');
+    cmdkInput.value = '';
+    renderCmdk('');
+    setTimeout(() => cmdkInput.focus(), 30);
+  }
+  function closeCmdk() { cmdkOverlay.classList.remove('open'); }
+
+  searchBar?.addEventListener('click', openCmdk);
+  document.getElementById('cmdk-back')?.addEventListener('click', () => renderCmdk(cmdkInput.value));
+  cmdkOverlay?.addEventListener('click', e => { if (e.target === cmdkOverlay) closeCmdk(); });
+  cmdkInput?.addEventListener('input', () => renderCmdk(cmdkInput.value));
+
+  cmdkInput?.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); cmdkActive = Math.min(cmdkActive + 1, cmdkFlat.length - 1); highlight(); scrollActive(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); cmdkActive = Math.max(cmdkActive - 1, 0); highlight(); scrollActive(); }
+    else if (e.key === 'Enter') { e.preventDefault(); activate(cmdkActive); }
+  });
+
+  function scrollActive() {
+    const el = cmdkResults.querySelector('.cmdk-item.active');
+    el?.scrollIntoView({ block: 'nearest' });
+  }
+
+  // Atajos globales: ⌘K / Ctrl+K para abrir, ESC para cerrar
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      cmdkOverlay.classList.contains('open') ? closeCmdk() : openCmdk();
+    } else if (e.key === 'Escape' && cmdkOverlay.classList.contains('open')) {
+      closeCmdk();
+    }
   });
 </script>
 </html>
