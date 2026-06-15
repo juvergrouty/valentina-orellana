@@ -16,7 +16,7 @@ export default {
         forest:  '#576352', // verde — color primario de CTAs e íconos
       },
       fontFamily: {
-        heading: ['Cormorant Garamond', 'Georgia', 'serif'],
+        heading: ['Domine', 'Georgia', 'serif'],
         body:    ['Inter', 'system-ui', 'sans-serif'],
       },
       fontSize: {
