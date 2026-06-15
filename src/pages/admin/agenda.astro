@@ -826,7 +826,8 @@ document.addEventListener('click', e => {
 });
 
 // ── Click-to-book + drag-to-block ────────────────────────────────────────────
-const calGrid = document.getElementById('cal-grid');
+const calGrid    = document.getElementById('cal-grid');
+const calScrollEl = document.getElementById('cal-scroll');
 
 function getTimeFromClientY(clientY) {
   const gridRect = calGrid.getBoundingClientRect();
@@ -838,31 +839,15 @@ function getTimeFromClientY(clientY) {
 }
 
 let dragState = null;
-let didDrag   = false;   // suppresses the click that fires after a drag
 
 document.querySelectorAll('.cal-col').forEach(col => {
-
-  // ── Click → Agendar hora ─────────────────────────────────────────────────
-  col.addEventListener('click', e => {
-    if (e.target.closest('.cal-event')) return;
-    if (didDrag) { didDrag = false; return; }
-
-    const { time } = getTimeFromClientY(e.clientY);
-    const date = col.dataset.date;
-    document.getElementById('bp-date').value = date;
-    document.getElementById('bp-time').value = time;
-    document.getElementById('bp-date-label').textContent = isoToLabel(date);
-    document.getElementById('bp-tab-agenda').classList.add('active');
-    document.getElementById('bp-tab-block').classList.remove('active');
-    document.getElementById('bp-agenda-body').style.display = '';
-    document.getElementById('bp-block-body').style.display  = 'none';
-    openBookingPanel(date, time);
-  });
-
-  // ── Mousedown → watch for drag ────────────────────────────────────────────
   col.addEventListener('mousedown', e => {
     if (e.target.closest('.cal-event')) return;
     if (e.button !== 0) return;
+
+    // preventDefault: prevents text-selection drag AND suppresses the subsequent
+    // click event — we handle both cases manually in onUp
+    e.preventDefault();
 
     const { time, snapped } = getTimeFromClientY(e.clientY);
     const ov = document.createElement('div');
@@ -880,8 +865,11 @@ document.querySelectorAll('.cal-col').forEach(col => {
     function onMove(ev) {
       if (!dragState) return;
       if (Math.abs(ev.clientY - dragState.startY) > 20) {
-        dragState.isDragging = true;
-        document.body.style.cursor = 'copy';
+        if (!dragState.isDragging) {
+          dragState.isDragging = true;
+          document.body.style.cursor = 'copy';
+          calScrollEl.style.overflowY = 'hidden'; // lock scroll so it doesn't compete
+        }
       }
       if (dragState.isDragging) {
         const { snapped: s } = getTimeFromClientY(ev.clientY);
@@ -896,26 +884,39 @@ document.querySelectorAll('.cal-col').forEach(col => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup',   onUp);
       document.body.style.cursor = '';
+      calScrollEl.style.overflowY = '';   // restore scroll
       if (!dragState) return;
 
       dragState.overlay.remove();
       const state = dragState;
       dragState   = null;
 
-      if (!state.isDragging) return;   // plain click — let the click event handle it
+      if (state.isDragging) {
+        // ── Drag → Bloquear hora ─────────────────────────────────────────────
+        const endCol  = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.cal-col') ?? state.startCol;
+        const endDate = endCol.dataset.date ?? state.startDate;
+        const { time: endTime } = getTimeFromClientY(ev.clientY);
 
-      didDrag = true;   // tell the upcoming click to skip
-      const endCol  = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.cal-col') ?? state.startCol;
-      const endDate = endCol.dataset.date ?? state.startDate;
-      const { time: endTime } = getTimeFromClientY(ev.clientY);
-
-      let fromDate = state.startDate, fromTime = state.startTime;
-      let toDate   = endDate,         toTime   = endTime;
-      if (fromDate > toDate || (fromDate === toDate && fromTime > toTime)) {
-        [fromDate, toDate] = [toDate, fromDate];
-        [fromTime, toTime] = [toTime, fromTime];
+        let fromDate = state.startDate, fromTime = state.startTime;
+        let toDate   = endDate,         toTime   = endTime;
+        if (fromDate > toDate || (fromDate === toDate && fromTime > toTime)) {
+          [fromDate, toDate] = [toDate, fromDate];
+          [fromTime, toTime] = [toTime, fromTime];
+        }
+        openBloqueoPanel(fromDate, fromTime, toDate, toTime);
+      } else {
+        // ── Click → Agendar hora (click suppressed by preventDefault above) ──
+        const date = state.startDate;
+        const time = state.startTime;
+        document.getElementById('bp-date').value = date;
+        document.getElementById('bp-time').value = time;
+        document.getElementById('bp-date-label').textContent = isoToLabel(date);
+        document.getElementById('bp-tab-agenda').classList.add('active');
+        document.getElementById('bp-tab-block').classList.remove('active');
+        document.getElementById('bp-agenda-body').style.display = '';
+        document.getElementById('bp-block-body').style.display  = 'none';
+        openBookingPanel(date, time);
       }
-      openBloqueoPanel(fromDate, fromTime, toDate, toTime);
     }
 
     document.addEventListener('mousemove', onMove);
