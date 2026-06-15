@@ -713,10 +713,13 @@ const errorParam = Astro.url.searchParams.get('error');
 .sp-btn-cancel { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: #ef4444; background: none; border: none; cursor: pointer; padding: 0.25rem 0; }
 .sp-btn-cancel:hover { opacity: 0.75; }
 
-/* ── Drag overlay ─────────────────────────────────────────────────────────── */
-.cal-drag-overlay {
-  position: absolute;
-  background: rgba(79,92,232,0.13); border: 1.5px solid rgba(79,92,232,0.5);
+/* ── Drag selection highlight ────────────────────────────────────────────── */
+.cal-col.drag-sel { background: rgba(79,92,232,0.07); }
+.cal-col.drag-sel::after {
+  content: ''; position: absolute; left: 0; right: 0;
+  top: var(--drag-top, 0px); height: var(--drag-h, 0px);
+  background: rgba(79,92,232,0.18);
+  border: 1.5px solid rgba(79,92,232,0.5);
   border-radius: 4px; pointer-events: none; z-index: 5;
 }
 
@@ -839,47 +842,47 @@ function getTimeFromClientY(clientY) {
 }
 
 let dragState = null;
-
-// Cols array ordered by date (left→right), used for overlay spanning
 const allCols = Array.from(document.querySelectorAll('.cal-col'));
 
-function refreshOverlay(endCol, endSnapped) {
-  if (!dragState) return;
-  const gridRect  = calGrid.getBoundingClientRect();
-  const startRect = dragState.startCol.getBoundingClientRect();
-  const endRect   = endCol.getBoundingClientRect();
-
-  const minLeft  = Math.min(startRect.left, endRect.left)   - gridRect.left;
-  const maxRight = Math.max(startRect.right, endRect.right)  - gridRect.left;
-  const from     = Math.min(dragState.startSnap, endSnapped);
-  const to       = Math.max(dragState.startSnap, endSnapped);
-
-  const ov = dragState.overlay;
-  ov.style.left   = `${minLeft}px`;
-  ov.style.width  = `${maxRight - minLeft}px`;
-  ov.style.top    = `${from}px`;
-  ov.style.height = `${Math.max(15, to - from)}px`;
+function clearDragSel() {
+  allCols.forEach(c => {
+    c.classList.remove('drag-sel');
+    c.style.removeProperty('--drag-top');
+    c.style.removeProperty('--drag-h');
+  });
 }
 
-document.querySelectorAll('.cal-col').forEach(col => {
+function applyDragSel(endCol, endSnapped) {
+  const si   = allCols.indexOf(dragState.startCol);
+  const ei   = allCols.indexOf(endCol);
+  const lo   = Math.min(si, ei), hi = Math.max(si, ei);
+  const from = Math.min(dragState.startSnap, endSnapped);
+  const to   = Math.max(dragState.startSnap, endSnapped);
+  allCols.forEach((c, i) => {
+    if (i >= lo && i <= hi) {
+      c.classList.add('drag-sel');
+      c.style.setProperty('--drag-top', `${from}px`);
+      c.style.setProperty('--drag-h',   `${Math.max(15, to - from)}px`);
+    } else {
+      c.classList.remove('drag-sel');
+      c.style.removeProperty('--drag-top');
+      c.style.removeProperty('--drag-h');
+    }
+  });
+}
+
+allCols.forEach(col => {
   col.addEventListener('mousedown', e => {
     if (e.target.closest('.cal-event')) return;
     if (e.button !== 0) return;
-    e.preventDefault();   // suppresses text-selection AND the subsequent click event
+    e.preventDefault();
 
     const { time, snapped } = getTimeFromClientY(e.clientY);
-
-    // Overlay lives in calGrid so it can span multiple day-columns
-    const ov = document.createElement('div');
-    ov.className = 'cal-drag-overlay';
-    ov.style.cssText = `left:0;top:${snapped}px;width:0;height:0;`;
-    calGrid.appendChild(ov);
-
     dragState = {
       startDate: col.dataset.date, startTime: time,
       startX: e.clientX, startY: e.clientY, startSnap: snapped,
       startCol: col, endCol: col, endSnap: snapped,
-      overlay: ov, isDragging: false,
+      isDragging: false,
     };
 
     function onMove(ev) {
@@ -891,33 +894,27 @@ document.querySelectorAll('.cal-col').forEach(col => {
         calScrollEl.style.overflowY = 'hidden';
       }
       if (!dragState.isDragging) return;
-
-      // Track which column the cursor is currently over
-      const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+      const hit      = document.elementFromPoint(ev.clientX, ev.clientY);
       const hoverCol = hit?.closest('.cal-col') ?? dragState.endCol;
       const { snapped: s } = getTimeFromClientY(ev.clientY);
-
       dragState.endCol  = hoverCol;
       dragState.endSnap = s;
-      refreshOverlay(hoverCol, s);
+      applyDragSel(hoverCol, s);
     }
 
     function onUp(ev) {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup',   onUp);
-      document.body.style.cursor   = '';
-      calScrollEl.style.overflowY  = '';
+      document.body.style.cursor  = '';
+      calScrollEl.style.overflowY = '';
+      clearDragSel();
       if (!dragState) return;
-
-      dragState.overlay.remove();
       const state = dragState;
       dragState   = null;
 
       if (state.isDragging) {
-        // ── Drag ended → Bloquear hora ───────────────────────────────────────
         const endDate = state.endCol.dataset.date ?? state.startDate;
         const { time: endTime } = getTimeFromClientY(ev.clientY);
-
         let fromDate = state.startDate, fromTime = state.startTime;
         let toDate   = endDate,         toTime   = endTime;
         if (fromDate > toDate || (fromDate === toDate && fromTime > toTime)) {
@@ -926,7 +923,6 @@ document.querySelectorAll('.cal-col').forEach(col => {
         }
         openBloqueoPanel(fromDate, fromTime, toDate, toTime);
       } else {
-        // ── Click → Agendar hora ─────────────────────────────────────────────
         const date = state.startDate;
         const time = state.startTime;
         document.getElementById('bp-date').value = date;
