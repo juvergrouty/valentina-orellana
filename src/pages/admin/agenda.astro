@@ -35,7 +35,7 @@ const [bookingsRes, svcRes, patientRes, allSvcRes] = await Promise.all([
     .neq('status', 'cancelled')
     .order('session_time'),
   supabase.from('services_catalog').select('id, name'),
-  supabase.from('patients').select('id, name, email, phone').eq('active', true).order('name'),
+  supabase.from('patients').select('id, name, email, phone, rut').eq('active', true).order('name'),
   supabase.from('services_catalog')
     .select('id, name, price, price_online, price_presencial, modality, type, duration_min')
     .eq('visible', true).order('sort_order'),
@@ -46,6 +46,12 @@ const svcMap: Record<string, string> = {};
 (svcRes.data ?? []).forEach((s: { id: string; name: string }) => { svcMap[s.id] = s.name; });
 const patientList = patientRes.data ?? [];
 const allServices = allSvcRes.data ?? [];
+
+// Mapa email → RUT (para prellenar la emisión de boleta)
+const rutByEmail: Record<string, string> = {};
+patientList.forEach((p: { email: string | null; rut: string | null }) => {
+  if (p.email && p.rut) rutByEmail[p.email.toLowerCase()] = p.rut;
+});
 
 // ── Week days ─────────────────────────────────────────────────────────────────
 const DAYS_ES      = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
@@ -193,6 +199,7 @@ const errorParam = Astro.url.searchParams.get('error');
                   payment_method: b.payment_method,
                   service_label:  svcLabel(b),
                   notes:          b.notes,
+                  patient_rut:    rutByEmail[(b.patient_email ?? '').toLowerCase()] ?? '',
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}`}
               >
@@ -473,6 +480,32 @@ const errorParam = Astro.url.searchParams.get('error');
             <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
             <button type="submit" class="sp-btn-confirm">✓ Confirmar pago</button>
           </form>
+        </div>
+      </div>
+
+      <!-- Boleta de honorarios -->
+      <div class="sp-section">
+        <button class="sp-action-row" id="sp-toggle-boleta">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="11" x2="13" y2="11"/></svg>
+          Emitir boleta de honorarios
+        </button>
+        <div id="sp-boleta-form" style="display:none;margin-top:0.75rem;">
+          <div class="bp-field" style="margin-bottom:0.5rem;">
+            <label style="font-size:0.68rem;">RUT del paciente</label>
+            <input type="text" id="sp-boleta-rut" placeholder="12.345.678-9">
+          </div>
+          <button type="button" class="sp-btn-confirm" id="sp-btn-emitir">Emitir boleta</button>
+          <p id="sp-boleta-result" style="font-size:0.75rem;margin-top:0.5rem;line-height:1.5;"></p>
+          <div id="sp-boleta-actions" style="display:none;gap:0.4rem;margin-top:0.5rem;">
+            <button type="button" class="sp-action-row" id="sp-btn-pdf" style="padding:0.3rem 0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Descargar PDF
+            </button>
+            <button type="button" class="sp-action-row" id="sp-btn-email" style="padding:0.3rem 0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
+              Enviar por email al paciente
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1161,6 +1194,28 @@ function openSessionDetail(b) {
   // Cancel
   document.getElementById('sp-cancel-id').value = b.id;
 
+  // Boleta de honorarios
+  currentBookingId = b.id;
+  const boletaRut = document.getElementById('sp-boleta-rut');
+  if (boletaRut) boletaRut.value = b.patient_rut || '';
+  document.getElementById('sp-boleta-form').style.display = 'none';
+  const boletaResult  = document.getElementById('sp-boleta-result');
+  const boletaActions = document.getElementById('sp-boleta-actions');
+  if (boletaResult) { boletaResult.textContent = ''; boletaResult.style.color = ''; }
+  if (boletaActions) boletaActions.style.display = 'none';
+  // Si ya se emitió (queda registrado en notes), avisar y mostrar acciones
+  if (b.notes && /Boleta\s+Folio/i.test(b.notes)) {
+    const m = b.notes.match(/Boleta\s+Folio\s+(\d+)/i);
+    if (boletaResult) { boletaResult.textContent = `✓ Ya emitida (Folio ${m ? m[1] : ''})`; boletaResult.style.color = '#15803d'; }
+    document.getElementById('sp-boleta-form').style.display = 'block';
+    if (boletaActions) boletaActions.style.display = 'flex';
+    const emitBtn = document.getElementById('sp-btn-emitir');
+    if (emitBtn) emitBtn.style.display = 'none';   // ya emitida, ocultar re-emitir
+  } else {
+    const emitBtn = document.getElementById('sp-btn-emitir');
+    if (emitBtn) emitBtn.style.display = '';
+  }
+
   openSessionPanel();
 }
 
@@ -1168,5 +1223,91 @@ function openSessionDetail(b) {
 document.getElementById('sp-toggle-rsc')?.addEventListener('click', () => {
   const form = document.getElementById('sp-rsc-form');
   form.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+
+// ── Emitir boleta ───────────────────────────────────────────────────────────
+let currentBookingId = null;
+document.getElementById('sp-toggle-boleta')?.addEventListener('click', () => {
+  const form = document.getElementById('sp-boleta-form');
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+document.getElementById('sp-btn-emitir')?.addEventListener('click', async () => {
+  const btn    = document.getElementById('sp-btn-emitir');
+  const rut    = document.getElementById('sp-boleta-rut').value.trim();
+  const result = document.getElementById('sp-boleta-result');
+  if (!currentBookingId) return;
+  if (!rut) { result.textContent = 'Ingresa el RUT del paciente.'; result.style.color = '#dc2626'; return; }
+  if (!confirm('¿Emitir la boleta de honorarios? Esta acción genera un documento tributario real en el SII.')) return;
+
+  btn.disabled = true;
+  result.textContent = 'Emitiendo…'; result.style.color = '#6b7280';
+  try {
+    const res = await fetch('/api/admin/apigateway', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'emitir', booking_id: currentBookingId, rut }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const folio = data.folio ? ` · Folio ${data.folio}` : '';
+      result.textContent = `✓ Boleta emitida${folio}`; result.style.color = '#15803d';
+      document.getElementById('sp-boleta-actions').style.display = 'flex';
+      btn.style.display = 'none';
+    } else {
+      result.textContent = '✕ ' + (data.error ?? 'Error al emitir'); result.style.color = '#dc2626';
+    }
+  } catch {
+    result.textContent = '✕ Error de conexión'; result.style.color = '#dc2626';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ── Descargar PDF de la boleta ────────────────────────────────────────────────
+document.getElementById('sp-btn-pdf')?.addEventListener('click', async () => {
+  const result = document.getElementById('sp-boleta-result');
+  if (!currentBookingId) return;
+  result.textContent = 'Generando PDF…'; result.style.color = '#6b7280';
+  try {
+    const res  = await fetch('/api/admin/apigateway', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pdf', booking_id: currentBookingId }),
+    });
+    const data = await res.json();
+    if (data.ok && data.pdf) {
+      // base64 → blob → descarga
+      const bytes = Uint8Array.from(atob(data.pdf), c => c.charCodeAt(0));
+      const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const a     = document.createElement('a');
+      a.href = url; a.download = `boleta-${data.folio ?? 'honorarios'}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      result.textContent = '✓ PDF descargado'; result.style.color = '#15803d';
+    } else {
+      result.textContent = '✕ ' + (data.error ?? 'No se pudo obtener el PDF'); result.style.color = '#dc2626';
+    }
+  } catch {
+    result.textContent = '✕ Error al descargar'; result.style.color = '#dc2626';
+  }
+});
+
+// ── Enviar boleta por email ─────────────────────────────────────────────────
+document.getElementById('sp-btn-email')?.addEventListener('click', async () => {
+  const result = document.getElementById('sp-boleta-result');
+  if (!currentBookingId) return;
+  result.textContent = 'Enviando email…'; result.style.color = '#6b7280';
+  try {
+    const res  = await fetch('/api/admin/apigateway', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'email', booking_id: currentBookingId }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      result.textContent = `✓ Enviada a ${data.email}`; result.style.color = '#15803d';
+    } else {
+      result.textContent = '✕ ' + (data.error ?? 'No se pudo enviar'); result.style.color = '#dc2626';
+    }
+  } catch {
+    result.textContent = '✕ Error al enviar'; result.style.color = '#dc2626';
+  }
 });
 </script>

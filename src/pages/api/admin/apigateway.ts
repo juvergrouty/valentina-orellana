@@ -1,6 +1,17 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { getAgwConfig, bheEmitidas, emitirBHE, clearAgwCache } from '../../../lib/apigateway';
+import { getAgwConfig, bheEmitidas, emitirBHE, bhePdf, bheEmail, codigoDeFolio, clearAgwCache } from '../../../lib/apigateway';
+
+// Extrae "Boleta Folio N · Cod XXX" de las notas de una reserva
+function parseBoleta(notes: string | null): { folio: number | null; codigo: string | null } {
+  const f = notes?.match(/Boleta Folio (\d+)/i);
+  const c = notes?.match(/Cod ([\w-]+)/i);
+  return { folio: f ? parseInt(f[1]) : null, codigo: c ? c[1] : null };
+}
+const periodoActual = () => {
+  const n = new Date();
+  return `${n.getFullYear()}${String(n.getMonth() + 1).padStart(2, '0')}`;
+};
 
 export const prerender = false;
 
@@ -42,22 +53,89 @@ export const POST: APIRoute = async ({ request }) => {
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
 
     const { data: b } = await supabase
-      .from('bookings').select('patient_name, patient_email, amount, session_type').eq('id', bookingId).single();
+      .from('bookings').select('patient_name, patient_email, amount, session_type, notes').eq('id', bookingId).single();
     if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
 
-    // RUT del receptor desde la ficha del paciente
+    // RUT: prioriza el ingresado en el formulario; si no, el de la ficha del paciente
     const { data: p } = await supabase
       .from('patients').select('rut, name, address').eq('email', (b.patient_email ?? '').toLowerCase()).maybeSingle();
-    if (!p?.rut) return json({ ok: false, error: 'El paciente no tiene RUT registrado (requerido para la boleta).' }, 400);
+    const rut = (body.rut ?? '').trim() || p?.rut || '';
+    if (!rut) return json({ ok: false, error: 'Falta el RUT del paciente (requerido para la boleta).' }, 400);
+
+    if (!b.amount) return json({ ok: false, error: 'La reserva no tiene monto.' }, 400);
 
     try {
       const result = await emitirBHE({
-        receptor: { rut: p.rut, razonSocial: p.name ?? b.patient_name, direccion: p.address ?? '' },
-        detalle:  [{ nombre: `Atención psicológica — ${b.session_type}`, monto: b.amount ?? 0 }],
-      }, cfg);
-      return json({ ok: true, result });
+        receptor: { rut, razonSocial: p?.name ?? b.patient_name, direccion: p?.address ?? '' },
+        detalle:  [{ nombre: 'Atención psicológica', monto: b.amount }],
+      }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
+
+      const folio = result?.data?.Encabezado?.IdDoc?.Folio ?? null;
+
+      // Resolver el código de la boleta (necesario para PDF/email)
+      let codigo: string | null = null;
+      if (folio) {
+        try { codigo = await codigoDeFolio(cfg.siiRut, periodoActual(), folio, cfg); } catch { /* opcional */ }
+        const nuevaNota = `${b.notes ? b.notes + '\n' : ''}Boleta Folio ${folio}${codigo ? ' · Cod ' + codigo : ''}`;
+        await supabase.from('bookings').update({ notes: nuevaNota }).eq('id', bookingId);
+      }
+
+      return json({ ok: true, folio, codigo, result });
     } catch (e) {
       return json({ ok: false, error: e instanceof Error ? e.message : 'Error al emitir' }, 502);
+    }
+  }
+
+  // ── Enviar la boleta por email al paciente ────────────────────────────────
+  if (action === 'email') {
+    const bookingId = body.booking_id;
+    if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
+
+    const { data: b } = await supabase
+      .from('bookings').select('patient_email, notes').eq('id', bookingId).single();
+    if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
+
+    const email = (body.email ?? '').trim() || (b.patient_email ?? '');
+    if (!email) return json({ ok: false, error: 'Falta el email de destino.' }, 400);
+
+    let { folio, codigo } = parseBoleta(b.notes);
+    if (!folio) return json({ ok: false, error: 'Esta sesión aún no tiene boleta emitida.' }, 400);
+    if (!codigo) {
+      try { codigo = await codigoDeFolio(cfg.siiRut, periodoActual(), folio, cfg); } catch { /* */ }
+    }
+    if (!codigo) return json({ ok: false, error: 'No se pudo resolver el código de la boleta (folio ' + folio + ').' }, 502);
+
+    try {
+      const result = await bheEmail(codigo, email, cfg);
+      return json({ ok: true, email, result });
+    } catch (e) {
+      return json({ ok: false, error: e instanceof Error ? e.message : 'Error al enviar' }, 502);
+    }
+  }
+
+  // ── PDF de la boleta (devuelve base64 para descargar) ─────────────────────
+  if (action === 'pdf') {
+    const bookingId = body.booking_id;
+    if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
+
+    const { data: b } = await supabase
+      .from('bookings').select('notes').eq('id', bookingId).single();
+    if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
+
+    let { folio, codigo } = parseBoleta(b.notes);
+    if (!folio) return json({ ok: false, error: 'Esta sesión aún no tiene boleta emitida.' }, 400);
+    if (!codigo) {
+      try { codigo = await codigoDeFolio(cfg.siiRut, periodoActual(), folio, cfg); } catch { /* */ }
+    }
+    if (!codigo) return json({ ok: false, error: 'No se pudo resolver el código de la boleta.' }, 502);
+
+    try {
+      const result = await bhePdf(codigo, cfg) as unknown;
+      // La API puede devolver el base64 directo (string) o dentro de {data}
+      const pdf = typeof result === 'string' ? result : (result as { data?: string })?.data ?? null;
+      return json({ ok: true, folio, pdf });
+    } catch (e) {
+      return json({ ok: false, error: e instanceof Error ? e.message : 'Error al obtener PDF' }, 502);
     }
   }
 

@@ -114,23 +114,27 @@ export interface BheDetalleItem { nombre: string; monto: number; }
 
 /**
  * Emite una Boleta de Honorarios Electrónica.
- *
- * ⚠️ El ENDPOINT y el envoltorio exacto del payload deben confirmarse en la doc
- * de tu cuenta de API Gateway. La estructura del documento (Encabezado/Detalle)
- * sí está alineada con el formato SII publicado. Por seguridad, esta función NO
- * se dispara automáticamente: se invoca de forma explícita desde el admin.
+ * Payload confirmado con la doc de la cuenta (POST /api/v2/sii/bhe/emitidas/emitir):
+ *   { auth, boleta: { Encabezado: { IdDoc{FchEmis,TipoRetencion}, Emisor{RUTEmisor}, Receptor{...} }, Detalle:[{NmbItem,MontoItem}] } }
+ * `auth` lo agrega agwPost automáticamente.
+ * TipoRetencion: 2 = retención la efectúa el emisor (caso boletas a personas naturales, ej. pacientes).
+ * Por seguridad NO se dispara automáticamente — se invoca on-demand desde el admin.
  */
 export async function emitirBHE(params: {
   receptor: BheReceptor;
   detalle:  BheDetalleItem[];
-  emitePor?: 0 | 1; // 0 = el emisor retiene, 1 = el receptor retiene (según giro)
+  fecha?:   string;      // FchEmis YYYY-MM-DD (default: hoy)
+  tipoRetencion?: 1 | 2; // default 2 (emisor retiene)
 }, cfg?: AgwConfig) {
   const c = cfg ?? (await getAgwConfig());
   if (!c) throw new Error('API Gateway no configurado.');
 
-  const documento = {
+  const boleta = {
     Encabezado: {
-      IdDoc: { TipoDTE: 'boleta de honorarios' },
+      IdDoc: {
+        FchEmis:       params.fecha ?? new Date().toISOString().slice(0, 10),
+        TipoRetencion: params.tipoRetencion ?? 2,
+      },
       Emisor: { RUTEmisor: c.siiRut },
       Receptor: {
         RUTRecep:    params.receptor.rut,
@@ -139,16 +143,32 @@ export async function emitirBHE(params: {
         CmnaRecep:   params.receptor.comuna ?? '',
       },
     },
-    Detalle: params.detalle.map((d, i) => ({
-      NroLinDet: i + 1,
-      NmbItem:   d.nombre,
-      MontoItem: d.monto,
-    })),
+    Detalle: params.detalle.map(d => ({ NmbItem: d.nombre, MontoItem: d.monto })),
   };
 
-  // TODO: confirmar path exacto de emisión en developers.apigateway.cl
-  const emitPath = '/api/v1/sii/bhe/emitir';
-  return agwPost(emitPath, { documento }, c);
+  return agwPost('/api/v2/sii/bhe/emitidas/emitir', { boleta }, c);
+}
+
+/** Descarga el PDF de una BHE emitida (devuelve bytes/base64). POST /api/v2/sii/bhe/emitidas/pdf/{codigo} */
+export async function bhePdf(codigo: string, cfg?: AgwConfig) {
+  return agwPost(`/api/v2/sii/bhe/emitidas/pdf/${codigo}`, {}, cfg);
+}
+
+/** Envía por email una BHE emitida. POST /api/v2/sii/bhe/emitidas/email/{codigo} */
+export async function bheEmail(codigo: string, email: string, cfg?: AgwConfig) {
+  return agwPost(`/api/v2/sii/bhe/emitidas/email/${codigo}`, { destinatario: { email } }, cfg);
+}
+
+/** Lista emitidas del período y devuelve el `codigo` de una boleta por su folio (numero). */
+export async function codigoDeFolio(emisor: string, periodo: string, folio: number, cfg?: AgwConfig): Promise<string | null> {
+  const r = await bheEmitidas(emisor, periodo, 1, cfg) as { data?: { boletas?: Array<{ numero: number; codigo: string }> } };
+  const found = r?.data?.boletas?.find(b => b.numero === folio);
+  return found?.codigo ?? null;
+}
+
+/** Anula una BHE emitida. POST /api/v2/sii/bhe/emitidas/anular/{emisor}/{folio} */
+export async function bheAnular(emisor: string, folio: string | number, cfg?: AgwConfig) {
+  return agwPost(`/api/v2/sii/bhe/emitidas/anular/${emisor}/${folio}`, {}, cfg);
 }
 
 export function clearAgwCache() { _cache = null; }
