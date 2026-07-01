@@ -302,7 +302,7 @@ const saved = Astro.url.searchParams.get('saved') === '1';
       <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
         <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--forest)" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="11" x2="13" y2="11"/></svg>
         <p class="label" style="margin:0;">Boletas de honorarios · API Gateway</p>
-        {(settings['apigateway_apikey'] && settings['sii_rut'] && settings['sii_clave'])
+        {settings['apigateway_apikey']
           ? <span style="font-size:0.72rem;background:#f0fdf4;color:var(--green);border:1px solid #86efac;padding:0.2rem 0.6rem;border-radius:99px;font-weight:600;">● Configurado</span>
           : <span style="font-size:0.72rem;background:var(--warm);color:var(--stone);border:1px solid var(--dust);padding:0.2rem 0.6rem;border-radius:99px;">○ Sin configurar</span>}
       </div>
@@ -316,27 +316,21 @@ const saved = Astro.url.searchParams.get('saved') === '1';
       </p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
         <div>
-          <label class="label" style="margin-bottom:0.4rem;display:block;">API key (de tu cuenta API Gateway)</label>
-          <input type="password" name="apigateway_apikey" value={settings['apigateway_apikey'] ?? ''} placeholder="apikey de la conexión" />
+          <label class="label" style="margin-bottom:0.4rem;display:block;">Token de API Gateway</label>
+          <input type="password" name="apigateway_apikey" value={settings['apigateway_apikey'] ?? ''} placeholder="Token de tu cuenta" />
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.4rem;">Se envía como <code style="background:var(--warm);padding:0 4px;border-radius:3px;">Authorization: Token …</code></p>
         </div>
         <div>
           <label class="label" style="margin-bottom:0.4rem;display:block;">URL base de la API</label>
-          <input type="text" name="apigateway_base_url" value={settings['apigateway_base_url'] ?? ''} placeholder="https://api.apigateway.cl" />
+          <input type="text" name="apigateway_base_url" value={settings['apigateway_base_url'] ?? ''} placeholder="https://app.apigateway.cl" />
         </div>
         <div>
           <label class="label" style="margin-bottom:0.4rem;display:block;">RUT emisor (SII)</label>
           <input type="text" name="sii_rut" value={settings['sii_rut'] ?? ''} placeholder="12.345.678-9" />
         </div>
         <div>
-          <label class="label" style="margin-bottom:0.4rem;display:block;">Clave SII</label>
+          <label class="label" style="margin-bottom:0.4rem;display:block;">Clave SII (solo para emitir)</label>
           <input type="password" name="sii_clave" value={settings['sii_clave'] ?? ''} placeholder="••••••••" />
-        </div>
-        <div style="grid-column:1/-1;">
-          <label class="label" style="margin-bottom:0.4rem;display:block;">Nombre del header del apikey (avanzado)</label>
-          <input type="text" name="apigateway_header_name" value={settings['apigateway_header_name'] ?? 'apikey'} placeholder="apikey" />
-          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.4rem;">
-            Verifica el nombre exacto en la documentación de tu cuenta. Por defecto: <code style="background:var(--warm);padding:0 4px;border-radius:3px;">apikey</code>.
-          </p>
         </div>
       </div>
       <div style="margin-top:1rem;display:flex;align-items:center;gap:0.75rem;">
@@ -344,7 +338,7 @@ const saved = Astro.url.searchParams.get('saved') === '1';
         <span id="agw-test-result" style="font-size:0.8rem;"></span>
       </div>
       <p style="font-size:0.72rem;color:var(--stone);margin-top:0.6rem;">
-        Guarda la configuración antes de probar. La prueba consulta tus BHE emitidas del mes actual.
+        Guarda la configuración antes de probar. La prueba solo usa el token (consulta situación tributaria del RUT emisor).
       </p>
     </div>
 

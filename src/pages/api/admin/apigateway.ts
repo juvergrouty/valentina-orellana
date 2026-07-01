@@ -18,10 +18,14 @@ export const POST: APIRoute = async ({ request }) => {
 
   clearAgwCache();
   const cfg = await getAgwConfig();
-  if (!cfg) return json({ ok: false, error: 'Falta configurar apikey y/o credenciales SII.' }, 400);
+  if (!cfg) return json({ ok: false, error: 'Falta configurar el token de API Gateway.' }, 400);
 
-  // ── Probar conexión: lista BHE emitidas del período actual ────────────────
+  // ── Probar conexión: consulta BHE emitidas del período (producto boletas) ──
   if (action === 'test') {
+    if (!cfg.siiRut || !cfg.siiClave) {
+      return json({ ok: false, needsSii: true,
+        error: 'El token está guardado, pero para probar el producto de Boletas de Honorarios necesitas también el RUT y la clave SII.' }, 400);
+    }
     try {
       const now     = new Date();
       const periodo = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;

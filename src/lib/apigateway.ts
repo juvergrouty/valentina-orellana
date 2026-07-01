@@ -20,7 +20,6 @@ export interface AgwConfig {
   baseUrl:  string;
   siiRut:   string;
   siiClave: string;
-  headerName: string;
 }
 
 let _cache: AgwConfig | null = null;
@@ -30,55 +29,76 @@ export async function getAgwConfig(): Promise<AgwConfig | null> {
 
   const { data } = await supabase
     .from('settings').select('key, value')
-    .in('key', ['apigateway_apikey', 'apigateway_base_url', 'apigateway_header_name', 'sii_rut', 'sii_clave']);
+    .in('key', ['apigateway_apikey', 'apigateway_base_url', 'sii_rut', 'sii_clave']);
   const s: Record<string, string> = {};
   (data ?? []).forEach((r: { key: string; value: string }) => { s[r.key] = r.value; });
 
   const apikey   = import.meta.env.APIGATEWAY_APIKEY   || s.apigateway_apikey   || '';
-  const baseUrl  = (import.meta.env.APIGATEWAY_BASE_URL || s.apigateway_base_url || 'https://api.apigateway.cl').replace(/\/$/, '');
+  const baseUrl  = (import.meta.env.APIGATEWAY_BASE_URL || s.apigateway_base_url || 'https://app.apigateway.cl').replace(/\/$/, '');
   const siiRut   = import.meta.env.SII_RUT             || s.sii_rut             || '';
   const siiClave = import.meta.env.SII_CLAVE           || s.sii_clave           || '';
-  const headerName = s.apigateway_header_name || 'apikey';
 
-  if (!apikey || !siiRut || !siiClave) return null;
+  // La cuenta se autentica solo con el token; el RUT/clave SII se necesitan
+  // únicamente para acciones sobre la cuenta SII (ej. emitir boleta).
+  if (!apikey) return null;
 
-  _cache = { apikey, baseUrl, siiRut, siiClave, headerName };
+  _cache = { apikey, baseUrl, siiRut, siiClave };
   return _cache;
 }
 
-/** POST autenticado a API Gateway: agrega apikey en header y auth.pass en el body. */
-export async function agwPost(path: string, body: Record<string, unknown> = {}, cfg?: AgwConfig) {
-  const c = cfg ?? (await getAgwConfig());
-  if (!c) throw new Error('API Gateway no configurado (falta apikey o credenciales SII).');
-
-  const payload = {
-    auth: { pass: { rut: c.siiRut, clave: c.siiClave } },
-    ...body,
+function authHeaders(c: AgwConfig): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Token ${c.apikey}`,
   };
+}
 
-  const res = await fetch(`${c.baseUrl}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      [c.headerName]: c.apikey,
-    },
-    body: JSON.stringify(payload),
-  });
-
+async function handle(res: Response) {
   const text = await res.text();
   let json: unknown;
   try { json = JSON.parse(text); } catch { json = text; }
-
   if (!res.ok) {
     throw new Error(`API Gateway ${res.status}: ${typeof json === 'string' ? json : JSON.stringify(json)}`);
   }
   return json;
 }
 
+/** GET autenticado (solo token de cuenta). */
+export async function agwGet(path: string, cfg?: AgwConfig) {
+  const c = cfg ?? (await getAgwConfig());
+  if (!c) throw new Error('API Gateway no configurado (falta el token).');
+  return handle(await fetch(`${c.baseUrl}${path}`, { method: 'GET', headers: authHeaders(c) }));
+}
+
+/** POST autenticado: token en header + credenciales SII en el body (si existen). */
+export async function agwPost(path: string, body: Record<string, unknown> = {}, cfg?: AgwConfig) {
+  const c = cfg ?? (await getAgwConfig());
+  if (!c) throw new Error('API Gateway no configurado (falta el token).');
+
+  const payload: Record<string, unknown> = { ...body };
+  if (c.siiRut && c.siiClave) {
+    payload.auth = { pass: { rut: c.siiRut, clave: c.siiClave } };
+  }
+
+  return handle(await fetch(`${c.baseUrl}${path}`, {
+    method: 'POST', headers: authHeaders(c), body: JSON.stringify(payload),
+  }));
+}
+
+/**
+ * Consulta la situación tributaria de un contribuyente (dato público del SII).
+ * OJO: requiere que la conexión tenga habilitada esa operación (algunas no).
+ * GET /api/v2/sii/contribuyentes/situacion_tributaria/tercero/{rut}
+ */
+export async function situacionTributaria(rut: string, cfg?: AgwConfig) {
+  return agwGet(`/api/v2/sii/contribuyentes/situacion_tributaria/tercero/${rut}`, cfg);
+}
+
 /**
  * Lista las BHE emitidas por un emisor en un período (YYYY-MM).
- * Endpoint confirmado: POST /api/v1/sii/bhe/emitidas/documentos/{emisor}/{periodo}
- * Sirve también como prueba de conexión end-to-end.
+ * Requiere token + credenciales SII (auth.pass). Sirve como prueba real del
+ * producto de Boletas de Honorarios.
+ * ⚠️ Verificar versión/endpoint exacto en la doc de tu conexión (v1 vs v2).
  */
 export async function bheEmitidas(emisor: string, periodo: string, cfg?: AgwConfig) {
   return agwPost(`/api/v1/sii/bhe/emitidas/documentos/${emisor}/${periodo}`, {}, cfg);
