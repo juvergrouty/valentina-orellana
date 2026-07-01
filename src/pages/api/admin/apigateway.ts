@@ -13,6 +13,13 @@ const periodoActual = () => {
   return `${n.getFullYear()}${String(n.getMonth() + 1).padStart(2, '0')}`;
 };
 
+// Normaliza RUT a formato "XXXXXXXX-X" (sin puntos, con guion antes del dígito verificador)
+function normalizeRut(rut: string): string {
+  const clean = rut.replace(/\./g, '').replace(/\s/g, '').replace(/-/g, '').trim();
+  if (clean.length < 2) return rut.trim();
+  return `${clean.slice(0, -1)}-${clean.slice(-1)}`;
+}
+
 export const prerender = false;
 
 const json = (obj: unknown, status = 200) =>
@@ -59,8 +66,9 @@ export const POST: APIRoute = async ({ request }) => {
     // RUT: prioriza el ingresado en el formulario; si no, el de la ficha del paciente
     const { data: p } = await supabase
       .from('patients').select('rut, name, address').eq('email', (b.patient_email ?? '').toLowerCase()).maybeSingle();
-    const rut = (body.rut ?? '').trim() || p?.rut || '';
-    if (!rut) return json({ ok: false, error: 'Falta el RUT del paciente (requerido para la boleta).' }, 400);
+    const rutRaw = (body.rut ?? '').trim() || p?.rut || '';
+    if (!rutRaw) return json({ ok: false, error: 'Falta el RUT del paciente (requerido para la boleta).' }, 400);
+    const rut = normalizeRut(rutRaw);
 
     if (!b.amount) return json({ ok: false, error: 'La reserva no tiene monto.' }, 400);
 
