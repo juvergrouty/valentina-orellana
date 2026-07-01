@@ -29,7 +29,7 @@ export const POST: APIRoute = async ({ request }) => {
     try {
       const now     = new Date();
       const periodo = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const result  = await bheEmitidas(cfg.siiRut, periodo, cfg);
+      const result  = await bheEmitidas(cfg.siiRut, periodo, 1, cfg);
       return json({ ok: true, periodo, result });
     } catch (e) {
       return json({ ok: false, error: e instanceof Error ? e.message : 'Error desconocido' }, 502);

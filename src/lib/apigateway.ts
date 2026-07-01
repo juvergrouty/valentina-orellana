@@ -100,8 +100,8 @@ export async function situacionTributaria(rut: string, cfg?: AgwConfig) {
  * producto de Boletas de Honorarios.
  * ⚠️ Verificar versión/endpoint exacto en la doc de tu conexión (v1 vs v2).
  */
-export async function bheEmitidas(emisor: string, periodo: string, cfg?: AgwConfig) {
-  return agwPost(`/api/v2/sii/bhe/emitidas/documentos/${emisor}/${periodo}`, {}, cfg);
+export async function bheEmitidas(emisor: string, periodo: string, pagina = 1, cfg?: AgwConfig) {
+  return agwPost(`/api/v2/sii/bhe/emitidas/documentos/${emisor}/${periodo}?pagina=${pagina}`, {}, cfg);
 }
 
 export interface BheReceptor {
