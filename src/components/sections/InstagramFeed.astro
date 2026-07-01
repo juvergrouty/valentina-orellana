@@ -1,0 +1,59 @@
+---
+// Sección de Instagram — se muestra solo si hay publicaciones (el script la revela).
+---
+
+<section id="ig-feed-section" class="py-section bg-white" style="display:none;">
+  <div class="container-site">
+
+    <div class="text-center mb-10">
+      <p class="label text-stone mb-2">Instagram</p>
+      <div class="divider-center mb-6"></div>
+      <h2 class="section-title">Síguenos en Instagram</h2>
+    </div>
+
+    <div id="ig-grid" class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3"></div>
+
+    <div class="text-center mt-10">
+      <a id="ig-follow" href="#" target="_blank" rel="noopener" class="btn-outline inline-flex" style="display:none;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" style="margin-right:0.4rem;">
+          <rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/>
+        </svg>
+        Ver más en Instagram
+      </a>
+    </div>
+
+  </div>
+</section>
+
+<script>
+  (async () => {
+    try {
+      const res  = await fetch('/api/instagram');
+      const data = await res.json();
+      if (!data.items || !data.items.length) return; // queda oculta
+
+      const grid = document.getElementById('ig-grid');
+      grid.innerHTML = data.items.slice(0, 8).map(it => `
+        <a href="${it.permalink}" target="_blank" rel="noopener"
+           class="group relative block aspect-square overflow-hidden bg-warm">
+          <img src="${it.image}" alt="${(it.caption || 'Publicación de Instagram').replace(/"/g, '&quot;').slice(0, 80)}"
+               loading="lazy"
+               class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+          <div class="absolute inset-0 bg-ink/0 group-hover:bg-ink/25 transition-colors duration-300 flex items-center justify-center">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                 class="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+              <rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="white" stroke="none"/>
+            </svg>
+          </div>
+        </a>`).join('');
+
+      if (data.username) {
+        const follow = document.getElementById('ig-follow');
+        follow.href = `https://instagram.com/${data.username}`;
+        follow.style.display = '';
+      }
+
+      document.getElementById('ig-feed-section').style.display = '';
+    } catch { /* sin feed, sección oculta */ }
+  })();
+</script>

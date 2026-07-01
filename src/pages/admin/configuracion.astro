@@ -273,6 +273,81 @@ const saved = Astro.url.searchParams.get('saved') === '1';
       </div>
     </div>
 
+    <!-- Instagram -->
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E1306C" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="#E1306C" stroke="none"/></svg>
+        <p class="label" style="margin:0;">Instagram (feed del inicio)</p>
+        {settings['instagram_access_token']
+          ? <span style="font-size:0.72rem;background:#f0fdf4;color:var(--green);border:1px solid #86efac;padding:0.2rem 0.6rem;border-radius:99px;font-weight:600;">● Conectado</span>
+          : <span style="font-size:0.72rem;background:var(--warm);color:var(--stone);border:1px solid var(--dust);padding:0.2rem 0.6rem;border-radius:99px;">○ No conectado</span>}
+      </div>
+      <p style="font-size:0.85rem;color:var(--stone);margin-bottom:1.25rem;line-height:1.6;">
+        Muestra las últimas publicaciones de Instagram en el inicio. Requiere una cuenta
+        <strong>Creator o Business</strong> y un <strong>token de larga duración</strong> de la API de Instagram.
+        El token se renueva automáticamente cada mes (no expira mientras el sitio esté activo).
+      </p>
+      <div>
+        <label class="label" style="margin-bottom:0.4rem;display:block;">Token de acceso de Instagram</label>
+        <input type="password" name="instagram_access_token" value={settings['instagram_access_token'] ?? ''} placeholder="IGQ..." />
+        <p style="font-size:0.72rem;color:var(--stone);margin-top:0.4rem;">
+          Genéralo en <a href="https://developers.facebook.com/" target="_blank" rel="noopener" style="color:var(--forest);">Meta for Developers</a>
+          (Instagram API con Login → token de larga duración). Si está vacío, la sección no aparece en el sitio.
+        </p>
+      </div>
+    </div>
+
+    <!-- API Gateway · Boletas de Honorarios -->
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--forest)" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="11" x2="13" y2="11"/></svg>
+        <p class="label" style="margin:0;">Boletas de honorarios · API Gateway</p>
+        {(settings['apigateway_apikey'] && settings['sii_rut'] && settings['sii_clave'])
+          ? <span style="font-size:0.72rem;background:#f0fdf4;color:var(--green);border:1px solid #86efac;padding:0.2rem 0.6rem;border-radius:99px;font-weight:600;">● Configurado</span>
+          : <span style="font-size:0.72rem;background:var(--warm);color:var(--stone);border:1px solid var(--dust);padding:0.2rem 0.6rem;border-radius:99px;">○ Sin configurar</span>}
+      </div>
+      <p style="font-size:0.85rem;color:var(--stone);margin-bottom:1.25rem;line-height:1.6;">
+        Conecta <a href="https://www.apigateway.cl/" target="_blank" rel="noopener" style="color:var(--forest);">API Gateway</a>
+        para emitir boletas de honorarios electrónicas respaldadas por el SII.
+        Las credenciales SII son sensibles: para producción se recomienda guardarlas como variables de entorno en Vercel
+        (<code style="background:var(--warm);padding:0 4px;border-radius:3px;">APIGATEWAY_APIKEY</code>,
+        <code style="background:var(--warm);padding:0 4px;border-radius:3px;">SII_RUT</code>,
+        <code style="background:var(--warm);padding:0 4px;border-radius:3px;">SII_CLAVE</code>).
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div>
+          <label class="label" style="margin-bottom:0.4rem;display:block;">API key (de tu cuenta API Gateway)</label>
+          <input type="password" name="apigateway_apikey" value={settings['apigateway_apikey'] ?? ''} placeholder="apikey de la conexión" />
+        </div>
+        <div>
+          <label class="label" style="margin-bottom:0.4rem;display:block;">URL base de la API</label>
+          <input type="text" name="apigateway_base_url" value={settings['apigateway_base_url'] ?? ''} placeholder="https://api.apigateway.cl" />
+        </div>
+        <div>
+          <label class="label" style="margin-bottom:0.4rem;display:block;">RUT emisor (SII)</label>
+          <input type="text" name="sii_rut" value={settings['sii_rut'] ?? ''} placeholder="12.345.678-9" />
+        </div>
+        <div>
+          <label class="label" style="margin-bottom:0.4rem;display:block;">Clave SII</label>
+          <input type="password" name="sii_clave" value={settings['sii_clave'] ?? ''} placeholder="••••••••" />
+        </div>
+        <div style="grid-column:1/-1;">
+          <label class="label" style="margin-bottom:0.4rem;display:block;">Nombre del header del apikey (avanzado)</label>
+          <input type="text" name="apigateway_header_name" value={settings['apigateway_header_name'] ?? 'apikey'} placeholder="apikey" />
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.4rem;">
+            Verifica el nombre exacto en la documentación de tu cuenta. Por defecto: <code style="background:var(--warm);padding:0 4px;border-radius:3px;">apikey</code>.
+          </p>
+        </div>
+      </div>
+      <div style="margin-top:1rem;display:flex;align-items:center;gap:0.75rem;">
+        <button type="button" id="btn-agw-test" class="btn btn-outline btn-sm">Probar conexión</button>
+        <span id="agw-test-result" style="font-size:0.8rem;"></span>
+      </div>
+      <p style="font-size:0.72rem;color:var(--stone);margin-top:0.6rem;">
+        Guarda la configuración antes de probar. La prueba consulta tus BHE emitidas del mes actual.
+      </p>
+    </div>
+
     <!-- reCAPTCHA -->
     <div class="card">
       <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1.25rem;">
@@ -389,5 +464,30 @@ const saved = Astro.url.searchParams.get('saved') === '1';
     const on = (checkbox as HTMLInputElement).checked;
     if (track) track.style.background = on ? '#576352' : '#DDD8CF';
     if (thumb) thumb.style.left = on ? '21px' : '3px';
+  });
+
+  // Probar conexión API Gateway
+  const agwBtn = document.getElementById('btn-agw-test');
+  const agwOut = document.getElementById('agw-test-result');
+  agwBtn?.addEventListener('click', async () => {
+    if (agwOut) { agwOut.textContent = 'Probando…'; agwOut.style.color = '#6b7280'; }
+    (agwBtn as HTMLButtonElement).disabled = true;
+    try {
+      const res  = await fetch('/api/admin/apigateway', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'test' }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (agwOut) { agwOut.textContent = '✓ Conexión exitosa (período ' + data.periodo + ')'; agwOut.style.color = '#15803d'; }
+      } else {
+        if (agwOut) { agwOut.textContent = '✕ ' + (data.error ?? 'Error'); agwOut.style.color = '#dc2626'; }
+      }
+    } catch {
+      if (agwOut) { agwOut.textContent = '✕ Error de conexión'; agwOut.style.color = '#dc2626'; }
+    } finally {
+      (agwBtn as HTMLButtonElement).disabled = false;
+    }
   });
 </script>
