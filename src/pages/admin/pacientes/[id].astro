@@ -199,6 +199,7 @@ const formatCLP = (n: number) =>
             const nota = notesByBooking[b.id] ?? notesByDate[b.session_date] ?? null;
             const badgeClass = b.status === 'confirmed' ? 'badge-confirmed' : b.status === 'cancelled' ? 'badge-cancelled' : 'badge-pending';
             const badgeLabel = b.status === 'confirmed' ? 'Confirmada' : b.status === 'cancelled' ? 'Cancelada' : 'Pendiente';
+            const boletaFolio = (b.notes?.match(/Boleta Folio (\d+)/) ?? [])[1] ?? null;
             return (
               <div class="card" style="padding:0;overflow:hidden;">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;gap:1rem;flex-wrap:wrap;">
@@ -210,11 +211,25 @@ const formatCLP = (n: number) =>
                     <span class={`badge ${badgeClass}`}>{badgeLabel}</span>
                     <span style="font-size:0.82rem;color:var(--stone);">{formatCLP(b.amount)}</span>
                   </div>
-                  <button type="button" class="btn btn-outline btn-sm"
-                    onclick={`toggleNota('nota-${i}')`}
-                    style={nota ? 'border-color:var(--forest);color:var(--forest);' : ''}>
-                    {nota ? '📝 Ver nota' : '+ Agregar nota'}
-                  </button>
+                  <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                    <span class="bol-status" data-bid={b.id} style="font-size:0.75rem;"></span>
+                    {boletaFolio ? (
+                      <>
+                        <span class="badge badge-confirmed">✓ Boleta {boletaFolio}</span>
+                        <button type="button" class="btn btn-outline btn-sm bol-pdf" data-bid={b.id}>PDF</button>
+                        <button type="button" class="btn btn-outline btn-sm bol-email" data-bid={b.id}>Email</button>
+                      </>
+                    ) : b.status === 'confirmed' ? (
+                      <button type="button" class="btn btn-outline btn-sm bol-emitir" data-bid={b.id} data-rut={patient.rut ?? ''}>
+                        Emitir boleta
+                      </button>
+                    ) : null}
+                    <button type="button" class="btn btn-outline btn-sm"
+                      onclick={`toggleNota('nota-${i}')`}
+                      style={nota ? 'border-color:var(--forest);color:var(--forest);' : ''}>
+                      {nota ? '📝 Ver nota' : '+ Agregar nota'}
+                    </button>
+                  </div>
                 </div>
 
                 <div id={`nota-${i}`} style="display:none;border-top:1px solid var(--warm);background:var(--sand);padding:1.25rem;">
@@ -411,6 +426,60 @@ const formatCLP = (n: number) =>
 </div>
 
 <script>
+  // ── Boletas de honorarios (emitir / PDF / email) ──────────────────────────
+  function bolStatus(bid, text, color) {
+    const el = document.querySelector(`.bol-status[data-bid="${bid}"]`);
+    if (el) { el.textContent = text; el.style.color = color; }
+  }
+  async function bolPost(payload) {
+    const res = await fetch('/api/admin/apigateway', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    return res.json();
+  }
+  document.addEventListener('click', async (e) => {
+    const emitir = e.target.closest('.bol-emitir');
+    const pdf    = e.target.closest('.bol-pdf');
+    const email  = e.target.closest('.bol-email');
+
+    if (emitir) {
+      const bid = emitir.dataset.bid, rut = emitir.dataset.rut;
+      if (!rut) { bolStatus(bid, 'Falta el RUT del paciente en su ficha.', '#dc2626'); return; }
+      if (!confirm('¿Emitir la boleta de honorarios? Genera un documento tributario real en el SII.')) return;
+      emitir.disabled = true; bolStatus(bid, 'Emitiendo…', '#6b7280');
+      try {
+        const d = await bolPost({ action: 'emitir', booking_id: bid, rut });
+        if (d.ok) { bolStatus(bid, `✓ Emitida (Folio ${d.folio ?? ''})`, '#15803d'); setTimeout(() => location.reload(), 900); }
+        else { bolStatus(bid, '✕ ' + (d.error ?? 'Error'), '#dc2626'); emitir.disabled = false; }
+      } catch { bolStatus(bid, '✕ Error de conexión', '#dc2626'); emitir.disabled = false; }
+    }
+
+    if (pdf) {
+      const bid = pdf.dataset.bid;
+      bolStatus(bid, 'Generando PDF…', '#6b7280');
+      try {
+        const d = await bolPost({ action: 'pdf', booking_id: bid });
+        if (d.ok && d.pdf) {
+          const bytes = Uint8Array.from(atob(d.pdf), c => c.charCodeAt(0));
+          const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+          const a = document.createElement('a'); a.href = url; a.download = `boleta-${d.folio ?? 'honorarios'}.pdf`;
+          document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+          bolStatus(bid, '✓ PDF descargado', '#15803d');
+        } else { bolStatus(bid, '✕ ' + (d.error ?? 'Sin PDF'), '#dc2626'); }
+      } catch { bolStatus(bid, '✕ Error', '#dc2626'); }
+    }
+
+    if (email) {
+      const bid = email.dataset.bid;
+      bolStatus(bid, 'Enviando email…', '#6b7280');
+      try {
+        const d = await bolPost({ action: 'email', booking_id: bid });
+        if (d.ok) bolStatus(bid, `✓ Enviada a ${d.email}`, '#15803d');
+        else bolStatus(bid, '✕ ' + (d.error ?? 'No enviada'), '#dc2626');
+      } catch { bolStatus(bid, '✕ Error', '#dc2626'); }
+    }
+  });
+
   // Exponer funciones globalmente para que funcionen en onclick=""
   window.toggleNota = function(id) {
     const el = document.getElementById(id);
