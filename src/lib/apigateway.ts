@@ -101,7 +101,7 @@ export async function situacionTributaria(rut: string, cfg?: AgwConfig) {
  * ⚠️ Verificar versión/endpoint exacto en la doc de tu conexión (v1 vs v2).
  */
 export async function bheEmitidas(emisor: string, periodo: string, cfg?: AgwConfig) {
-  return agwPost(`/api/v1/sii/bhe/emitidas/documentos/${emisor}/${periodo}`, {}, cfg);
+  return agwPost(`/api/v2/sii/bhe/emitidas/documentos/${emisor}/${periodo}`, {}, cfg);
 }
 
 export interface BheReceptor {
