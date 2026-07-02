@@ -60,7 +60,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
 
     const { data: b } = await supabase
-      .from('bookings').select('patient_name, patient_email, amount, session_type, notes').eq('id', bookingId).single();
+      .from('bookings').select('patient_name, patient_email, amount, session_type, notes, service_id').eq('id', bookingId).single();
     if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
 
     // RUT: prioriza el ingresado en el formulario; si no, el de la ficha del paciente
@@ -72,10 +72,18 @@ export const POST: APIRoute = async ({ request }) => {
 
     if (!b.amount) return json({ ok: false, error: 'La reserva no tiene monto.' }, 400);
 
+    // Glosa: usa la del servicio si existe, si no un texto genérico
+    let glosa = 'Atención psicológica';
+    if (b.service_id) {
+      const { data: svc } = await supabase
+        .from('services_catalog').select('fonasa_description').eq('id', b.service_id).maybeSingle();
+      if (svc?.fonasa_description) glosa = svc.fonasa_description;
+    }
+
     try {
       const result = await emitirBHE({
         receptor: { rut, razonSocial: p?.name ?? b.patient_name, direccion: p?.address ?? '' },
-        detalle:  [{ nombre: 'Atención psicológica', monto: b.amount }],
+        detalle:  [{ nombre: glosa, monto: b.amount }],
       }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
 
       const folio = result?.data?.Encabezado?.IdDoc?.Folio ?? null;

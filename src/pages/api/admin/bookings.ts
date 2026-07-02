@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
 import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar } from '../../../lib/syncCalendar';
+import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
 
 export const prerender = false;
@@ -17,7 +18,18 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (!id) return redirect(dest);
     await supabase.from('bookings').update({ status: 'confirmed' }).eq('id', id);
     const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
-    if (booking) syncBookingToCalendar(booking).catch(console.error);
+    if (booking) {
+      syncBookingToCalendar(booking).catch(console.error);
+      // Emisión automática de boleta si el servicio lo tiene activado
+      if (booking.service_id) {
+        supabase.from('services_catalog').select('boleta_auto').eq('id', booking.service_id).maybeSingle()
+          .then(({ data: svc }) => {
+            if (svc?.boleta_auto) {
+              emitBoletaParaReserva(id, { enviarEmail: true }).catch(console.error);
+            }
+          }).then(undefined, () => { /* columna boleta_auto puede no existir aún */ });
+      }
+    }
     return redirect(dest);
   }
 

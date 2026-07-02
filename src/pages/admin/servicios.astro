@@ -24,7 +24,7 @@ const TYPE_LABEL: Record<string, string> = {
   individual: 'Individual', pareja: 'Pareja', grupal: 'Grupal', paquete: 'Paquete',
 };
 const MODALITY_LABEL: Record<string, string> = {
-  presencial: 'Presencial', online: 'Online', ambos: 'Presencial + Online',
+  presencial: 'Presencial', online: 'Online', ambos: 'Presencial + Online', domicilio: 'A domicilio',
 };
 const TYPE_ICON: Record<string, string> = {
   individual: '◯', pareja: '◎', grupal: '◉', paquete: '▣',
@@ -202,8 +202,8 @@ const TYPE_ICON: Record<string, string> = {
         <div>
           <label class="label" style="display:block;margin-bottom:0.3rem;">Modalidad</label>
           <select name="modality">
-            {(['presencial','online','ambos'] as const).map(m => (
-              <option value={m} selected={editService?.modality === m}>{MODALITY_LABEL[m]}</option>
+            {(['presencial','online','ambos','domicilio'] as const).map(m => (
+              <option value={m} selected={editService?.modality === m}>{MODALITY_LABEL[m] ?? m}</option>
             ))}
           </select>
         </div>
@@ -264,10 +264,50 @@ const TYPE_ICON: Record<string, string> = {
           <textarea name="description" rows="3" placeholder="Descripción del servicio...">{editService?.description ?? ''}</textarea>
         </div>
 
-        <div style="grid-column:1/-1;">
-          <label class="label" style="display:block;margin-bottom:0.3rem;">Descripción Fonasa (código / glosa)</label>
-          <textarea name="fonasa_description" rows="2" placeholder="Ej: 12-01-001 · Psicoterapia individual 50 min">{(editService as Record<string, unknown>)?.fonasa_description as string ?? ''}</textarea>
-          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.3rem;">Se usa para emisión de boleta y registros Fonasa. No visible en el sitio.</p>
+        {/* ── Boleta de honorarios ── */}
+        <div style="grid-column:1/-1;border-top:1px solid var(--warm);padding-top:1rem;margin-top:0.25rem;">
+          <p class="label" style="display:block;margin-bottom:0.6rem;font-weight:700;">Boleta de honorarios</p>
+
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Glosa de la boleta (para el SII)</label>
+          <input type="text" name="fonasa_description" value={(editService as Record<string, unknown>)?.fonasa_description as string ?? ''}
+            placeholder="Ej: Sesión psicoterapia individual" />
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.3rem;">
+            Es el texto que aparece como detalle en la boleta emitida. No se muestra en el sitio.
+          </p>
+
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;margin-top:0.75rem;">
+            <input type="checkbox" name="boleta_auto" style="width:auto;" checked={(editService as Record<string, unknown>)?.boleta_auto as boolean ?? false} />
+            Emitir la boleta automáticamente al confirmarse el pago
+          </label>
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.3rem;margin-left:1.5rem;">
+            Requiere que el paciente tenga RUT en su ficha. También se le envía por correo.
+          </p>
+        </div>
+
+        {/* ── Agendamiento ── */}
+        <div style="grid-column:1/-1;border-top:1px solid var(--warm);padding-top:1rem;">
+          <p class="label" style="display:block;margin-bottom:0.6rem;font-weight:700;">Agendamiento</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.3rem;">Horas mínimas de anticipación</label>
+              <input type="number" name="min_hours" value={(editService as Record<string, unknown>)?.min_hours as number ?? ''}
+                min="0" step="1" placeholder="Ej: 24" />
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:0.6rem;margin-top:0.75rem;">
+            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;">
+              <input type="checkbox" name="waitlist" style="width:auto;" checked={(editService as Record<string, unknown>)?.waitlist as boolean ?? false} />
+              Activar lista de espera cuando no haya horas disponibles
+            </label>
+            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;">
+              <input type="checkbox" name="prepago" style="width:auto;" checked={(editService as Record<string, unknown>)?.prepago as boolean ?? false} />
+              Prepago (el paciente paga al momento de agendar)
+            </label>
+            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;">
+              <input type="checkbox" name="pago_requerido" style="width:auto;" checked={(editService as Record<string, unknown>)?.pago_requerido as boolean ?? false} />
+              Pago requerido para entrar a la sesión (online)
+            </label>
+          </div>
         </div>
 
         <div style="grid-column:1/-1;">

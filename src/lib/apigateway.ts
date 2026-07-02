@@ -198,4 +198,70 @@ export async function bheAnular(emisor: string, folio: string | number, cfg?: Ag
   return agwPost(`/api/v2/sii/bhe/emitidas/anular/${emisor}/${folio}`, {}, cfg);
 }
 
+// Normaliza RUT a "XXXXXXXX-X" (sin puntos, con guion antes del dígito verificador)
+export function normalizeRut(rut: string): string {
+  const clean = rut.replace(/\./g, '').replace(/\s/g, '').replace(/-/g, '').trim();
+  if (clean.length < 2) return rut.trim();
+  return `${clean.slice(0, -1)}-${clean.slice(-1)}`;
+}
+
+function periodoActualYM(): string {
+  const n = new Date();
+  return `${n.getFullYear()}${String(n.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Emite la boleta de una reserva de punta a punta: resuelve paciente, glosa del
+ * servicio, emite, resuelve el código y lo guarda en bookings.notes.
+ * Reutilizable desde el admin (manual) y desde la confirmación de pago (automática).
+ */
+export async function emitBoletaParaReserva(
+  bookingId: string,
+  opts: { rutOverride?: string; enviarEmail?: boolean } = {},
+): Promise<{ ok: boolean; folio?: number | null; codigo?: string | null; error?: string; alreadyEmitted?: boolean }> {
+  const cfg = await getAgwConfig();
+  if (!cfg) return { ok: false, error: 'API Gateway no configurado.' };
+
+  const { data: b } = await supabase
+    .from('bookings').select('patient_name, patient_email, amount, session_type, notes, service_id').eq('id', bookingId).single();
+  if (!b) return { ok: false, error: 'Reserva no encontrada.' };
+
+  const already = /Boleta Folio (\d+)/.exec(b.notes ?? '');
+  if (already) return { ok: true, folio: parseInt(already[1]), alreadyEmitted: true };
+
+  const { data: p } = await supabase
+    .from('patients').select('rut, name, address').eq('email', (b.patient_email ?? '').toLowerCase()).maybeSingle();
+  const rutRaw = (opts.rutOverride ?? '').trim() || p?.rut || '';
+  if (!rutRaw) return { ok: false, error: 'Falta el RUT del paciente.' };
+  if (!b.amount) return { ok: false, error: 'La reserva no tiene monto.' };
+
+  let glosa = 'Atención psicológica';
+  if (b.service_id) {
+    const { data: svc } = await supabase
+      .from('services_catalog').select('fonasa_description').eq('id', b.service_id).maybeSingle();
+    if (svc?.fonasa_description) glosa = svc.fonasa_description as string;
+  }
+
+  try {
+    const result = await emitirBHE({
+      receptor: { rut: normalizeRut(rutRaw), razonSocial: p?.name ?? b.patient_name, direccion: p?.address ?? '' },
+      detalle:  [{ nombre: glosa, monto: b.amount }],
+    }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
+
+    const folio = result?.data?.Encabezado?.IdDoc?.Folio ?? null;
+    let codigo: string | null = null;
+    if (folio) {
+      try { codigo = await codigoDeFolio(cfg.siiRut, periodoActualYM(), folio, cfg); } catch { /* opcional */ }
+      const nota = `${b.notes ? b.notes + '\n' : ''}Boleta Folio ${folio}${codigo ? ' · Cod ' + codigo : ''}`;
+      await supabase.from('bookings').update({ notes: nota }).eq('id', bookingId);
+    }
+    if (opts.enviarEmail && codigo && b.patient_email) {
+      try { await bheEmail(codigo, b.patient_email, cfg); } catch { /* no bloquear */ }
+    }
+    return { ok: true, folio, codigo };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Error al emitir' };
+  }
+}
+
 export function clearAgwCache() { _cache = null; }
