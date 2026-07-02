@@ -149,9 +149,36 @@ export async function emitirBHE(params: {
   return agwPost('/api/v2/sii/bhe/emitidas/emitir', { boleta }, c);
 }
 
-/** Descarga el PDF de una BHE emitida (devuelve bytes/base64). POST /api/v2/sii/bhe/emitidas/pdf/{codigo} */
-export async function bhePdf(codigo: string, cfg?: AgwConfig) {
-  return agwPost(`/api/v2/sii/bhe/emitidas/pdf/${codigo}`, {}, cfg);
+/**
+ * Descarga el PDF de una BHE emitida y devuelve base64 limpio.
+ * POST /api/v2/sii/bhe/emitidas/pdf/{codigo}
+ * El endpoint puede responder el PDF binario o un JSON con el base64 — se manejan ambos.
+ */
+export async function bhePdf(codigo: string, cfg?: AgwConfig): Promise<string | null> {
+  const c = cfg ?? (await getAgwConfig());
+  if (!c) throw new Error('API Gateway no configurado.');
+
+  const body: Record<string, unknown> = {};
+  if (c.siiRut && c.siiClave) body.auth = { pass: { rut: c.siiRut, clave: c.siiClave } };
+
+  const res = await fetch(`${c.baseUrl}/api/v2/sii/bhe/emitidas/pdf/${codigo}`, {
+    method: 'POST', headers: authHeaders(c), body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`API Gateway ${res.status}: ${t.slice(0, 200)}`);
+  }
+
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.includes('application/json')) {
+    const j = await res.json();
+    if (typeof j === 'string') return j;                 // base64 como string JSON
+    return (j?.data ?? j?.pdf ?? j?.pdf_bytes ?? null);  // o dentro de un objeto
+  }
+  // Binario → base64
+  const buf = await res.arrayBuffer();
+  return Buffer.from(buf).toString('base64');
 }
 
 /** Envía por email una BHE emitida. POST /api/v2/sii/bhe/emitidas/email/{codigo} */

@@ -3,20 +3,24 @@ interface Props {
   label: string;
   title: string;
   description?: string;
-  image?: string;  // imagen personalizada, por defecto hero-paginas.jpg
+  image?: string;        // imagen desktop, por defecto hero-paginas.jpg
+  imageMobile?: string;  // imagen opcional para mobile (< 768px)
 }
-const { label, title, description, image = '/images/hero-paginas.jpg' } = Astro.props;
+const { label, title, description, image = '/images/hero-paginas.jpg', imageMobile } = Astro.props;
 ---
 
 <section class="relative overflow-hidden min-h-[380px] md:min-h-[420px] flex items-end border-b border-dust">
 
-  <!-- Imagen de fondo: object-[50%_25%] muestra la parte superior de imágenes panorámicas -->
-  <img
-    src={image}
-    alt=""
-    class="absolute inset-0 w-full h-full object-cover object-[50%_25%]"
-    aria-hidden="true"
-  />
+  <!-- Imagen de fondo: en mobile usa imageMobile si existe -->
+  <picture class="absolute inset-0 w-full h-full">
+    {imageMobile && <source media="(max-width: 767px)" srcset={imageMobile} />}
+    <img
+      src={image}
+      alt=""
+      class="w-full h-full object-cover object-[50%_25%]"
+      aria-hidden="true"
+    />
+  </picture>
 
   <!-- Degradado sobre la imagen — más oscuro abajo para que el texto resalte -->
   <div class="absolute inset-0 bg-gradient-to-t from-ink/80 via-ink/30 to-ink/10"></div>

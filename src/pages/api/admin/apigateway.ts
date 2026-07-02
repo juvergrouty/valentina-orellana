@@ -100,7 +100,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
 
     const { data: b } = await supabase
-      .from('bookings').select('patient_email, notes').eq('id', bookingId).single();
+      .from('bookings').select('patient_name, patient_email, notes').eq('id', bookingId).single();
     if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
 
     const email = (body.email ?? '').trim() || (b.patient_email ?? '');
@@ -138,9 +138,8 @@ export const POST: APIRoute = async ({ request }) => {
     if (!codigo) return json({ ok: false, error: 'No se pudo resolver el código de la boleta.' }, 502);
 
     try {
-      const result = await bhePdf(codigo, cfg) as unknown;
-      // La API puede devolver el base64 directo (string) o dentro de {data}
-      const pdf = typeof result === 'string' ? result : (result as { data?: string })?.data ?? null;
+      const pdf = await bhePdf(codigo, cfg);
+      if (!pdf) return json({ ok: false, error: 'La API no devolvió el PDF.' }, 502);
       return json({ ok: true, folio, pdf });
     } catch (e) {
       return json({ ok: false, error: e instanceof Error ? e.message : 'Error al obtener PDF' }, 502);
