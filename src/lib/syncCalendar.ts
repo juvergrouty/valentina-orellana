@@ -131,9 +131,13 @@ export async function syncBookingToCalendar(booking: BookingForCalendar): Promis
       calendarId:    cfg['google_calendar_id'] ?? 'primary',
     });
 
-    // Guardar event_id y Meet link en la reserva
+    // Guardar event_id y Meet link en la reserva SIN pisar otras notas (ej. folio de boleta)
     const updateData: Record<string, string> = { google_event_id: event.id };
-    if (event.meetLink) updateData.notes = `Meet: ${event.meetLink}`;
+    if (event.meetLink) {
+      const { data: cur } = await supabase.from('bookings').select('notes').eq('id', booking.id).single();
+      const prev = (cur?.notes ?? '').replace(/(^|\n)\s*Meet:\s*\S+/g, '').trim(); // quita Meet previo
+      updateData.notes = (prev ? prev + '\n' : '') + `Meet: ${event.meetLink}`;
+    }
     await supabase.from('bookings').update(updateData).eq('id', booking.id);
 
     return { success: true, meetLink: event.meetLink, eventLink: event.htmlLink };
