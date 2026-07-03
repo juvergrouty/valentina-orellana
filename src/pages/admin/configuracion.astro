@@ -482,7 +482,13 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
       });
       const data = await res.json();
       if (data.ok) {
-        if (revOut) { revOut.textContent = '✓ ' + data.count + ' reseñas guardadas'; revOut.style.color = '#15803d'; }
+        const extra = (data.total != null || data.rating != null)
+          ? ` · Google reporta rating ${data.rating ?? '—'} / ${data.total ?? 0} reseñas totales`
+          : '';
+        if (revOut) {
+          revOut.textContent = '✓ ' + data.count + ' reseñas guardadas' + extra;
+          revOut.style.color = data.count > 0 ? '#15803d' : '#b45309';
+        }
       } else {
         if (revOut) { revOut.textContent = '✕ ' + (data.error ?? 'Error'); revOut.style.color = '#dc2626'; }
       }

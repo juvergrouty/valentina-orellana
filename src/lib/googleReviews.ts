@@ -53,7 +53,7 @@ export async function fetchGoogleReviewsLive(): Promise<ReviewsCache | null> {
 }
 
 /** Refresca la caché en la BD. Llamado por el cron diario y por el botón del admin. */
-export async function refreshGoogleReviewsCache(): Promise<{ ok: boolean; count?: number; error?: string }> {
+export async function refreshGoogleReviewsCache(): Promise<{ ok: boolean; count?: number; rating?: number | null; total?: number | null; error?: string }> {
   const { placeId, apiKey } = await getConfig();
   if (!placeId) return { ok: false, error: 'Falta el Place ID en Configuración.' };
   if (!apiKey)  return { ok: false, error: 'Falta la API key de Google Places en Configuración.' };
@@ -91,7 +91,7 @@ export async function refreshGoogleReviewsCache(): Promise<{ ok: boolean; count?
   const { error } = await supabase.from('settings')
     .upsert({ key: 'google_reviews_cache', value: JSON.stringify(data) }, { onConflict: 'key' });
   if (error) return { ok: false, error: error.message };
-  return { ok: true, count: reviews.length };
+  return { ok: true, count: reviews.length, rating: data.rating, total: data.total };
 }
 
 /** Lee la caché guardada (sin llamar a Google). La usa el hero público. */
