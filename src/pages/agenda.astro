@@ -72,6 +72,17 @@ const { data: catalogServices } = await supabase
   <section class="py-section bg-sand">
     <div class="container-site">
 
+      <!-- Resumen del servicio elegido (visible en pasos 2-4) -->
+      <div id="service-summary" class="hidden mb-8 flex items-center gap-3 border border-dust bg-white px-5 py-4 rounded-sm max-w-2xl">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#576352" stroke-width="1.75" class="flex-shrink-0">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/>
+        </svg>
+        <div class="min-w-0">
+          <p id="summary-name" class="font-heading font-semibold text-base text-ink leading-tight"></p>
+          <p id="summary-detail" class="font-body text-sm text-stone"></p>
+        </div>
+      </div>
+
       <!-- ── PASO 1: Tipo de sesión ─────────────────────────────────────── -->
       <div id="step-1" class="booking-step">
         <p class="label text-stone mb-4">Paso 1</p>
@@ -411,6 +422,9 @@ const { data: catalogServices } = await supabase
     document.querySelectorAll('.booking-step').forEach((el) => el.classList.add('hidden'));
     $(`step-${n}`)?.classList.remove('hidden');
     updateStepIndicators(n);
+    // Resumen del servicio: visible desde el paso 2 en adelante
+    const sum = $('service-summary');
+    if (sum) sum.style.display = n >= 2 ? 'flex' : 'none';
     const bar = document.getElementById('booking-bar');
     if (bar) {
       const top = bar.getBoundingClientRect().top + window.scrollY - 1;
@@ -499,6 +513,12 @@ const { data: catalogServices } = await supabase
     state.sessionDuration = duration;
     state.sessionTitle    = name + (modality === 'online' ? ' Online' : ' Presencial');
     state.loadedSlots     = {};
+
+    // Poblar el resumen del servicio (nombre + modalidad + precio + duración)
+    const sName = $('summary-name');
+    const sDet  = $('summary-detail');
+    if (sName) sName.textContent = state.sessionTitle;
+    if (sDet)  sDet.textContent  = `${formatCLP(price)} · ${duration} min · ${modality === 'online' ? 'Videollamada (Meet)' : 'Las Condes'}`;
 
     updateMotivoSelect(selectedGroup);
 
