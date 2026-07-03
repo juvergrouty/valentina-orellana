@@ -16,7 +16,7 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
   cookies.set('vo_admin_token', secret, {
     path:     '/',
     httpOnly: true,
-    sameSite: 'strict',
+    sameSite: 'lax',   // 'lax' permite que la cookie viaje en el redirect de vuelta de Google OAuth
     secure:   import.meta.env.PROD,
     maxAge:   60 * 60 * 8,
   });
