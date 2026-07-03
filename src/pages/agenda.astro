@@ -918,7 +918,7 @@ const { data: catalogServices } = await supabase
 
   // ─── Pago por transferencia ───────────────────────────────────────────────
   document.getElementById('transfer-pay-btn')?.addEventListener('click', async () => {
-    const btn = document.getElementById('transfer-pay-btn') as HTMLButtonElement | null;
+    const btn = document.getElementById('transfer-pay-btn');
     if (!btn) return;
     btn.textContent = 'Confirmando...';
     btn.disabled = true;
