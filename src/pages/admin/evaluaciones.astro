@@ -76,9 +76,13 @@ function stars(n: number) {
         )}
       </div>
       {configured && (
-        <a href={`https://search.google.com/local/reviews?placeid=${placeId}`} target="_blank" rel="noopener" class="btn btn-outline btn-sm">
-          Ver en Google →
-        </a>
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <span id="ev-refresh-status" style="font-size:0.8rem;"></span>
+          <button id="ev-refresh-btn" class="btn btn-outline btn-sm">↻ Actualizar reseñas</button>
+          <a href={`https://search.google.com/local/reviews?placeid=${placeId}`} target="_blank" rel="noopener" class="btn btn-outline btn-sm">
+            Ver en Google →
+          </a>
+        </div>
       )}
     </div>
 
@@ -139,6 +143,32 @@ function stars(n: number) {
   </div>
 
 </AdminLayout>
+
+<script>
+  const btn = document.getElementById('ev-refresh-btn');
+  const st  = document.getElementById('ev-refresh-status');
+  btn?.addEventListener('click', async () => {
+    btn.disabled = true;
+    if (st) { st.textContent = 'Actualizando…'; st.style.color = '#6b7280'; }
+    try {
+      const res  = await fetch('/api/admin/reviews', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh' }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (st) { st.textContent = `✓ ${data.count} reseñas guardadas`; st.style.color = '#15803d'; }
+        setTimeout(() => location.reload(), 900);
+      } else {
+        if (st) { st.textContent = '✕ ' + (data.error ?? 'Error'); st.style.color = '#dc2626'; }
+        btn.disabled = false;
+      }
+    } catch {
+      if (st) { st.textContent = '✕ Error de conexión'; st.style.color = '#dc2626'; }
+      btn.disabled = false;
+    }
+  });
+</script>
 
 <style>
 .ev-wrap { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: white; }
