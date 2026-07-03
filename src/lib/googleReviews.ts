@@ -94,6 +94,32 @@ export async function refreshGoogleReviewsCache(): Promise<{ ok: boolean; count?
   return { ok: true, count: reviews.length, rating: data.rating, total: data.total };
 }
 
+export interface PlaceCandidate { place_id: string; name: string; rating: number | null; total: number | null; address: string; }
+
+/** Busca fichas por nombre y devuelve sus Place ID (para encontrar el correcto, ChIJ...). */
+export async function findPlaceCandidates(query: string): Promise<{ ok: boolean; results?: PlaceCandidate[]; error?: string }> {
+  const { apiKey } = await getConfig();
+  if (!apiKey) return { ok: false, error: 'Falta la API key de Google Places en Configuración.' };
+  try {
+    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&language=es&key=${apiKey}`;
+    const res = await fetch(url);
+    const j   = await res.json();
+    if (j.status !== 'OK' && j.status !== 'ZERO_RESULTS') {
+      return { ok: false, error: `Google: ${j.status}${j.error_message ? ' — ' + j.error_message : ''}` };
+    }
+    const results: PlaceCandidate[] = (j.results ?? []).slice(0, 6).map((r: Record<string, unknown>) => ({
+      place_id: r.place_id as string,
+      name:     r.name as string,
+      rating:   (r.rating as number) ?? null,
+      total:    (r.user_ratings_total as number) ?? null,
+      address:  (r.formatted_address as string) ?? '',
+    }));
+    return { ok: true, results };
+  } catch {
+    return { ok: false, error: 'No se pudo conectar con Google.' };
+  }
+}
+
 /** Lee la caché guardada (sin llamar a Google). La usa el hero público. */
 export async function getCachedReviews(): Promise<ReviewsCache | null> {
   const { data } = await supabase.from('settings').select('value').eq('key', 'google_reviews_cache').maybeSingle();
