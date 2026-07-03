@@ -1,32 +1,26 @@
 ---
 import { supabase } from '../../lib/supabase';
 
-const { data: dbServices } = await supabase
-  .from('services_catalog')
-  .select('id, name, description, modality, location, image_url, type, price, duration_min')
-  .eq('show_home', true)
-  .eq('visible', true)
-  .order('sort_order')
-  .limit(10);
+const SELECT = 'id, name, description, modality, location, image_url, type, price, duration_min';
 
-const fallback = [
-  {
-    id: 'individual', name: 'Terapia Individual',
-    description: 'Un espacio para ti. Para entender lo que sientes, soltar lo que te pesa y reconectar contigo.',
-    type: 'individual', modality: 'ambos', image_url: '/images/consultorio-individual.jpg', price: 45000, duration_min: 50, location: null,
-  },
-  {
-    id: 'pareja', name: 'Terapia de Pareja',
-    description: 'Mejoren su comunicación, fortalezcan su vínculo y construyan una relación más sana y consciente.',
-    type: 'pareja', modality: 'ambos', image_url: '/images/consultorio-pareja.jpg', price: 60000, duration_min: 60, location: null,
-  },
-];
+// 1º: servicios marcados para el inicio (⭐). 2º: si no hay, los visibles reales.
+let { data: dbServices } = await supabase
+  .from('services_catalog').select(SELECT)
+  .eq('show_home', true).eq('visible', true)
+  .order('sort_order').limit(10);
+
+if (!dbServices || dbServices.length === 0) {
+  const { data: visibles } = await supabase
+    .from('services_catalog').select(SELECT)
+    .eq('visible', true)
+    .order('sort_order').limit(6);
+  dbServices = visibles ?? [];
+}
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style:'currency', currency:'CLP', maximumFractionDigits:0 }).format(n);
 
-const raw = (dbServices && dbServices.length > 0 ? dbServices : fallback);
-const cards = raw.map(s => ({
+const cards = (dbServices ?? []).map(s => ({
   ...s,
   href:       `/agenda?grupo=${s.type === 'pareja' ? 'pareja' : 'individual'}`,
   badge:      s.modality === 'online' ? 'Online' : s.modality === 'presencial' ? 'Presencial' : 'Online · Presencial',
@@ -34,6 +28,7 @@ const cards = raw.map(s => ({
 }));
 ---
 
+{cards.length > 0 && (
 <section class="py-section bg-sand">
   <div class="container-site">
 
@@ -116,6 +111,7 @@ const cards = raw.map(s => ({
   <div id="svc-dots" class="flex justify-center gap-2 mt-5 container-site"></div>
 
 </section>
+)}
 
 <script>
 (function() {

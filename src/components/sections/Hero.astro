@@ -72,7 +72,12 @@ const total   = cache?.total ?? null;
                   data-idx={i}
                   style={`transition:opacity .6s ease; position:${i===0?'relative':'absolute'}; inset:0; opacity:${i===0?1:0};`}
                 >
-                  <span class="italic">"{r.text.length > 150 ? r.text.slice(0,150).trim() + '…' : r.text}"</span>
+                  <span class="italic">"{r.text.length > 150 ? r.text.slice(0,150).trim() + '… ' : r.text}"</span>
+                  {r.text.length > 150 && (
+                    <button type="button" class="hero-review-more not-italic"
+                      data-full={r.text} data-author={r.author} data-rating={String(r.rating ?? 5)}
+                      style="color:#576352;font-weight:500;text-decoration:underline;">leer más</button>
+                  )}
                   <span class="block mt-1 not-italic font-medium text-ink">— {r.author}</span>
                 </blockquote>
               ))}
@@ -102,15 +107,26 @@ const total   = cache?.total ?? null;
     </div>
   </div>
 
+  <!-- Modal reseña completa -->
+  <div id="review-modal" style="display:none;position:fixed;inset:0;background:rgba(26,26,24,.55);z-index:200;align-items:center;justify-content:center;padding:1rem;">
+    <div style="background:white;max-width:480px;width:100%;border-radius:10px;padding:1.75rem;position:relative;max-height:85vh;overflow-y:auto;">
+      <button id="review-modal-close" aria-label="Cerrar"
+        style="position:absolute;top:0.6rem;right:0.85rem;background:none;border:none;font-size:1.3rem;cursor:pointer;color:#9B9485;line-height:1;">✕</button>
+      <div id="review-modal-stars" style="display:flex;gap:2px;margin-bottom:0.85rem;"></div>
+      <p id="review-modal-text" class="font-body" style="font-size:0.95rem;line-height:1.7;color:#374151;"></p>
+      <p id="review-modal-author" class="font-body" style="margin-top:0.9rem;font-weight:600;color:#1A1A18;"></p>
+      <p style="margin-top:0.2rem;font-size:0.72rem;color:#9B9485;">Reseña de Google</p>
+    </div>
+  </div>
+
   <script>
     (() => {
       const wrap = document.getElementById('hero-reviews');
       if (!wrap) return;
       const items = Array.from(wrap.querySelectorAll('.hero-review'));
       const dots  = Array.from(document.querySelectorAll('#hero-dots .hero-dot'));
-      if (items.length < 2) return;
 
-      let i = 0, timer;
+      let i = 0, timer = null;
       const show = (n) => {
         items[i].style.opacity = '0';
         if (dots[i]) { dots[i].style.background = '#D8D2C8'; dots[i].style.width = '7px'; }
@@ -118,13 +134,39 @@ const total   = cache?.total ?? null;
         items[i].style.opacity = '1';
         if (dots[i]) { dots[i].style.background = '#576352'; dots[i].style.width = '16px'; }
       };
-      const start = () => { timer = setInterval(() => show(i + 1), 5000); };
-      const stop  = () => clearInterval(timer);
+      const start = () => { if (items.length > 1 && !timer) timer = setInterval(() => show(i + 1), 5000); };
+      const stop  = () => { if (timer) { clearInterval(timer); timer = null; } };
 
-      dots.forEach((d, idx) => d.addEventListener('click', () => { stop(); show(idx); start(); }));
-      wrap.addEventListener('mouseenter', stop);
-      wrap.addEventListener('mouseleave', start);
-      start();
+      // ── Modal "leer más" ──
+      const modal   = document.getElementById('review-modal');
+      const mText   = document.getElementById('review-modal-text');
+      const mAuthor = document.getElementById('review-modal-author');
+      const mStars  = document.getElementById('review-modal-stars');
+      const starSvg = (n) => Array.from({length:5}, (_, k) =>
+        `<svg width="15" height="15" viewBox="0 0 24 24" fill="${k < Math.round(n) ? '#F5A623' : 'none'}" stroke="#F5A623" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`
+      ).join('');
+      const openModal = (full, author, rating) => {
+        mText.textContent   = '"' + full + '"';
+        mAuthor.textContent = '— ' + author;
+        mStars.innerHTML    = starSvg(Number(rating) || 5);
+        modal.style.display = 'flex';
+        stop();
+      };
+      const closeModal = () => { modal.style.display = 'none'; start(); };
+      document.querySelectorAll('.hero-review-more').forEach(b => b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openModal(b.dataset.full, b.dataset.author, b.dataset.rating);
+      }));
+      document.getElementById('review-modal-close')?.addEventListener('click', closeModal);
+      modal?.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+      // ── Carrusel (solo si hay 2+) ──
+      if (items.length > 1) {
+        dots.forEach((d, idx) => d.addEventListener('click', () => { stop(); show(idx); start(); }));
+        wrap.addEventListener('mouseenter', stop);
+        wrap.addEventListener('mouseleave', start);
+        start();
+      }
     })();
   </script>
 
