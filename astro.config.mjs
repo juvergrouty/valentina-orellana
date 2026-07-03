@@ -6,7 +6,7 @@ export default defineConfig({
   output: 'static',
   adapter: vercel(),
   integrations: [tailwind()],
-  site: 'https://psicologavalentinaorellana.com',
+  site: 'https://valentinaorellana.cl',
   security: {
     checkOrigin: false, // Flow envía POST cross-site en urlReturn y urlConfirmation
   },

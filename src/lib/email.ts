@@ -106,7 +106,7 @@ export async function sendConfirmationToClient(data: BookingEmailData) {
             <li>Tu reserva está confirmada porque el <strong>pago fue procesado</strong>. Sin pago, el horario queda libre.</li>
           </ul>
           <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#9B9485;margin-top:0.75rem;">
-            <a href="https://valentina-orellana.vercel.app/condiciones" style="color:#576352;">Ver condiciones completas →</a>
+            <a href="https://valentinaorellana.cl/condiciones" style="color:#576352;">Ver condiciones completas →</a>
           </p>
         </div>
         ` : `
@@ -237,7 +237,7 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
               <td style="padding:0.35rem 0;font-weight:500;">${formatCLP(data.amount)}</td></tr>
         </table>
 
-        <a href="https://valentina-orellana.vercel.app/admin/agenda"
+        <a href="https://valentinaorellana.cl/admin/agenda"
            style="display:inline-block;margin-top:1.5rem;background:#1A1A18;color:white;
                   padding:0.6rem 1.2rem;text-decoration:none;font-size:0.72rem;
                   letter-spacing:0.1em;text-transform:uppercase;">

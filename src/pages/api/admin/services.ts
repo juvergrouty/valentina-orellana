@@ -80,7 +80,10 @@ export const POST: APIRoute = async ({ request }) => {
 
   if (action === 'delete') {
     const id = get('id')!;
-    await supabase.from('services_catalog').delete().eq('id', id);
+    // Quitar la referencia en reservas para no violar el foreign key (conserva el historial)
+    await supabase.from('bookings').update({ service_id: null }).eq('service_id', id);
+    const { error } = await supabase.from('services_catalog').delete().eq('id', id);
+    if (error) console.error('[services] delete:', error.message, error.code);
   }
 
   if (action === 'toggle_visible') {
