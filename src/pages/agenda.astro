@@ -521,7 +521,10 @@ const { data: catalogServices } = await supabase
   }
 
   // ── Servicio pre-seleccionado desde /servicios (?servicio=UUID) ──────────────
-  if (preselectedServicioId) {
+  // Se define aquí pero se EJECUTA al final del script (ver runPreselection()),
+  // cuando ya están inicializadas todas las constantes (ej. MOTIVOS) — evita TDZ.
+  function runPreselection() {
+    if (preselectedServicioId) {
     const svc = catalogServices.find((s) => s.id === preselectedServicioId);
     if (svc) {
       selectedGroup = svc.type;
@@ -550,8 +553,9 @@ const { data: catalogServices } = await supabase
         selectService(svc.id, svc.modality, svc.price, svc.duration_min ?? 50, svc.name);
       }
     }
-  } else if (preselectedGroup === 'individual' || preselectedGroup === 'pareja') {
-    activateGroup(preselectedGroup);
+    } else if (preselectedGroup === 'individual' || preselectedGroup === 'pareja') {
+      activateGroup(preselectedGroup);
+    }
   }
 
   $('back-to-servicios')?.addEventListener('click', () => {
@@ -973,4 +977,5 @@ const { data: catalogServices } = await supabase
 
   // ─── Init ─────────────────────────────────────────────────────────────────
   updateStepIndicators(1);
+  runPreselection();  // preselección de servicio/grupo (al final: todo ya inicializado)
 </script>
