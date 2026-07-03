@@ -280,6 +280,13 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
           </p>
         </div>
       </div>
+      <div style="margin-top:1rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+        <button type="button" id="btn-reviews-refresh" class="btn btn-outline btn-sm">↻ Actualizar reseñas ahora</button>
+        <span id="reviews-refresh-status" style="font-size:0.8rem;"></span>
+      </div>
+      <p style="font-size:0.72rem;color:var(--stone);margin-top:0.6rem;">
+        Guarda la configuración antes de actualizar. Trae las reseñas de Google y las guarda para el carrusel del inicio (se refresca solo 1 vez al día).
+      </p>
     </div>
 
     <!-- Instagram -->
@@ -460,6 +467,30 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
     const on = (checkbox as HTMLInputElement).checked;
     if (track) track.style.background = on ? '#576352' : '#DDD8CF';
     if (thumb) thumb.style.left = on ? '21px' : '3px';
+  });
+
+  // Actualizar reseñas de Google
+  const revBtn = document.getElementById('btn-reviews-refresh');
+  const revOut = document.getElementById('reviews-refresh-status');
+  revBtn?.addEventListener('click', async () => {
+    if (revOut) { revOut.textContent = 'Actualizando…'; revOut.style.color = '#6b7280'; }
+    (revBtn as HTMLButtonElement).disabled = true;
+    try {
+      const res  = await fetch('/api/admin/reviews', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh' }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (revOut) { revOut.textContent = '✓ ' + data.count + ' reseñas guardadas'; revOut.style.color = '#15803d'; }
+      } else {
+        if (revOut) { revOut.textContent = '✕ ' + (data.error ?? 'Error'); revOut.style.color = '#dc2626'; }
+      }
+    } catch {
+      if (revOut) { revOut.textContent = '✕ Error de conexión'; revOut.style.color = '#dc2626'; }
+    } finally {
+      (revBtn as HTMLButtonElement).disabled = false;
+    }
   });
 
   // Probar conexión API Gateway
