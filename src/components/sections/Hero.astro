@@ -70,7 +70,7 @@ const total   = cache?.total ?? null;
                 <blockquote
                   class="hero-review font-body text-sm text-stone leading-relaxed"
                   data-idx={i}
-                  style={`transition:opacity .6s ease; position:${i===0?'relative':'absolute'}; inset:0; opacity:${i===0?1:0};`}
+                  style={`transition:opacity .6s ease; position:${i===0?'relative':'absolute'}; inset:0; opacity:${i===0?1:0}; pointer-events:${i===0?'auto':'none'};`}
                 >
                   <span class="italic">"{r.text.length > 150 ? r.text.slice(0,150).trim() + '… ' : r.text}"</span>
                   {r.text.length > 150 && (
@@ -129,9 +129,11 @@ const total   = cache?.total ?? null;
       let i = 0, timer = null;
       const show = (n) => {
         items[i].style.opacity = '0';
+        items[i].style.pointerEvents = 'none';
         if (dots[i]) { dots[i].style.background = '#D8D2C8'; dots[i].style.width = '7px'; }
         i = (n + items.length) % items.length;
         items[i].style.opacity = '1';
+        items[i].style.pointerEvents = 'auto';
         if (dots[i]) { dots[i].style.background = '#576352'; dots[i].style.width = '16px'; }
       };
       const start = () => { if (items.length > 1 && !timer) timer = setInterval(() => show(i + 1), 5000); };

@@ -22,7 +22,7 @@ const formatCLP = (n: number) =>
 
 const cards = (dbServices ?? []).map(s => ({
   ...s,
-  href:       `/agenda?grupo=${s.type === 'pareja' ? 'pareja' : 'individual'}`,
+  href:       `/agenda?servicio=${s.id}`,
   badge:      s.modality === 'online' ? 'Online' : s.modality === 'presencial' ? 'Presencial' : 'Online · Presencial',
   priceLabel: formatCLP(s.price),
 }));
