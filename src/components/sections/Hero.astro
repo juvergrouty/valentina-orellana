@@ -65,18 +65,27 @@ const total   = cache?.total ?? null;
               </p>
             </div>
 
-            <div id="hero-reviews" class="relative" style="min-height:64px;">
+            <div id="hero-reviews" class="relative" style="min-height:84px;">
               {reviews.map((r, i) => (
                 <blockquote
                   class="hero-review font-body text-sm text-stone leading-relaxed"
                   data-idx={i}
-                  style={`transition:opacity .5s; position:${i===0?'relative':'absolute'}; inset:0; opacity:${i===0?1:0};`}
+                  style={`transition:opacity .6s ease; position:${i===0?'relative':'absolute'}; inset:0; opacity:${i===0?1:0};`}
                 >
-                  <span class="italic">"{r.text.length > 140 ? r.text.slice(0,140).trim() + '…' : r.text}"</span>
+                  <span class="italic">"{r.text.length > 150 ? r.text.slice(0,150).trim() + '…' : r.text}"</span>
                   <span class="block mt-1 not-italic font-medium text-ink">— {r.author}</span>
                 </blockquote>
               ))}
             </div>
+
+            {reviews.length > 1 && (
+              <div id="hero-dots" class="flex gap-1.5 mt-3">
+                {reviews.map((_, i) => (
+                  <button type="button" class="hero-dot" data-idx={i} aria-label={`Reseña ${i+1}`}
+                    style={`width:7px;height:7px;border-radius:9999px;border:none;padding:0;cursor:pointer;transition:background .3s,width .3s;background:${i===0?'#576352':'#D8D2C8'};${i===0?'width:16px;':''}`}></button>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div class="flex items-center gap-3">
@@ -95,14 +104,27 @@ const total   = cache?.total ?? null;
 
   <script>
     (() => {
-      const items = Array.from(document.querySelectorAll('#hero-reviews .hero-review'));
+      const wrap = document.getElementById('hero-reviews');
+      if (!wrap) return;
+      const items = Array.from(wrap.querySelectorAll('.hero-review'));
+      const dots  = Array.from(document.querySelectorAll('#hero-dots .hero-dot'));
       if (items.length < 2) return;
-      let i = 0;
-      setInterval(() => {
+
+      let i = 0, timer;
+      const show = (n) => {
         items[i].style.opacity = '0';
-        i = (i + 1) % items.length;
+        if (dots[i]) { dots[i].style.background = '#D8D2C8'; dots[i].style.width = '7px'; }
+        i = (n + items.length) % items.length;
         items[i].style.opacity = '1';
-      }, 5000);
+        if (dots[i]) { dots[i].style.background = '#576352'; dots[i].style.width = '16px'; }
+      };
+      const start = () => { timer = setInterval(() => show(i + 1), 5000); };
+      const stop  = () => clearInterval(timer);
+
+      dots.forEach((d, idx) => d.addEventListener('click', () => { stop(); show(idx); start(); }));
+      wrap.addEventListener('mouseenter', stop);
+      wrap.addEventListener('mouseleave', start);
+      start();
     })();
   </script>
 
