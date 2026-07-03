@@ -54,12 +54,44 @@ export async function fetchGoogleReviewsLive(): Promise<ReviewsCache | null> {
 
 /** Refresca la caché en la BD. Llamado por el cron diario y por el botón del admin. */
 export async function refreshGoogleReviewsCache(): Promise<{ ok: boolean; count?: number; error?: string }> {
-  const data = await fetchGoogleReviewsLive();
-  if (!data) return { ok: false, error: 'Google no está configurado o no respondió.' };
+  const { placeId, apiKey } = await getConfig();
+  if (!placeId) return { ok: false, error: 'Falta el Place ID en Configuración.' };
+  if (!apiKey)  return { ok: false, error: 'Falta la API key de Google Places en Configuración.' };
+
+  let json: Record<string, unknown>;
+  try {
+    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=rating,user_ratings_total,reviews&reviews_sort=newest&language=es&key=${apiKey}`;
+    const res = await fetch(url);
+    json = await res.json();
+  } catch {
+    return { ok: false, error: 'No se pudo conectar con Google.' };
+  }
+
+  if (json.status !== 'OK') {
+    // Surface el motivo real: REQUEST_DENIED (key restringida/Places API no habilitada), etc.
+    return { ok: false, error: `Google: ${json.status}${json.error_message ? ' — ' + json.error_message : ''}` };
+  }
+
+  const result = json.result as Record<string, unknown>;
+  const reviews: GReview[] = ((result?.reviews as Record<string, unknown>[]) ?? []).map(r => ({
+    author:   r.author_name as string,
+    rating:   r.rating as number,
+    text:     (r.text as string) ?? '',
+    time:     r.time as number,
+    relative: r.relative_time_description as string,
+    photo:    r.profile_photo_url as string,
+  }));
+  const data: ReviewsCache = {
+    rating: (result?.rating as number) ?? null,
+    total:  (result?.user_ratings_total as number) ?? null,
+    reviews,
+    updated: new Date().toISOString(),
+  };
+
   const { error } = await supabase.from('settings')
     .upsert({ key: 'google_reviews_cache', value: JSON.stringify(data) }, { onConflict: 'key' });
   if (error) return { ok: false, error: error.message };
-  return { ok: true, count: data.reviews.length };
+  return { ok: true, count: reviews.length };
 }
 
 /** Lee la caché guardada (sin llamar a Google). La usa el hero público. */
