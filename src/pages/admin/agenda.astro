@@ -3,6 +3,7 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { pricingPlans } from '../../data/services';
+import { getValidAccessToken } from '../../lib/syncCalendar';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
 const weekOffset = parseInt(Astro.url.searchParams.get('w') ?? '0');
@@ -29,7 +30,7 @@ const weekEndStr   = weekEnd.toISOString().split('T')[0];
 const [bookingsRes, svcRes, patientRes, allSvcRes] = await Promise.all([
   supabase
     .from('bookings')
-    .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method')
+    .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id')
     .gte('session_date', weekStartStr)
     .lte('session_date', weekEndStr)
     .neq('status', 'cancelled')
@@ -52,6 +53,37 @@ const rutByEmail: Record<string, string> = {};
 patientList.forEach((p: { email: string | null; rut: string | null }) => {
   if (p.email && p.rut) rutByEmail[p.email.toLowerCase()] = p.rut;
 });
+
+// ── Eventos de Google Calendar de la semana (solo lectura) ──────────────────
+type GEvent = { date: string; time: string; dur: number; title: string };
+const gcalByDate: Record<string, GEvent[]> = {};
+try {
+  const auth = await getValidAccessToken();
+  if (auth) {
+    const tMin = new Date(weekStart); tMin.setDate(tMin.getDate() - 1);
+    const tMax = new Date(weekEnd);   tMax.setDate(tMax.getDate() + 2);
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(auth.calendarId)}/events`
+      + `?timeMin=${tMin.toISOString()}&timeMax=${tMax.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=100`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` } });
+    if (res.ok) {
+      const data = await res.json();
+      // Evitar duplicar los eventos que ya son reservas del sitio
+      const bookedGoogleIds = new Set(bookings.map((b: { google_event_id?: string }) => b.google_event_id).filter(Boolean));
+      for (const ev of (data.items ?? [])) {
+        if (ev.id && bookedGoogleIds.has(ev.id)) continue;
+        const sdt = ev.start?.dateTime;
+        if (!sdt) continue; // omitir eventos de todo el día
+        const date = sdt.slice(0, 10);
+        const time = sdt.slice(11, 16);
+        let dur = 60;
+        if (ev.end?.dateTime) {
+          dur = Math.max(20, Math.round((new Date(ev.end.dateTime).getTime() - new Date(sdt).getTime()) / 60000));
+        }
+        (gcalByDate[date] ??= []).push({ date, time, dur, title: ev.summary ?? 'Ocupado' });
+      }
+    }
+  }
+} catch (e) { console.error('[agenda] gcal:', e); }
 
 // ── Week days ─────────────────────────────────────────────────────────────────
 const DAYS_ES      = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
@@ -206,6 +238,14 @@ const errorParam = Astro.url.searchParams.get('error');
                 <span class="ev-time">{b.session_time.slice(0, 5)}</span>
                 <span class="ev-name">{b.patient_name}</span>
                 {(b.duration_min ?? 50) > 35 && <span class="ev-type">{svcLabel(b)}</span>}
+              </div>
+            ))}
+
+            {(gcalByDate[day.isoDate] ?? []).map(g => (
+              <div class="cal-gcal-event" style={evStyle(g.time, g.dur)} title={`${g.title} · ${g.time} (Google Calendar)`}>
+                <span class="ev-time">{g.time}</span>
+                <span class="ev-name">{g.title}</span>
+                {g.dur > 35 && <span class="ev-type">Google Calendar</span>}
               </div>
             ))}
 
@@ -649,6 +689,12 @@ const errorParam = Astro.url.searchParams.get('error');
 .ev-confirmed { background: #dcfce7; border-color: #86efac; color: #166534; }
 .ev-pending   { background: #dbeafe; border-color: #93c5fd; color: #1e40af; border-style: dashed; }
 .ev-manual    { background: #fef9c3; border-color: #fcd34d; color: #92400e; }
+.cal-gcal-event {
+  position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px;
+  overflow: hidden; z-index: 1; pointer-events: none;
+  background: repeating-linear-gradient(45deg, #eef1f5, #eef1f5 6px, #e5e9ef 6px, #e5e9ef 12px);
+  border: 1px dashed #9aa4b2; color: #64748b;
+}
 .ev-time { display: block; font-size: 0.6rem; font-weight: 600; opacity: 0.75; line-height: 1.2; }
 .ev-name { display: block; font-size: 0.72rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.35; }
 .ev-type { display: block; font-size: 0.62rem; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
