@@ -19,15 +19,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     await supabase.from('bookings').update({ status: 'confirmed' }).eq('id', id);
     const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
     if (booking) {
-      syncBookingToCalendar(booking).catch(console.error);
+      // AWAIT: en serverless (Vercel) la función se termina al responder, matando
+      // promesas pendientes. Hay que esperar la sincronización antes del redirect.
+      try { await syncBookingToCalendar(booking); } catch (e) { console.error('[confirm] sync:', e); }
       // Emisión automática de boleta si el servicio lo tiene activado
       if (booking.service_id) {
-        supabase.from('services_catalog').select('boleta_auto').eq('id', booking.service_id).maybeSingle()
-          .then(({ data: svc }) => {
-            if (svc?.boleta_auto) {
-              emitBoletaParaReserva(id, { enviarEmail: true }).catch(console.error);
-            }
-          }).then(undefined, () => { /* columna boleta_auto puede no existir aún */ });
+        try {
+          const { data: svc } = await supabase.from('services_catalog').select('boleta_auto').eq('id', booking.service_id).maybeSingle();
+          if (svc?.boleta_auto) await emitBoletaParaReserva(id, { enviarEmail: true });
+        } catch (e) { console.error('[confirm] boleta:', e); }
       }
     }
     return redirect(dest);
@@ -38,7 +38,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
     await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', id);
-    deleteBookingFromCalendar(id).catch(console.error);
+    try { await deleteBookingFromCalendar(id); } catch (e) { console.error('[cancel] gcal:', e); }
     return redirect(dest);
   }
 
@@ -61,7 +61,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (conflict) return redirect(dest + '&error=conflict');
 
     await supabase.from('bookings').update({ session_date, session_time }).eq('id', id);
-    rescheduleBookingInCalendar(id, session_date, session_time).catch(console.error);
+    try { await rescheduleBookingInCalendar(id, session_date, session_time); } catch (e) { console.error('[reschedule] gcal:', e); }
     return redirect(dest);
   }
 
@@ -95,7 +95,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     }).select().single();
 
     if (error || !booking) return redirect(dest + '&error=conflict');
-    syncBookingToCalendar(booking).catch(console.error);
+    try { await syncBookingToCalendar(booking); } catch (e) { console.error('[create] sync:', e); }
     return redirect(dest);
   }
 
@@ -186,27 +186,28 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       if (booking) bookingIds.push(booking.id);
     }
 
-    // Sync FIRST booking to Google Calendar (creates Meet link if online)
+    // Sincronizar TODAS las reservas a Google Calendar (con await — en serverless
+    // las promesas sin await se matan al responder). Crea Meet si es online.
     if (bookingIds.length > 0) {
-      const { data: first } = await supabase.from('bookings').select('*').eq('id', bookingIds[0]).single();
-      if (first) {
-        syncBookingToCalendar(first).catch(console.error);
+      for (const bid of bookingIds) {
+        const { data: b } = await supabase.from('bookings').select('*').eq('id', bid).single();
+        if (b) { try { await syncBookingToCalendar(b); } catch (e) { console.error('[create-admin] sync:', e); } }
+      }
 
-        if (sendConf && finalEmail) {
-          const emailData = {
-            patient_name:   finalName,
-            patient_email:  finalEmail,
-            patient_phone:  finalPhone,
-            session_type:   sessionType,
-            session_date,
-            session_time,
-            amount:         totalPrice,
-            payment_method: 'manual',
-            service_name:   svc.name,
-          };
-          sendConfirmationToClient(emailData).catch(console.error);
-          sendNotificationToAdmin(emailData, notifEmail).catch(console.error);
-        }
+      if (sendConf && finalEmail) {
+        const emailData = {
+          patient_name:   finalName,
+          patient_email:  finalEmail,
+          patient_phone:  finalPhone,
+          session_type:   sessionType,
+          session_date,
+          session_time,
+          amount:         totalPrice,
+          payment_method: 'manual',
+          service_name:   svc.name,
+        };
+        try { await sendConfirmationToClient(emailData); } catch (e) { console.error('[create-admin] email:', e); }
+        try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[create-admin] notif:', e); }
       }
     }
 

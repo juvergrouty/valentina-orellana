@@ -89,7 +89,9 @@ export const POST: APIRoute = async ({ request }) => {
           amount:         updated.amount,
           payment_method: 'flow',
         };
-        Promise.all([
+        // AWAIT: es un webhook; si no esperamos, la función serverless termina y
+        // mata la sincronización con Google Calendar / los correos.
+        await Promise.all([
           sendConfirmationToClient(emailData).catch(console.error),
           sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
           syncBookingToCalendar(updated).catch(console.error),

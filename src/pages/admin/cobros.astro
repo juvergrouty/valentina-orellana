@@ -123,12 +123,12 @@ const servicesJson  = JSON.stringify(services  ?? []);
             <input type="text" id="cobro-desc" placeholder="Sesión individual" />
           </div>
           <div>
-            <label class="label" style="display:block;margin-bottom:0.35rem;">Fecha de sesión</label>
-            <input type="date" id="cobro-date" />
+            <label class="label" style="display:block;margin-bottom:0.35rem;">Fecha de sesión *</label>
+            <input type="date" id="cobro-date" required />
           </div>
           <div>
-            <label class="label" style="display:block;margin-bottom:0.35rem;">Hora de sesión</label>
-            <input type="time" id="cobro-time" step="900" />
+            <label class="label" style="display:block;margin-bottom:0.35rem;">Hora de sesión *</label>
+            <input type="time" id="cobro-time" step="900" required />
           </div>
           <div style="grid-column:1/-1;">
             <label class="label" style="display:block;margin-bottom:0.5rem;">Modalidad</label>
@@ -530,6 +530,8 @@ const servicesJson  = JSON.stringify(services  ?? []);
     if (!email) { showError('El email es requerido para generar el cobro en Flow.'); return; }
     if (!amount || parseInt(amount) < 1000) { showError('Ingresa un monto válido (mínimo $1.000 CLP).'); return; }
     if (!desc) { showError('Ingresa una descripción del cobro.'); return; }
+    if (!cobroDate.value) { showError('Selecciona la fecha de la sesión para que quede agendada.'); return; }
+    if (!cobroTime.value) { showError('Selecciona la hora de la sesión.'); return; }
 
     cobroError.style.display   = 'none';
     cobroWarning.style.display = 'none';

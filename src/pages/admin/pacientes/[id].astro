@@ -205,8 +205,17 @@ const formatCLP = (n: number) =>
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;gap:1rem;flex-wrap:wrap;">
                   <div style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;">
                     <div>
-                      <p style="font-weight:600;font-size:0.9rem;">{formatDate(b.session_date)}</p>
-                      <p style="font-size:0.78rem;color:var(--stone);">{b.session_time.slice(0,5)} · {SESSION_LABELS[b.session_type] ?? b.session_type}</p>
+                      {b.session_date === '2099-12-31' ? (
+                        <>
+                          <p style="font-weight:600;font-size:0.9rem;">Cobro manual</p>
+                          <p style="font-size:0.78rem;color:var(--stone);">Sin fecha de sesión · {SESSION_LABELS[b.session_type] ?? b.session_type}</p>
+                        </>
+                      ) : (
+                        <>
+                          <p style="font-weight:600;font-size:0.9rem;">{formatDate(b.session_date)}</p>
+                          <p style="font-size:0.78rem;color:var(--stone);">{b.session_time.slice(0,5)} · {SESSION_LABELS[b.session_type] ?? b.session_type}</p>
+                        </>
+                      )}
                     </div>
                     <span class={`badge ${badgeClass}`}>{badgeLabel}</span>
                     <span style="font-size:0.82rem;color:var(--stone);">{formatCLP(b.amount)}</span>
