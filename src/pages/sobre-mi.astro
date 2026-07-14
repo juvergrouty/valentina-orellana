@@ -21,11 +21,6 @@ import PageHero   from '../components/sections/PageHero.astro';
             onerror="this.style.display='none'"
           />
         </div>
-        <div class="border border-dust bg-white p-6 mt-px">
-          <p class="label text-stone mb-1">N° de registro</p>
-          <p class="font-heading font-light text-3xl text-ink mt-1">360070</p>
-          <p class="label text-stone mt-1">Superintendencia de Salud</p>
-        </div>
       </div>
 
       <!-- Texto -->
@@ -51,7 +46,7 @@ import PageHero   from '../components/sections/PageHero.astro';
           <ul class="space-y-5">
             {[
               ['Psicología', 'Universidad del Desarrollo'],
-              ['Formación en Terapia Sistémica', 'Universidad del Desarrollo'],
+              ['Especialización en Terapia Sistémica', 'N° de registro 360070 · Superintendencia de Salud'],
             ].map(([titulo, inst]) => (
               <li class="grid grid-cols-1 gap-0.5 border-b border-dust pb-5">
                 <p class="font-body font-medium text-sm text-ink">{titulo}</p>
