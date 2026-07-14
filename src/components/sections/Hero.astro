@@ -7,7 +7,7 @@ const rating  = cache?.rating ?? 5.0;
 const total   = cache?.total ?? null;
 ---
 
-<section class="relative overflow-hidden bg-sand min-h-[620px] sm:min-h-0">
+<section class="relative overflow-hidden bg-sand min-h-[680px] sm:min-h-0">
 
   <!-- Imagen hero: en mobile absolute+cover para llenar min-h, en sm+ fluye con tamaño natural -->
   <img
@@ -33,12 +33,12 @@ const total   = cache?.total ?? null;
           Un espacio seguro donde puedes ser tú, sin máscaras.
         </h1>
 
-        <p class="body-lead mb-10">
+        <p class="body-lead mb-6 sm:mb-10">
           Terapia para adultos y parejas que buscan bienestar emocional,
           claridad y relaciones más auténticas.
         </p>
 
-        <div class="flex flex-wrap items-center gap-4 mb-10">
+        <div class="flex flex-wrap items-center gap-4 mb-8 sm:mb-10">
           <a href="/agenda" class="btn-dark py-3.5 px-7">Agendar sesión</a>
           <a href="/sobre-mi"
              class="font-body text-sm text-ink tracking-wide flex items-center gap-2 hover:text-forest transition-colors duration-200">
@@ -65,7 +65,7 @@ const total   = cache?.total ?? null;
               </p>
             </div>
 
-            <div id="hero-reviews" class="relative" style="min-height:84px;">
+            <div id="hero-reviews" class="relative min-h-[150px] sm:min-h-[88px]">
               {reviews.map((r, i) => (
                 <blockquote
                   class="hero-review font-body text-sm text-stone leading-relaxed"
