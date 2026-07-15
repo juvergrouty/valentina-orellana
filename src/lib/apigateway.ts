@@ -205,9 +205,23 @@ export function normalizeRut(rut: string): string {
   return `${clean.slice(0, -1)}-${clean.slice(-1)}`;
 }
 
-function periodoActualYM(): string {
-  const n = new Date();
-  return `${n.getFullYear()}${String(n.getMonth() + 1).padStart(2, '0')}`;
+/** YYYYMM a partir de una fecha YYYY-MM-DD. */
+function periodoDeFecha(ymd: string): string {
+  return ymd.slice(0, 7).replace('-', '');
+}
+
+/**
+ * Fecha de emisión (FchEmis) de la boleta a partir de la fecha de la sesión.
+ * Usa la fecha de la sesión para que el reembolso en la isapre calce con el día
+ * de atención. El SII NO acepta fechas futuras, así que si la sesión aún no
+ * ocurre (o es el marcador 2099 de un cobro sin fecha), cae a la fecha de hoy.
+ */
+export function fechaBoletaDesdeSesion(sessionDate?: string | null): string {
+  const hoy = new Date().toISOString().slice(0, 10);
+  if (!sessionDate) return hoy;
+  if (sessionDate === '2099-12-31') return hoy;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(sessionDate)) return hoy;
+  return sessionDate <= hoy ? sessionDate : hoy;
 }
 
 /**
@@ -223,7 +237,7 @@ export async function emitBoletaParaReserva(
   if (!cfg) return { ok: false, error: 'API Gateway no configurado.' };
 
   const { data: b } = await supabase
-    .from('bookings').select('patient_name, patient_email, amount, session_type, notes, service_id').eq('id', bookingId).single();
+    .from('bookings').select('patient_name, patient_email, amount, session_type, session_date, notes, service_id').eq('id', bookingId).single();
   if (!b) return { ok: false, error: 'Reserva no encontrada.' };
 
   const already = /Boleta Folio (\d+)/.exec(b.notes ?? '');
@@ -242,8 +256,12 @@ export async function emitBoletaParaReserva(
     if (svc?.fonasa_description) glosa = svc.fonasa_description as string;
   }
 
+  // FchEmis = fecha de la sesión (para que el reembolso calce con el día de atención)
+  const fecha = fechaBoletaDesdeSesion(b.session_date);
+
   try {
     const result = await emitirBHE({
+      fecha,
       receptor: { rut: normalizeRut(rutRaw), razonSocial: p?.name ?? b.patient_name, direccion: p?.address ?? '' },
       detalle:  [{ nombre: glosa, monto: b.amount }],
     }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
@@ -251,7 +269,7 @@ export async function emitBoletaParaReserva(
     const folio = result?.data?.Encabezado?.IdDoc?.Folio ?? null;
     let codigo: string | null = null;
     if (folio) {
-      try { codigo = await codigoDeFolio(cfg.siiRut, periodoActualYM(), folio, cfg); } catch { /* opcional */ }
+      try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeFecha(fecha), folio, cfg); } catch { /* opcional */ }
       const nota = `${b.notes ? b.notes + '\n' : ''}Boleta Folio ${folio}${codigo ? ' · Cod ' + codigo : ''}`;
       await supabase.from('bookings').update({ notes: nota }).eq('id', bookingId);
     }

@@ -88,11 +88,20 @@ const formatCLP = (n: number) =>
       </div>
     </div>
 
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
       {patient.phone && (
         <a href={`https://wa.me/${patient.phone.replace(/\D/g,'')}`} target="_blank"
            class="btn btn-outline btn-sm">WhatsApp</a>
       )}
+      {patient.email && (
+        <>
+          <button type="button" class="btn btn-outline btn-sm send-mail-btn"
+            data-mail-action="steps" data-email={patient.email} data-name={patient.name}>Pasos a seguir</button>
+          <button type="button" class="btn btn-outline btn-sm send-mail-btn"
+            data-mail-action="review_request" data-email={patient.email} data-name={patient.name}>Solicitar reseña</button>
+        </>
+      )}
+      <span id="mail-status" style="font-size:0.78rem;"></span>
       <button id="open-agenda-modal" class="btn btn-dark btn-sm">+ Agendar sesión</button>
       <form method="POST" action="/api/admin/patients" style="margin:0;">
         <input type="hidden" name="action" value="archive" />
@@ -486,6 +495,33 @@ const formatCLP = (n: number) =>
         if (d.ok) bolStatus(bid, `✓ Enviada a ${d.email}`, '#15803d');
         else bolStatus(bid, '✕ ' + (d.error ?? 'No enviada'), '#dc2626');
       } catch { bolStatus(bid, '✕ Error', '#dc2626'); }
+    }
+  });
+
+  // ── Correos al paciente: pasos a seguir / solicitud de reseña ──────────────
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.send-mail-btn');
+    if (!btn) return;
+    const action = btn.dataset.mailAction;
+    const status = document.getElementById('mail-status');
+    const labels = { steps: 'pasos a seguir', review_request: 'solicitud de reseña' };
+    const setStatus = (t, c) => { if (status) { status.textContent = t; status.style.color = c; } };
+
+    if (!confirm(`¿Enviar el correo de "${labels[action]}" a ${btn.dataset.email}?`)) return;
+    btn.disabled = true;
+    setStatus('Enviando…', '#6b7280');
+    try {
+      const res = await fetch('/api/admin/send-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, email: btn.dataset.email, name: btn.dataset.name }),
+      });
+      const d = await res.json();
+      if (d.ok) setStatus(`✓ Correo enviado a ${btn.dataset.email}`, '#15803d');
+      else setStatus('✕ ' + (d.error ?? 'No se pudo enviar'), '#dc2626');
+    } catch {
+      setStatus('✕ Error de conexión', '#dc2626');
+    } finally {
+      btn.disabled = false;
     }
   });
 

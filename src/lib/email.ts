@@ -131,6 +131,134 @@ export async function sendConfirmationToClient(data: BookingEmailData) {
   });
 }
 
+// ─── Email al cliente: solicitud de reseña en Google ─────────────────────────
+export async function sendReviewRequestEmail(opts: {
+  patientName:  string;
+  patientEmail: string;
+  reviewUrl:    string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+
+  const res = await client.emails.send({
+    from: FROM,
+    to:   opts.patientEmail,
+    subject: 'Tu opinión me ayudaría mucho 🌿',
+    html: `
+      <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Gracias por confiar en este proceso</h1>
+        <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.25rem;font-family:'Inter',sans-serif;">
+          Hola ${opts.patientName}, espero que nuestras sesiones te hayan sido de ayuda.
+          Si te parece bien, me encantaría que dejaras una breve reseña en Google.
+          Tu experiencia le sirve a otras personas que buscan apoyo y están dando el primer paso.
+        </p>
+        <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
+          Solo te tomará un minuto. ¡Gracias de corazón!
+        </p>
+        <a href="${opts.reviewUrl}"
+           style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;
+                  text-decoration:none;font-family:'Inter',sans-serif;font-size:0.78rem;
+                  letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
+          Dejar mi reseña en Google
+        </a>
+        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
+                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
+          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+        </p>
+      </div>
+    `,
+  });
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
+}
+
+// ─── Email al cliente: pasos a seguir / qué esperar ──────────────────────────
+export async function sendStepsEmail(opts: {
+  patientName:   string;
+  patientEmail:  string;
+  clinicAddress?: string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+
+  const addressLine = opts.clinicAddress?.trim()
+    ? `la dirección de la consulta es <strong>${opts.clinicAddress.trim()}</strong>`
+    : `te confirmaré la dirección exacta de la consulta por WhatsApp`;
+
+  const res = await client.emails.send({
+    from: FROM,
+    to:   opts.patientEmail,
+    subject: 'Pasos a seguir para tu proceso — Ps. Valentina Orellana',
+    html: `
+      <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Bienvenida/o a tu proceso</h1>
+        <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
+          Hola ${opts.patientName}, aquí tienes todo lo que necesitas saber para que estés tranquila/o.
+          Estos son los pasos y lo que recibirás por correo.
+        </p>
+
+        <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.86rem;line-height:1.7;color:#1A1A18;">
+          <p style="font-weight:600;margin:0 0 0.85rem;text-transform:uppercase;letter-spacing:0.06em;font-size:0.78rem;color:#576352;">
+            📩 Correos que recibirás
+          </p>
+          <ul style="margin:0;padding-left:1.1rem;color:#6B6860;">
+            <li style="margin-bottom:0.6rem;">
+              <strong>Boleta de honorarios electrónica (SII):</strong> después de cada sesión te llegará por correo
+              tu boleta emitida ante el Servicio de Impuestos Internos. Guárdala.
+            </li>
+            <li style="margin-bottom:0.6rem;">
+              <strong>Confirmación de tu sesión:</strong> con la fecha, hora y modalidad de tu reserva.
+            </li>
+            <li style="margin-bottom:0.6rem;">
+              <strong>Si tu sesión es online:</strong> recibirás el <strong>enlace de Google Meet</strong>
+              en la invitación de tu calendario.
+            </li>
+          </ul>
+        </div>
+
+        <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.86rem;line-height:1.7;color:#1A1A18;">
+          <p style="font-weight:600;margin:0 0 0.85rem;text-transform:uppercase;letter-spacing:0.06em;font-size:0.78rem;color:#576352;">
+            📍 Dirección y modalidad
+          </p>
+          <p style="margin:0;color:#6B6860;">
+            Si tu sesión es <strong>presencial</strong>, ${addressLine}.
+            Si es <strong>online</strong>, la sesión se realiza por <strong>Google Meet</strong> con el enlace que te llegará.
+          </p>
+        </div>
+
+        <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.86rem;line-height:1.7;color:#1A1A18;">
+          <p style="font-weight:600;margin:0 0 0.85rem;text-transform:uppercase;letter-spacing:0.06em;font-size:0.78rem;color:#576352;">
+            💳 Reembolso y reagendamiento
+          </p>
+          <ul style="margin:0;padding-left:1.1rem;color:#6B6860;">
+            <li style="margin-bottom:0.6rem;">
+              La <strong>boleta emitida te permite reembolsar</strong> el costo del servicio en tu prestador de salud
+              o en tu seguro de salud, si corresponde.
+            </li>
+            <li style="margin-bottom:0.6rem;">
+              Para <strong>reagendar</strong>, avísame con al menos <strong>24 horas de anticipación</strong>.
+            </li>
+          </ul>
+        </div>
+
+        <a href="https://wa.me/56972735696"
+           style="display:inline-block;background:#576352;color:white;padding:0.75rem 1.5rem;
+                  text-decoration:none;font-family:'Inter',sans-serif;font-size:0.75rem;
+                  letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
+          Escribir por WhatsApp
+        </a>
+
+        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
+                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
+          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+        </p>
+      </div>
+    `,
+  });
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
+}
+
 // ─── Enviar boleta de honorarios con el PDF adjunto (vía Resend) ─────────────
 export async function sendBoletaEmail(opts: {
   to: string;

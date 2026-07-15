@@ -1,6 +1,10 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { getAgwConfig, bheEmitidas, emitirBHE, bhePdf, bheEmail, codigoDeFolio, clearAgwCache } from '../../../lib/apigateway';
+import { getAgwConfig, bheEmitidas, emitirBHE, bhePdf, bheEmail, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion } from '../../../lib/apigateway';
+
+// YYYYMM del período en que se emitió/emitirá la boleta (según la fecha de la sesión)
+const periodoDeSesion = (sessionDate?: string | null) =>
+  fechaBoletaDesdeSesion(sessionDate).slice(0, 7).replace('-', '');
 
 // Extrae "Boleta Folio N · Cod XXX" de las notas de una reserva
 function parseBoleta(notes: string | null): { folio: number | null; codigo: string | null } {
@@ -8,10 +12,6 @@ function parseBoleta(notes: string | null): { folio: number | null; codigo: stri
   const c = notes?.match(/Cod ([\w-]+)/i);
   return { folio: f ? parseInt(f[1]) : null, codigo: c ? c[1] : null };
 }
-const periodoActual = () => {
-  const n = new Date();
-  return `${n.getFullYear()}${String(n.getMonth() + 1).padStart(2, '0')}`;
-};
 
 // Normaliza RUT a formato "XXXXXXXX-X" (sin puntos, con guion antes del dígito verificador)
 function normalizeRut(rut: string): string {
@@ -60,7 +60,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
 
     const { data: b } = await supabase
-      .from('bookings').select('patient_name, patient_email, amount, session_type, notes, service_id').eq('id', bookingId).single();
+      .from('bookings').select('patient_name, patient_email, amount, session_type, session_date, notes, service_id').eq('id', bookingId).single();
     if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
 
     // RUT: prioriza el ingresado en el formulario; si no, el de la ficha del paciente
@@ -80,8 +80,12 @@ export const POST: APIRoute = async ({ request }) => {
       if (svc?.fonasa_description) glosa = svc.fonasa_description;
     }
 
+    // FchEmis = fecha de la sesión (para que el reembolso en la isapre calce con el día de atención)
+    const fecha = fechaBoletaDesdeSesion(b.session_date);
+
     try {
       const result = await emitirBHE({
+        fecha,
         receptor: { rut, razonSocial: p?.name ?? b.patient_name, direccion: p?.address ?? '' },
         detalle:  [{ nombre: glosa, monto: b.amount }],
       }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
@@ -91,7 +95,7 @@ export const POST: APIRoute = async ({ request }) => {
       // Resolver el código de la boleta (necesario para PDF/email)
       let codigo: string | null = null;
       if (folio) {
-        try { codigo = await codigoDeFolio(cfg.siiRut, periodoActual(), folio, cfg); } catch { /* opcional */ }
+        try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeSesion(b.session_date), folio, cfg); } catch { /* opcional */ }
         const nuevaNota = `${b.notes ? b.notes + '\n' : ''}Boleta Folio ${folio}${codigo ? ' · Cod ' + codigo : ''}`;
         await supabase.from('bookings').update({ notes: nuevaNota }).eq('id', bookingId);
       }
@@ -108,7 +112,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
 
     const { data: b } = await supabase
-      .from('bookings').select('patient_name, patient_email, notes').eq('id', bookingId).single();
+      .from('bookings').select('patient_name, patient_email, session_date, notes').eq('id', bookingId).single();
     if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
 
     const email = (body.email ?? '').trim() || (b.patient_email ?? '');
@@ -117,7 +121,7 @@ export const POST: APIRoute = async ({ request }) => {
     let { folio, codigo } = parseBoleta(b.notes);
     if (!folio) return json({ ok: false, error: 'Esta sesión aún no tiene boleta emitida.' }, 400);
     if (!codigo) {
-      try { codigo = await codigoDeFolio(cfg.siiRut, periodoActual(), folio, cfg); } catch { /* */ }
+      try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeSesion(b.session_date), folio, cfg); } catch { /* */ }
     }
     if (!codigo) return json({ ok: false, error: 'No se pudo resolver el código de la boleta (folio ' + folio + ').' }, 502);
 
@@ -135,13 +139,13 @@ export const POST: APIRoute = async ({ request }) => {
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
 
     const { data: b } = await supabase
-      .from('bookings').select('notes').eq('id', bookingId).single();
+      .from('bookings').select('session_date, notes').eq('id', bookingId).single();
     if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
 
     let { folio, codigo } = parseBoleta(b.notes);
     if (!folio) return json({ ok: false, error: 'Esta sesión aún no tiene boleta emitida.' }, 400);
     if (!codigo) {
-      try { codigo = await codigoDeFolio(cfg.siiRut, periodoActual(), folio, cfg); } catch { /* */ }
+      try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeSesion(b.session_date), folio, cfg); } catch { /* */ }
     }
     if (!codigo) return json({ ok: false, error: 'No se pudo resolver el código de la boleta.' }, 502);
 

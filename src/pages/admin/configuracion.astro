@@ -197,6 +197,19 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
           Requiere dominio verificado en Resend. Si está vacío se usa el remitente de prueba.
         </p>
       </div>
+
+      <div style="margin-bottom:0.5rem;">
+        <label class="label" style="margin-bottom:0.4rem;display:block;">Dirección de la consulta (presencial)</label>
+        <input
+          type="text"
+          name="clinic_address"
+          value={settings['clinic_address'] ?? ''}
+          placeholder="Av. Ejemplo 123, of. 45, Las Condes, Santiago"
+        />
+        <p style="font-size:0.7rem;color:var(--stone);margin-top:0.4rem;">
+          Se incluye en el correo de “Pasos a seguir” que se envía al paciente. Si lo dejas vacío, el correo dirá que la confirmarás por WhatsApp.
+        </p>
+      </div>
     </div>
 
     <!-- Google Calendar -->

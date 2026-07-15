@@ -136,9 +136,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const svcModality = svc.modality === 'ambos' ? modality_choice : svc.modality;
     const sessionType = svc.type === 'pareja' ? `pareja-${svcModality}` : svcModality;
 
-    // Price per session (total pack price on first booking, $0 on rest for pack tracking)
-    const totalPrice = svc.price;
-    const durMin     = svc.duration_min ?? 50;
+    // Precio por sesión: se reparte el total del pack entre las N sesiones para
+    // que CADA sesión tenga su propio monto y pueda emitirse una boleta por sesión
+    // (necesario para el reembolso en la isapre). El resto de la división lo
+    // absorbe la primera sesión, así la suma cuadra exactamente con el total.
+    const totalPrice     = svc.price;
+    const durMin         = svc.duration_min ?? 50;
+    const perSessionBase = Math.floor(totalPrice / sessions_count);
+    const remainder      = totalPrice - perSessionBase * sessions_count;
 
     // Notification email
     const { data: settingsRows } = await supabase.from('settings').select('key, value').in('key', ['notification_email']);
@@ -171,7 +176,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         patient_phone:  finalPhone,
         status:         'confirmed',
         payment_method: 'manual',
-        amount:         i === 0 ? totalPrice : 0,
+        amount:         perSessionBase + (i === 0 ? remainder : 0),
         duration_min:   durMin,
       };
 
