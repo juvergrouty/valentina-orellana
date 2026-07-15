@@ -210,6 +210,19 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
           Se incluye en el correo de “Pasos a seguir” que se envía al paciente. Si lo dejas vacío, el correo dirá que la confirmarás por WhatsApp.
         </p>
       </div>
+
+      <div style="margin-bottom:0.5rem;border-top:1px solid var(--dust);padding-top:1rem;">
+        <label style="display:flex;align-items:flex-start;gap:0.6rem;cursor:pointer;">
+          <input type="checkbox" name="review_auto_enabled" value="true"
+            checked={settings['review_auto_enabled'] !== 'false'} style="margin-top:0.15rem;" />
+          <span>
+            <span style="font-weight:600;font-size:0.85rem;">Solicitar reseña de Google automáticamente</span>
+            <span style="display:block;font-size:0.7rem;color:var(--stone);margin-top:0.2rem;">
+              Una vez al día se envía el correo de reseña a los pacientes cuya sesión ya terminó (una vez por sesión). Requiere el Place ID de Google configurado abajo.
+            </span>
+          </span>
+        </label>
+      </div>
     </div>
 
     <!-- Google Calendar -->

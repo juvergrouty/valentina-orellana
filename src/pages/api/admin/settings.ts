@@ -4,7 +4,7 @@ import { supabase } from '../../../lib/supabase';
 export const prerender = false;
 
 // Claves boolean: si no vienen en el form → desmarcado → 'false'
-const BOOLEAN_KEYS = ['manual_payment_enabled', 'flow_enabled', 'transfer_payment_enabled'];
+const BOOLEAN_KEYS = ['manual_payment_enabled', 'flow_enabled', 'transfer_payment_enabled', 'review_auto_enabled'];
 
 // GET — obtener todas las settings
 export const GET: APIRoute = async () => {
