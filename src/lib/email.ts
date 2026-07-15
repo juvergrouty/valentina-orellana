@@ -152,6 +152,62 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
   await logEmail('email/confirmacion', data.patient_email, subject, !res.error, res.error?.message);
 }
 
+// ─── Email al cliente: link de pago (Flow) ──────────────────────────────────
+export async function sendPaymentLinkEmail(opts: {
+  patientName:  string;
+  patientEmail: string;
+  serviceName:  string;
+  amount:       number;
+  sessionDate?: string;
+  sessionTime?: string;
+  paymentUrl:   string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+
+  const subject = `Enlace de pago para tu sesión — Ps. Valentina Orellana`;
+  const dateLine = opts.sessionDate
+    ? `<tr><td style="padding:0.4rem 0;color:#6B6860;width:40%;">Fecha</td><td style="padding:0.4rem 0;font-weight:500;">${formatDate(opts.sessionDate)}${opts.sessionTime ? ' · ' + opts.sessionTime : ''}</td></tr>`
+    : '';
+
+  const res = await client.emails.send({
+    from: FROM,
+    to:   opts.patientEmail,
+    subject,
+    html: `
+      <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Enlace de pago de tu sesión</h1>
+        <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
+          Hola ${opts.patientName}, para confirmar tu reserva realiza el pago con el siguiente enlace seguro.
+        </p>
+        <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
+          <table style="width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:0.85rem;">
+            <tr><td style="padding:0.4rem 0;color:#6B6860;width:40%;">Servicio</td><td style="padding:0.4rem 0;font-weight:500;">${opts.serviceName}</td></tr>
+            ${dateLine}
+            <tr><td style="padding:0.4rem 0;color:#6B6860;">Valor</td><td style="padding:0.4rem 0;font-weight:500;">${formatCLP(opts.amount)}</td></tr>
+          </table>
+        </div>
+        <a href="${opts.paymentUrl}"
+           style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;
+                  text-decoration:none;font-family:'Inter',sans-serif;font-size:0.78rem;
+                  letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
+          Pagar mi sesión
+        </a>
+        <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#9B9485;margin-top:1rem;">
+          Tu reserva queda confirmada una vez procesado el pago.
+        </p>
+        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
+                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
+          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+        </p>
+      </div>
+    `,
+  });
+  await logEmail('email/link-pago', opts.patientEmail, subject, !res.error, res.error?.message);
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
+}
+
 // ─── Email al cliente: recordatorio de sesión ────────────────────────────────
 export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();

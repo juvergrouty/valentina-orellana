@@ -3,7 +3,8 @@ import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
 import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar } from '../../../lib/syncCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
-import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
+import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail } from '../../../lib/email';
+import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 
 export const prerender = false;
 
@@ -109,6 +110,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const sessions_count  = Math.min(Math.max(isNaN(sessions_raw) ? 1 : sessions_raw, 1), 52);
     const modality_choice = form.get('modality_choice')?.toString() ?? 'presencial';
     const sendConf        = form.get('send_confirmation') !== null;
+    // Modo de pago: 'manual' (pago en consulta, confirma de una) o 'link' (envía link de pago Flow)
+    const payment_mode    = form.get('payment_mode')?.toString() === 'link' ? 'link' : 'manual';
 
     if (!service_id || !session_date || !session_time) {
       return redirect(dest + '&error=missing_fields');
@@ -174,8 +177,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         patient_name:   finalName,
         patient_email:  finalEmail,
         patient_phone:  finalPhone,
-        status:         'confirmed',
-        payment_method: 'manual',
+        status:         payment_mode === 'link' ? 'pending_payment' : 'confirmed',
+        payment_method: payment_mode === 'link' ? 'flow' : 'manual',
         amount:         perSessionBase + (i === 0 ? remainder : 0),
         duration_min:   durMin,
       };
@@ -191,29 +194,76 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       if (booking) bookingIds.push(booking.id);
     }
 
-    // Sincronizar TODAS las reservas a Google Calendar (con await — en serverless
-    // las promesas sin await se matan al responder). Crea Meet si es online.
-    if (bookingIds.length > 0) {
-      for (const bid of bookingIds) {
-        const { data: b } = await supabase.from('bookings').select('*').eq('id', bid).single();
-        if (b) { try { await syncBookingToCalendar(b); } catch (e) { console.error('[create-admin] sync:', e); } }
-      }
+    if (bookingIds.length === 0) return redirect(dest);
 
-      if (sendConf && finalEmail) {
-        const emailData = {
-          patient_name:   finalName,
-          patient_email:  finalEmail,
-          patient_phone:  finalPhone,
-          session_type:   sessionType,
-          session_date,
-          session_time,
-          amount:         totalPrice,
-          payment_method: 'manual',
-          service_name:   svc.name,
-        };
-        try { await sendConfirmationToClient(emailData); } catch (e) { console.error('[create-admin] email:', e); }
-        try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[create-admin] notif:', e); }
+    // ── Modo LINK DE PAGO: generar orden Flow y enviarla al paciente ──────────
+    if (payment_mode === 'link') {
+      if (!finalEmail) return redirect(dest + '&error=need_email');
+      try {
+        // Config de Flow desde settings
+        const { data: flowRows } = await supabase.from('settings').select('key, value').in('key', ['flow_env', 'flow_enabled']);
+        const fcfg: Record<string, string> = {};
+        (flowRows ?? []).forEach((r: { key: string; value: string }) => { fcfg[r.key] = r.value; });
+        if (fcfg['flow_enabled'] === 'false') return redirect(dest + '&error=flow_disabled');
+        const baseUrl = fcfg['flow_env'] === 'production' ? FLOW_URLS.production : FLOW_URLS.sandbox;
+
+        const firstId = bookingIds[0];
+        const reqUrl  = new URL(request.url);
+        const siteUrl = `${reqUrl.protocol}//${reqUrl.host}`;
+
+        const order = await createPaymentOrder({
+          subject:         svc.name,
+          amount:          totalPrice,
+          email:           finalEmail,
+          orderId:         firstId,
+          urlConfirmation: `${siteUrl}/api/flow/confirm`,
+          urlReturn:       `${siteUrl}/api/flow/return`,
+          baseUrl,
+        });
+        const paymentUrl = `${order.url}?token=${order.token}`;
+        await supabase.from('bookings').update({ mp_preference_id: order.token }).eq('id', firstId);
+
+        // Enviar el link por correo al paciente
+        try {
+          await sendPaymentLinkEmail({
+            patientName:  finalName,
+            patientEmail: finalEmail,
+            serviceName:  svc.name,
+            amount:       totalPrice,
+            sessionDate:  session_date,
+            sessionTime:  session_time,
+            paymentUrl,
+          });
+        } catch (e) { console.error('[create-admin] payment-link email:', e); }
+
+        // Redirigir mostrando el link (para copiar / WhatsApp)
+        return redirect(dest + `&payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}`);
+      } catch (e) {
+        console.error('[create-admin] flow order:', e);
+        return redirect(dest + '&error=flow_error');
       }
+    }
+
+    // ── Modo MANUAL: confirmar de una (calendario + correos) ──────────────────
+    for (const bid of bookingIds) {
+      const { data: b } = await supabase.from('bookings').select('*').eq('id', bid).single();
+      if (b) { try { await syncBookingToCalendar(b); } catch (e) { console.error('[create-admin] sync:', e); } }
+    }
+
+    if (sendConf && finalEmail) {
+      const emailData = {
+        patient_name:   finalName,
+        patient_email:  finalEmail,
+        patient_phone:  finalPhone,
+        session_type:   sessionType,
+        session_date,
+        session_time,
+        amount:         totalPrice,
+        payment_method: 'manual',
+        service_name:   svc.name,
+      };
+      try { await sendConfirmationToClient(emailData); } catch (e) { console.error('[create-admin] email:', e); }
+      try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[create-admin] notif:', e); }
     }
 
     return redirect(dest);
