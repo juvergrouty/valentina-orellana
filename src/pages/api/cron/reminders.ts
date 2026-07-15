@@ -26,10 +26,11 @@ export const GET: APIRoute = async ({ request }) => {
     return json({ ok: true, skipped: 'recordatorios desactivados en Configuración' });
   }
 
-  // Ventana de antelación. Default 5h → con cron cada hora envía ~4-5h antes (Vercel Pro).
-  // Si se vuelve a cron diario, subir a 28 (recordatorio el día anterior).
+  // Ventana de antelación. Default 28h → con cron DIARIO (plan Hobby) envía el
+  // recordatorio el día anterior. Al pasar a Vercel Pro: cambiar el cron a "0 * * * *"
+  // (cada hora) y poner reminder_window_hours = 5 para lograr "~4h antes".
   const { data: winRow } = await supabase.from('settings').select('value').eq('key', 'reminder_window_hours').maybeSingle();
-  const windowHours = parseInt(winRow?.value ?? '5') || 5;
+  const windowHours = parseInt(winRow?.value ?? '28') || 28;
 
   const now      = Date.now();
   const windowMs = windowHours * 60 * 60 * 1000;
