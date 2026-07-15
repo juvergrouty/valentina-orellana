@@ -14,6 +14,10 @@ export const POST: APIRoute = async ({ request }) => {
       break_end?: string;   // "14:00"
       interval: number;     // minutos
     };
+    // Modalidad del horario: 'online' | 'presencial' | 'ambos' (default)
+    const modalityRaw = (body as { modality?: string }).modality;
+    const modality = ['online', 'presencial', 'ambos'].includes(modalityRaw ?? '')
+      ? (modalityRaw as string) : 'ambos';
 
     if (!days?.length || !start_time || !end_time || !interval) {
       return Response.json({ error: 'Faltan parámetros.' }, { status: 400 });
@@ -30,7 +34,7 @@ export const POST: APIRoute = async ({ request }) => {
     const breakE    = break_end   ? toMinutes(break_end)   : null;
 
     // Generar los slots del template
-    const generated: { day_of_week: number; start_time: string; active: boolean }[] = [];
+    const generated: { day_of_week: number; start_time: string; active: boolean; modality: string }[] = [];
 
     for (const day of days) {
       let cur = startMin;
@@ -40,17 +44,19 @@ export const POST: APIRoute = async ({ request }) => {
         if (!inBreak) {
           const hh = String(Math.floor(cur / 60)).padStart(2, '0');
           const mm = String(cur % 60).padStart(2, '0');
-          generated.push({ day_of_week: day, start_time: `${hh}:${mm}:00`, active: true });
+          generated.push({ day_of_week: day, start_time: `${hh}:${mm}:00`, active: true, modality });
         }
         cur += interval;
       }
     }
 
-    // Borrar slots existentes de los días seleccionados
+    // Borrar solo los slots de ESTA modalidad en los días seleccionados
+    // (así generar el horario online no borra el presencial y viceversa)
     const { error: delError } = await supabase
       .from('availability_slots')
       .delete()
-      .in('day_of_week', days);
+      .in('day_of_week', days)
+      .eq('modality', modality);
 
     if (delError) {
       return Response.json({ error: 'Error al limpiar slots: ' + delError.message }, { status: 500 });

@@ -15,3 +15,13 @@ export async function log(level: Level, context: string, message: string, data?:
 export const logInfo  = (ctx: string, msg: string, data?: unknown) => log('info',  ctx, msg, data);
 export const logWarn  = (ctx: string, msg: string, data?: unknown) => log('warn',  ctx, msg, data);
 export const logError = (ctx: string, msg: string, data?: unknown) => log('error', ctx, msg, data);
+
+/** Registra el resultado de un envío de correo (aparece en /admin/logs). */
+export function logEmail(context: string, to: string, subject: string, ok: boolean, errorMsg?: string) {
+  return log(
+    ok ? 'info' : 'error',
+    context,
+    ok ? `✉ Correo enviado a ${to} — "${subject}"` : `✉ Falló envío a ${to} — "${subject}": ${errorMsg ?? 'error desconocido'}`,
+    { to, subject, ok, error: errorMsg ?? null },
+  );
+}

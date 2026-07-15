@@ -32,10 +32,10 @@ const DAYS = [
   { n: 0, short: 'Do', long: 'Domingo' },
 ];
 
-const byDay = new Map<number, Array<{ id: string; start_time: string; active: boolean }>>();
+const byDay = new Map<number, Array<{ id: string; start_time: string; active: boolean; modality: string }>>();
 DAYS.forEach(d => byDay.set(d.n, []));
 (slots ?? []).forEach(s => {
-  byDay.get(s.day_of_week)?.push({ id: s.id, start_time: s.start_time.slice(0, 5), active: s.active });
+  byDay.get(s.day_of_week)?.push({ id: s.id, start_time: s.start_time.slice(0, 5), active: s.active, modality: (s as { modality?: string }).modality ?? 'ambos' });
 });
 
 const daysWithSlots = DAYS.filter(d => (byDay.get(d.n) ?? []).length > 0);
@@ -171,6 +171,19 @@ const feriados: [string, string][] = [
             </div>
           </div>
 
+          <!-- Modalidad del horario -->
+          <div style="margin-bottom:1.25rem;">
+            <label class="label" style="display:block;margin-bottom:0.4rem;">¿Para qué modalidad es este horario?</label>
+            <select id="gen-modality">
+              <option value="ambos">Ambas (online y presencial)</option>
+              <option value="online">Solo online</option>
+              <option value="presencial">Solo presencial</option>
+            </select>
+            <p style="font-size:0.7rem;color:var(--stone);margin-top:0.3rem;">
+              Genera un horario distinto por modalidad. Al agendar una sesión, esa franja se bloquea para ambas.
+            </p>
+          </div>
+
           <!-- Rango horario -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem;">
             <div>
@@ -279,9 +292,12 @@ const feriados: [string, string][] = [
                     data-day={n}
                     data-time={slot.start_time}
                     data-active={slot.active ? 'true' : 'false'}
-                    title={slot.active ? 'Clic para desactivar' : 'Clic para reactivar'}
+                    data-modality={slot.modality}
+                    title={`${slot.active ? 'Clic para desactivar' : 'Clic para reactivar'} · ${slot.modality === 'online' ? 'Online' : slot.modality === 'presencial' ? 'Presencial' : 'Ambas modalidades'}`}
                   >
                     {slot.start_time}
+                    {slot.modality === 'online' && <span style="font-size:0.6rem;color:#2563eb;margin-left:0.2rem;">on</span>}
+                    {slot.modality === 'presencial' && <span style="font-size:0.6rem;color:#576352;margin-left:0.2rem;">pres</span>}
                   </button>
                 ))}
               </div>
@@ -610,6 +626,7 @@ document.getElementById('btn-apply')?.addEventListener('click', async () => {
     break_start: useBreak ? (document.getElementById('break-start') as HTMLInputElement).value : undefined,
     break_end:   useBreak ? (document.getElementById('break-end')   as HTMLInputElement).value : undefined,
     interval:    parseInt((document.getElementById('interval') as HTMLSelectElement).value),
+    modality:    (document.getElementById('gen-modality') as HTMLSelectElement)?.value ?? 'ambos',
   };
 
   try {

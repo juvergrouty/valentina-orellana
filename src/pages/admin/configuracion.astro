@@ -223,6 +223,32 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
           </span>
         </label>
       </div>
+
+      <div style="margin-bottom:0.5rem;">
+        <label style="display:flex;align-items:flex-start;gap:0.6rem;cursor:pointer;">
+          <input type="checkbox" name="email_confirmation_enabled" value="true"
+            checked={settings['email_confirmation_enabled'] !== 'false'} style="margin-top:0.15rem;" />
+          <span>
+            <span style="font-weight:600;font-size:0.85rem;">Correo de confirmación de cita</span>
+            <span style="display:block;font-size:0.7rem;color:var(--stone);margin-top:0.2rem;">
+              Se envía automáticamente al confirmar una reserva. (El reenvío manual desde la ficha siempre funciona, aunque esté desactivado.)
+            </span>
+          </span>
+        </label>
+      </div>
+
+      <div style="margin-bottom:0.5rem;">
+        <label style="display:flex;align-items:flex-start;gap:0.6rem;cursor:pointer;">
+          <input type="checkbox" name="email_reminder_enabled" value="true"
+            checked={settings['email_reminder_enabled'] !== 'false'} style="margin-top:0.15rem;" />
+          <span>
+            <span style="font-weight:600;font-size:0.85rem;">Recordatorio de cita</span>
+            <span style="display:block;font-size:0.7rem;color:var(--stone);margin-top:0.2rem;">
+              Se envía automáticamente antes de cada sesión (según la frecuencia del cron configurado).
+            </span>
+          </span>
+        </label>
+      </div>
     </div>
 
     <!-- Google Calendar -->

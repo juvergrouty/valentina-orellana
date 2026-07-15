@@ -834,6 +834,21 @@ const errorParam = Astro.url.searchParams.get('error');
 
 /* Shared bp-field inside session panel reschedule form */
 #sp-rsc-form .bp-field label { font-size: 0.68rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; display: block; }
+
+/* ── Mobile: calendario navegable con scroll horizontal ─────────────────── */
+@media (max-width: 768px) {
+  /* La barra superior se envuelve para no cortar botones (Hoy, flechas, Agendar) */
+  .cal-toolbar { flex-wrap: wrap; row-gap: 0.4rem; padding: 0.5rem 0.75rem; }
+  .cal-toolbar > div[style*="flex:1"] { display: none; }
+  .cal-toolbar-right { margin-left: auto; }
+
+  /* La grilla de 7 días no cabe en pantalla chica → scroll horizontal táctil */
+  .cal-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .cal-headers, .cal-allday-row, .cal-grid { min-width: 680px; }
+
+  /* Los paneles laterales ocupan casi todo el ancho en mobile */
+  .side-panel { width: 100vw; max-width: 340px; }
+}
 </style>
 
 <script>

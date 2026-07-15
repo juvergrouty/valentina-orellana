@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase';
 const q      = Astro.url.searchParams.get('q') ?? '';
 const filtro = Astro.url.searchParams.get('filtro') ?? 'todos';
 const saved  = Astro.url.searchParams.get('saved') === '1';
+const errorMsg = Astro.url.searchParams.get('error') ?? '';
 
 // ── Pacientes ──────────────────────────────────────────────────────────────
 let query = supabase.from('patients').select('*').order('name');
@@ -71,6 +72,11 @@ const TABS = [
   <div class="pac-wrap">
 
     {saved && <div class="alert-success" style="margin:1rem 1.5rem 0;">✓ Paciente guardado correctamente.</div>}
+    {errorMsg && (
+      <div style="margin:1rem 1.5rem 0;padding:0.75rem 1rem;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:6px;font-size:0.85rem;">
+        ✕ {errorMsg}
+      </div>
+    )}
 
     <!-- Título -->
     <div class="pac-head">

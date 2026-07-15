@@ -242,6 +242,16 @@ const formatCLP = (n: number) =>
                         Emitir boleta
                       </button>
                     ) : null}
+                    {b.session_date !== '2099-12-31' && b.patient_email && (
+                      <>
+                        <button type="button" class="btn btn-outline btn-sm resend-mail" data-action="confirmation" data-bid={b.id}
+                          title="Reenviar el correo de confirmación de esta sesión">✉ Confirmación</button>
+                        <button type="button" class="btn btn-outline btn-sm resend-mail" data-action="reminder" data-bid={b.id}
+                          title="Enviar el recordatorio de esta sesión">✉ Recordatorio</button>
+                        <button type="button" class="btn btn-outline btn-sm resend-mail" data-action="steps" data-bid={b.id}
+                          title="Enviar el correo de pasos a seguir">✉ Pasos</button>
+                      </>
+                    )}
                     <button type="button" class="btn btn-outline btn-sm"
                       onclick={`toggleNota('nota-${i}')`}
                       style={nota ? 'border-color:var(--forest);color:var(--forest);' : ''}>
@@ -495,6 +505,32 @@ const formatCLP = (n: number) =>
         if (d.ok) bolStatus(bid, `✓ Enviada a ${d.email}`, '#15803d');
         else bolStatus(bid, '✕ ' + (d.error ?? 'No enviada'), '#dc2626');
       } catch { bolStatus(bid, '✕ Error', '#dc2626'); }
+    }
+  });
+
+  // ── Reenviar correos por sesión (confirmación / recordatorio / pasos) ───────
+  const MAIL_LABELS = { confirmation: 'confirmación', reminder: 'recordatorio', steps: 'pasos a seguir' };
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.resend-mail');
+    if (!btn) return;
+    const bid = btn.dataset.bid;
+    const act = btn.dataset.action;
+    const label = MAIL_LABELS[act] ?? 'correo';
+    if (!confirm(`¿Enviar el correo de ${label} de esta sesión al paciente?`)) return;
+    btn.disabled = true;
+    bolStatus(bid, 'Enviando…', '#6b7280');
+    try {
+      const res = await fetch('/api/admin/send-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: act, booking_id: bid }),
+      });
+      const d = await res.json();
+      if (d.ok) bolStatus(bid, `✓ Correo de ${label} enviado`, '#15803d');
+      else bolStatus(bid, '✕ ' + (d.error ?? 'No enviado'), '#dc2626');
+    } catch {
+      bolStatus(bid, '✕ Error de conexión', '#dc2626');
+    } finally {
+      btn.disabled = false;
     }
   });
 

@@ -3,10 +3,18 @@ import { supabase } from '../../../lib/supabase';
 
 export const prerender = false;
 
+// Agrega un parámetro de query a la URL de redirect (respeta los que ya tenga)
+function withParam(path: string, key: string, value: string): string {
+  const u = new URL(path, 'http://local');
+  u.searchParams.delete('saved'); // si hubo error, no mostrar también "guardado"
+  u.searchParams.set(key, value);
+  return u.pathname + '?' + u.searchParams.toString();
+}
+
 export const POST: APIRoute = async ({ request }) => {
   const form     = await request.formData();
   const action   = form.get('action') as string;
-  const redirect = (form.get('redirect') as string) ?? '/admin/pacientes';
+  let   redirect = (form.get('redirect') as string) ?? '/admin/pacientes';
 
   // ── Crear paciente ──────────────────────────────────────────────────────────
   if (action === 'create') {
@@ -21,7 +29,10 @@ export const POST: APIRoute = async ({ request }) => {
       emergency_phone:  (form.get('emergency_phone') as string)?.trim() || null,
       notes:            (form.get('notes') as string)?.trim() || null,
     });
-    if (error) console.error('[patients] create:', error.message);
+    if (error) {
+      console.error('[patients] create:', error.message);
+      redirect = withParam(redirect, 'error', `No se pudo crear el paciente: ${error.message}`);
+    }
   }
 
   // ── Actualizar paciente ─────────────────────────────────────────────────────
@@ -38,7 +49,10 @@ export const POST: APIRoute = async ({ request }) => {
       emergency_phone:  (form.get('emergency_phone') as string)?.trim() || null,
       notes:            (form.get('notes') as string)?.trim() || null,
     }).eq('id', id);
-    if (error) console.error('[patients] update:', error.message);
+    if (error) {
+      console.error('[patients] update:', error.message);
+      redirect = withParam(redirect, 'error', `No se pudo guardar: ${error.message}`);
+    }
   }
 
   // ── Archivar / restaurar ────────────────────────────────────────────────────

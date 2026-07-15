@@ -155,15 +155,15 @@ const { data: catalogServices } = await supabase
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-dust">
           <!-- Calendario -->
-          <div class="bg-white p-8 md:p-10">
+          <div class="bg-white p-5 sm:p-8 md:p-10">
             <div class="flex items-center justify-between mb-7">
               <button id="prev-month" type="button"
-                class="w-9 h-9 flex items-center justify-center hover:bg-warm transition-colors text-stone hover:text-ink text-xl rounded-sm">
+                class="w-11 h-11 flex items-center justify-center hover:bg-warm transition-colors text-stone hover:text-ink text-xl rounded-sm">
                 ‹
               </button>
               <p id="calendar-title" class="font-heading font-semibold text-xl text-ink tracking-wide"></p>
               <button id="next-month" type="button"
-                class="w-9 h-9 flex items-center justify-center hover:bg-warm transition-colors text-stone hover:text-ink text-xl rounded-sm">
+                class="w-11 h-11 flex items-center justify-center hover:bg-warm transition-colors text-stone hover:text-ink text-xl rounded-sm">
                 ›
               </button>
             </div>
@@ -176,7 +176,7 @@ const { data: catalogServices } = await supabase
           </div>
 
           <!-- Slots de hora -->
-          <div class="bg-sand p-8 md:p-10 flex flex-col">
+          <div class="bg-sand p-5 sm:p-8 md:p-10 flex flex-col">
             <div id="slots-placeholder" class="flex-1 flex items-center justify-center text-center py-8">
               <div>
                 <p class="font-heading font-light text-2xl text-ink/30 mb-2">—</p>
@@ -711,15 +711,17 @@ const { data: catalogServices } = await supabase
     $('slots-grid').innerHTML = '<p class="col-span-3 text-xs text-muted py-2">Cargando horarios...</p>';
     hide('no-slots-msg');
 
-    // Fetch slots
-    let slots = state.loadedSlots[iso];
+    // Fetch slots — la caché incluye la modalidad (los horarios difieren por modalidad)
+    const cacheKey = `${iso}|${state.modalityChoice ?? ''}`;
+    let slots = state.loadedSlots[cacheKey];
     if (!slots) {
       try {
         const dur = state.sessionDuration ? `&duration=${state.sessionDuration}` : '';
-        const res = await fetch(`/api/availability?date=${iso}${dur}`);
+        const mod = state.modalityChoice ? `&modality=${state.modalityChoice}` : '';
+        const res = await fetch(`/api/availability?date=${iso}${dur}${mod}`);
         const data = await res.json();
         slots = data.slots ?? [];
-        state.loadedSlots[iso] = slots;
+        state.loadedSlots[cacheKey] = slots;
       } catch {
         slots = [];
       }

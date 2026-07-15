@@ -45,6 +45,22 @@ export const GET: APIRoute = async ({ url }) => {
   // duration_min del servicio que el usuario quiere reservar (para check inverso)
   const newDuration = parseInt(url.searchParams.get('duration') ?? '0') || null;
 
+  // Modalidad solicitada: 'online' | 'presencial' (si no viene, no se filtra por modalidad)
+  const reqModalityRaw = url.searchParams.get('modality');
+  const reqModality = ['online', 'presencial'].includes(reqModalityRaw ?? '') ? reqModalityRaw : null;
+
+  // Trae los slots del día. Intenta con la columna 'modality'; si aún no existe
+  // (migración no aplicada), reintenta sin ella para no romper la disponibilidad.
+  async function fetchSlots() {
+    const withMod = await supabase.from('availability_slots')
+      .select('start_time, modality').eq('day_of_week', dayOfWeek).eq('active', true).order('start_time');
+    if (withMod.error?.code === '42703') {
+      return await supabase.from('availability_slots')
+        .select('start_time').eq('day_of_week', dayOfWeek).eq('active', true).order('start_time');
+    }
+    return withMod;
+  }
+
   // Cargar en paralelo: slots, fecha bloqueada, reservas del día y prep_duration_min
   const [
     { data: slots, error: slotsError },
@@ -52,7 +68,7 @@ export const GET: APIRoute = async ({ url }) => {
     { data: booked, error: bookedError },
     { data: settingsRows },
   ] = await Promise.all([
-    supabase.from('availability_slots').select('start_time').eq('day_of_week', dayOfWeek).eq('active', true).order('start_time'),
+    fetchSlots(),
     supabase.from('blocked_dates').select('id').eq('date', dateParam).maybeSingle(),
     supabase.from('bookings')
       .select('session_time, duration_min')
@@ -82,6 +98,10 @@ export const GET: APIRoute = async ({ url }) => {
   const nowMin  = nowHour.getHours() * 60 + nowHour.getMinutes() + 60; // +60 min buffer
 
   const available = slots
+    // Filtrar por modalidad: se aceptan los slots de la modalidad pedida y los 'ambos'.
+    // Si el slot no tiene modalidad (columna vieja) o no se pidió modalidad, pasa igual.
+    .filter((s: { modality?: string }) =>
+      !reqModality || !s.modality || s.modality === 'ambos' || s.modality === reqModality)
     .map((s) => s.start_time.slice(0, 5))
     .filter((time) => {
       const [h, m] = time.split(':').map(Number);
