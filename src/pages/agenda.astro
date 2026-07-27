@@ -734,14 +734,14 @@ const { data: catalogServices } = await supabase
     $('slots-grid').innerHTML = '<p class="col-span-3 text-xs text-muted py-2">Cargando horarios...</p>';
     hide('no-slots-msg');
 
-    // Fetch slots — la caché incluye la modalidad (los horarios difieren por modalidad)
-    const cacheKey = `${iso}|${state.modalityChoice ?? ''}`;
+    // Fetch slots — el horario es por servicio, así que la caché incluye el service_id
+    const cacheKey = `${iso}|${state.serviceId ?? ''}`;
     let slots = state.loadedSlots[cacheKey];
     if (!slots) {
       try {
         const dur = state.sessionDuration ? `&duration=${state.sessionDuration}` : '';
-        const mod = state.modalityChoice ? `&modality=${state.modalityChoice}` : '';
-        const res = await fetch(`/api/availability?date=${iso}${dur}${mod}`);
+        const svc = state.serviceId ? `&service_id=${encodeURIComponent(state.serviceId)}` : '';
+        const res = await fetch(`/api/availability?date=${iso}${dur}${svc}`);
         const data = await res.json();
         slots = data.slots ?? [];
         state.loadedSlots[cacheKey] = slots;

@@ -1,0 +1,159 @@
+---
+export const prerender = false;
+import AdminLayout from '../../../../components/admin/AdminLayout.astro';
+import { supabase } from '../../../../lib/supabase';
+
+const { id } = Astro.params;
+
+// Servicio actual
+const { data: service } = await supabase
+  .from('services_catalog').select('id, name').eq('id', id!).maybeSingle();
+if (!service) return Astro.redirect('/admin/servicios');
+
+// Otros servicios (para "copiar horario de")
+const { data: others } = await supabase
+  .from('services_catalog').select('id, name').neq('id', id!).order('name');
+
+// Franjas actuales de este servicio (degrada si aún no existe la columna service_id)
+let existing: Array<{ day_of_week: number; start_time: string }> = [];
+{
+  const res = await supabase.from('availability_slots')
+    .select('day_of_week, start_time').eq('service_id', id!).eq('active', true);
+  if (!res.error) existing = (res.data ?? []).map(s => ({ day_of_week: s.day_of_week, start_time: String(s.start_time).slice(0, 5) }));
+}
+const selectedKeys = existing.map(s => `${s.day_of_week}|${s.start_time}`);
+
+// Grilla: días (lun→dom) y filas de tiempo cada 30 min
+const DAYS = [
+  { dow: 1, label: 'Lun' }, { dow: 2, label: 'Mar' }, { dow: 3, label: 'Mié' },
+  { dow: 4, label: 'Jue' }, { dow: 5, label: 'Vie' }, { dow: 6, label: 'Sáb' }, { dow: 0, label: 'Dom' },
+];
+const TIMES: string[] = [];
+for (let h = 7; h <= 21; h++) {
+  TIMES.push(`${String(h).padStart(2, '0')}:00`);
+  TIMES.push(`${String(h).padStart(2, '0')}:30`);
+}
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+---
+
+<AdminLayout title={`Horario · ${service.name}`} current="/admin/servicios">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <div>
+      <a href="/admin/servicios" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Servicios</a>
+      <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;margin-top:0.3rem;">Horario de atención</h2>
+      <p style="font-size:0.85rem;color:var(--stone);">{service.name}</p>
+    </div>
+    <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;">
+      {others && others.length > 0 && (
+        <select id="copy-from" style="font-size:0.82rem;padding:0.45rem 0.6rem;">
+          <option value="">Copiar horario de…</option>
+          {others.map(o => <option value={o.id}>{o.name}</option>)}
+        </select>
+      )}
+      <button id="btn-clear" class="btn btn-outline btn-sm" type="button">Limpiar</button>
+      <button id="btn-save" class="btn btn-dark btn-sm" type="button" data-service={service.id}>Guardar horario</button>
+    </div>
+  </div>
+
+  {saved && <div class="alert-success" style="margin-bottom:1rem;">✓ Horario guardado.</div>}
+  <div id="save-status" style="font-size:0.82rem;margin-bottom:0.75rem;"></div>
+
+  <p style="font-size:0.8rem;color:var(--stone);margin-bottom:0.75rem;">
+    Haz clic en las horas para <strong>agregar o quitar</strong> franjas disponibles de este servicio. Cada franja es un inicio de sesión.
+  </p>
+
+  <div style="overflow-x:auto;border:1px solid var(--dust);border-radius:8px;">
+    <table class="hgrid" style="border-collapse:collapse;width:100%;min-width:640px;">
+      <thead>
+        <tr>
+          <th style="width:56px;"></th>
+          {DAYS.map(d => <th style="padding:0.5rem;font-size:0.78rem;color:var(--ink);border-bottom:1px solid var(--dust);">{d.label}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {TIMES.map(t => (
+          <tr>
+            <td style="font-size:0.68rem;color:var(--stone);text-align:right;padding:0 0.4rem;white-space:nowrap;">{t}</td>
+            {DAYS.map(d => {
+              const key = `${d.dow}|${t}`;
+              return (
+                <td style="padding:0;border:1px solid #f0ede8;">
+                  <button type="button" class={`slot-cell${selectedKeys.includes(key) ? ' on' : ''}`}
+                    data-dow={d.dow} data-time={t}
+                    style="width:100%;height:26px;border:none;background:transparent;cursor:pointer;display:block;"></button>
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+</AdminLayout>
+
+<style>
+  .slot-cell.on { background: #4f5ce8 !important; }
+  .slot-cell:hover { background: #eef0fe; }
+  .slot-cell.on:hover { background: #4048c8 !important; }
+</style>
+
+<script>
+  const status = document.getElementById('save-status');
+  function setStatus(t, c) { if (status) { status.textContent = t; status.style.color = c; } }
+
+  // Toggle celdas
+  document.querySelectorAll('.slot-cell').forEach(cell => {
+    cell.addEventListener('click', () => cell.classList.toggle('on'));
+  });
+
+  // Limpiar
+  document.getElementById('btn-clear')?.addEventListener('click', () => {
+    document.querySelectorAll('.slot-cell.on').forEach(c => c.classList.remove('on'));
+  });
+
+  // Copiar horario de otro servicio
+  document.getElementById('copy-from')?.addEventListener('change', async (e) => {
+    const fromId = e.target.value;
+    if (!fromId) return;
+    setStatus('Copiando…', '#6b7280');
+    try {
+      const res = await fetch('/api/admin/slots/service', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'copy', from_service_id: fromId }),
+      });
+      const d = await res.json();
+      if (!d.ok) { setStatus('✕ ' + (d.error ?? 'Error'), '#dc2626'); return; }
+      document.querySelectorAll('.slot-cell.on').forEach(c => c.classList.remove('on'));
+      const keys = new Set(d.slots.map(s => `${s.day_of_week}|${s.start_time}`));
+      document.querySelectorAll('.slot-cell').forEach(c => {
+        if (keys.has(`${c.dataset.dow}|${c.dataset.time}`)) c.classList.add('on');
+      });
+      setStatus(`✓ ${d.slots.length} franjas copiadas (recuerda Guardar)`, '#15803d');
+      e.target.value = '';
+    } catch { setStatus('✕ Error de conexión', '#dc2626'); }
+  });
+
+  // Guardar
+  document.getElementById('btn-save')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const serviceId = btn.dataset.service;
+    const slots = Array.from(document.querySelectorAll('.slot-cell.on')).map(c => ({
+      day_of_week: parseInt(c.dataset.dow),
+      start_time:  c.dataset.time,
+    }));
+    btn.disabled = true;
+    setStatus('Guardando…', '#6b7280');
+    try {
+      const res = await fetch('/api/admin/slots/service', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save', service_id: serviceId, slots }),
+      });
+      const d = await res.json();
+      if (d.ok) { window.location.href = '/admin/servicios/horario/' + serviceId + '?saved=1'; }
+      else { setStatus('✕ ' + (d.error ?? 'Error'), '#dc2626'); btn.disabled = false; }
+    } catch { setStatus('✕ Error de conexión', '#dc2626'); btn.disabled = false; }
+  });
+</script>

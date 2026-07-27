@@ -45,20 +45,24 @@ export const GET: APIRoute = async ({ url }) => {
   // duration_min del servicio que el usuario quiere reservar (para check inverso)
   const newDuration = parseInt(url.searchParams.get('duration') ?? '0') || null;
 
-  // Modalidad solicitada: 'online' | 'presencial' (si no viene, no se filtra por modalidad)
+  // Horario POR SERVICIO: si viene service_id, se filtran las franjas de ese servicio.
+  const serviceId = url.searchParams.get('service_id');
+  // (compat) modalidad, para instalaciones que aún no migraron a por-servicio
   const reqModalityRaw = url.searchParams.get('modality');
   const reqModality = ['online', 'presencial'].includes(reqModalityRaw ?? '') ? reqModalityRaw : null;
 
-  // Trae los slots del día. Intenta con la columna 'modality'; si aún no existe
-  // (migración no aplicada), reintenta sin ella para no romper la disponibilidad.
+  // Trae los slots del día. Prioriza service_id; degrada si faltan columnas nuevas.
   async function fetchSlots() {
-    const withMod = await supabase.from('availability_slots')
-      .select('start_time, modality').eq('day_of_week', dayOfWeek).eq('active', true).order('start_time');
-    if (withMod.error?.code === '42703') {
+    let q = supabase.from('availability_slots')
+      .select('start_time, modality, service_id').eq('day_of_week', dayOfWeek).eq('active', true);
+    if (serviceId) q = q.eq('service_id', serviceId);
+    const res = await q.order('start_time');
+    if (res.error?.code === '42703') {
+      // columnas nuevas (service_id/modality) no existen aún → query mínima
       return await supabase.from('availability_slots')
         .select('start_time').eq('day_of_week', dayOfWeek).eq('active', true).order('start_time');
     }
-    return withMod;
+    return res;
   }
 
   // Cargar en paralelo: slots, fecha bloqueada, reservas del día y prep_duration_min
@@ -98,10 +102,9 @@ export const GET: APIRoute = async ({ url }) => {
   const nowMin  = nowHour.getHours() * 60 + nowHour.getMinutes() + 60; // +60 min buffer
 
   const available = slots
-    // Filtrar por modalidad: se aceptan los slots de la modalidad pedida y los 'ambos'.
-    // Si el slot no tiene modalidad (columna vieja) o no se pidió modalidad, pasa igual.
+    // Si se pidió por service_id, la query ya filtró; si no, se filtra por modalidad (compat).
     .filter((s: { modality?: string }) =>
-      !reqModality || !s.modality || s.modality === 'ambos' || s.modality === reqModality)
+      serviceId || !reqModality || !s.modality || s.modality === 'ambos' || s.modality === reqModality)
     .map((s) => s.start_time.slice(0, 5))
     .filter((time) => {
       const [h, m] = time.split(':').map(Number);

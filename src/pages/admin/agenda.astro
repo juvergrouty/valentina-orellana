@@ -220,7 +220,7 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
               <button type="button" data-f="online">Online</button>
             </div>
             <div class="cal-show-sep"></div>
-            <button type="button" id="open-horarios-btn" class="cal-show-config">⚙ Configurar horarios</button>
+            <button type="button" id="open-horarios-btn" class="cal-show-config">⚙ Configurar horarios (por servicio) →</button>
           </div>
         </div>
 
@@ -1107,10 +1107,9 @@ document.addEventListener('click', (e) => {
     try { localStorage.setItem('vo_avail_f', b.dataset.f); } catch (e) {}
   }));
 
-  // "Configurar horarios" → abre el panel lateral de configuración
+  // "Configurar horarios" → ahora el horario es POR SERVICIO: se edita en Servicios
   document.getElementById('open-horarios-btn')?.addEventListener('click', () => {
-    menu.classList.remove('open');
-    document.getElementById('horarios-panel')?.classList.add('open');
+    window.location.href = '/admin/servicios';
   });
 })();
 
