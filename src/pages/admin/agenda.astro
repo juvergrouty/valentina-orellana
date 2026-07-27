@@ -61,22 +61,22 @@ const svcColor: Record<string, { bg: string; bd: string }> = {};
 const NEUTRAL_COLOR = { bg: '#eef2f7', bd: '#94a3b8' };
 
 // ── Horarios disponibles configurados (para el overlay del calendario) ──────
-// Intenta con la columna 'modality'; si aún no existe, cae sin ella (todo 'ambos').
+// El horario es POR SERVICIO → cada franja trae su service_id. Degrada si aún no existe.
 async function fetchAvailSlots() {
-  const withMod = await supabase.from('availability_slots')
-    .select('day_of_week, start_time, active, modality').eq('active', true);
-  if (withMod.error?.code === '42703') {
+  const withSvc = await supabase.from('availability_slots')
+    .select('day_of_week, start_time, active, service_id').eq('active', true);
+  if (withSvc.error?.code === '42703') {
     return await supabase.from('availability_slots').select('day_of_week, start_time, active').eq('active', true);
   }
-  return withMod;
+  return withSvc;
 }
 const { data: availSlotsRaw } = await fetchAvailSlots();
-type AvSlot = { start: string; min: number; mod: string; height: number };
+type AvSlot = { start: string; min: number; svc: string; height: number };
 const availByDow: Record<number, AvSlot[]> = {};
-(availSlotsRaw ?? []).forEach((s: { day_of_week: number; start_time: string; modality?: string }) => {
+(availSlotsRaw ?? []).forEach((s: { day_of_week: number; start_time: string; service_id?: string }) => {
   const hhmm = String(s.start_time).slice(0, 5);
   const [h, m] = hhmm.split(':').map(Number);
-  (availByDow[s.day_of_week] ??= []).push({ start: hhmm, min: h * 60 + m, mod: s.modality ?? 'ambos', height: 55 });
+  (availByDow[s.day_of_week] ??= []).push({ start: hhmm, min: h * 60 + m, svc: s.service_id ?? '', height: 55 });
 });
 // Altura de cada bloque = distancia al siguiente slot del mismo día (para que teselen)
 Object.keys(availByDow).forEach(k => {
@@ -225,13 +225,6 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
               <span>Horarios disponibles</span>
             </label>
             <div class="cal-show-sep"></div>
-            <p class="cal-show-lbl">Filtrar por modalidad</p>
-            <div class="cal-show-filter" id="avail-filter">
-              <button type="button" data-f="all" class="active">Todas</button>
-              <button type="button" data-f="presencial">Presencial</button>
-              <button type="button" data-f="online">Online</button>
-            </div>
-            <div class="cal-show-sep"></div>
             <label class="cal-show-item">
               <input type="checkbox" id="toggle-colors" />
               <span>Colores por servicio</span>
@@ -324,9 +317,9 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 
             {/* Overlay de horarios disponibles (oculto por defecto; lo activa el menú "Mostrar") */}
             {(availByDow[day.dow] ?? []).map(s => (
-              <div class="avail-block" data-mod={s.mod}
-                title={`Disponible ${s.start} · ${s.mod === 'online' ? 'Online' : s.mod === 'presencial' ? 'Presencial' : 'Ambas'}`}
-                style={`top:${s.min - 360}px;height:${s.height - 2}px;`}></div>
+              <div class="avail-block" data-svc={s.svc}
+                title={`Disponible ${s.start}${s.svc && svcMap[s.svc] ? ' · ' + svcMap[s.svc] : ''}`}
+                style={`top:${s.min - 360}px;height:${s.height - 2}px;--svcbg:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bg};--svcbd:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bd}`}></div>
             ))}
 
             {(byDate[day.isoDate] ?? []).map(b => (
@@ -1037,19 +1030,17 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 /* Shared bp-field inside session panel reschedule form */
 #sp-rsc-form .bp-field label { font-size: 0.68rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; display: block; }
 
-/* ── Overlay de horarios disponibles ────────────────────────────────────── */
+/* ── Overlay de horarios disponibles (color por servicio) ───────────────── */
 .avail-block {
   position: absolute; left: 2px; right: 2px; border-radius: 4px;
   display: none; pointer-events: none; z-index: 1;
+  background: var(--svcbg, rgba(148,163,184,0.14));
+  border-left: 3px solid var(--svcbd, #94a3b8);
 }
-.avail-block[data-mod="online"]     { background: rgba(37,99,235,0.10);  border-left: 3px solid #2563eb; }
-.avail-block[data-mod="presencial"] { background: rgba(87,99,82,0.12);   border-left: 3px solid #576352; }
-.avail-block[data-mod="ambos"]      { background: rgba(148,163,184,0.14); border-left: 3px solid #94a3b8; }
 /* visible solo cuando el toggle está activo */
 .cal-scroll.avail-on .avail-block { display: block; }
-/* filtro por modalidad (los 'ambos' se muestran en todos los filtros) */
-.cal-scroll.avail-f-online .avail-block[data-mod="presencial"] { display: none; }
-.cal-scroll.avail-f-presencial .avail-block[data-mod="online"] { display: none; }
+/* el filtro por servicio (dropdown) oculta las franjas de otros servicios */
+.avail-block.svc-hidden { display: none !important; }
 
 /* ── Menú "Mostrar" ─────────────────────────────────────────────────────── */
 .cal-show-wrap { position: relative; }
@@ -1113,13 +1104,12 @@ document.addEventListener('click', (e) => {
   });
 });
 
-// ── Menú "Mostrar": overlay de horarios disponibles + filtro por modalidad ─────
+// ── Menú "Mostrar": overlay de horarios disponibles + colores + filtro por servicio ─
 (function () {
   const btn    = document.getElementById('cal-show-btn');
   const menu   = document.getElementById('cal-show-menu');
   const scroll = document.getElementById('cal-scroll');
   const toggle = document.getElementById('toggle-avail');
-  const filter = document.getElementById('avail-filter');
   if (!btn || !menu || !scroll || !toggle) return;
 
   btn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('open'); });
@@ -1127,27 +1117,15 @@ document.addEventListener('click', (e) => {
     if (!menu.contains(e.target) && !btn.contains(e.target)) menu.classList.remove('open');
   });
 
-  function applyFilter(f) {
-    scroll.classList.remove('avail-f-all', 'avail-f-online', 'avail-f-presencial');
-    scroll.classList.add('avail-f-' + f);
-    filter?.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.f === f));
-  }
-
-  // Restaurar preferencia guardada
+  // Restaurar preferencia guardada del overlay
   try {
     if (localStorage.getItem('vo_avail_on') === '1') { toggle.checked = true; scroll.classList.add('avail-on'); }
-    applyFilter(localStorage.getItem('vo_avail_f') || 'all');
-  } catch (e) { applyFilter('all'); }
+  } catch (e) {}
 
   toggle.addEventListener('change', () => {
     scroll.classList.toggle('avail-on', toggle.checked);
     try { localStorage.setItem('vo_avail_on', toggle.checked ? '1' : '0'); } catch (e) {}
   });
-
-  filter?.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-    applyFilter(b.dataset.f);
-    try { localStorage.setItem('vo_avail_f', b.dataset.f); } catch (e) {}
-  }));
 
   // ── Colores por servicio ──────────────────────────────────────────────────
   const colorsToggle = document.getElementById('toggle-colors');
@@ -1164,11 +1142,11 @@ document.addEventListener('click', (e) => {
     try { localStorage.setItem('vo_colors_on', colorsToggle.checked ? '1' : '0'); } catch (e) {}
   });
 
-  // ── Filtro por servicio (oculta las citas que no son del servicio elegido) ─
+  // ── Filtro por servicio: oculta citas Y franjas del overlay de otros servicios ─
   const svcFilter = document.getElementById('svc-filter');
   function applySvcFilter(id) {
-    document.querySelectorAll('.cal-event').forEach((ev) => {
-      ev.classList.toggle('svc-hidden', !!id && ev.dataset.svc !== id);
+    document.querySelectorAll('.cal-event, .avail-block').forEach((el) => {
+      el.classList.toggle('svc-hidden', !!id && el.dataset.svc !== id);
     });
   }
   try {
