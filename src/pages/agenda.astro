@@ -506,6 +506,27 @@ const { data: catalogServices } = await supabase
     });
   }
 
+  // ── Medición de embudo para GTM (GA4 / Google Ads) ────────────────────────
+  function voItem() {
+    return {
+      item_id:       String(state.serviceId || ''),
+      item_name:     String(state.sessionTitle || ''),
+      item_category: state.modalityChoice === 'online' ? 'online' : 'presencial',
+      price:         Number(state.sessionPrice) || 0,
+      quantity:      1,
+    };
+  }
+  function voPush(eventName) {
+    try {
+      window.dataLayer = window.dataLayer || [];
+      window.dataLayer.push({ ecommerce: null });
+      window.dataLayer.push({
+        event: eventName,
+        ecommerce: { currency: 'CLP', value: Number(state.sessionPrice) || 0, items: [voItem()] },
+      });
+    } catch (e) { /* medición no debe romper el flujo */ }
+  }
+
   function selectService(serviceId, modality, price, duration, name) {
     state.serviceId       = serviceId;
     state.modalityChoice  = modality;
@@ -525,6 +546,8 @@ const { data: catalogServices } = await supabase
     const now = new Date();
     state.calendarYear  = now.getFullYear();
     state.calendarMonth = now.getMonth();
+
+    voPush('view_item'); // el paciente "ve" el servicio elegido
 
     goToStep(2);
     renderCalendar();
@@ -848,6 +871,8 @@ const { data: catalogServices } = await supabase
     show('payment-loading');
     hide('payment-ready');
     hide('payment-error');
+
+    voPush('begin_checkout'); // el paciente inicia el pago
 
     try {
       const res = await fetch('/api/bookings', {

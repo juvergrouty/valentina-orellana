@@ -78,7 +78,7 @@ if (manual || transferencia) {
     // Buscar la reserva por el token guardado en mp_preference_id
     const { data } = await supabase
       .from('bookings')
-      .select('session_type, session_date, session_time, patient_name, amount, status')
+      .select('id, service_id, mp_payment_id, session_type, session_date, session_time, patient_name, amount, status')
       .eq('mp_preference_id', token)
       .maybeSingle();
 
@@ -99,6 +99,43 @@ if (manual || transferencia) {
     console.error('[confirmacion] Error consultando Flow:', err);
     pageState = 'pending'; // Si hay error al consultar, mostrar como pendiente
   }
+}
+
+// ── Datos para la conversión "purchase" (GA4 / Google Ads vía GTM) ─────────────
+// Solo para una COMPRA real online (pago Flow acreditado). No aplica a pago en
+// consulta / transferencia (no hay cargo online que atribuir).
+interface PurchaseData {
+  transaction_id: string;
+  value:          number;
+  currency:       string;
+  coupon:         string;
+  items:          Array<{ item_id: string; item_name: string; item_category: string; price: number; quantity: number; discount: number }>;
+}
+let purchase: PurchaseData | null = null;
+
+if (pageState === 'paid' && booking && !manual && !transferencia) {
+  const sessionType = String(booking.session_type ?? '');
+  let itemName = SESSION_LABELS[sessionType] ?? sessionType;
+  if (booking.service_id) {
+    const { data: svc } = await supabase
+      .from('services_catalog').select('name').eq('id', booking.service_id as string).maybeSingle();
+    if (svc?.name) itemName = svc.name as string;
+  }
+  const value = Number(booking.amount) || 0;
+  purchase = {
+    transaction_id: String(booking.mp_payment_id ?? booking.id ?? token),
+    value,
+    currency: 'CLP',
+    coupon:   '', // no hay sistema de cupones aún → sin descuento
+    items: [{
+      item_id:       String(booking.service_id ?? sessionType ?? 'sesion'),
+      item_name:     itemName,
+      item_category: sessionType.includes('online') ? 'online' : 'presencial',
+      price:         value,
+      quantity:      1,
+      discount:      0, // sin descuentos por ahora
+    }],
+  };
 }
 
 const titles: Record<PageState, string> = {
@@ -312,4 +349,38 @@ const titles: Record<PageState, string> = {
 
     </div>
   </section>
+
+  {purchase && (
+    <script is:inline define:vars={{ purchase }}>
+      // Conversión de compra para GTM (GA4 / Google Ads). Se dispara al cargar la
+      // página de confirmación — el usuario ya aterrizó aquí, la atribución no se
+      // interrumpe. La deduplicación por transaction_id evita contar doble si se
+      // recarga la página (configúralo así en la etiqueta de conversión de GTM).
+      window.dataLayer = window.dataLayer || [];
+      try {
+        var _key = 'vo_purchase_' + purchase.transaction_id;
+        if (!sessionStorage.getItem(_key)) {
+          window.dataLayer.push({ ecommerce: null }); // limpiar objeto previo
+          window.dataLayer.push({
+            event: 'purchase',
+            ecommerce: {
+              transaction_id: purchase.transaction_id,
+              value:          purchase.value,
+              currency:       purchase.currency,
+              coupon:         purchase.coupon,
+              items:          purchase.items,
+            },
+          });
+          sessionStorage.setItem(_key, '1');
+        }
+      } catch (e) {
+        // Si sessionStorage no está disponible, empujar igual (mejor medir que perder la conversión)
+        window.dataLayer.push({ ecommerce: null });
+        window.dataLayer.push({ event: 'purchase', ecommerce: {
+          transaction_id: purchase.transaction_id, value: purchase.value,
+          currency: purchase.currency, coupon: purchase.coupon, items: purchase.items,
+        }});
+      }
+    </script>
+  )}
 </BaseLayout>

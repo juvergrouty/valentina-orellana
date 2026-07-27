@@ -48,6 +48,33 @@ const svcMap: Record<string, string> = {};
 const patientList = patientRes.data ?? [];
 const allServices = allSvcRes.data ?? [];
 
+// ── Horarios disponibles configurados (para el overlay del calendario) ──────
+// Intenta con la columna 'modality'; si aún no existe, cae sin ella (todo 'ambos').
+async function fetchAvailSlots() {
+  const withMod = await supabase.from('availability_slots')
+    .select('day_of_week, start_time, active, modality').eq('active', true);
+  if (withMod.error?.code === '42703') {
+    return await supabase.from('availability_slots').select('day_of_week, start_time, active').eq('active', true);
+  }
+  return withMod;
+}
+const { data: availSlotsRaw } = await fetchAvailSlots();
+type AvSlot = { start: string; min: number; mod: string; height: number };
+const availByDow: Record<number, AvSlot[]> = {};
+(availSlotsRaw ?? []).forEach((s: { day_of_week: number; start_time: string; modality?: string }) => {
+  const hhmm = String(s.start_time).slice(0, 5);
+  const [h, m] = hhmm.split(':').map(Number);
+  (availByDow[s.day_of_week] ??= []).push({ start: hhmm, min: h * 60 + m, mod: s.modality ?? 'ambos', height: 55 });
+});
+// Altura de cada bloque = distancia al siguiente slot del mismo día (para que teselen)
+Object.keys(availByDow).forEach(k => {
+  const arr = availByDow[+k].sort((a, b) => a.min - b.min);
+  arr.forEach((s, i) => {
+    const gap = i < arr.length - 1 ? arr[i + 1].min - s.min : 55;
+    s.height = Math.max(20, Math.min(gap, 90));
+  });
+});
+
 // Mapa email → RUT (para prellenar la emisión de boleta)
 const rutByEmail: Record<string, string> = {};
 patientList.forEach((p: { email: string | null; rut: string | null }) => {
@@ -99,6 +126,7 @@ const weekDays = Array.from({ length: 7 }, (_, i) => {
     dayName: DAYS_ES[i], dayNum: d.getDate(),
     month: d.getMonth(), year: d.getFullYear(),
     isoDate: iso, isToday: iso === todayStr,
+    dow: d.getDay(), // 0=Dom..6=Sáb (para mapear los horarios disponibles)
   };
 });
 
@@ -172,6 +200,30 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
           Semana
         </div>
+
+        <!-- Menú "Mostrar": overlay de horarios disponibles + filtro por modalidad -->
+        <div class="cal-show-wrap">
+          <button id="cal-show-btn" type="button" class="cal-view-chip" style="cursor:pointer;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            Mostrar
+          </button>
+          <div id="cal-show-menu" class="cal-show-menu">
+            <label class="cal-show-item">
+              <input type="checkbox" id="toggle-avail" />
+              <span>Horarios disponibles</span>
+            </label>
+            <div class="cal-show-sep"></div>
+            <p class="cal-show-lbl">Filtrar por modalidad</p>
+            <div class="cal-show-filter" id="avail-filter">
+              <button type="button" data-f="all" class="active">Todas</button>
+              <button type="button" data-f="presencial">Presencial</button>
+              <button type="button" data-f="online">Online</button>
+            </div>
+            <div class="cal-show-sep"></div>
+            <button type="button" id="open-horarios-btn" class="cal-show-config">⚙ Configurar horarios</button>
+          </div>
+        </div>
+
         <a href="/agenda" target="_blank" class="cal-link-btn">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
           Mi link
@@ -233,6 +285,13 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
             ))}
             {HOURS.slice(0, -1).map(h => (
               <div class="h-half" style={`top:${(h - 6) * 60 + 30}px`}></div>
+            ))}
+
+            {/* Overlay de horarios disponibles (oculto por defecto; lo activa el menú "Mostrar") */}
+            {(availByDow[day.dow] ?? []).map(s => (
+              <div class="avail-block" data-mod={s.mod}
+                title={`Disponible ${s.start} · ${s.mod === 'online' ? 'Online' : s.mod === 'presencial' ? 'Presencial' : 'Ambas'}`}
+                style={`top:${s.min - 360}px;height:${s.height - 2}px;`}></div>
             ))}
 
             {(byDate[day.isoDate] ?? []).map(b => (
@@ -503,6 +562,75 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 
         <button type="submit" class="bp-submit-btn">Confirmar bloqueo</button>
       </form>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       HORARIOS PANEL — configurar el horario semanal (por modalidad)
+       ════════════════════════════════════════════════════════════════════ -->
+  <div class="side-panel" id="horarios-panel">
+    <div class="sp-header">
+      <div style="flex:1;min-width:0;">
+        <div class="sp-service">Configurar horarios</div>
+        <div class="sp-status">Genera las franjas disponibles por modalidad</div>
+      </div>
+      <button class="sp-close-btn" id="hp-close" title="Cerrar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="sp-body">
+      <div class="bp-field">
+        <label>Días de atención</label>
+        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
+          {[[1,'Lu'],[2,'Ma'],[3,'Mi'],[4,'Ju'],[5,'Vi'],[6,'Sá'],[0,'Do']].map(([n, s]) => (
+            <button type="button" class="hp-day" data-day={n}>{s}</button>
+          ))}
+        </div>
+      </div>
+
+      <div class="bp-field">
+        <label>Modalidad</label>
+        <select id="hp-modality">
+          <option value="ambos">Ambas (online y presencial)</option>
+          <option value="online">Solo online</option>
+          <option value="presencial">Solo presencial</option>
+        </select>
+      </div>
+
+      <div class="bp-field">
+        <label>Presets</label>
+        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
+          <button type="button" class="hp-preset" data-s="08:00" data-e="13:00">Mañana</button>
+          <button type="button" class="hp-preset" data-s="14:00" data-e="20:00">Tarde</button>
+          <button type="button" class="hp-preset" data-s="08:00" data-e="20:00">Jornada</button>
+        </div>
+      </div>
+
+      <div class="bp-field-row">
+        <div class="bp-field"><label>Inicio</label><input type="time" id="hp-start" value="08:00" step="900" /></div>
+        <div class="bp-field"><label>Término</label><input type="time" id="hp-end" value="20:00" step="900" /></div>
+      </div>
+
+      <div class="bp-field">
+        <label>Intervalo entre citas</label>
+        <select id="hp-interval">
+          <option value="30">Cada 30 min</option>
+          <option value="45">Cada 45 min</option>
+          <option value="55">Cada 55 min</option>
+          <option value="60" selected>Cada 60 min</option>
+          <option value="90">Cada 90 min</option>
+        </select>
+      </div>
+
+      <p style="font-size:0.72rem;color:#6b7280;margin:0.25rem 0 0.5rem;">
+        Al aplicar, se reemplazan las franjas de <strong>esa modalidad</strong> en los días elegidos (no toca las otras).
+      </p>
+      <button type="button" class="bp-submit-btn" id="hp-apply">Aplicar horario</button>
+      <div id="hp-status" style="font-size:0.78rem;margin-top:0.5rem;text-align:center;"></div>
+
+      <div style="margin-top:1rem;border-top:1px solid #f3f4f6;padding-top:0.75rem;">
+        <a href="/admin/horarios" style="font-size:0.78rem;color:#4f5ce8;text-decoration:none;">Vacaciones y feriados →</a>
+      </div>
     </div>
   </div>
 
@@ -873,6 +1001,49 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 /* Shared bp-field inside session panel reschedule form */
 #sp-rsc-form .bp-field label { font-size: 0.68rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; display: block; }
 
+/* ── Overlay de horarios disponibles ────────────────────────────────────── */
+.avail-block {
+  position: absolute; left: 2px; right: 2px; border-radius: 4px;
+  display: none; pointer-events: none; z-index: 1;
+}
+.avail-block[data-mod="online"]     { background: rgba(37,99,235,0.10);  border-left: 3px solid #2563eb; }
+.avail-block[data-mod="presencial"] { background: rgba(87,99,82,0.12);   border-left: 3px solid #576352; }
+.avail-block[data-mod="ambos"]      { background: rgba(148,163,184,0.14); border-left: 3px solid #94a3b8; }
+/* visible solo cuando el toggle está activo */
+.cal-scroll.avail-on .avail-block { display: block; }
+/* filtro por modalidad (los 'ambos' se muestran en todos los filtros) */
+.cal-scroll.avail-f-online .avail-block[data-mod="presencial"] { display: none; }
+.cal-scroll.avail-f-presencial .avail-block[data-mod="online"] { display: none; }
+
+/* ── Menú "Mostrar" ─────────────────────────────────────────────────────── */
+.cal-show-wrap { position: relative; }
+.cal-show-menu {
+  display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  background: white; border: 1px solid #e5e7eb; border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.10); padding: 0.6rem; min-width: 220px;
+}
+.cal-show-menu.open { display: block; }
+.cal-show-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: #374151; cursor: pointer; padding: 0.3rem 0.2rem; }
+.cal-show-item input { width: 15px; height: 15px; accent-color: #4f5ce8; }
+.cal-show-sep { height: 1px; background: #f3f4f6; margin: 0.5rem 0; }
+.cal-show-lbl { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; margin: 0 0 0.4rem; }
+.cal-show-filter { display: flex; gap: 0.25rem; }
+.cal-show-filter button {
+  flex: 1; padding: 0.35rem 0.4rem; font-size: 0.72rem; border: 1px solid #d1d5db;
+  background: white; color: #374151; border-radius: 5px; cursor: pointer;
+}
+.cal-show-filter button.active { background: #4f5ce8; color: white; border-color: #4f5ce8; }
+.cal-show-config { width: 100%; text-align: left; background: none; border: none; cursor: pointer; font-size: 0.82rem; color: #4f5ce8; padding: 0.3rem 0.2rem; }
+.cal-show-config:hover { text-decoration: underline; }
+
+/* ── Panel "Configurar horarios" ────────────────────────────────────────── */
+.hp-day, .hp-preset {
+  padding: 0.4rem 0.7rem; border: 1.5px solid #d1d5db; background: white;
+  border-radius: 6px; font-size: 0.75rem; cursor: pointer; color: #374151;
+}
+.hp-day.active { background: #4f5ce8; color: white; border-color: #4f5ce8; }
+.hp-preset:hover { background: #f9fafb; }
+
 /* ── Mobile: calendario navegable con scroll horizontal ─────────────────── */
 @media (max-width: 768px) {
   /* La barra superior se envuelve para no cortar botones (Hoy, flechas, Agendar) */
@@ -899,6 +1070,98 @@ document.addEventListener('click', (e) => {
     setTimeout(() => { btn.textContent = prev; }, 1500);
   });
 });
+
+// ── Menú "Mostrar": overlay de horarios disponibles + filtro por modalidad ─────
+(function () {
+  const btn    = document.getElementById('cal-show-btn');
+  const menu   = document.getElementById('cal-show-menu');
+  const scroll = document.getElementById('cal-scroll');
+  const toggle = document.getElementById('toggle-avail');
+  const filter = document.getElementById('avail-filter');
+  if (!btn || !menu || !scroll || !toggle) return;
+
+  btn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('open'); });
+  document.addEventListener('click', (e) => {
+    if (!menu.contains(e.target) && !btn.contains(e.target)) menu.classList.remove('open');
+  });
+
+  function applyFilter(f) {
+    scroll.classList.remove('avail-f-all', 'avail-f-online', 'avail-f-presencial');
+    scroll.classList.add('avail-f-' + f);
+    filter?.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.f === f));
+  }
+
+  // Restaurar preferencia guardada
+  try {
+    if (localStorage.getItem('vo_avail_on') === '1') { toggle.checked = true; scroll.classList.add('avail-on'); }
+    applyFilter(localStorage.getItem('vo_avail_f') || 'all');
+  } catch (e) { applyFilter('all'); }
+
+  toggle.addEventListener('change', () => {
+    scroll.classList.toggle('avail-on', toggle.checked);
+    try { localStorage.setItem('vo_avail_on', toggle.checked ? '1' : '0'); } catch (e) {}
+  });
+
+  filter?.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+    applyFilter(b.dataset.f);
+    try { localStorage.setItem('vo_avail_f', b.dataset.f); } catch (e) {}
+  }));
+
+  // "Configurar horarios" → abre el panel lateral de configuración
+  document.getElementById('open-horarios-btn')?.addEventListener('click', () => {
+    menu.classList.remove('open');
+    document.getElementById('horarios-panel')?.classList.add('open');
+  });
+})();
+
+// ── Panel "Configurar horarios" (generador semanal por modalidad) ──────────────
+(function () {
+  const panel = document.getElementById('horarios-panel');
+  if (!panel) return;
+  document.getElementById('hp-close')?.addEventListener('click', () => panel.classList.remove('open'));
+
+  const days = new Set([1, 2, 3, 4, 5]);
+  panel.querySelectorAll('.hp-day').forEach((b) => {
+    const n = parseInt(b.dataset.day);
+    if (days.has(n)) b.classList.add('active');
+    b.addEventListener('click', () => {
+      if (days.has(n)) { days.delete(n); b.classList.remove('active'); }
+      else { days.add(n); b.classList.add('active'); }
+    });
+  });
+
+  panel.querySelectorAll('.hp-preset').forEach((b) => b.addEventListener('click', () => {
+    document.getElementById('hp-start').value = b.dataset.s;
+    document.getElementById('hp-end').value   = b.dataset.e;
+  }));
+
+  document.getElementById('hp-apply')?.addEventListener('click', async () => {
+    const st = document.getElementById('hp-status');
+    if (days.size === 0) { st.textContent = 'Elige al menos un día.'; st.style.color = '#dc2626'; return; }
+    const payload = {
+      days:       [...days],
+      start_time: document.getElementById('hp-start').value,
+      end_time:   document.getElementById('hp-end').value,
+      interval:   parseInt(document.getElementById('hp-interval').value),
+      modality:   document.getElementById('hp-modality').value,
+    };
+    st.textContent = 'Aplicando…'; st.style.color = '#6b7280';
+    try {
+      const res = await fetch('/api/admin/slots/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        st.textContent = `✓ Horario aplicado (${d.count} franjas). Recargando…`; st.style.color = '#15803d';
+        setTimeout(() => location.reload(), 900);
+      } else {
+        st.textContent = '✕ ' + (d.error ?? 'Error'); st.style.color = '#dc2626';
+      }
+    } catch {
+      st.textContent = '✕ Error de conexión'; st.style.color = '#dc2626';
+    }
+  });
+})();
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const MONTHS_LONG = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];

@@ -184,15 +184,30 @@ const feriados: [string, string][] = [
             </p>
           </div>
 
+          <!-- Presets rápidos de horario -->
+          <div style="margin-bottom:1rem;">
+            <label class="label" style="display:block;margin-bottom:0.4rem;">Presets rápidos</label>
+            <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+              <button type="button" class="hr-preset" data-start="08:00" data-end="13:00"
+                style="padding:0.35rem 0.75rem;border:1.5px solid var(--dust);border-radius:99px;background:var(--sand);font-size:0.72rem;cursor:pointer;">Mañana · 08:00–13:00</button>
+              <button type="button" class="hr-preset" data-start="14:00" data-end="20:00"
+                style="padding:0.35rem 0.75rem;border:1.5px solid var(--dust);border-radius:99px;background:var(--sand);font-size:0.72rem;cursor:pointer;">Tarde · 14:00–20:00</button>
+              <button type="button" class="hr-preset" data-start="08:00" data-end="20:00"
+                style="padding:0.35rem 0.75rem;border:1.5px solid var(--dust);border-radius:99px;background:var(--sand);font-size:0.72rem;cursor:pointer;">Jornada · 08:00–20:00</button>
+              <button type="button" class="hr-preset" data-start="09:00" data-end="19:00"
+                style="padding:0.35rem 0.75rem;border:1.5px solid var(--dust);border-radius:99px;background:var(--sand);font-size:0.72rem;cursor:pointer;">Clásico · 09:00–19:00</button>
+            </div>
+          </div>
+
           <!-- Rango horario -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem;">
             <div>
               <label class="label" style="display:block;margin-bottom:0.4rem;">Hora inicio</label>
-              <input type="time" id="start-time" value="09:00" step="900" />
+              <input type="time" id="start-time" value="08:00" step="900" />
             </div>
             <div>
               <label class="label" style="display:block;margin-bottom:0.4rem;">Hora término</label>
-              <input type="time" id="end-time" value="19:00" step="900" />
+              <input type="time" id="end-time" value="20:00" step="900" />
             </div>
           </div>
 
@@ -556,6 +571,17 @@ breakToggle?.addEventListener('change', () => {
 
 ['start-time','end-time','break-start','break-end','interval'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', updatePreview);
+});
+
+// Presets rápidos de rango horario
+document.querySelectorAll<HTMLButtonElement>('.hr-preset').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const s = document.getElementById('start-time') as HTMLInputElement;
+    const e = document.getElementById('end-time')   as HTMLInputElement;
+    if (btn.dataset.start) s.value = btn.dataset.start;
+    if (btn.dataset.end)   e.value = btn.dataset.end;
+    updatePreview();
+  });
 });
 
 function toMin(t: string) { const [h,m]=t.split(':').map(Number); return h*60+m; }
