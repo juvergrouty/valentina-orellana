@@ -48,6 +48,18 @@ const svcMap: Record<string, string> = {};
 const patientList = patientRes.data ?? [];
 const allServices = allSvcRes.data ?? [];
 
+// Paleta de colores por servicio (para el modo "Colores por servicio" del calendario)
+const SVC_PALETTE = [
+  { bg: '#e0e7ff', bd: '#4f5ce8' }, { bg: '#dcfce7', bd: '#16a34a' },
+  { bg: '#fef3c7', bd: '#d97706' }, { bg: '#fce7f3', bd: '#db2777' },
+  { bg: '#cffafe', bd: '#0891b2' }, { bg: '#f3e8ff', bd: '#9333ea' },
+  { bg: '#ffedd5', bd: '#ea580c' }, { bg: '#dbeafe', bd: '#2563eb' },
+  { bg: '#fee2e2', bd: '#dc2626' }, { bg: '#d1fae5', bd: '#059669' },
+];
+const svcColor: Record<string, { bg: string; bd: string }> = {};
+(allServices as Array<{ id: string }>).forEach((s, i) => { svcColor[s.id] = SVC_PALETTE[i % SVC_PALETTE.length]; });
+const NEUTRAL_COLOR = { bg: '#eef2f7', bd: '#94a3b8' };
+
 // ── Horarios disponibles configurados (para el overlay del calendario) ──────
 // Intenta con la columna 'modality'; si aún no existe, cae sin ella (todo 'ambos').
 async function fetchAvailSlots() {
@@ -220,6 +232,19 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
               <button type="button" data-f="online">Online</button>
             </div>
             <div class="cal-show-sep"></div>
+            <label class="cal-show-item">
+              <input type="checkbox" id="toggle-colors" />
+              <span>Colores por servicio</span>
+            </label>
+            <div class="cal-show-sep"></div>
+            <p class="cal-show-lbl">Filtrar por servicio</p>
+            <select id="svc-filter" style="width:100%;font-size:0.8rem;padding:0.35rem 0.4rem;border:1px solid #d1d5db;border-radius:5px;">
+              <option value="">Todos los servicios</option>
+              {allServices.map((s: { id: string; name: string }) => (
+                <option value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <div class="cal-show-sep"></div>
             <button type="button" id="open-horarios-btn" class="cal-show-config">⚙ Configurar horarios (por servicio) →</button>
           </div>
         </div>
@@ -233,6 +258,16 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
           Agendar
         </button>
       </div>
+    </div>
+
+    <!-- Leyenda de colores por servicio (visible con el toggle) -->
+    <div id="svc-legend" style="display:none;flex-wrap:wrap;gap:0.5rem 1rem;padding:0.5rem 1rem;border-bottom:1px solid #e5e7eb;">
+      {allServices.map((s: { id: string; name: string }) => (
+        <span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.72rem;color:#374151;">
+          <span style={`width:12px;height:12px;border-radius:3px;background:${(svcColor[s.id] ?? NEUTRAL_COLOR).bg};border-left:3px solid ${(svcColor[s.id] ?? NEUTRAL_COLOR).bd};`}></span>
+          {s.name}
+        </span>
+      ))}
     </div>
 
     {paymentLink && (
@@ -297,7 +332,8 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
             {(byDate[day.isoDate] ?? []).map(b => (
               <div
                 class={`cal-event ${evClass(b.status, b.payment_method)}`}
-                style={evStyle(b.session_time, b.duration_min)}
+                data-svc={b.service_id ?? ''}
+                style={`${evStyle(b.session_time, b.duration_min)};--svcbg:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bg};--svcbd:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bd}`}
                 data-booking={JSON.stringify({
                   id: b.id,
                   patient_name:   b.patient_name,
@@ -1044,6 +1080,12 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 .hp-day.active { background: #4f5ce8; color: white; border-color: #4f5ce8; }
 .hp-preset:hover { background: #f9fafb; }
 
+/* ── Colores por servicio + filtro de eventos ───────────────────────────── */
+.cal-scroll.colors-on .cal-event { background: var(--svcbg) !important; border-left: 4px solid var(--svcbd) !important; }
+.cal-scroll.colors-on .cal-event,
+.cal-scroll.colors-on .cal-event .ev-time { color: #1f2937 !important; }
+.cal-event.svc-hidden { display: none !important; }
+
 /* ── Mobile: calendario navegable con scroll horizontal ─────────────────── */
 @media (max-width: 768px) {
   /* La barra superior se envuelve para no cortar botones (Hoy, flechas, Agendar) */
@@ -1106,6 +1148,38 @@ document.addEventListener('click', (e) => {
     applyFilter(b.dataset.f);
     try { localStorage.setItem('vo_avail_f', b.dataset.f); } catch (e) {}
   }));
+
+  // ── Colores por servicio ──────────────────────────────────────────────────
+  const colorsToggle = document.getElementById('toggle-colors');
+  const legend = document.getElementById('svc-legend');
+  function applyColors(on) {
+    scroll.classList.toggle('colors-on', on);
+    if (legend) legend.style.display = on ? 'flex' : 'none';
+  }
+  try {
+    if (localStorage.getItem('vo_colors_on') === '1' && colorsToggle) { colorsToggle.checked = true; applyColors(true); }
+  } catch (e) {}
+  colorsToggle?.addEventListener('change', () => {
+    applyColors(colorsToggle.checked);
+    try { localStorage.setItem('vo_colors_on', colorsToggle.checked ? '1' : '0'); } catch (e) {}
+  });
+
+  // ── Filtro por servicio (oculta las citas que no son del servicio elegido) ─
+  const svcFilter = document.getElementById('svc-filter');
+  function applySvcFilter(id) {
+    document.querySelectorAll('.cal-event').forEach((ev) => {
+      ev.classList.toggle('svc-hidden', !!id && ev.dataset.svc !== id);
+    });
+  }
+  try {
+    const sf = localStorage.getItem('vo_svc_filter') || '';
+    if (sf && svcFilter) svcFilter.value = sf;
+    applySvcFilter(sf);
+  } catch (e) {}
+  svcFilter?.addEventListener('change', () => {
+    applySvcFilter(svcFilter.value);
+    try { localStorage.setItem('vo_svc_filter', svcFilter.value); } catch (e) {}
+  });
 
   // "Configurar horarios" → ahora el horario es POR SERVICIO: se edita en Servicios
   document.getElementById('open-horarios-btn')?.addEventListener('click', () => {
