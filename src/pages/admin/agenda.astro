@@ -48,6 +48,12 @@ const svcMap: Record<string, string> = {};
 const patientList = patientRes.data ?? [];
 const allServices = allSvcRes.data ?? [];
 
+// TODOS los servicios (incluidos ocultos/paquetes) — para el filtro y los colores
+// del calendario. `allServices` (solo visibles) se sigue usando para agendar.
+const { data: allSvcFullRes } = await supabase
+  .from('services_catalog').select('id, name').order('sort_order');
+const allSvcFull = (allSvcFullRes ?? []) as Array<{ id: string; name: string }>;
+
 // Paleta de colores por servicio (para el modo "Colores por servicio" del calendario)
 const SVC_PALETTE = [
   { bg: '#e0e7ff', bd: '#4f5ce8' }, { bg: '#dcfce7', bd: '#16a34a' },
@@ -57,7 +63,7 @@ const SVC_PALETTE = [
   { bg: '#fee2e2', bd: '#dc2626' }, { bg: '#d1fae5', bd: '#059669' },
 ];
 const svcColor: Record<string, { bg: string; bd: string }> = {};
-(allServices as Array<{ id: string }>).forEach((s, i) => { svcColor[s.id] = SVC_PALETTE[i % SVC_PALETTE.length]; });
+allSvcFull.forEach((s, i) => { svcColor[s.id] = SVC_PALETTE[i % SVC_PALETTE.length]; });
 const NEUTRAL_COLOR = { bg: '#eef2f7', bd: '#94a3b8' };
 
 // ── Horarios disponibles configurados (para el overlay del calendario) ──────
@@ -233,7 +239,7 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
             <p class="cal-show-lbl">Filtrar por servicio</p>
             <select id="svc-filter" style="width:100%;font-size:0.8rem;padding:0.35rem 0.4rem;border:1px solid #d1d5db;border-radius:5px;">
               <option value="">Todos los servicios</option>
-              {allServices.map((s: { id: string; name: string }) => (
+              {allSvcFull.map((s) => (
                 <option value={s.id}>{s.name}</option>
               ))}
             </select>
@@ -255,7 +261,7 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 
     <!-- Leyenda de colores por servicio (visible con el toggle) -->
     <div id="svc-legend" style="display:none;flex-wrap:wrap;gap:0.5rem 1rem;padding:0.5rem 1rem;border-bottom:1px solid #e5e7eb;">
-      {allServices.map((s: { id: string; name: string }) => (
+      {allSvcFull.map((s) => (
         <span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.72rem;color:#374151;">
           <span style={`width:12px;height:12px;border-radius:3px;background:${(svcColor[s.id] ?? NEUTRAL_COLOR).bg};border-left:3px solid ${(svcColor[s.id] ?? NEUTRAL_COLOR).bd};`}></span>
           {s.name}
