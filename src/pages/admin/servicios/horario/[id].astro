@@ -61,21 +61,29 @@ const saved = Astro.url.searchParams.get('saved') === '1';
   <div id="save-status" style="font-size:0.82rem;margin-bottom:0.75rem;"></div>
 
   <p style="font-size:0.8rem;color:var(--stone);margin-bottom:0.75rem;">
-    Haz clic en las horas para <strong>agregar o quitar</strong> franjas disponibles de este servicio. Cada franja es un inicio de sesión.
+    <strong>Arrastra</strong> para pintar varias horas de una vez · clic en un <strong>día</strong> (arriba) para toda la columna · clic en una <strong>hora</strong> (izquierda) para toda la fila. Cada franja es un inicio de sesión.
   </p>
 
   <div style="overflow-x:auto;border:1px solid var(--dust);border-radius:8px;">
-    <table class="hgrid" style="border-collapse:collapse;width:100%;min-width:640px;">
+    <table class="hgrid" style="border-collapse:collapse;width:100%;min-width:640px;user-select:none;-webkit-user-select:none;">
       <thead>
         <tr>
           <th style="width:56px;"></th>
-          {DAYS.map(d => <th style="padding:0.5rem;font-size:0.78rem;color:var(--ink);border-bottom:1px solid var(--dust);">{d.label}</th>)}
+          {DAYS.map(d => (
+            <th class="day-head" data-dow={d.dow}
+              title="Clic para seleccionar / limpiar todo el día"
+              style="padding:0.5rem;font-size:0.78rem;color:var(--ink);border-bottom:1px solid var(--dust);cursor:pointer;user-select:none;">
+              {d.label}
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody>
         {TIMES.map(t => (
           <tr>
-            <td style="font-size:0.68rem;color:var(--stone);text-align:right;padding:0 0.4rem;white-space:nowrap;">{t}</td>
+            <td class="time-lbl" data-time={t}
+              title="Clic para seleccionar / limpiar esta hora en todos los días"
+              style="font-size:0.68rem;color:var(--stone);text-align:right;padding:0 0.4rem;white-space:nowrap;cursor:pointer;user-select:none;">{t}</td>
             {DAYS.map(d => {
               const key = `${d.dow}|${t}`;
               return (
@@ -98,15 +106,48 @@ const saved = Astro.url.searchParams.get('saved') === '1';
   .slot-cell.on { background: #4f5ce8 !important; }
   .slot-cell:hover { background: #eef0fe; }
   .slot-cell.on:hover { background: #4048c8 !important; }
+  .day-head:hover, .time-lbl:hover { background: #eef0fe; }
 </style>
 
 <script>
   const status = document.getElementById('save-status');
   function setStatus(t, c) { if (status) { status.textContent = t; status.style.color = c; } }
 
-  // Toggle celdas
+  // ── Selección rápida: arrastrar para pintar ────────────────────────────────
+  let painting = false;
+  let paintOn  = true; // true = agregar, false = quitar (según la 1ª celda)
+  const setCell = (cell, on) => cell.classList.toggle('on', on);
+
   document.querySelectorAll('.slot-cell').forEach(cell => {
-    cell.addEventListener('click', () => cell.classList.toggle('on'));
+    cell.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      painting = true;
+      paintOn = !cell.classList.contains('on'); // invierte el estado de la 1ª celda
+      setCell(cell, paintOn);
+    });
+    cell.addEventListener('mouseenter', () => { if (painting) setCell(cell, paintOn); });
+    // Soporte táctil (tablet): tocar alterna la celda
+    cell.addEventListener('touchstart', (e) => { e.preventDefault(); setCell(cell, !cell.classList.contains('on')); }, { passive: false });
+  });
+  document.addEventListener('mouseup', () => { painting = false; });
+  document.addEventListener('mouseleave', () => { painting = false; });
+
+  // ── Clic en el día (encabezado) → toda la columna ─────────────────────────
+  document.querySelectorAll('.day-head').forEach(h => {
+    h.addEventListener('click', () => {
+      const cells = Array.from(document.querySelectorAll(`.slot-cell[data-dow="${h.dataset.dow}"]`));
+      const allOn = cells.length > 0 && cells.every(c => c.classList.contains('on'));
+      cells.forEach(c => setCell(c, !allOn));
+    });
+  });
+
+  // ── Clic en la hora (etiqueta) → toda la fila ─────────────────────────────
+  document.querySelectorAll('.time-lbl').forEach(l => {
+    l.addEventListener('click', () => {
+      const cells = Array.from(document.querySelectorAll(`.slot-cell[data-time="${l.dataset.time}"]`));
+      const allOn = cells.length > 0 && cells.every(c => c.classList.contains('on'));
+      cells.forEach(c => setCell(c, !allOn));
+    });
   });
 
   // Limpiar
