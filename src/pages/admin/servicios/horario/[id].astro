@@ -153,8 +153,20 @@ const saved = Astro.url.searchParams.get('saved') === '1';
     });
     head += '</tr></thead>';
 
+    // Horas de las filas = cadencia de la frecuencia + TODAS las ya seleccionadas
+    // (así nunca se oculta una selección existente aunque no calce la cadencia).
+    const startsSet = new Set();
+    for (let m = START_MIN; m + duration <= END_MIN + 1; m += freq) startsSet.add(m);
+    selected.forEach(k => {
+      const t = k.split('|')[1];
+      const [hh, mm] = t.split(':').map(Number);
+      const min = hh * 60 + mm;
+      if (min >= START_MIN && min <= END_MIN) startsSet.add(min);
+    });
+    const starts = Array.from(startsSet).sort((a, b) => a - b);
+
     let bodyRows = '';
-    for (let m = START_MIN; m + duration <= END_MIN + 1; m += freq) {
+    for (const m of starts) {
       const start = toHM(m);
       const end   = toHM(m + duration);
       bodyRows += `<tr><td class="time-lbl" data-time="${start}" title="Clic: seleccionar/limpiar esta hora en todos los días"
