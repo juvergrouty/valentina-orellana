@@ -101,6 +101,20 @@ const saved = Astro.url.searchParams.get('saved') === '1';
         </select>
         <p style="font-size:0.66rem;color:var(--stone);margin-top:0.25rem;">Cada cuánto empieza un cupo. Normalmente = duración + descanso.</p>
       </div>
+
+      <div style="border-top:1px solid var(--warm);padding-top:0.85rem;margin-top:0.85rem;">
+        <p class="label" style="margin-bottom:0.5rem;font-size:0.68rem;">Agregar hora personalizada</p>
+        <p style="font-size:0.66rem;color:var(--stone);margin-bottom:0.5rem;">Cualquier minuto (ej. 13:13), aunque no calce con la frecuencia.</p>
+        <select id="cfg-cust-day" style="width:100%;font-size:0.82rem;padding:0.45rem;margin-bottom:0.4rem;">
+          <option value="">Todos los días</option>
+          <option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option>
+          <option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option>
+        </select>
+        <div style="display:flex;gap:0.4rem;">
+          <input type="time" id="cfg-cust-time" step="60" style="flex:1;font-size:0.82rem;padding:0.45rem;" />
+          <button type="button" id="cfg-cust-add" class="btn btn-outline btn-sm">Agregar</button>
+        </div>
+      </div>
     </div>
 
     <!-- ── Grilla ──────────────────────────────────────────────────────────── -->
@@ -229,6 +243,17 @@ const saved = Astro.url.searchParams.get('saved') === '1';
   // ── Controles de configuración → re-render en vivo ───────────────────────
   document.getElementById('cfg-duration')?.addEventListener('change', (e) => { duration = parseInt(e.target.value); renderGrid(); });
   document.getElementById('cfg-freq')?.addEventListener('change', (e) => { freq = parseInt(e.target.value); renderGrid(); });
+
+  // Agregar una hora personalizada (cualquier minuto) a un día o a todos
+  document.getElementById('cfg-cust-add')?.addEventListener('click', () => {
+    const t = document.getElementById('cfg-cust-time').value; // "HH:MM"
+    if (!/^\d{2}:\d{2}$/.test(t)) { setStatus('Ingresa una hora válida (HH:MM).', '#dc2626'); return; }
+    const dowVal = document.getElementById('cfg-cust-day').value;
+    const days = dowVal === '' ? [1, 2, 3, 4, 5, 6, 0] : [parseInt(dowVal)];
+    days.forEach(dw => selected.add(`${dw}|${t}`));
+    renderGrid();
+    setStatus(`✓ Agregada ${t}${dowVal === '' ? ' (todos los días)' : ''} · recuerda Guardar`, '#15803d');
+  });
 
   // ── Copiar horario de otro servicio ──────────────────────────────────────
   document.getElementById('copy-from')?.addEventListener('change', async (e) => {
