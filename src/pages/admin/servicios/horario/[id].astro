@@ -185,8 +185,8 @@ const saved = Astro.url.searchParams.get('saved') === '1';
     attachHandlers();
   }
 
-  // ── Selección: arrastrar + día + hora ────────────────────────────────────
-  let painting = false, paintOn = true;
+  // ── Selección: clic simple (toggle) + arrastrar para pintar ──────────────
+  let painting = false, paintOn = true, moved = false, startCell = null;
   const setCell = (cell, on) => {
     cell.classList.toggle('on', on);
     const key = `${cell.dataset.dow}|${cell.dataset.time}`;
@@ -195,8 +195,19 @@ const saved = Astro.url.searchParams.get('saved') === '1';
 
   function attachHandlers() {
     document.querySelectorAll('#hgrid .slot-cell').forEach(cell => {
-      cell.addEventListener('mousedown', (e) => { e.preventDefault(); painting = true; paintOn = !cell.classList.contains('on'); setCell(cell, paintOn); });
-      cell.addEventListener('mouseenter', () => { if (painting) setCell(cell, paintOn); });
+      cell.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        painting = true; moved = false; startCell = cell;
+        paintOn = !cell.classList.contains('on');
+      });
+      cell.addEventListener('mouseenter', () => {
+        if (!painting) return;
+        if (!moved && startCell) setCell(startCell, paintOn); // pinta también la celda inicial
+        moved = true;
+        setCell(cell, paintOn);
+      });
+      // clic simple (sin arrastre): togglear esta celda
+      cell.addEventListener('click', () => { if (!moved) setCell(cell, !cell.classList.contains('on')); });
       cell.addEventListener('touchstart', (e) => { e.preventDefault(); setCell(cell, !cell.classList.contains('on')); }, { passive: false });
     });
     document.querySelectorAll('#hgrid .day-head').forEach(h => h.addEventListener('click', () => {
@@ -210,8 +221,8 @@ const saved = Astro.url.searchParams.get('saved') === '1';
       cells.forEach(c => setCell(c, !allOn));
     }));
   }
-  document.addEventListener('mouseup', () => { painting = false; });
-  document.addEventListener('mouseleave', () => { painting = false; });
+  document.addEventListener('mouseup', () => { painting = false; startCell = null; });
+  document.addEventListener('mouseleave', () => { painting = false; startCell = null; });
 
   // ── Controles de configuración → re-render en vivo ───────────────────────
   document.getElementById('cfg-duration')?.addEventListener('change', (e) => { duration = parseInt(e.target.value); renderGrid(); });
