@@ -359,6 +359,11 @@ const { data: catalogServices } = await supabase
   #calendar-grid .day-past {
     @apply text-dust/40 cursor-not-allowed line-through;
   }
+  /* Días sin atención para el servicio (ej. sáb/dom) o feriados: no seleccionables */
+  #calendar-grid .day-off {
+    @apply text-dust/50 cursor-not-allowed;
+    background: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.03) 4px, rgba(0,0,0,0.03) 8px);
+  }
   #calendar-grid .day-selected {
     @apply bg-ink text-sand font-semibold;
   }
@@ -394,6 +399,8 @@ const { data: catalogServices } = await supabase
     calendarYear:    null,
     calendarMonth:   null,
     loadedSlots:     {},    // { 'YYYY-MM-DD': ['09:00', ...] }
+    availableWeekdays: null, // Set de días de semana con horario (0=Dom..6=Sáb); null = aún sin cargar
+    blockedDates:      new Set(), // fechas 'YYYY-MM-DD' bloqueadas (feriados/vacaciones)
   };
 
   const catalogServices = JSON.parse(catalogServicesRaw);
@@ -573,6 +580,21 @@ const { data: catalogServices } = await supabase
 
     goToStep(2);
     renderCalendar();
+    loadAvailabilitySummary(); // días sin horario / feriados → deshabilitar en el calendario
+  }
+
+  // Carga qué días de la semana tienen horario y qué fechas están bloqueadas
+  async function loadAvailabilitySummary() {
+    state.availableWeekdays = null;
+    state.blockedDates = new Set();
+    if (!state.serviceId) return;
+    try {
+      const res = await fetch(`/api/availability/summary?service_id=${encodeURIComponent(state.serviceId)}`);
+      const d = await res.json();
+      state.availableWeekdays = new Set(d.weekdays ?? []);
+      state.blockedDates = new Set(d.blocked ?? []);
+      renderCalendar(); // re-pintar ya con los días deshabilitados
+    } catch { /* si falla, el calendario sigue mostrando los días (el clic dirá "sin horarios") */ }
   }
 
   function activateGroup(group) {
@@ -709,9 +731,18 @@ const { data: catalogServices } = await supabase
       const isSelected = iso === state.selectedDate;
 
       const isToday = iso === new Date().toISOString().slice(0, 10);
+      // Día sin horario para este servicio (ej. no atiende sáb/dom) o feriado bloqueado
+      const dow        = dateObj.getDay();
+      const noWeekday  = state.availableWeekdays !== null && !state.availableWeekdays.has(dow);
+      const isBlocked  = state.blockedDates.has(iso);
+      const unavailable = noWeekday || isBlocked;
+      const disabled   = isPast || unavailable;
+
       let cls = 'day-btn ';
       if (isPast) {
         cls += 'day-past';
+      } else if (unavailable) {
+        cls += 'day-off';
       } else if (isSelected) {
         cls += 'day-selected';
       } else {
@@ -724,9 +755,11 @@ const { data: catalogServices } = await supabase
       btn.className = cls;
       btn.textContent = d;
       btn.dataset.iso = iso;
-      btn.disabled = isPast;
+      btn.disabled = disabled;
+      if (isBlocked) btn.title = 'No disponible (feriado o bloqueado)';
+      else if (noWeekday) btn.title = 'Este día no hay atención para este servicio';
 
-      if (!isPast) {
+      if (!disabled) {
         btn.addEventListener('click', () => selectDate(iso));
       }
 
