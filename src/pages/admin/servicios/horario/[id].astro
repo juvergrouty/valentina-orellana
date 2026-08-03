@@ -5,34 +5,40 @@ import { supabase } from '../../../../lib/supabase';
 
 const { id } = Astro.params;
 
-// Servicio actual
-const { data: service } = await supabase
-  .from('services_catalog').select('id, name').eq('id', id!).maybeSingle();
+// Servicio actual (con degradación si aún no existen las columnas nuevas)
+async function loadService() {
+  const full = await supabase.from('services_catalog')
+    .select('id, name, duration_min, break_min, slot_interval_min, booking_window_days').eq('id', id!).maybeSingle();
+  if (full.error?.code === '42703') {
+    return await supabase.from('services_catalog').select('id, name, duration_min').eq('id', id!).maybeSingle();
+  }
+  return full;
+}
+const { data: service } = await loadService();
 if (!service) return Astro.redirect('/admin/servicios');
+
+const duration   = (service as { duration_min?: number }).duration_min ?? 50;
+const breakMin   = (service as { break_min?: number }).break_min ?? 10;
+const frecuencia = (service as { slot_interval_min?: number }).slot_interval_min ?? (duration + breakMin);
+const windowDays = (service as { booking_window_days?: number }).booking_window_days ?? 60;
 
 // Otros servicios (para "copiar horario de")
 const { data: others } = await supabase
   .from('services_catalog').select('id, name').neq('id', id!).order('name');
 
-// Franjas actuales de este servicio (degrada si aún no existe la columna service_id)
+// Franjas actuales de este servicio
 let existing: Array<{ day_of_week: number; start_time: string }> = [];
 {
   const res = await supabase.from('availability_slots')
     .select('day_of_week, start_time').eq('service_id', id!).eq('active', true);
   if (!res.error) existing = (res.data ?? []).map(s => ({ day_of_week: s.day_of_week, start_time: String(s.start_time).slice(0, 5) }));
 }
-const selectedKeys = existing.map(s => `${s.day_of_week}|${s.start_time}`);
 
-// Grilla: días (lun→dom) y filas de tiempo cada 30 min
-const DAYS = [
-  { dow: 1, label: 'Lun' }, { dow: 2, label: 'Mar' }, { dow: 3, label: 'Mié' },
-  { dow: 4, label: 'Jue' }, { dow: 5, label: 'Vie' }, { dow: 6, label: 'Sáb' }, { dow: 0, label: 'Dom' },
-];
-const TIMES: string[] = [];
-for (let h = 7; h <= 21; h++) {
-  TIMES.push(`${String(h).padStart(2, '0')}:00`);
-  TIMES.push(`${String(h).padStart(2, '0')}:30`);
-}
+const config = {
+  serviceId:  service.id,
+  duration, breakMin, frecuencia, windowDays,
+  selected:   existing.map(s => `${s.day_of_week}|${s.start_time}`),
+};
 
 const saved = Astro.url.searchParams.get('saved') === '1';
 ---
@@ -42,120 +48,164 @@ const saved = Astro.url.searchParams.get('saved') === '1';
   <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
     <div>
       <a href="/admin/servicios" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Servicios</a>
-      <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;margin-top:0.3rem;">Horario de atención</h2>
+      <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;margin-top:0.3rem;">Horarios de atención</h2>
       <p style="font-size:0.85rem;color:var(--stone);">{service.name}</p>
     </div>
-    <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;">
-      {others && others.length > 0 && (
-        <select id="copy-from" style="font-size:0.82rem;padding:0.45rem 0.6rem;">
-          <option value="">Copiar horario de…</option>
-          {others.map(o => <option value={o.id}>{o.name}</option>)}
-        </select>
-      )}
-      <button id="btn-clear" class="btn btn-outline btn-sm" type="button">Limpiar</button>
-      <button id="btn-save" class="btn btn-dark btn-sm" type="button" data-service={service.id}>Guardar horario</button>
-    </div>
+    <button id="btn-save" class="btn btn-dark btn-sm" type="button">Guardar horario</button>
   </div>
 
   {saved && <div class="alert-success" style="margin-bottom:1rem;">✓ Horario guardado.</div>}
   <div id="save-status" style="font-size:0.82rem;margin-bottom:0.75rem;"></div>
 
-  <p style="font-size:0.8rem;color:var(--stone);margin-bottom:0.75rem;">
-    <strong>Arrastra</strong> para pintar varias horas de una vez · clic en un <strong>día</strong> (arriba) para toda la columna · clic en una <strong>hora</strong> (izquierda) para toda la fila. Cada franja es un inicio de sesión.
-  </p>
+  <div style="display:grid;grid-template-columns:230px 1fr;gap:1.5rem;align-items:start;">
 
-  <div style="overflow-x:auto;border:1px solid var(--dust);border-radius:8px;">
-    <table class="hgrid" style="border-collapse:collapse;width:100%;min-width:640px;user-select:none;-webkit-user-select:none;">
-      <thead>
-        <tr>
-          <th style="width:56px;"></th>
-          {DAYS.map(d => (
-            <th class="day-head" data-dow={d.dow}
-              title="Clic para seleccionar / limpiar todo el día"
-              style="padding:0.5rem;font-size:0.78rem;color:var(--ink);border-bottom:1px solid var(--dust);cursor:pointer;user-select:none;">
-              {d.label}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {TIMES.map(t => (
-          <tr>
-            <td class="time-lbl" data-time={t}
-              title="Clic para seleccionar / limpiar esta hora en todos los días"
-              style="font-size:0.68rem;color:var(--stone);text-align:right;padding:0 0.4rem;white-space:nowrap;cursor:pointer;user-select:none;">{t}</td>
-            {DAYS.map(d => {
-              const key = `${d.dow}|${t}`;
-              return (
-                <td style="padding:0;border:1px solid #f0ede8;">
-                  <button type="button" class={`slot-cell${selectedKeys.includes(key) ? ' on' : ''}`}
-                    data-dow={d.dow} data-time={t}
-                    style="width:100%;height:26px;border:none;background:transparent;cursor:pointer;display:block;"></button>
-                </td>
-              );
-            })}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <!-- ── Panel de configuración (estilo Encuadrado) ─────────────────────── -->
+    <div class="card" style="padding:1.1rem;">
+      <p class="label" style="margin-bottom:1rem;">Configuración general</p>
+
+      {others && others.length > 0 && (
+        <div style="margin-bottom:1rem;">
+          <label class="label" style="display:block;margin-bottom:0.3rem;font-size:0.72rem;">Copiar horario de otro servicio</label>
+          <select id="copy-from" style="width:100%;font-size:0.82rem;padding:0.45rem;">
+            <option value="">— Elegir —</option>
+            {others.map(o => <option value={o.id}>{o.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      <div style="margin-bottom:1rem;">
+        <label class="label" style="display:block;margin-bottom:0.3rem;font-size:0.72rem;">Duración</label>
+        <select id="cfg-duration" style="width:100%;font-size:0.82rem;padding:0.45rem;">
+          {[30,40,45,50,60,75,80,90,120].map(v => <option value={v} selected={v===duration}>{v} minutos</option>)}
+        </select>
+      </div>
+
+      <div style="margin-bottom:1rem;">
+        <label class="label" style="display:block;margin-bottom:0.3rem;font-size:0.72rem;">Descanso entre sesiones</label>
+        <select id="cfg-break" style="width:100%;font-size:0.82rem;padding:0.45rem;">
+          {[0,5,10,15,20,30].map(v => <option value={v} selected={v===breakMin}>{v} minutos</option>)}
+        </select>
+      </div>
+
+      <div style="margin-bottom:1rem;">
+        <label class="label" style="display:block;margin-bottom:0.3rem;font-size:0.72rem;">Días visibles hacia el futuro</label>
+        <input type="number" id="cfg-window" value={windowDays} min="1" max="365" style="width:100%;font-size:0.82rem;padding:0.45rem;" />
+        <p style="font-size:0.66rem;color:var(--stone);margin-top:0.25rem;">Hasta cuántos días adelante puede agendar el paciente.</p>
+      </div>
+
+      <div style="border-top:1px solid var(--warm);padding-top:0.85rem;">
+        <p class="label" style="margin-bottom:0.5rem;font-size:0.68rem;">Reglas avanzadas</p>
+        <label class="label" style="display:block;margin-bottom:0.3rem;font-size:0.72rem;">Frecuencia de atención</label>
+        <select id="cfg-freq" style="width:100%;font-size:0.82rem;padding:0.45rem;">
+          {[30,40,45,50,60,75,80,90,120].map(v => <option value={v} selected={v===frecuencia}>{v} minutos</option>)}
+        </select>
+        <p style="font-size:0.66rem;color:var(--stone);margin-top:0.25rem;">Cada cuánto empieza un cupo. Normalmente = duración + descanso.</p>
+      </div>
+    </div>
+
+    <!-- ── Grilla ──────────────────────────────────────────────────────────── -->
+    <div>
+      <p style="font-size:0.8rem;color:var(--stone);margin-bottom:0.6rem;">
+        <strong>Arrastra</strong> para pintar varias horas · clic en un <strong>día</strong> (arriba) para toda la columna · clic en la <strong>hora</strong> (izquierda) para toda la fila. Cada bloque es un cupo (inicio – fin).
+      </p>
+      <div style="overflow-x:auto;border:1px solid var(--dust);border-radius:8px;">
+        <table id="hgrid" class="hgrid" style="border-collapse:collapse;width:100%;min-width:640px;user-select:none;-webkit-user-select:none;"></table>
+      </div>
+    </div>
   </div>
 
+  <script id="hgrid-config" type="application/json" set:html={JSON.stringify(config)}></script>
 </AdminLayout>
 
 <style>
-  .slot-cell.on { background: #4f5ce8 !important; }
+  .slot-cell.on { background: #4f5ce8 !important; color: #fff; }
   .slot-cell:hover { background: #eef0fe; }
   .slot-cell.on:hover { background: #4048c8 !important; }
   .day-head:hover, .time-lbl:hover { background: #eef0fe; }
+  .slot-cell { font-size: 0.6rem; line-height: 1; }
 </style>
 
 <script>
+  const cfg = JSON.parse(document.getElementById('hgrid-config').textContent);
+  const DAYS = [
+    { dow: 1, label: 'Lun' }, { dow: 2, label: 'Mar' }, { dow: 3, label: 'Mié' },
+    { dow: 4, label: 'Jue' }, { dow: 5, label: 'Vie' }, { dow: 6, label: 'Sáb' }, { dow: 0, label: 'Dom' },
+  ];
+  const START_MIN = 7 * 60;   // 07:00
+  const END_MIN   = 22 * 60;   // 22:00
   const status = document.getElementById('save-status');
-  function setStatus(t, c) { if (status) { status.textContent = t; status.style.color = c; } }
+  const setStatus = (t, c) => { if (status) { status.textContent = t; status.style.color = c; } };
 
-  // ── Selección rápida: arrastrar para pintar ────────────────────────────────
-  let painting = false;
-  let paintOn  = true; // true = agregar, false = quitar (según la 1ª celda)
-  const setCell = (cell, on) => cell.classList.toggle('on', on);
+  let selected = new Set(cfg.selected);           // claves "dow|HH:MM"
+  let duration = cfg.duration;
+  let freq      = cfg.frecuencia;
 
-  document.querySelectorAll('.slot-cell').forEach(cell => {
-    cell.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      painting = true;
-      paintOn = !cell.classList.contains('on'); // invierte el estado de la 1ª celda
-      setCell(cell, paintOn);
+  const pad = (n) => String(n).padStart(2, '0');
+  const toHM = (min) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
+
+  // ── Construir/re-construir la grilla según la frecuencia y duración ──────
+  function renderGrid() {
+    const table = document.getElementById('hgrid');
+    let head = '<thead><tr><th style="width:56px;"></th>';
+    DAYS.forEach(d => {
+      head += `<th class="day-head" data-dow="${d.dow}" title="Clic: seleccionar/limpiar todo el día"
+        style="padding:0.5rem;font-size:0.78rem;color:var(--ink);border-bottom:1px solid var(--dust);cursor:pointer;">${d.label}</th>`;
     });
-    cell.addEventListener('mouseenter', () => { if (painting) setCell(cell, paintOn); });
-    // Soporte táctil (tablet): tocar alterna la celda
-    cell.addEventListener('touchstart', (e) => { e.preventDefault(); setCell(cell, !cell.classList.contains('on')); }, { passive: false });
-  });
+    head += '</tr></thead>';
+
+    let bodyRows = '';
+    for (let m = START_MIN; m + duration <= END_MIN + 1; m += freq) {
+      const start = toHM(m);
+      const end   = toHM(m + duration);
+      bodyRows += `<tr><td class="time-lbl" data-time="${start}" title="Clic: seleccionar/limpiar esta hora en todos los días"
+        style="font-size:0.66rem;color:var(--stone);text-align:right;padding:0 0.4rem;white-space:nowrap;cursor:pointer;">${start}</td>`;
+      DAYS.forEach(d => {
+        const key = `${d.dow}|${start}`;
+        const on  = selected.has(key) ? ' on' : '';
+        bodyRows += `<td style="padding:0;border:1px solid #f0ede8;">
+          <button type="button" class="slot-cell${on}" data-dow="${d.dow}" data-time="${start}"
+            style="width:100%;height:30px;border:none;background:transparent;cursor:pointer;display:block;">${start.slice(0,5)}–${end}</button>
+        </td>`;
+      });
+      bodyRows += '</tr>';
+    }
+    table.innerHTML = head + '<tbody>' + bodyRows + '</tbody>';
+    attachHandlers();
+  }
+
+  // ── Selección: arrastrar + día + hora ────────────────────────────────────
+  let painting = false, paintOn = true;
+  const setCell = (cell, on) => {
+    cell.classList.toggle('on', on);
+    const key = `${cell.dataset.dow}|${cell.dataset.time}`;
+    if (on) selected.add(key); else selected.delete(key);
+  };
+
+  function attachHandlers() {
+    document.querySelectorAll('#hgrid .slot-cell').forEach(cell => {
+      cell.addEventListener('mousedown', (e) => { e.preventDefault(); painting = true; paintOn = !cell.classList.contains('on'); setCell(cell, paintOn); });
+      cell.addEventListener('mouseenter', () => { if (painting) setCell(cell, paintOn); });
+      cell.addEventListener('touchstart', (e) => { e.preventDefault(); setCell(cell, !cell.classList.contains('on')); }, { passive: false });
+    });
+    document.querySelectorAll('#hgrid .day-head').forEach(h => h.addEventListener('click', () => {
+      const cells = Array.from(document.querySelectorAll(`#hgrid .slot-cell[data-dow="${h.dataset.dow}"]`));
+      const allOn = cells.length > 0 && cells.every(c => c.classList.contains('on'));
+      cells.forEach(c => setCell(c, !allOn));
+    }));
+    document.querySelectorAll('#hgrid .time-lbl').forEach(l => l.addEventListener('click', () => {
+      const cells = Array.from(document.querySelectorAll(`#hgrid .slot-cell[data-time="${l.dataset.time}"]`));
+      const allOn = cells.length > 0 && cells.every(c => c.classList.contains('on'));
+      cells.forEach(c => setCell(c, !allOn));
+    }));
+  }
   document.addEventListener('mouseup', () => { painting = false; });
   document.addEventListener('mouseleave', () => { painting = false; });
 
-  // ── Clic en el día (encabezado) → toda la columna ─────────────────────────
-  document.querySelectorAll('.day-head').forEach(h => {
-    h.addEventListener('click', () => {
-      const cells = Array.from(document.querySelectorAll(`.slot-cell[data-dow="${h.dataset.dow}"]`));
-      const allOn = cells.length > 0 && cells.every(c => c.classList.contains('on'));
-      cells.forEach(c => setCell(c, !allOn));
-    });
-  });
+  // ── Controles de configuración → re-render en vivo ───────────────────────
+  document.getElementById('cfg-duration')?.addEventListener('change', (e) => { duration = parseInt(e.target.value); renderGrid(); });
+  document.getElementById('cfg-freq')?.addEventListener('change', (e) => { freq = parseInt(e.target.value); renderGrid(); });
 
-  // ── Clic en la hora (etiqueta) → toda la fila ─────────────────────────────
-  document.querySelectorAll('.time-lbl').forEach(l => {
-    l.addEventListener('click', () => {
-      const cells = Array.from(document.querySelectorAll(`.slot-cell[data-time="${l.dataset.time}"]`));
-      const allOn = cells.length > 0 && cells.every(c => c.classList.contains('on'));
-      cells.forEach(c => setCell(c, !allOn));
-    });
-  });
-
-  // Limpiar
-  document.getElementById('btn-clear')?.addEventListener('click', () => {
-    document.querySelectorAll('.slot-cell.on').forEach(c => c.classList.remove('on'));
-  });
-
-  // Copiar horario de otro servicio
+  // ── Copiar horario de otro servicio ──────────────────────────────────────
   document.getElementById('copy-from')?.addEventListener('change', async (e) => {
     const fromId = e.target.value;
     if (!fromId) return;
@@ -167,34 +217,35 @@ const saved = Astro.url.searchParams.get('saved') === '1';
       });
       const d = await res.json();
       if (!d.ok) { setStatus('✕ ' + (d.error ?? 'Error'), '#dc2626'); return; }
-      document.querySelectorAll('.slot-cell.on').forEach(c => c.classList.remove('on'));
-      const keys = new Set(d.slots.map(s => `${s.day_of_week}|${s.start_time}`));
-      document.querySelectorAll('.slot-cell').forEach(c => {
-        if (keys.has(`${c.dataset.dow}|${c.dataset.time}`)) c.classList.add('on');
-      });
+      selected = new Set(d.slots.map(s => `${s.day_of_week}|${s.start_time}`));
+      renderGrid();
       setStatus(`✓ ${d.slots.length} franjas copiadas (recuerda Guardar)`, '#15803d');
       e.target.value = '';
     } catch { setStatus('✕ Error de conexión', '#dc2626'); }
   });
 
-  // Guardar
+  // ── Guardar (franjas + configuración del servicio) ───────────────────────
   document.getElementById('btn-save')?.addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
-    const serviceId = btn.dataset.service;
-    const slots = Array.from(document.querySelectorAll('.slot-cell.on')).map(c => ({
-      day_of_week: parseInt(c.dataset.dow),
-      start_time:  c.dataset.time,
-    }));
+    const slots = Array.from(selected).map(k => { const [dow, time] = k.split('|'); return { day_of_week: parseInt(dow), start_time: time }; });
+    const settings = {
+      duration_min:        parseInt(document.getElementById('cfg-duration').value),
+      break_min:           parseInt(document.getElementById('cfg-break').value),
+      slot_interval_min:   parseInt(document.getElementById('cfg-freq').value),
+      booking_window_days: parseInt(document.getElementById('cfg-window').value),
+    };
     btn.disabled = true;
     setStatus('Guardando…', '#6b7280');
     try {
       const res = await fetch('/api/admin/slots/service', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save', service_id: serviceId, slots }),
+        body: JSON.stringify({ action: 'save', service_id: cfg.serviceId, slots, settings }),
       });
       const d = await res.json();
-      if (d.ok) { window.location.href = '/admin/servicios/horario/' + serviceId + '?saved=1'; }
+      if (d.ok) { window.location.href = '/admin/servicios/horario/' + cfg.serviceId + '?saved=1'; }
       else { setStatus('✕ ' + (d.error ?? 'Error'), '#dc2626'); btn.disabled = false; }
     } catch { setStatus('✕ Error de conexión', '#dc2626'); btn.disabled = false; }
   });
+
+  renderGrid();
 </script>

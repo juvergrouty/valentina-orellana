@@ -12,7 +12,11 @@ function json(data: unknown, status = 200) {
 //   'save' { service_id, slots: [{day_of_week, start_time}] }  → reemplaza el horario del servicio
 //   'copy' { from_service_id }                                 → devuelve las franjas de otro servicio (para pre-cargar la grilla)
 export const POST: APIRoute = async ({ request }) => {
-  let body: { action?: string; service_id?: string; from_service_id?: string; slots?: Array<{ day_of_week: number; start_time: string }> };
+  let body: {
+    action?: string; service_id?: string; from_service_id?: string;
+    slots?: Array<{ day_of_week: number; start_time: string }>;
+    settings?: { duration_min?: number; break_min?: number; slot_interval_min?: number; booking_window_days?: number };
+  };
   try { body = await request.json(); }
   catch { return json({ ok: false, error: 'Body inválido.' }, 400); }
 
@@ -35,6 +39,23 @@ export const POST: APIRoute = async ({ request }) => {
   if (action === 'save') {
     const serviceId = body.service_id;
     if (!serviceId) return json({ ok: false, error: 'Falta service_id.' }, 400);
+
+    // Guardar la configuración del servicio (duración/descanso/frecuencia/días).
+    // Degrada sin romper si las columnas nuevas aún no existen.
+    if (body.settings) {
+      const s = body.settings;
+      const upd: Record<string, number> = {};
+      if (Number.isFinite(s.duration_min))        upd.duration_min        = Number(s.duration_min);
+      if (Number.isFinite(s.break_min))           upd.break_min           = Number(s.break_min);
+      if (Number.isFinite(s.slot_interval_min))   upd.slot_interval_min   = Number(s.slot_interval_min);
+      if (Number.isFinite(s.booking_window_days)) upd.booking_window_days = Number(s.booking_window_days);
+      if (Object.keys(upd).length) {
+        const r = await supabase.from('services_catalog').update(upd).eq('id', serviceId);
+        if (r.error && r.error.code !== '42703') {
+          return json({ ok: false, error: 'Error al guardar la configuración: ' + r.error.message }, 500);
+        }
+      }
+    }
 
     const clean = (body.slots ?? [])
       .filter(s => typeof s.day_of_week === 'number' && /^\d{2}:\d{2}$/.test(s.start_time))

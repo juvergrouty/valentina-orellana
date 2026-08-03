@@ -65,12 +65,24 @@ export const GET: APIRoute = async ({ url }) => {
     return res;
   }
 
-  // Cargar en paralelo: slots, fecha bloqueada, reservas del día y prep_duration_min
+  // Config del servicio pedido (duración/descanso/días visibles), con degradación.
+  async function fetchServiceCfg() {
+    if (!serviceId) return { data: null };
+    const full = await supabase.from('services_catalog')
+      .select('duration_min, break_min, booking_window_days').eq('id', serviceId).maybeSingle();
+    if (full.error?.code === '42703') {
+      return await supabase.from('services_catalog').select('duration_min').eq('id', serviceId).maybeSingle();
+    }
+    return full;
+  }
+
+  // Cargar en paralelo: slots, fecha bloqueada, reservas del día, settings, config del servicio
   const [
     { data: slots, error: slotsError },
     { data: blockedDate },
     { data: booked, error: bookedError },
     { data: settingsRows },
+    { data: svcCfg },
   ] = await Promise.all([
     fetchSlots(),
     supabase.from('blocked_dates').select('id').eq('date', dateParam).maybeSingle(),
@@ -80,7 +92,18 @@ export const GET: APIRoute = async ({ url }) => {
       .neq('status', 'cancelled')
       .or(`status.eq.confirmed,and(status.eq.pending_payment,created_at.gte.${new Date(Date.now() - 30 * 60 * 1000).toISOString()})`),
     supabase.from('settings').select('key, value'),
+    fetchServiceCfg(),
   ]);
+
+  // Límite "días visibles hacia el futuro" del servicio
+  const svcWindow = (svcCfg as { booking_window_days?: number } | null)?.booking_window_days;
+  if (serviceId && Number.isFinite(svcWindow)) {
+    const maxDate = new Date(today);
+    maxDate.setDate(maxDate.getDate() + Number(svcWindow));
+    if (requested > maxDate) {
+      return new Response(JSON.stringify({ slots: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
 
   if (slotsError) return new Response(JSON.stringify({ error: 'Error consultando disponibilidad.' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   if (!slots || slots.length === 0) return new Response(JSON.stringify({ slots: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -89,7 +112,13 @@ export const GET: APIRoute = async ({ url }) => {
 
   const cfg: Record<string, string> = {};
   (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { cfg[key] = value; });
-  const prepMin = parseInt(cfg['prep_duration_min'] ?? '20');
+
+  // Descanso entre sesiones: por servicio si está definido; si no, el global.
+  const svcBreak = (svcCfg as { break_min?: number } | null)?.break_min;
+  const prepMin = Number.isFinite(svcBreak) ? Number(svcBreak) : parseInt(cfg['prep_duration_min'] ?? '20');
+  // Duración de la nueva sesión: la del parámetro o la del servicio.
+  const svcDuration = (svcCfg as { duration_min?: number } | null)?.duration_min;
+  const effDuration = newDuration ?? (Number.isFinite(svcDuration) ? Number(svcDuration) : null);
 
   // Reservas existentes con su duración real (fallback 50 min para bookings antiguos sin duration_min)
   const bookedSessions = (booked ?? []).map((b) => {
@@ -116,7 +145,7 @@ export const GET: APIRoute = async ({ url }) => {
         // Este slot cae dentro de la ventana de una reserva existente
         if (slotMin >= bMin && slotMin < bMin + bDur + prepMin) return false;
         // Una reserva existente cae dentro de la ventana de este slot (si se conoce la duración nueva)
-        if (newDuration && bMin >= slotMin && bMin < slotMin + newDuration + prepMin) return false;
+        if (effDuration && bMin >= slotMin && bMin < slotMin + effDuration + prepMin) return false;
       }
 
       return true;
