@@ -117,12 +117,14 @@ const saved = Astro.url.searchParams.get('saved') === '1';
   <script id="hgrid-config" type="application/json" set:html={JSON.stringify(config)}></script>
 </AdminLayout>
 
-<style>
-  .slot-cell.on { background: #4f5ce8 !important; color: #fff; }
-  .slot-cell:hover { background: #eef0fe; }
-  .slot-cell.on:hover { background: #4048c8 !important; }
-  .day-head:hover, .time-lbl:hover { background: #eef0fe; }
-  .slot-cell { font-size: 0.6rem; line-height: 1; }
+<!-- is:global porque la grilla se crea con innerHTML (JS) y no lleva el atributo
+     de scoping de Astro; acotado a #hgrid para no filtrar a otras páginas. -->
+<style is:global>
+  #hgrid .slot-cell { font-size: 0.6rem; line-height: 1; }
+  #hgrid .slot-cell.on { background: #4f5ce8 !important; color: #fff !important; }
+  #hgrid .slot-cell:hover { background: #eef0fe; }
+  #hgrid .slot-cell.on:hover { background: #4048c8 !important; }
+  #hgrid .day-head:hover, #hgrid .time-lbl:hover { background: #eef0fe; }
 </style>
 
 <script>
