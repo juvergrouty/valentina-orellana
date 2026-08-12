@@ -3,4 +3,4 @@ Allow: /
 Disallow: /admin
 Disallow: /api
 
-Sitemap: https://valentinaorellana.cl/sitemap.xml
+Sitemap: https://www.valentinaorellana.cl/sitemap.xml
