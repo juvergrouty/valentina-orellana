@@ -17,7 +17,7 @@ const PAGES: { path: string; changefreq: string; priority: string }[] = [
 export const GET: APIRoute = ({ site }) => {
   const base = (site?.toString() ?? 'https://www.valentinaorellana.cl/').replace(/\/$/, '');
   const urls = PAGES.map(p => {
-    const loc = p.path ? `${base}/${p.path}` : `${base}/`;
+    const loc = p.path ? `${base}/${p.path}/` : `${base}/`;
     return `  <url>\n    <loc>${loc}</loc>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`;
   }).join('\n');
 
