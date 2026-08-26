@@ -12,6 +12,7 @@ const settings: Record<string, string> = {};
 (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
 const manualPaymentEnabled    = settings['manual_payment_enabled'] !== 'false';
 const transferPaymentEnabled  = settings['transfer_payment_enabled'] === 'true';
+const recaptchaSiteKey        = settings['recaptcha_site_key'] ?? '';
 
 // Pre-selección de grupo desde URL (ej: /agenda?grupo=individual)
 const grupoParam    = Astro.url.searchParams.get('grupo')    ?? null;
@@ -384,6 +385,13 @@ const { data: catalogServices } = await supabase
     @apply text-sand border-ink;
   }
 </style>
+
+<script define:vars={{ recaptchaSiteKey }}>
+  window.__RECAPTCHA_SITE_KEY__ = recaptchaSiteKey;
+</script>
+{recaptchaSiteKey && (
+  <script src={`https://www.google.com/recaptcha/api.js?render=${recaptchaSiteKey}`} is:inline></script>
+)}
 
 <script define:vars={{ catalogServicesRaw: JSON.stringify(catalogServices ?? []), preselectedGroup: grupoParam, preselectedServicioId: servicioParam }}>
   // ─── Estado ───────────────────────────────────────────────────────────────
@@ -929,6 +937,21 @@ const { data: catalogServices } = await supabase
 
     voPush('begin_checkout'); // el paciente inicia el pago
 
+    let recaptchaToken = '';
+    if (window.__RECAPTCHA_SITE_KEY__ && window.grecaptcha) {
+      try {
+        recaptchaToken = await new Promise((resolve, reject) => {
+          grecaptcha.ready(() => {
+            grecaptcha.execute(window.__RECAPTCHA_SITE_KEY__, { action: 'submit_booking' })
+              .then(resolve)
+              .catch(reject);
+          });
+        });
+      } catch (err) {
+        console.error('[recaptcha] error obteniendo token', err);
+      }
+    }
+
     try {
       const res = await fetch('/api/bookings', {
         method: 'POST',
@@ -942,6 +965,7 @@ const { data: catalogServices } = await supabase
           patient_email:   email,
           patient_phone:   phone,
           notes,
+          recaptcha_token: recaptchaToken,
         }),
       });
 
