@@ -1,0 +1,32 @@
+name: Frequent cron (reminders + expiración de pagos)
+
+# Vercel Hobby solo permite 1 cron diario por proyecto. Este workflow gratuito
+# de GitHub Actions (repos públicos = sin costo) llama a los endpoints que
+# necesitan revisarse cada pocos minutos: liberar reservas sin pago a los 3 min,
+# y enviar recordatorios con precisión de horas (no solo "el día antes").
+#
+# Requiere UN secreto de repo (Settings → Secrets and variables → Actions):
+#   CRON_SECRET  → el mismo valor que la variable de entorno CRON_SECRET en Vercel.
+# GitHub no permite intervalos menores a ~5 min de forma confiable, así que la
+# expiración de 3 minutos puede tardar hasta ~5-8 min en la práctica.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Expirar reservas sin pago (>3 min)
+        run: |
+          curl -sS -X GET "https://www.valentinaorellana.cl/api/cron/expire-pending" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP %{http_code}\n"
+
+      - name: Recordatorios (email 24h / WhatsApp 4h antes)
+        run: |
+          curl -sS -X GET "https://www.valentinaorellana.cl/api/cron/reminders" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP %{http_code}\n"

@@ -11,10 +11,10 @@ function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-// Vercel Cron. Envía el recordatorio a los pacientes con sesión próxima.
-// La "ventana" (horas de antelación) es configurable: reminder_window_hours (default 5).
-//   - Cron cada hora + ventana 5h  → recordatorio ~4-5h antes (requiere Vercel Pro).
-//   - Cron 1 vez al día + ventana 28h → recordatorio el día anterior (plan gratis).
+// Se llama cada 5 min vía GitHub Actions (.github/workflows/frequent-cron.yml —
+// Vercel Hobby solo permite cron diario, así que la frecuencia real la da GH Actions,
+// gratis en repos públicos). Envía el recordatorio por correo a los pacientes cuya
+// sesión empieza dentro de la ventana configurada (reminder_window_hours, default 24h).
 export const GET: APIRoute = async ({ request }) => {
   const secret = import.meta.env.CRON_SECRET;
   if (secret) {
@@ -26,31 +26,46 @@ export const GET: APIRoute = async ({ request }) => {
     return json({ ok: true, skipped: 'recordatorios desactivados en Configuración' });
   }
 
-  // Ventana de antelación. Default 28h → con cron DIARIO (plan Hobby) envía el
-  // recordatorio el día anterior. Al pasar a Vercel Pro: cambiar el cron a "0 * * * *"
-  // (cada hora) y poner reminder_window_hours = 5 para lograr "~4h antes".
+  // Ventana de antelación en horas antes de la sesión (por defecto 24h antes).
   const { data: winRow } = await supabase.from('settings').select('value').eq('key', 'reminder_window_hours').maybeSingle();
-  const windowHours = parseInt(winRow?.value ?? '28') || 28;
+  const windowHours = parseInt(winRow?.value ?? '24') || 24;
 
   const now      = Date.now();
   const windowMs = windowHours * 60 * 60 * 1000;
   const today    = new Date(now).toISOString().slice(0, 10);
   const tomorrow = new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  // Sesiones confirmadas de hoy/mañana, con correo, aún sin recordatorio enviado
-  const { data: bookings } = await supabase
-    .from('bookings')
-    .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, notes')
-    .eq('status', 'confirmed')
-    .gte('session_date', today)
-    .lte('session_date', tomorrow)
-    .not('patient_email', 'is', null);
+  // Sesiones confirmadas de hoy/mañana, con correo, aún sin recordatorio enviado.
+  // reminder_email_enabled puede no existir aún (columna nueva) — si falla, reintenta sin ella.
+  let bookings: any[] | null = null;
+  {
+    const q = await supabase
+      .from('bookings')
+      .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, notes, reminder_email_enabled')
+      .eq('status', 'confirmed')
+      .gte('session_date', today)
+      .lte('session_date', tomorrow)
+      .not('patient_email', 'is', null);
+    if (q.error?.code === '42703') {
+      const retry = await supabase
+        .from('bookings')
+        .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, notes')
+        .eq('status', 'confirmed')
+        .gte('session_date', today)
+        .lte('session_date', tomorrow)
+        .not('patient_email', 'is', null);
+      bookings = retry.data;
+    } else {
+      bookings = q.data;
+    }
+  }
 
   let sent = 0, failed = 0, skipped = 0;
 
   for (const b of bookings ?? []) {
     if (!b.patient_email) { skipped++; continue; }
     if (b.session_date === '2099-12-31') { skipped++; continue; }
+    if (b.reminder_email_enabled === false) { skipped++; continue; }
     if ((b.notes ?? '').includes(MARKER)) { skipped++; continue; }
 
     // ¿La sesión empieza dentro de la ventana (entre ahora y ahora+ventana)?

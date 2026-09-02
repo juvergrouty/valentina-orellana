@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { createPaymentOrder } from '../../lib/flow';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
 import { logInfo, logWarn, logError } from '../../lib/logger';
+import { upsertPatientFromBooking } from '../../lib/patients';
 
 export const prerender = false;
 
@@ -235,6 +236,7 @@ async function handleBooking(request: Request) {
 
       // Enviar emails (sin bloquear la respuesta)
       const ed = { ...emailData, payment_method: 'manual' };
+        await upsertPatientFromBooking({ patient_name: ed.patient_name, patient_email: ed.patient_email, patient_phone: ed.patient_phone });
         Promise.all([
                 sendConfirmationToClient(ed).catch(console.error),
                 sendNotificationToAdmin(ed, notificationEmail).catch(console.error),

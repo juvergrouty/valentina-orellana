@@ -27,26 +27,45 @@ const weekStartStr = weekStart.toISOString().split('T')[0];
 const weekEndStr   = weekEnd.toISOString().split('T')[0];
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
-const [bookingsRes, svcRes, patientRes, allSvcRes] = await Promise.all([
-  supabase
-    .from('bookings')
-    .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id')
-    .gte('session_date', weekStartStr)
-    .lte('session_date', weekEndStr)
-    .neq('status', 'cancelled')
-    .order('session_time'),
+// reminder_whatsapp_enabled / reminder_email_enabled / mp_preference_id son columnas
+// nuevas — si aún no existen en la base, reintenta sin ellas para no romper la página.
+async function fetchBookings() {
+  const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_whatsapp_enabled, reminder_email_enabled';
+  const res = await supabase.from('bookings').select(cols)
+    .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
+    .neq('status', 'cancelled').order('session_time');
+  if (res.error?.code === '42703') {
+    const fallbackCols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id';
+    return supabase.from('bookings').select(fallbackCols)
+      .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
+      .neq('status', 'cancelled').order('session_time');
+  }
+  return res;
+}
+
+const [bookingsRes, svcRes, patientRes, allSvcRes, settingsRes] = await Promise.all([
+  fetchBookings(),
   supabase.from('services_catalog').select('id, name'),
   supabase.from('patients').select('id, name, email, phone, rut').eq('active', true).order('name'),
   supabase.from('services_catalog')
     .select('id, name, price, price_online, price_presencial, modality, type, duration_min')
     .eq('visible', true).order('sort_order'),
+  supabase.from('settings').select('key, value').in('key', ['google_place_id', 'clinic_address', 'flow_env']),
 ]);
 
-const bookings    = bookingsRes.data ?? [];
+const bookings    = (bookingsRes.data ?? []) as Array<Record<string, any>>;
 const svcMap: Record<string, string> = {};
 (svcRes.data ?? []).forEach((s: { id: string; name: string }) => { svcMap[s.id] = s.name; });
 const patientList = patientRes.data ?? [];
 const allServices = allSvcRes.data ?? [];
+
+const cfg: Record<string, string> = {};
+(settingsRes.data ?? []).forEach((r: { key: string; value: string }) => { cfg[r.key] = r.value; });
+const reviewUrl = cfg['google_place_id']
+  ? `https://search.google.com/local/writereview?placeid=${encodeURIComponent(cfg['google_place_id'])}`
+  : '';
+const clinicAddress = cfg['clinic_address'] ?? '';
+const flowCheckoutBase = cfg['flow_env'] === 'production' ? 'https://www.flow.cl/app/web/pay.php' : 'https://sandbox.flow.cl/app/web/pay.php';
 
 // TODOS los servicios (incluidos ocultos/paquetes) — para el filtro y los colores
 // del calendario. `allServices` (solo visibles) se sigue usando para agendar.
@@ -93,10 +112,13 @@ Object.keys(availByDow).forEach(k => {
   });
 });
 
-// Mapa email → RUT (para prellenar la emisión de boleta)
+// Mapa email → RUT (para prellenar la emisión de boleta) y email → id de ficha
+// (para el botón "Escribir evolución" del panel — enlaza directo a la ficha si ya existe)
 const rutByEmail: Record<string, string> = {};
-patientList.forEach((p: { email: string | null; rut: string | null }) => {
+const patientIdByEmail: Record<string, string> = {};
+patientList.forEach((p: { id: string; email: string | null; rut: string | null }) => {
   if (p.email && p.rut) rutByEmail[p.email.toLowerCase()] = p.rut;
+  if (p.email) patientIdByEmail[p.email.toLowerCase()] = p.id;
 });
 
 // ── Eventos de Google Calendar de la semana (solo lectura) ──────────────────
@@ -348,6 +370,11 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
                   service_label:  svcLabel(b),
                   notes:          b.notes,
                   patient_rut:    rutByEmail[(b.patient_email ?? '').toLowerCase()] ?? '',
+                  patient_id:     patientIdByEmail[(b.patient_email ?? '').toLowerCase()] ?? '',
+                  mp_preference_id: b.mp_preference_id ?? '',
+                  reminder_whatsapp_enabled: b.reminder_whatsapp_enabled !== false,
+                  reminder_email_enabled:    b.reminder_email_enabled !== false,
+                  created_pending:           b.status === 'pending_payment',
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}`}
               >
@@ -702,10 +729,20 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
           Ver ficha del paciente
         </a>
-        <button class="sp-action-row">
+        <a href="#" id="sp-btn-evolucion" class="sp-action-row">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
           Escribir evolución
-        </button>
+        </a>
+        <a href="#" id="sp-btn-remind-wa" target="_blank" rel="noopener" class="sp-action-row">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+          Recordar sesión por WhatsApp
+        </a>
+        {reviewUrl && (
+          <a href={reviewUrl} target="_blank" rel="noopener" class="sp-action-row">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Pedir reseña en Google
+          </a>
+        )}
       </div>
 
       <!-- Pago -->
@@ -722,6 +759,37 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
             <button type="submit" class="sp-btn-confirm">✓ Confirmar pago</button>
           </form>
         </div>
+        <div id="sp-paylink-box" style="display:none;margin-top:0.6rem;">
+          <p style="font-size:0.72rem;color:var(--stone);margin-bottom:0.4rem;">Link de pago pendiente:</p>
+          <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+            <a href="#" id="sp-paylink-wa" target="_blank" rel="noopener" class="sp-action-row" style="padding:0.3rem 0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+              WhatsApp
+            </a>
+            <a href="#" id="sp-paylink-mail" class="sp-action-row" style="padding:0.3rem 0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
+              Email
+            </a>
+            <button type="button" id="sp-paylink-copy" class="sp-action-row" style="padding:0.3rem 0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              Copiar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recordatorios automáticos -->
+      <div class="sp-section">
+        <p class="label" style="margin-bottom:0.5rem;">Recordatorios automáticos</p>
+        <label style="display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;padding:0.3rem 0;cursor:pointer;">
+          <span>WhatsApp 4h antes</span>
+          <input type="checkbox" id="sp-rem-wa" data-field="reminder_whatsapp_enabled">
+        </label>
+        <label style="display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;padding:0.3rem 0;cursor:pointer;">
+          <span>Email 24h antes</span>
+          <input type="checkbox" id="sp-rem-email" data-field="reminder_email_enabled">
+        </label>
+        <p id="sp-rem-msg" style="display:none;font-size:0.72rem;color:var(--stone);margin-top:0.3rem;"></p>
       </div>
 
       <!-- Boleta de honorarios -->
@@ -888,7 +956,7 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 .cal-event { position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px; cursor: pointer; overflow: hidden; border: 1px solid; transition: filter .1s, box-shadow .1s; z-index: 1; }
 .cal-event:hover { filter: brightness(0.95); box-shadow: 0 2px 8px rgba(0,0,0,.1); z-index: 3; }
 .ev-confirmed { background: #dcfce7; border-color: #86efac; color: #166534; }
-.ev-pending   { background: #dbeafe; border-color: #93c5fd; color: #1e40af; border-style: dashed; }
+.ev-pending   { background: #fef3c7; border-color: #f59e0b; color: #92400e; border-style: dashed; border-width: 2px; }
 .ev-manual    { background: #fef9c3; border-color: #fcd34d; color: #92400e; }
 .cal-gcal-event {
   position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px;
@@ -1099,7 +1167,7 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 }
 </style>
 
-<script>
+<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase }}>
 // ── Copiar link de pago (banner tras crear cita con link) ──────────────────────
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-copy-link]');
@@ -1586,11 +1654,74 @@ function openSessionDetail(b) {
 
   // Ver ficha link
   const fichaBtn = document.getElementById('sp-btn-ficha');
-  if (b.patient_email) {
-    fichaBtn.href = `/admin/pacientes?q=${encodeURIComponent(b.patient_email)}`;
+  const fichaFallback = b.patient_email
+    ? `/admin/pacientes?q=${encodeURIComponent(b.patient_email)}`
+    : `/admin/pacientes?q=${encodeURIComponent(b.patient_name)}`;
+  fichaBtn.href = fichaFallback;
+
+  // Escribir evolución: si ya tiene ficha, va directo al formulario de nota;
+  // si no, cae en la misma búsqueda (la ficha aún no existe — se crea sola
+  // en cuanto el paciente pague, o se crea a mano desde ahí).
+  const evolBtn = document.getElementById('sp-btn-evolucion');
+  evolBtn.href = b.patient_id ? `/admin/pacientes/${b.patient_id}?tab=notas#nueva-nota` : fichaFallback;
+
+  // Recordar sesión por WhatsApp (manual — abre WhatsApp con el mensaje ya armado)
+  const remWaBtn = document.getElementById('sp-btn-remind-wa');
+  const waDigits = (b.patient_phone || '').replace(/\D/g, '');
+  const waPhone  = waDigits.length === 9 ? '56' + waDigits : waDigits;
+  const remTime  = b.session_time.slice(0, 5);
+  if (waPhone.length >= 11) {
+    const isOnlineRem = b.session_type?.includes('online');
+    const whereLine = isOnlineRem
+      ? 'Es una sesión online — te paso el link de la videollamada apenas se acerque la hora.'
+      : (clinicAddress ? `Te espero en: ${clinicAddress}` : 'Es una sesión presencial en mi consulta.');
+    const msg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te recuerdo tu sesión del ${isoToLabel(b.session_date)} a las ${remTime}. ${whereLine}`;
+    remWaBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`;
+    remWaBtn.style.display = '';
   } else {
-    fichaBtn.href = `/admin/pacientes?q=${encodeURIComponent(b.patient_name)}`;
+    remWaBtn.style.display = 'none';
   }
+
+  // Link de pago (solo si está pendiente y ya se generó una orden Flow)
+  const paylinkBox = document.getElementById('sp-paylink-box');
+  if (!isPaid && b.mp_preference_id) {
+    const payUrl = `${flowCheckoutBase}?token=${b.mp_preference_id}`;
+    const payMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te comparto el link de pago de tu sesión: ${payUrl}`;
+    const waPayBtn = document.getElementById('sp-paylink-wa');
+    if (waPhone.length >= 11) {
+      waPayBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(payMsg)}`;
+      waPayBtn.style.display = '';
+    } else {
+      waPayBtn.style.display = 'none';
+    }
+    const mailBtn = document.getElementById('sp-paylink-mail');
+    if (b.patient_email) {
+      mailBtn.href = `mailto:${b.patient_email}?subject=${encodeURIComponent('Link de pago — Ps. Valentina Orellana')}&body=${encodeURIComponent(payMsg)}`;
+      mailBtn.style.display = '';
+    } else {
+      mailBtn.style.display = 'none';
+    }
+    document.getElementById('sp-paylink-copy').onclick = () => {
+      navigator.clipboard.writeText(payUrl).then(() => {
+        const btn = document.getElementById('sp-paylink-copy');
+        const original = btn.innerHTML;
+        btn.textContent = '✓ Copiado';
+        setTimeout(() => { btn.innerHTML = original; }, 1500);
+      });
+    };
+    paylinkBox.style.display = 'block';
+  } else {
+    paylinkBox.style.display = 'none';
+  }
+
+  // Recordatorios automáticos (interruptores por reserva)
+  const remWa = document.getElementById('sp-rem-wa');
+  const remEmail = document.getElementById('sp-rem-email');
+  remWa.checked = b.reminder_whatsapp_enabled !== false;
+  remEmail.checked = b.reminder_email_enabled !== false;
+  remWa.dataset.bookingId = b.id;
+  remEmail.dataset.bookingId = b.id;
+  document.getElementById('sp-rem-msg').style.display = 'none';
 
   // Amount & badge
   document.getElementById('sp-amount').textContent = formatCLP(b.amount);
@@ -1647,6 +1778,38 @@ function openSessionDetail(b) {
 
   openSessionPanel();
 }
+
+// ── Recordatorios: guardar el interruptor al cambiarlo ────────────────────────
+async function saveReminderToggle(input) {
+  const bookingId = input.dataset.bookingId;
+  const field = input.dataset.field;
+  const msg = document.getElementById('sp-rem-msg');
+  if (!bookingId) return;
+  try {
+    const fd = new FormData();
+    fd.set('action', 'update-reminders');
+    fd.set('id', bookingId);
+    fd.set('field', field);
+    fd.set('value', input.checked ? 'true' : 'false');
+    const res = await fetch('/api/admin/bookings', { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      msg.textContent = '✓ Guardado';
+      msg.style.color = '#15803d';
+    } else {
+      msg.textContent = data.error ?? 'No se pudo guardar (falta actualizar la base de datos).';
+      msg.style.color = '#dc2626';
+      input.checked = !input.checked; // revertir visualmente
+    }
+  } catch {
+    msg.textContent = 'Error de conexión.';
+    msg.style.color = '#dc2626';
+    input.checked = !input.checked;
+  }
+  msg.style.display = 'block';
+}
+document.getElementById('sp-rem-wa')?.addEventListener('change', (e) => saveReminderToggle(e.target));
+document.getElementById('sp-rem-email')?.addEventListener('change', (e) => saveReminderToggle(e.target));
 
 // ── Reagendar toggle ──────────────────────────────────────────────────────────
 document.getElementById('sp-toggle-rsc')?.addEventListener('click', () => {

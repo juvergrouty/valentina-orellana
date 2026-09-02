@@ -21,6 +21,7 @@ import { getPaymentStatus } from '../../../lib/flow';
 import { supabase } from '../../../lib/supabase';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
 import { syncBookingToCalendar } from '../../../lib/syncCalendar';
+import { upsertPatientFromBooking } from '../../../lib/patients';
 
 export const prerender = false;
 
@@ -95,6 +96,7 @@ export const POST: APIRoute = async ({ request }) => {
           sendConfirmationToClient(emailData).catch(console.error),
           sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
           syncBookingToCalendar(updated).catch(console.error),
+          upsertPatientFromBooking(emailData).catch(console.error),
         ]);
       }
 

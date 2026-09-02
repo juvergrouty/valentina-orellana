@@ -253,6 +253,53 @@ export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent:
   return { sent: true };
 }
 
+// ─── Email al cliente: reserva liberada por falta de pago ────────────────────
+export async function sendPendingExpiredEmail(data: {
+  patient_name: string; patient_email: string; session_date: string; session_time: string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+
+  const subject = `Tu horario del ${formatDate(data.session_date)} fue liberado — Ps. Valentina Orellana`;
+
+  const res = await client.emails.send({
+    from: FROM,
+    to:   data.patient_email,
+    subject,
+    html: `
+      <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Tu horario fue liberado</h1>
+        <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;line-height:1.6;">
+          Hola ${data.patient_name}, habías reservado el <strong>${formatDate(data.session_date)} a las ${data.session_time}</strong>,
+          pero el pago no se completó a tiempo, así que el horario quedó disponible nuevamente para otra persona.
+        </p>
+        <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#6B6860;line-height:1.6;margin-bottom:1.5rem;">
+          Si fue un error o quieres agendar de nuevo, puedes hacerlo aquí mismo o escribirme directamente.
+        </p>
+        <a href="https://www.valentinaorellana.cl/agenda"
+           style="display:inline-block;background:#576352;color:white;padding:0.75rem 1.5rem;
+                  text-decoration:none;font-family:'Inter',sans-serif;font-size:0.75rem;
+                  letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;margin-right:0.5rem;">
+          Agendar de nuevo
+        </a>
+        <a href="https://wa.me/56972735696"
+           style="display:inline-block;background:transparent;color:#576352;padding:0.75rem 1.5rem;
+                  text-decoration:none;font-family:'Inter',sans-serif;font-size:0.75rem;
+                  letter-spacing:0.1em;text-transform:uppercase;border:1px solid #576352;border-radius:4px;">
+          Escribir por WhatsApp
+        </a>
+        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
+                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
+          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+        </p>
+      </div>
+    `,
+  });
+  await logEmail('email/reserva-liberada', data.patient_email, subject, !res.error, res.error?.message);
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
+}
+
 // ─── Email al cliente: solicitud de reseña en Google ─────────────────────────
 export async function sendReviewRequestEmail(opts: {
   patientName:  string;

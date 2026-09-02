@@ -353,7 +353,7 @@ const formatCLP = (n: number) =>
       </div>
 
       <!-- Agregar nota -->
-      <div class="card" style="position:sticky;top:90px;">
+      <div class="card" id="nueva-nota" style="position:sticky;top:90px;">
         <p class="label" style="margin-bottom:1.25rem;">+ Nueva nota</p>
         <form method="POST" action="/api/admin/patients" style="display:flex;flex-direction:column;gap:1rem;">
           <input type="hidden" name="action" value="add_note" />
@@ -377,7 +377,7 @@ const formatCLP = (n: number) =>
           </div>
           <div>
             <label class="label" style="display:block;margin-bottom:0.3rem;">Notas de sesión</label>
-            <textarea name="content" rows="8" required
+            <textarea name="content" id="nueva-nota-content" rows="8" required
               placeholder="Temas abordados, evolución del paciente, tareas asignadas..."
               style="resize:vertical;"></textarea>
           </div>
@@ -388,6 +388,12 @@ const formatCLP = (n: number) =>
       </div>
 
     </div>
+  )}
+
+  {tab === 'notas' && (
+    <script>
+      document.getElementById('nueva-nota-content')?.focus();
+    </script>
   )}
 
 </AdminLayout>

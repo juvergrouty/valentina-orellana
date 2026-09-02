@@ -5,6 +5,7 @@ import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCa
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail } from '../../../lib/email';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
+import { upsertPatientFromBooking } from '../../../lib/patients';
 
 export const prerender = false;
 
@@ -12,6 +13,25 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   const form   = await request.formData();
   const action = form.get('action')?.toString();
   const dest   = form.get('redirect')?.toString() ?? '/admin/agenda';
+
+  // ── Guardar interruptor de recordatorio (WhatsApp 4h / email 24h) ────────────
+  if (action === 'update-reminders') {
+    const id    = form.get('id')?.toString();
+    const field = form.get('field')?.toString();
+    const value = form.get('value')?.toString() === 'true';
+    const allowed = ['reminder_whatsapp_enabled', 'reminder_email_enabled'];
+    if (!id || !field || !allowed.includes(field)) {
+      return new Response(JSON.stringify({ ok: false, error: 'Solicitud inválida.' }), { status: 400 });
+    }
+    const { error } = await supabase.from('bookings').update({ [field]: value }).eq('id', id);
+    if (error) {
+      const msg = error.code === '42703'
+        ? 'Falta aplicar la migración de base de datos (columnas de recordatorio).'
+        : error.message;
+      return new Response(JSON.stringify({ ok: false, error: msg }), { status: 500 });
+    }
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+  }
 
   // ── Confirmar reserva ───────────────────────────────────────────────────────
   if (action === 'confirm') {
@@ -23,6 +43,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       // AWAIT: en serverless (Vercel) la función se termina al responder, matando
       // promesas pendientes. Hay que esperar la sincronización antes del redirect.
       try { await syncBookingToCalendar(booking); } catch (e) { console.error('[confirm] sync:', e); }
+      try { await upsertPatientFromBooking(booking); } catch (e) { console.error('[confirm] patient:', e); }
       // Emisión automática de boleta si el servicio lo tiene activado
       if (booking.service_id) {
         try {
@@ -97,6 +118,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (error || !booking) return redirect(dest + '&error=conflict');
     try { await syncBookingToCalendar(booking); } catch (e) { console.error('[create] sync:', e); }
+    try { await upsertPatientFromBooking(booking); } catch (e) { console.error('[create] patient:', e); }
     return redirect(dest);
   }
 
@@ -249,6 +271,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       const { data: b } = await supabase.from('bookings').select('*').eq('id', bid).single();
       if (b) { try { await syncBookingToCalendar(b); } catch (e) { console.error('[create-admin] sync:', e); } }
     }
+    try { await upsertPatientFromBooking({ patient_name: finalName, patient_email: finalEmail, patient_phone: finalPhone }); } catch (e) { console.error('[create-admin] patient:', e); }
 
     if (sendConf && finalEmail) {
       const emailData = {
