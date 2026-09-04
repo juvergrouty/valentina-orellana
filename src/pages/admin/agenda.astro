@@ -27,10 +27,10 @@ const weekStartStr = weekStart.toISOString().split('T')[0];
 const weekEndStr   = weekEnd.toISOString().split('T')[0];
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
-// reminder_whatsapp_enabled / reminder_email_enabled / mp_preference_id son columnas
-// nuevas — si aún no existen en la base, reintenta sin ellas para no romper la página.
+// reminder_email_enabled / patient_rut / mp_preference_id son columnas nuevas —
+// si aún no existen en la base, reintenta sin ellas para no romper la página.
 async function fetchBookings() {
-  const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_whatsapp_enabled, reminder_email_enabled';
+  const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, patient_rut';
   const res = await supabase.from('bookings').select(cols)
     .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
     .neq('status', 'cancelled').order('session_time');
@@ -369,12 +369,11 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
                   payment_method: b.payment_method,
                   service_label:  svcLabel(b),
                   notes:          b.notes,
-                  patient_rut:    rutByEmail[(b.patient_email ?? '').toLowerCase()] ?? '',
+                  patient_rut:    rutByEmail[(b.patient_email ?? '').toLowerCase()] || b.patient_rut || '',
                   patient_id:     patientIdByEmail[(b.patient_email ?? '').toLowerCase()] ?? '',
                   mp_preference_id: b.mp_preference_id ?? '',
-                  reminder_whatsapp_enabled: b.reminder_whatsapp_enabled !== false,
-                  reminder_email_enabled:    b.reminder_email_enabled !== false,
-                  created_pending:           b.status === 'pending_payment',
+                  reminder_email_enabled: b.reminder_email_enabled !== false,
+                  created_pending:        b.status === 'pending_payment',
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}`}
               >
@@ -778,13 +777,9 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
         </div>
       </div>
 
-      <!-- Recordatorios automáticos -->
+      <!-- Recordatorio automático -->
       <div class="sp-section">
-        <p class="label" style="margin-bottom:0.5rem;">Recordatorios automáticos</p>
-        <label style="display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;padding:0.3rem 0;cursor:pointer;">
-          <span>WhatsApp 4h antes</span>
-          <input type="checkbox" id="sp-rem-wa" data-field="reminder_whatsapp_enabled">
-        </label>
+        <p class="label" style="margin-bottom:0.5rem;">Recordatorio automático</p>
         <label style="display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;padding:0.3rem 0;cursor:pointer;">
           <span>Email 24h antes</span>
           <input type="checkbox" id="sp-rem-email" data-field="reminder_email_enabled">
@@ -1714,12 +1709,9 @@ function openSessionDetail(b) {
     paylinkBox.style.display = 'none';
   }
 
-  // Recordatorios automáticos (interruptores por reserva)
-  const remWa = document.getElementById('sp-rem-wa');
+  // Recordatorio automático (interruptor por reserva)
   const remEmail = document.getElementById('sp-rem-email');
-  remWa.checked = b.reminder_whatsapp_enabled !== false;
   remEmail.checked = b.reminder_email_enabled !== false;
-  remWa.dataset.bookingId = b.id;
   remEmail.dataset.bookingId = b.id;
   document.getElementById('sp-rem-msg').style.display = 'none';
 
@@ -1808,7 +1800,6 @@ async function saveReminderToggle(input) {
   }
   msg.style.display = 'block';
 }
-document.getElementById('sp-rem-wa')?.addEventListener('change', (e) => saveReminderToggle(e.target));
 document.getElementById('sp-rem-email')?.addEventListener('change', (e) => saveReminderToggle(e.target));
 
 // ── Reagendar toggle ──────────────────────────────────────────────────────────

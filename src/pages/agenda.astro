@@ -253,6 +253,12 @@ const { data: catalogServices } = await supabase
             <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa un correo válido.</p>
           </div>
           <div>
+            <label class="label text-stone block mb-2" for="patient_rut">RUT *</label>
+            <input id="patient_rut" name="patient_rut" type="text" required autocomplete="off"
+              placeholder="12.345.678-9" class="field" />
+            <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa tu RUT (necesario para emitir tu boleta de honorarios automáticamente).</p>
+          </div>
+          <div>
             <label class="label text-stone block mb-2" for="motivo_consulta">Motivo de consulta *</label>
             <select id="motivo_consulta" name="motivo_consulta" required class="field bg-transparent cursor-pointer">
               <option value="" disabled selected>Selecciona el motivo principal...</option>
@@ -909,6 +915,7 @@ const { data: catalogServices } = await supabase
 
     const name   = $('patient_name').value.trim();
     const email  = $('patient_email').value.trim();
+    const rut    = $('patient_rut').value.trim();
     const phoneRaw = $('patient_phone').value.replace(/\D/g, '');
     const phone  = phoneRaw.length === 9 ? `+56${phoneRaw}` : '';
     const motivo = $('motivo_consulta').value.trim();
@@ -923,6 +930,8 @@ const { data: catalogServices } = await supabase
     if (!name)   { $('patient_name').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('patient_email').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!phone)  { $('patient_phone').closest('div').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    const rutClean = rut.replace(/\./g, '').replace(/\s/g, '');
+    if (!/^\d{7,8}-[\dkK]$/.test(rutClean)) { $('patient_rut').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!motivo) { $('motivo_consulta').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!valid) return;
 
@@ -964,6 +973,7 @@ const { data: catalogServices } = await supabase
           patient_name:    name,
           patient_email:   email,
           patient_phone:   phone,
+          patient_rut:     rutClean,
           notes,
           recaptcha_token: recaptchaToken,
         }),

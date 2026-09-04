@@ -83,7 +83,7 @@ export const POST: APIRoute = async ({ request }) => {
     sendConfirmationToClient(emailData).catch(console.error),
     sendNotificationToAdmin(emailData, notificationEmail).catch(console.error),
     syncBookingToCalendar({ ...emailData, id: bookingId }).catch(console.error),
-    upsertPatientFromBooking(emailData).catch(console.error),
+    upsertPatientFromBooking({ ...emailData, rut: booking.patient_rut }).catch(console.error),
   ]);
 
   return json({ confirmed: true, paymentMethod });

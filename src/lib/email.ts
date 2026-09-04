@@ -449,8 +449,12 @@ export async function sendBoletaEmail(opts: {
       <div style="font-family:'Inter',sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <p style="font-size:0.95rem;color:#6B6860;margin-bottom:1.25rem;">Hola ${opts.patientName},</p>
         <p style="font-size:0.92rem;line-height:1.7;">
-          Adjunto encontrarás tu <strong>boleta de honorarios electrónica${folioTxt}</strong> por la atención psicológica.
-          Puedes usarla para solicitar el reembolso en tu previsión o seguro de salud si corresponde.
+          Muchas gracias por tu sesión. Te adjunto tu <strong>boleta de honorarios electrónica${folioTxt}</strong>
+          por la atención psicológica.
+        </p>
+        <p style="font-size:0.92rem;line-height:1.7;">
+          Puedes usar este documento para solicitar el <strong>reembolso en tu Isapre, Fonasa o seguro de salud</strong>,
+          si tu plan lo contempla.
         </p>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">

@@ -19,7 +19,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const id    = form.get('id')?.toString();
     const field = form.get('field')?.toString();
     const value = form.get('value')?.toString() === 'true';
-    const allowed = ['reminder_whatsapp_enabled', 'reminder_email_enabled'];
+    const allowed = ['reminder_email_enabled'];
     if (!id || !field || !allowed.includes(field)) {
       return new Response(JSON.stringify({ ok: false, error: 'Solicitud inválida.' }), { status: 400 });
     }
@@ -43,7 +43,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       // AWAIT: en serverless (Vercel) la función se termina al responder, matando
       // promesas pendientes. Hay que esperar la sincronización antes del redirect.
       try { await syncBookingToCalendar(booking); } catch (e) { console.error('[confirm] sync:', e); }
-      try { await upsertPatientFromBooking(booking); } catch (e) { console.error('[confirm] patient:', e); }
+      try { await upsertPatientFromBooking({ ...booking, rut: booking.patient_rut }); } catch (e) { console.error('[confirm] patient:', e); }
       // Emisión automática de boleta si el servicio lo tiene activado
       if (booking.service_id) {
         try {
@@ -118,7 +118,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (error || !booking) return redirect(dest + '&error=conflict');
     try { await syncBookingToCalendar(booking); } catch (e) { console.error('[create] sync:', e); }
-    try { await upsertPatientFromBooking(booking); } catch (e) { console.error('[create] patient:', e); }
+    try { await upsertPatientFromBooking({ ...booking, rut: booking.patient_rut }); } catch (e) { console.error('[create] patient:', e); }
     return redirect(dest);
   }
 

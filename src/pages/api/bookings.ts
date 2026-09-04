@@ -36,6 +36,7 @@ async function handleBooking(request: Request) {
         patient_name,
         patient_email,
         patient_phone,
+        patient_rut,
         notes,
         recaptcha_token,
   } = body as Record<string, string>;
@@ -70,8 +71,13 @@ async function handleBooking(request: Request) {
   // mismo comportamiento que hoy, para no romper el flujo mientras no esté activo.
 
   // ── Validación ───────────────────────────────────────────────────────────────
-  if (!service_id || !modality_choice || !session_date || !session_time || !patient_name || !patient_email || !patient_phone) {
+  if (!service_id || !modality_choice || !session_date || !session_time || !patient_name || !patient_email || !patient_phone || !patient_rut) {
         return json({ error: 'Faltan campos obligatorios.' }, 400);
+  }
+
+  const rutClean = patient_rut.trim().toUpperCase().replace(/\./g, '').replace(/\s/g, '');
+  if (!/^\d{7,8}-[\dK]$/.test(rutClean)) {
+        return json({ error: 'RUT inválido.' }, 400);
   }
 
   if (!['online', 'presencial'].includes(modality_choice)) {
@@ -153,6 +159,7 @@ async function handleBooking(request: Request) {
         patient_name:   patient_name.trim(),
         patient_email:  patient_email.trim().toLowerCase(),
         patient_phone:  patient_phone.trim(),
+        patient_rut:    rutClean,
         notes:          notes?.trim() ?? null,
         status:         'pending_payment',
         payment_method: 'flow',
@@ -169,15 +176,16 @@ async function handleBooking(request: Request) {
 
   let { data: bookingData, error: insertError } = await tryInsert(bookingPayload);
 
-  // Si falla por columna inexistente, reintentar quitando columnas opcionales
+  // Si falla por columna inexistente, reintentar quitando columnas opcionales una a una
   if (insertError?.code === '42703') {
         await logWarn('bookings', 'Columna desconocida, reintentando sin columnas opcionales', { error: insertError.message });
-        const { duration_min, ...withoutDur } = bookingPayload;
-        let retry = await tryInsert(withoutDur);
-        if (retry.error?.code === '42703') {
-                // service_id column also missing
-          const { service_id: _sid, ...withoutBoth } = withoutDur as Record<string, unknown>;
-                retry = await tryInsert(withoutBoth);
+        let payload = { ...bookingPayload };
+        let retry = { data: bookingData, error: insertError };
+        const optionalCols = ['duration_min', 'service_id', 'patient_rut'];
+        for (const col of optionalCols) {
+                if (retry.error?.code !== '42703') break;
+                delete payload[col];
+                retry = await tryInsert(payload);
         }
         bookingData = retry.data;
         insertError = retry.error;
@@ -236,7 +244,7 @@ async function handleBooking(request: Request) {
 
       // Enviar emails (sin bloquear la respuesta)
       const ed = { ...emailData, payment_method: 'manual' };
-        await upsertPatientFromBooking({ patient_name: ed.patient_name, patient_email: ed.patient_email, patient_phone: ed.patient_phone });
+        await upsertPatientFromBooking({ patient_name: ed.patient_name, patient_email: ed.patient_email, patient_phone: ed.patient_phone, rut: rutClean });
         Promise.all([
                 sendConfirmationToClient(ed).catch(console.error),
                 sendNotificationToAdmin(ed, notificationEmail).catch(console.error),

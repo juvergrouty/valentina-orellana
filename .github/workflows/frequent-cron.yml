@@ -25,7 +25,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -w "\nHTTP %{http_code}\n"
 
-      - name: Recordatorios (email 24h / WhatsApp 4h antes)
+      - name: Recordatorios por email (24h antes)
         run: |
           curl -sS -X GET "https://www.valentinaorellana.cl/api/cron/reminders" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \

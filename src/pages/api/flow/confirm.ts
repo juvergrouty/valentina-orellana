@@ -22,6 +22,7 @@ import { supabase } from '../../../lib/supabase';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
 import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 import { upsertPatientFromBooking } from '../../../lib/patients';
+import { emitBoletaParaReserva } from '../../../lib/apigateway';
 
 export const prerender = false;
 
@@ -96,8 +97,23 @@ export const POST: APIRoute = async ({ request }) => {
           sendConfirmationToClient(emailData).catch(console.error),
           sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
           syncBookingToCalendar(updated).catch(console.error),
-          upsertPatientFromBooking(emailData).catch(console.error),
+          upsertPatientFromBooking({ ...emailData, rut: updated.patient_rut }).catch(console.error),
         ]);
+
+        // Boleta de honorarios automática al confirmarse el pago online. A diferencia
+        // del checkbox "boleta_auto" por servicio (pensado para cuando el pago se
+        // confirma a mano desde el admin), aquí el pago fue online y real vía Flow,
+        // así que se intenta emitir siempre que el paciente haya dejado su RUT.
+        try {
+          if (updated.patient_rut) {
+            const boletaRes = await emitBoletaParaReserva(updated.id, { rutOverride: updated.patient_rut, enviarEmail: true });
+            if (!boletaRes.ok) console.error('[Flow webhook] boleta automática no emitida:', boletaRes.error);
+          } else {
+            console.warn('[Flow webhook] boleta automática omitida: la reserva no tiene RUT.');
+          }
+        } catch (e) {
+          console.error('[Flow webhook] boleta automática:', e);
+        }
       }
 
     } else if (status.status === 3 || status.status === 4) {

@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { sendBoletaEmail } from './email';
 
 /**
  * Integración con API Gateway (apigateway.cl) — Boletas de Honorarios Electrónicas (BHE).
@@ -274,7 +275,14 @@ export async function emitBoletaParaReserva(
       await supabase.from('bookings').update({ notes: nota }).eq('id', bookingId);
     }
     if (opts.enviarEmail && codigo && b.patient_email) {
-      try { await bheEmail(codigo, b.patient_email, cfg); } catch { /* no bloquear */ }
+      try {
+        const pdfBase64 = await bhePdf(codigo, cfg);
+        if (pdfBase64) {
+          await sendBoletaEmail({ to: b.patient_email, patientName: b.patient_name, folio, pdfBase64 });
+        } else {
+          await bheEmail(codigo, b.patient_email, cfg); // fallback: email genérico de apigateway.cl
+        }
+      } catch { /* no bloquear la emisión por un fallo de envío */ }
     }
     return { ok: true, folio, codigo };
   } catch (e) {

@@ -8,6 +8,7 @@ export async function upsertPatientFromBooking(b: {
   patient_name?: string | null;
   patient_email?: string | null;
   patient_phone?: string | null;
+  rut?: string | null;
 }): Promise<void> {
   const email = b.patient_email?.trim().toLowerCase();
   const name  = b.patient_name?.trim();
@@ -16,19 +17,21 @@ export async function upsertPatientFromBooking(b: {
   try {
     const { data: existing } = await supabase
       .from('patients')
-      .select('id, phone')
+      .select('id, phone, rut')
       .eq('email', email)
       .maybeSingle();
 
     if (existing) {
-      // No pisar un teléfono ya guardado con uno vacío.
+      // No pisar un teléfono/RUT ya guardado con uno vacío.
       const phone = b.patient_phone?.trim() || existing.phone;
-      await supabase.from('patients').update({ name, phone }).eq('id', existing.id);
+      const rut   = b.rut?.trim() || existing.rut;
+      await supabase.from('patients').update({ name, phone, rut }).eq('id', existing.id);
     } else {
       await supabase.from('patients').insert({
         name,
         email,
         phone: b.patient_phone?.trim() || null,
+        rut:   b.rut?.trim() || null,
       });
     }
   } catch (err) {
