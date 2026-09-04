@@ -1,0 +1,118 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+const { data: rows } = await supabase.from('settings').select('key, value')
+  .in('key', ['whatsapp_access_token', 'whatsapp_waba_id', 'whatsapp_phone_number_id', 'whatsapp_connected_at']);
+const cfg: Record<string, string> = {};
+(rows ?? []).forEach((r: { key: string; value: string }) => { cfg[r.key] = r.value; });
+
+const connected = !!cfg['whatsapp_access_token'];
+const appId    = import.meta.env.PUBLIC_META_APP_ID ?? '';
+const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
+---
+
+<AdminLayout title="Conectar WhatsApp" current="/admin/whatsapp-conectar">
+
+  <div class="card" style="max-width:560px;margin:0 auto;padding:2.5rem;">
+    <p class="label" style="margin-bottom:0.75rem;">WhatsApp Business</p>
+    <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;margin-bottom:1rem;">
+      Conectar tu WhatsApp (modo Coexistence)
+    </h1>
+    <p style="font-size:0.88rem;color:var(--stone);line-height:1.6;margin-bottom:1.5rem;">
+      Este modo conecta tu número de WhatsApp actual (+56 9 7273 5696) al sitio para poder enviar
+      recordatorios automáticos, <strong>sin desconectarlo de la app de tu teléfono</strong> — sigues
+      usando WhatsApp normal para hablar con tus pacientes exactamente igual que hoy.
+    </p>
+
+    {!appId || !configId ? (
+      <div style="background:#fef2f2;border:1px solid #fecaca;padding:1rem;border-radius:6px;font-size:0.85rem;color:#991b1b;">
+        Falta configurar <code>PUBLIC_META_APP_ID</code> / <code>PUBLIC_META_WHATSAPP_CONFIG_ID</code> en Vercel.
+      </div>
+    ) : connected ? (
+      <div style="background:#f0fdf4;border:1px solid #86efac;padding:1.25rem;border-radius:6px;">
+        <p style="font-size:0.9rem;color:#166534;font-weight:600;margin-bottom:0.5rem;">✓ WhatsApp conectado</p>
+        <p style="font-size:0.8rem;color:#166534;">Conectado el {new Date(cfg['whatsapp_connected_at']).toLocaleString('es-CL')}</p>
+        <button id="btn-reconnect" class="btn btn-outline btn-sm" style="margin-top:1rem;">Volver a conectar</button>
+      </div>
+    ) : (
+      <button id="btn-connect" class="btn btn-dark" style="width:100%;justify-content:center;padding:0.9rem;">
+        Conectar WhatsApp
+      </button>
+    )}
+
+    <p id="wa-status" style="display:none;font-size:0.82rem;margin-top:1rem;padding:0.85rem;border-radius:6px;"></p>
+  </div>
+
+</AdminLayout>
+
+<script define:vars={{ appId, configId }}>
+  window.fbAsyncInit = function () {
+    FB.init({ appId, autoLogAppEvents: true, xfbml: true, version: 'v21.0' });
+  };
+  (function (d, s, id) {
+    if (d.getElementById(id)) return;
+    const js = d.createElement(s);
+    js.id = id;
+    js.src = 'https://connect.facebook.net/es_LA/sdk.js';
+    d.body.appendChild(js);
+  })(document, 'script', 'facebook-jssdk');
+
+  let capturedWaba = null;
+  let capturedPhone = null;
+
+  window.addEventListener('message', (event) => {
+    if (!event.origin.endsWith('facebook.com')) return;
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type !== 'WA_EMBEDDED_SIGNUP') return;
+      if (data.event === 'FINISH' || data.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING') {
+        capturedWaba = data.data?.waba_id ?? capturedWaba;
+        capturedPhone = data.data?.phone_number_id ?? capturedPhone;
+      }
+    } catch { /* mensajes de otro origen, ignorar */ }
+  });
+
+  function showStatus(msg, ok) {
+    const el = document.getElementById('wa-status');
+    el.textContent = msg;
+    el.style.display = 'block';
+    el.style.background = ok ? '#f0fdf4' : '#fef2f2';
+    el.style.color = ok ? '#166534' : '#991b1b';
+    el.style.border = ok ? '1px solid #86efac' : '1px solid #fecaca';
+  }
+
+  async function launchSignup() {
+    showStatus('Abriendo la ventana de Meta…', true);
+    FB.login((response) => {
+      if (response.authResponse && response.authResponse.code) {
+        showStatus('Conectando…', true);
+        fetch('/api/admin/whatsapp/exchange-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: response.authResponse.code, wabaId: capturedWaba, phoneNumberId: capturedPhone }),
+        })
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.ok) {
+              showStatus('✓ WhatsApp conectado correctamente. Recarga la página para ver el estado.', true);
+            } else {
+              showStatus('Error: ' + (data.error ?? 'no se pudo conectar.'), false);
+            }
+          })
+          .catch(() => showStatus('Error de conexión al guardar.', false));
+      } else {
+        showStatus('Se cerró la ventana sin completar la conexión.', false);
+      }
+    }, {
+      config_id: configId,
+      response_type: 'code',
+      override_default_response_type: true,
+      extras: { setup: {} },
+    });
+  }
+
+  document.getElementById('btn-connect')?.addEventListener('click', launchSignup);
+  document.getElementById('btn-reconnect')?.addEventListener('click', launchSignup);
+</script>

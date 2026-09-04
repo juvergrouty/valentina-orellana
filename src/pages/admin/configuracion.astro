@@ -305,6 +305,27 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
       )}
     </div>
 
+    <!-- WhatsApp Business (Coexistence) -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
+        <div style="display:flex;align-items:center;gap:0.75rem;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#25D366" stroke-width="1.5"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+          <p class="label" style="margin:0;">WhatsApp Business</p>
+        </div>
+        {settings['whatsapp_access_token']
+          ? <span style="font-size:0.72rem;background:#f0fdf4;color:var(--green);border:1px solid #86efac;padding:0.2rem 0.6rem;border-radius:99px;font-weight:600;">● Conectado</span>
+          : <span style="font-size:0.72rem;background:var(--warm);color:var(--stone);border:1px solid var(--dust);padding:0.2rem 0.6rem;border-radius:99px;">○ No conectado</span>
+        }
+      </div>
+      <p style="font-size:0.85rem;color:var(--stone);margin-bottom:1.25rem;line-height:1.6;">
+        Conecta tu WhatsApp actual (+56 9 7273 5696) en modo Coexistence — sigue funcionando normal
+        en tu teléfono, y además queda disponible para enviar mensajes automáticos desde el sitio.
+      </p>
+      <a href="/admin/whatsapp-conectar" class="btn btn-dark">
+        {settings['whatsapp_access_token'] ? 'Ver conexión' : 'Conectar WhatsApp'}
+      </a>
+    </div>
+
     <!-- Reseñas de Google -->
     <div class="card">
       <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
