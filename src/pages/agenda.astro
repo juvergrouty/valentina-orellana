@@ -744,7 +744,9 @@ const { data: catalogServices } = await supabase
       const isPast   = dateObj < today;
       const isSelected = iso === state.selectedDate;
 
-      const isToday = iso === new Date().toISOString().slice(0, 10);
+      // Fecha de hoy en la zona horaria de Chile (toISOString() da la fecha en UTC,
+      // que se adelanta durante la tarde/noche en Chile — ver src/lib/dateUtils.ts).
+      const isToday = iso === new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
       // Día sin horario para este servicio (ej. no atiende sáb/dom) o feriado bloqueado
       const dow        = dateObj.getDay();
       const noWeekday  = state.availableWeekdays !== null && !state.availableWeekdays.has(dow);

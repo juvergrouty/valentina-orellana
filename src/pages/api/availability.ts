@@ -1,19 +1,31 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
+import { nowCL } from '../../lib/dateUtils';
 
 export const prerender = false;
 
-// Limpiar reservas pending_payment con más de 30 min — no bloqueante
-function cleanupExpiredPending() {
+// Limpiar reservas pending_payment con más de 30 min — no bloqueante.
+// IMPORTANTE: nunca debe tocar reservas creadas por la propia admin
+// (created_by_admin=true) — esas solo se liberan si ella misma las cancela.
+// Se degrada automáticamente si la columna aún no existe en la base de datos.
+async function cleanupExpiredPending() {
   const expiry = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  supabase
+  const { error } = await supabase
     .from('bookings')
     .delete()
     .eq('status', 'pending_payment')
-    .lt('created_at', expiry)
-    .then(({ error }) => {
-      if (error) console.warn('[availability] cleanup error:', error.message);
-    });
+    .eq('created_by_admin', false)
+    .lt('created_at', expiry);
+  if (error?.code === '42703') {
+    const retry = await supabase
+      .from('bookings')
+      .delete()
+      .eq('status', 'pending_payment')
+      .lt('created_at', expiry);
+    if (retry.error) console.warn('[availability] cleanup error:', retry.error.message);
+  } else if (error) {
+    console.warn('[availability] cleanup error:', error.message);
+  }
 }
 
 export const GET: APIRoute = async ({ url }) => {
@@ -30,7 +42,7 @@ export const GET: APIRoute = async ({ url }) => {
   }
 
   // No permitir fechas pasadas
-  const today = new Date();
+  const today = nowCL();
   today.setHours(0, 0, 0, 0);
   const requested = new Date(dateParam + 'T00:00:00');
   if (requested < today) {
@@ -76,6 +88,27 @@ export const GET: APIRoute = async ({ url }) => {
     return full;
   }
 
+  // Reservas del día que cuentan como "ocupadas": confirmadas, pendientes de pago
+  // recientes (<30 min), o pendientes creadas por la propia admin (esas se pueden
+  // quedar pendientes mucho más tiempo — nunca se auto-eliminan — así que siguen
+  // bloqueando el horario mientras existan). Se degrada si la columna no existe aún.
+  async function fetchBooked() {
+    const recentCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const res = await supabase.from('bookings')
+      .select('session_time, duration_min')
+      .eq('session_date', dateParam)
+      .neq('status', 'cancelled')
+      .or(`status.eq.confirmed,created_by_admin.eq.true,and(status.eq.pending_payment,created_at.gte.${recentCutoff})`);
+    if (res.error?.code === '42703') {
+      return await supabase.from('bookings')
+        .select('session_time, duration_min')
+        .eq('session_date', dateParam)
+        .neq('status', 'cancelled')
+        .or(`status.eq.confirmed,and(status.eq.pending_payment,created_at.gte.${recentCutoff})`);
+    }
+    return res;
+  }
+
   // Cargar en paralelo: slots, fecha bloqueada, reservas del día, settings, config del servicio
   const [
     { data: slots, error: slotsError },
@@ -86,11 +119,7 @@ export const GET: APIRoute = async ({ url }) => {
   ] = await Promise.all([
     fetchSlots(),
     supabase.from('blocked_dates').select('id').eq('date', dateParam).maybeSingle(),
-    supabase.from('bookings')
-      .select('session_time, duration_min')
-      .eq('session_date', dateParam)
-      .neq('status', 'cancelled')
-      .or(`status.eq.confirmed,and(status.eq.pending_payment,created_at.gte.${new Date(Date.now() - 30 * 60 * 1000).toISOString()})`),
+    fetchBooked(),
     supabase.from('settings').select('key, value'),
     fetchServiceCfg(),
   ]);
@@ -126,7 +155,7 @@ export const GET: APIRoute = async ({ url }) => {
     return { startMin: h * 60 + m, duration: b.duration_min ?? 50 };
   });
 
-  const nowHour = new Date();
+  const nowHour = nowCL();
   const isToday = dateParam === nowHour.toISOString().slice(0, 10);
   const nowMin  = nowHour.getHours() * 60 + nowHour.getMinutes() + 60; // +60 min buffer
 

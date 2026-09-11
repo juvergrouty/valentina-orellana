@@ -66,15 +66,30 @@ export const POST: APIRoute = async ({ request }) => {
 
     if (status.status === 2) {
       // ✅ Pagado — confirmar la reserva
-      const { data: updated, error } = await supabase
+      let { data: updated, error } = await supabase
         .from('bookings')
         .update({
           status:         'confirmed',
           mp_payment_id:  String(status.flowOrder),
+          paid_at:        new Date().toISOString(),
+          payment_note:   'Flow',
         })
         .eq('mp_preference_id', token)
         .select()
         .single();
+
+      if (error?.code === '42703') {
+        // Migración de paid_at/payment_note todavía no aplicada — no perder el
+        // pago real por eso, reintenta sin esas columnas.
+        const retry = await supabase
+          .from('bookings')
+          .update({ status: 'confirmed', mp_payment_id: String(status.flowOrder) })
+          .eq('mp_preference_id', token)
+          .select()
+          .single();
+        updated = retry.data;
+        error   = retry.error;
+      }
 
       if (error) {
         console.error('[Flow webhook] Error confirmando reserva:', error);

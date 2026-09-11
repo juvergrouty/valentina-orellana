@@ -2,6 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { todayCL } from '../../lib/dateUtils';
 
 const q      = Astro.url.searchParams.get('q') ?? '';
 const filtro = Astro.url.searchParams.get('filtro') ?? 'todos';
@@ -24,7 +25,7 @@ const [{ count: countAll }, { count: countActive }, { count: countInactive }] = 
 ]);
 
 // ── Reservas (para última/próxima sesión y cobros) ─────────────────────────
-const todayStr = new Date().toISOString().split('T')[0];
+const todayStr = todayCL();
 const { data: bookings } = await supabase
   .from('bookings')
   .select('patient_email, session_date, status, amount')

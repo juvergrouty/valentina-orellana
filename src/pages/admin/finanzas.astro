@@ -2,11 +2,12 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { nowCL } from '../../lib/dateUtils';
 
 const MONTHS_LONG = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
 // Mes seleccionado (YYYY-MM), por defecto el actual
-const now      = new Date();
+const now      = nowCL();
 const curYM    = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 const selYM    = Astro.url.searchParams.get('mes') ?? curYM;
 const [selY, selM] = selYM.split('-').map(Number);

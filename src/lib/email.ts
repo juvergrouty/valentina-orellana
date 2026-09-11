@@ -254,13 +254,31 @@ export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent:
 }
 
 // ─── Email al cliente: reserva liberada por falta de pago ────────────────────
+// Si se pasa `recoverUrl`, se ofrece un botón para pagar y recuperar el mismo
+// horario (disponible solo hasta 4 horas antes de la sesión y mientras el
+// horario siga libre — esa validación real la hace la página de recuperación).
 export async function sendPendingExpiredEmail(data: {
-  patient_name: string; patient_email: string; session_date: string; session_time: string;
+  patient_name: string; patient_email: string; session_date: string; session_time: string; recoverUrl?: string;
 }): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
 
   const subject = `Tu horario del ${formatDate(data.session_date)} fue liberado — Ps. Valentina Orellana`;
+
+  const recoverBlock = data.recoverUrl ? `
+        <div style="background:#F4F0EC;padding:1.25rem 1.5rem;margin-bottom:1.5rem;border-left:3px solid #576352;">
+          <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#1A1A18;line-height:1.6;margin:0 0 1rem;">
+            Si todavía quieres <strong>ese mismo horario</strong>, puedes pagarlo ahora y lo recuperamos —
+            siempre que sigan quedando más de <strong>4 horas</strong> antes de la sesión y nadie más lo haya tomado.
+          </p>
+          <a href="${data.recoverUrl}"
+             style="display:inline-block;background:#576352;color:white;padding:0.75rem 1.5rem;
+                    text-decoration:none;font-family:'Inter',sans-serif;font-size:0.75rem;
+                    letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
+            Pagar y mantener mi hora
+          </a>
+        </div>
+  ` : '';
 
   const res = await client.emails.send({
     from: FROM,
@@ -273,14 +291,15 @@ export async function sendPendingExpiredEmail(data: {
           Hola ${data.patient_name}, habías reservado el <strong>${formatDate(data.session_date)} a las ${data.session_time}</strong>,
           pero el pago no se completó a tiempo, así que el horario quedó disponible nuevamente para otra persona.
         </p>
+        ${recoverBlock}
         <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#6B6860;line-height:1.6;margin-bottom:1.5rem;">
-          Si fue un error o quieres agendar de nuevo, puedes hacerlo aquí mismo o escribirme directamente.
+          Si prefieres agendar un horario distinto, puedes hacerlo aquí mismo o escribirme directamente.
         </p>
         <a href="https://www.valentinaorellana.cl/agenda"
-           style="display:inline-block;background:#576352;color:white;padding:0.75rem 1.5rem;
+           style="display:inline-block;background:transparent;color:#576352;padding:0.75rem 1.5rem;
                   text-decoration:none;font-family:'Inter',sans-serif;font-size:0.75rem;
-                  letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;margin-right:0.5rem;">
-          Agendar de nuevo
+                  letter-spacing:0.1em;text-transform:uppercase;border:1px solid #576352;border-radius:4px;margin-right:0.5rem;">
+          Agendar otro horario
         </a>
         <a href="https://wa.me/56972735696"
            style="display:inline-block;background:transparent;color:#576352;padding:0.75rem 1.5rem;
@@ -502,6 +521,42 @@ export async function sendBulkEmail(
   }
 
   return { sent, failed, skipped };
+}
+
+// ─── Email al admin: hora liberada automáticamente por falta de pago ────────
+export async function sendExpiredBookingAdminAlert(
+  data: { patient_name: string; patient_email: string; session_date: string; session_time: string },
+  adminEmail: string,
+) {
+  const client = getResend();
+  if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
+
+  await client.emails.send({
+    from:    FROM,
+    to:      adminEmail,
+    subject: `⚠️ Hora liberada automáticamente — ${data.patient_name} · ${formatDate(data.session_date)} ${data.session_time}`,
+    html: `
+      <div style="font-family:'Inter',sans-serif;max-width:480px;margin:0 auto;padding:1.5rem;color:#1A1A18;background:#FAF7F4;">
+        <h2 style="font-size:1rem;font-weight:600;margin-bottom:1.25rem;border-bottom:2px solid #b5533c;padding-bottom:0.5rem;">
+          Hora liberada por falta de pago
+        </h2>
+        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+          <tr><td style="padding:0.35rem 0;color:#6B6860;width:40%;">Paciente</td>
+              <td style="padding:0.35rem 0;font-weight:500;">${data.patient_name}</td></tr>
+          <tr><td style="padding:0.35rem 0;color:#6B6860;">Email</td>
+              <td style="padding:0.35rem 0;">${data.patient_email}</td></tr>
+          <tr><td style="padding:0.35rem 0;color:#6B6860;">Fecha reservada</td>
+              <td style="padding:0.35rem 0;font-weight:500;">${formatDate(data.session_date)}</td></tr>
+          <tr><td style="padding:0.35rem 0;color:#6B6860;">Hora</td>
+              <td style="padding:0.35rem 0;font-weight:600;font-size:1rem;">${data.session_time}</td></tr>
+        </table>
+        <p style="font-family:'Inter',sans-serif;font-size:0.8rem;color:#6B6860;margin-top:1rem;line-height:1.5;">
+          El pago no se completó a tiempo y el horario quedó disponible nuevamente para otra persona.
+          Al paciente también se le avisó por correo.
+        </p>
+      </div>
+    `,
+  });
 }
 
 // ─── Email al admin: nueva reserva ───────────────────────────────────────────

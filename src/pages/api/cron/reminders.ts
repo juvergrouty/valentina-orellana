@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { sendReminderEmail, emailTypeEnabled } from '../../../lib/email';
+import { nowCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
 
@@ -32,8 +33,9 @@ export const GET: APIRoute = async ({ request }) => {
 
   const now      = Date.now();
   const windowMs = windowHours * 60 * 60 * 1000;
-  const today    = new Date(now).toISOString().slice(0, 10);
-  const tomorrow = new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // "hoy"/"mañana" en la fecha calendario de Chile (no UTC — ver src/lib/dateUtils.ts)
+  const today    = nowCL(new Date(now)).toISOString().slice(0, 10);
+  const tomorrow = nowCL(new Date(now + 2 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
 
   // Sesiones confirmadas de hoy/mañana, con correo, aún sin recordatorio enviado.
   // reminder_email_enabled puede no existir aún (columna nueva) — si falla, reintenta sin ella.

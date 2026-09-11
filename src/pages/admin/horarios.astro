@@ -2,8 +2,9 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { todayCL } from '../../lib/dateUtils';
 
-const today = new Date().toISOString().slice(0, 10);
+const today = todayCL();
 
 const [
   { data: slots },

@@ -105,7 +105,7 @@ async function handleBooking(request: Request) {
       .select('id')
       .eq('session_date', session_date)
       .eq('session_time', session_time)
-      .neq('status', 'cancelled')
+      .not('status', 'in', '(cancelled,expired)')
       .maybeSingle();
 
   if (existing) {

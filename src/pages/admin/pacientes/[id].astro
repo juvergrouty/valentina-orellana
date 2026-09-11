@@ -2,6 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../../components/admin/AdminLayout.astro';
 import { supabase } from '../../../lib/supabase';
+import { nowCL } from '../../../lib/dateUtils';
 
 const { id } = Astro.params;
 
@@ -209,6 +210,13 @@ const formatCLP = (n: number) =>
             const badgeClass = b.status === 'confirmed' ? 'badge-confirmed' : b.status === 'cancelled' ? 'badge-cancelled' : 'badge-pending';
             const badgeLabel = b.status === 'confirmed' ? 'Confirmada' : b.status === 'cancelled' ? 'Cancelada' : 'Pendiente';
             const boletaFolio = (b.notes?.match(/Boleta Folio (\d+)/) ?? [])[1] ?? null;
+            // Estado de pago real, separado del estado de la reserva (ver migración
+            // 0001, sección 5): una reserva puede estar "Confirmada" sin haber sido
+            // pagada todavía (ej. "Pago en consulta").
+            const isPaid   = !!b.paid_at;
+            const isVoided = !!b.debt_voided;
+            const payBadgeClass = isVoided ? 'badge-cancelled' : isPaid ? 'badge-confirmed' : 'badge-pending';
+            const payBadgeLabel = isVoided ? 'Deuda anulada' : isPaid ? (b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado') : 'Por pagar';
             return (
               <div class="card" style="padding:0;overflow:hidden;">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;gap:1rem;flex-wrap:wrap;">
@@ -227,6 +235,7 @@ const formatCLP = (n: number) =>
                       )}
                     </div>
                     <span class={`badge ${badgeClass}`}>{badgeLabel}</span>
+                    <span class={`badge ${payBadgeClass}`}>{payBadgeLabel}</span>
                     <span style="font-size:0.82rem;color:var(--stone);">{formatCLP(b.amount)}</span>
                   </div>
                   <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
@@ -237,11 +246,19 @@ const formatCLP = (n: number) =>
                         <button type="button" class="btn btn-outline btn-sm bol-pdf" data-bid={b.id}>PDF</button>
                         <button type="button" class="btn btn-outline btn-sm bol-email" data-bid={b.id}>Email</button>
                       </>
-                    ) : b.status === 'confirmed' ? (
+                    ) : isPaid ? (
                       <button type="button" class="btn btn-outline btn-sm bol-emitir" data-bid={b.id} data-rut={patient.rut ?? ''}>
                         Emitir boleta
                       </button>
                     ) : null}
+                    {!isPaid && !isVoided && (
+                      <>
+                        <button type="button" class="btn btn-outline btn-sm"
+                          onclick={`toggleNota('pay-${i}')`}>💰 Marcar pagado</button>
+                        <button type="button" class="btn btn-outline btn-sm btn-void-debt" data-bid={b.id}
+                          style="color:var(--stone);">Anular deuda</button>
+                      </>
+                    )}
                     {b.session_date !== '2099-12-31' && b.patient_email && (
                       <>
                         <button type="button" class="btn btn-outline btn-sm resend-mail" data-action="confirmation" data-bid={b.id}
@@ -259,6 +276,31 @@ const formatCLP = (n: number) =>
                     </button>
                   </div>
                 </div>
+
+                {!isPaid && !isVoided && (
+                  <div id={`pay-${i}`} style="display:none;border-top:1px solid var(--warm);background:var(--sand);padding:1rem 1.25rem;">
+                    <form method="POST" action="/api/admin/bookings" style="margin:0;display:flex;align-items:flex-end;gap:0.75rem;flex-wrap:wrap;">
+                      <input type="hidden" name="action" value="mark_paid" />
+                      <input type="hidden" name="id" value={b.id} />
+                      <input type="hidden" name="redirect" value={`${redirectBase}?tab=sesiones`} />
+                      <input type="hidden" name="rut" value={patient.rut ?? ''} />
+                      <div class="bp-field" style="margin:0;">
+                        <label style="font-size:0.68rem;">Medio de pago</label>
+                        <select name="medio">
+                          <option value="Efectivo">Efectivo</option>
+                          <option value="Transferencia">Transferencia</option>
+                          <option value="Tarjeta">Tarjeta (fuera de Flow)</option>
+                          <option value="Otro">Otro</option>
+                        </select>
+                      </div>
+                      <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;cursor:pointer;">
+                        <input type="checkbox" name="emitir_boleta" />
+                        Emitir y enviar boleta
+                      </label>
+                      <button type="submit" class="btn btn-dark btn-sm">✓ Marcar como pagado</button>
+                    </form>
+                  </div>
+                )}
 
                 <div id={`nota-${i}`} style="display:none;border-top:1px solid var(--warm);background:var(--sand);padding:1.25rem;">
                   {nota ? (
@@ -363,7 +405,7 @@ const formatCLP = (n: number) =>
           <div>
             <label class="label" style="display:block;margin-bottom:0.3rem;">Fecha de sesión</label>
             <input type="date" name="session_date"
-              value={new Date().toISOString().slice(0,10)} required />
+              value={nowCL().toISOString().slice(0,10)} required />
           </div>
           <div>
             <label class="label" style="display:block;margin-bottom:0.3rem;">Tipo de sesión</label>
@@ -430,7 +472,7 @@ const formatCLP = (n: number) =>
       <div>
         <label class="label" style="display:block;margin-bottom:0.3rem;">Fecha</label>
         <input type="date" name="session_date" id="agenda-date" required
-          min={new Date().toISOString().slice(0,10)} />
+          min={nowCL().toISOString().slice(0,10)} />
       </div>
 
       <div>
@@ -445,6 +487,11 @@ const formatCLP = (n: number) =>
       <div id="custom-time-wrap" style="display:none;">
         <label class="label" style="display:block;margin-bottom:0.3rem;">Horario personalizado</label>
         <input type="time" name="custom_time" step="300" />
+      </div>
+
+      <div>
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Precio (opcional — en blanco usa el precio del servicio)</label>
+        <input type="number" name="amount_override" min="0" step="1" placeholder="Ej: 60000" />
       </div>
 
       <div>
@@ -538,6 +585,23 @@ const formatCLP = (n: number) =>
     } finally {
       btn.disabled = false;
     }
+  });
+
+  // ── Anular deuda ────────────────────────────────────────────────────────────
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.btn-void-debt');
+    if (!btn) return;
+    if (!confirm('¿Anular la deuda de esta sesión? No se marcará como pagada, solo dejará de aparecer como pendiente de cobro.')) return;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/api/admin/bookings';
+    form.innerHTML = `
+      <input type="hidden" name="action" value="void_debt">
+      <input type="hidden" name="id" value="${btn.dataset.bid}">
+      <input type="hidden" name="redirect" value="${window.location.pathname}?tab=sesiones">
+    `;
+    document.body.appendChild(form);
+    form.submit();
   });
 
   // ── Correos al paciente: pasos a seguir / solicitud de reseña ──────────────

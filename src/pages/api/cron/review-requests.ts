@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { sendReviewRequestEmail } from '../../../lib/email';
+import { nowCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
 
@@ -40,8 +41,9 @@ export const GET: APIRoute = async ({ request }) => {
   // Ventana: sesiones de los últimos 3 días (evita enviar a todo el histórico al
   // activar la función, y da margen si el cron falla algún día).
   const now      = Date.now();
-  const today    = new Date(now).toISOString().slice(0, 10);
-  const fromDate = new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // "hoy" en la fecha calendario de Chile (no UTC — ver src/lib/dateUtils.ts)
+  const today    = nowCL(new Date(now)).toISOString().slice(0, 10);
+  const fromDate = nowCL(new Date(now - 3 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
 
   const { data: bookings } = await supabase
     .from('bookings')

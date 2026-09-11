@@ -4,11 +4,12 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { pricingPlans } from '../../data/services';
 import { getValidAccessToken } from '../../lib/syncCalendar';
+import { nowCL } from '../../lib/dateUtils';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
 const weekOffset = parseInt(Astro.url.searchParams.get('w') ?? '0');
 
-const NOW = new Date();
+const NOW = nowCL();
 NOW.setHours(0, 0, 0, 0);
 const todayStr = NOW.toISOString().split('T')[0];
 
@@ -30,7 +31,7 @@ const weekEndStr   = weekEnd.toISOString().split('T')[0];
 // reminder_email_enabled / patient_rut / mp_preference_id son columnas nuevas —
 // si aún no existen en la base, reintenta sin ellas para no romper la página.
 async function fetchBookings() {
-  const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, patient_rut';
+  const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, patient_rut, paid_at, payment_note, debt_voided, no_show';
   const res = await supabase.from('bookings').select(cols)
     .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
     .neq('status', 'cancelled').order('session_time');
@@ -198,6 +199,7 @@ function svcLabel(b: BRow): string {
 
 const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
 const errorParam   = Astro.url.searchParams.get('error');
+const errorDetail  = Astro.url.searchParams.get('detail');
 const paymentLink  = Astro.url.searchParams.get('payment_link');
 const plPhoneRaw   = (Astro.url.searchParams.get('pl_phone') ?? '').replace(/\D/g, '');
 const plWaMsg      = paymentLink ? `Hola 👋 Te comparto el enlace de pago para tu sesión: ${paymentLink}` : '';
@@ -221,6 +223,21 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
       )}
       {errorParam === 'flow_error' && (
         <div class="cal-error-banner">⚠ No se pudo generar el link de pago. Revisa la configuración de Flow.</div>
+      )}
+      {errorParam === 'missing_fields' && (
+        <div class="cal-error-banner">⚠ Faltan datos obligatorios (servicio, fecha, hora o paciente) — no se agendó nada.</div>
+      )}
+      {errorParam === 'slot_conflict' && (
+        <div class="cal-error-banner">⚠ No se creó ninguna sesión: todos los horarios elegidos ya estaban ocupados por otra reserva activa.</div>
+      )}
+      {errorParam === 'insert_failed' && (
+        <div class="cal-error-banner">⚠ No se pudo guardar la reserva en la base de datos{errorDetail ? `: ${errorDetail}` : ''}. No se cobró ni se envió nada — intenta de nuevo o avisa a soporte.</div>
+      )}
+      {errorParam === 'unknown_no_booking' && (
+        <div class="cal-error-banner">⚠ No se creó ninguna sesión por un motivo desconocido. Intenta de nuevo — si vuelve a pasar, avisa a soporte.</div>
+      )}
+      {errorParam === 'missing_migration' && (
+        <div class="cal-error-banner">⚠ Falta ejecutar la migración de base de datos pendiente antes de poder usar esto (columnas de pago).</div>
       )}
       <div class="cal-nav-group">
         <a href="?w=0" class="cal-btn-today">Hoy</a>
@@ -374,6 +391,10 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
                   mp_preference_id: b.mp_preference_id ?? '',
                   reminder_email_enabled: b.reminder_email_enabled !== false,
                   created_pending:        b.status === 'pending_payment',
+                  paid_at:        b.paid_at ?? null,
+                  payment_note:   b.payment_note ?? '',
+                  debt_voided:    b.debt_voided ?? false,
+                  no_show:        b.no_show ?? false,
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}`}
               >
@@ -523,6 +544,12 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
         <div class="bp-price-block">
           <div class="bp-price-value" id="bp-price-value">—</div>
           <div class="bp-price-note" id="bp-price-note">Selecciona un servicio para ver el precio</div>
+        </div>
+
+        <!-- Precio manual (opcional) -->
+        <div class="bp-field">
+          <label>Precio manual (opcional)</label>
+          <input type="number" name="amount_override" min="0" step="1" placeholder="En blanco usa el precio del servicio de arriba">
         </div>
 
         <!-- Modo de pago -->
@@ -714,11 +741,15 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
       <div class="sp-section">
         <div class="sp-patient-name" id="sp-patient-name"></div>
         <div class="sp-patient-info" id="sp-patient-info"></div>
-        <div id="sp-meet-link" style="display:none;margin-top:0.5rem;">
+        <div id="sp-meet-link" style="display:none;margin-top:0.5rem;gap:0.4rem;flex-wrap:wrap;">
           <a href="#" id="sp-meet-href" target="_blank" class="sp-meet-btn">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
             Unirse al Meet
           </a>
+          <button type="button" id="sp-meet-copy" class="sp-meet-btn" style="background:transparent;color:var(--stone);border:1px solid var(--warm);">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            Copiar link
+          </button>
         </div>
       </div>
 
@@ -737,11 +768,20 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
           Recordar sesión por WhatsApp
         </a>
         {reviewUrl && (
-          <a href={reviewUrl} target="_blank" rel="noopener" class="sp-action-row">
+          <a href="#" id="sp-btn-review-wa" target="_blank" rel="noopener" class="sp-action-row">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             Pedir reseña en Google
           </a>
         )}
+        <button type="button" id="sp-btn-no-show" class="sp-action-row" style="width:100%;text-align:left;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span id="sp-btn-no-show-label">Marcar inasistencia</span>
+        </button>
+        <form method="POST" action="/api/admin/bookings" id="sp-no-show-form" style="margin:0;display:none;">
+          <input type="hidden" name="action" id="sp-no-show-action" value="mark_no_show">
+          <input type="hidden" name="id" id="sp-no-show-id">
+          <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+        </form>
       </div>
 
       <!-- Pago -->
@@ -751,11 +791,43 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
           <span class="sp-pay-badge" id="sp-pay-badge"></span>
         </div>
         <div id="sp-confirm-form" style="display:none;margin-top:0.6rem;">
-          <form method="POST" action="/api/admin/bookings" style="margin:0">
-            <input type="hidden" name="action" value="confirm">
+          <form method="POST" action="/api/admin/bookings" style="margin:0;display:flex;flex-direction:column;gap:0.5rem;">
+            <input type="hidden" name="action" value="mark_paid">
             <input type="hidden" name="id" id="sp-confirm-id">
             <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
-            <button type="submit" class="sp-btn-confirm">✓ Confirmar pago</button>
+            <div class="bp-field">
+              <label style="font-size:0.68rem;">Medio de pago</label>
+              <select name="medio" id="sp-medio-pago">
+                <option value="Efectivo">Efectivo</option>
+                <option value="Transferencia">Transferencia</option>
+                <option value="Tarjeta">Tarjeta (fuera de Flow)</option>
+                <option value="Otro">Otro</option>
+              </select>
+            </div>
+            <input type="hidden" name="rut" id="sp-mark-paid-rut" value="">
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;cursor:pointer;">
+              <input type="checkbox" name="emitir_boleta" id="sp-mark-paid-boleta">
+              Emitir y enviar boleta al confirmar
+            </label>
+            <button type="submit" class="sp-btn-confirm">✓ Marcar como pagado</button>
+          </form>
+          <button type="button" id="sp-btn-void-debt" class="sp-action-row" style="padding:0.4rem 0;color:var(--stone);">
+            Anular deuda (no se cobrará esta sesión)
+          </button>
+          <form method="POST" action="/api/admin/bookings" id="sp-void-debt-form" style="margin:0;display:none;">
+            <input type="hidden" name="action" value="void_debt">
+            <input type="hidden" name="id" id="sp-void-debt-id">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+          </form>
+        </div>
+        <div id="sp-unmark-paid-box" style="display:none;margin-top:0.6rem;">
+          <button type="button" id="sp-btn-unmark-paid" class="sp-action-row" style="padding:0.4rem 0;color:var(--stone);">
+            Anular pago (fue un error, no estaba pagada)
+          </button>
+          <form method="POST" action="/api/admin/bookings" id="sp-unmark-paid-form" style="margin:0;display:none;">
+            <input type="hidden" name="action" value="unmark_paid">
+            <input type="hidden" name="id" id="sp-unmark-paid-id">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
           </form>
         </div>
         <div id="sp-paylink-box" style="display:none;margin-top:0.6rem;">
@@ -808,6 +880,10 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
             <button type="button" class="sp-action-row" id="sp-btn-email" style="padding:0.3rem 0;">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
               Enviar por email al paciente
+            </button>
+            <button type="button" class="sp-action-row" id="sp-btn-anular-boleta" style="padding:0.3rem 0;color:#b45309;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+              Anular boleta
             </button>
           </div>
         </div>
@@ -1033,7 +1109,9 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 .status-confirmed { color: #15803d; font-weight: 600; }
 .status-pending   { color: #b45309; font-weight: 600; }
 .sp-patient-name  { font-size: 0.875rem; font-weight: 600; color: #111827; }
-.sp-patient-info  { font-size: 0.75rem; color: #6b7280; line-height: 1.7; margin-top: 3px; white-space: pre-line; }
+.sp-patient-info  { font-size: 0.75rem; color: #6b7280; line-height: 1.7; margin-top: 3px; white-space: pre-line; display: flex; flex-direction: column; }
+.sp-contact-link  { color: #6b7280; text-decoration: none; }
+.sp-contact-link:hover { color: #4f5ce8; text-decoration: underline; }
 .sp-meet-btn {
   display: inline-flex; align-items: center; gap: 0.3rem;
   font-size: 0.75rem; color: #4f5ce8; text-decoration: none; font-weight: 600;
@@ -1046,7 +1124,7 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 .sp-pay-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 99px; font-size: 0.7rem; font-weight: 600; }
 .badge-paid     { background: #dcfce7; color: #15803d; }
 .badge-pending  { background: #fef9c3; color: #92400e; }
-.badge-manual   { background: #dbeafe; color: #1e40af; }
+.badge-manual   { background: #e5e7eb; color: #374151; }
 .badge-transfer { background: #ede9fe; color: #5b21b6; }
 .sp-btn-confirm { width: 100%; padding: 0.45rem; background: #4f5ce8; color: white; border: none; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
 .sp-btn-confirm:hover { background: #3a4fde; }
@@ -1482,7 +1560,9 @@ allCols.forEach(col => {
 
 // Toolbar "+ Agendar" button
 document.getElementById('open-new-btn')?.addEventListener('click', () => {
-  const today = new Date().toISOString().split('T')[0];
+  // Fecha de hoy en la zona horaria de Chile (toISOString() da la fecha en UTC,
+  // que se adelanta durante la tarde/noche en Chile — ver src/lib/dateUtils.ts).
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
   const now   = new Date();
   const roundedH = now.getHours();
   const time  = `${String(roundedH).padStart(2,'0')}:00`;
@@ -1627,25 +1707,70 @@ document.querySelectorAll('.cal-event').forEach(el => {
 function openSessionDetail(b) {
   document.getElementById('sp-service').textContent = b.service_label || b.session_type;
 
-  const isPaid = b.status === 'confirmed';
-  const isManual = b.payment_method === 'manual';
-  const isXfer   = b.payment_method === 'transferencia';
+  // sessionConfirmed: la CITA está agendada/confirmada (no cancelada, no en
+  // espera de un link de pago). isPaid: el PAGO se recibió de verdad — son dos
+  // cosas distintas. Antes se usaba solo el status de la reserva para ambas,
+  // por eso "Pago en consulta" quedaba mostrado como si ya estuviera pagado
+  // apenas se agendaba, sin que la psicóloga hubiera cobrado todavía.
+  const sessionConfirmed = b.status === 'confirmed';
+  const isPaid    = !!b.paid_at;
+  const isVoided  = !!b.debt_voided;
+  const isNoShow  = !!b.no_show;
   const statusEl = document.getElementById('sp-status');
-  statusEl.textContent = isPaid ? 'Confirmada' : 'Pendiente de pago';
-  statusEl.className   = 'sp-status ' + (isPaid ? 'status-confirmed' : 'status-pending');
+  if (isNoShow) {
+    statusEl.textContent = 'Inasistencia';
+    statusEl.className   = 'sp-status status-pending';
+  } else {
+    statusEl.textContent = sessionConfirmed ? 'Confirmada' : 'Pendiente de pago';
+    statusEl.className   = 'sp-status ' + (sessionConfirmed ? 'status-confirmed' : 'status-pending');
+  }
 
   document.getElementById('sp-patient-name').textContent = b.patient_name;
-  document.getElementById('sp-patient-info').textContent = [b.patient_email, b.patient_phone].filter(Boolean).join('\n');
+  // Email y teléfono son clicables (correo / WhatsApp directo, sin plantilla) —
+  // igual que en Encuadrado, donde el panel de la cita permite contactar al
+  // paciente sin salir de ahí.
+  const infoDiv = document.getElementById('sp-patient-info');
+  infoDiv.innerHTML = '';
+  const infoWaDigits = (b.patient_phone || '').replace(/\D/g, '');
+  const infoWaPhone  = infoWaDigits.length === 9 ? '56' + infoWaDigits : infoWaDigits;
+  if (b.patient_email) {
+    const a = document.createElement('a');
+    a.href = `mailto:${b.patient_email}`;
+    a.textContent = b.patient_email;
+    a.className = 'sp-contact-link';
+    infoDiv.appendChild(a);
+  }
+  if (b.patient_phone) {
+    const a = document.createElement('a');
+    a.href = infoWaPhone.length >= 11 ? `https://wa.me/${infoWaPhone}` : `tel:${b.patient_phone}`;
+    a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = b.patient_phone;
+    a.className = 'sp-contact-link';
+    infoDiv.appendChild(a);
+  }
 
   // Meet link (stored as "Meet: https://..." in notes)
   const meetMatch = b.notes?.match(/Meet:\s*(https:\/\/\S+)/);
   const meetDiv  = document.getElementById('sp-meet-link');
   if (meetMatch) {
     document.getElementById('sp-meet-href').href = meetMatch[1];
-    meetDiv.style.display = '';
+    meetDiv.style.display = 'flex';
+    document.getElementById('sp-meet-copy').onclick = () => {
+      navigator.clipboard.writeText(meetMatch[1]).then(() => {
+        const btn = document.getElementById('sp-meet-copy');
+        const original = btn.innerHTML;
+        btn.textContent = '✓ Copiado';
+        setTimeout(() => { btn.innerHTML = original; }, 1500);
+      });
+    };
   } else {
     meetDiv.style.display = 'none';
   }
+
+  // Marcar / quitar inasistencia
+  document.getElementById('sp-no-show-id').value = b.id;
+  document.getElementById('sp-no-show-action').value = isNoShow ? 'unmark_no_show' : 'mark_no_show';
+  document.getElementById('sp-btn-no-show-label').textContent = isNoShow ? 'Quitar marca de inasistencia' : 'Marcar inasistencia';
 
   // Ver ficha link
   const fichaBtn = document.getElementById('sp-btn-ficha');
@@ -1677,9 +1802,23 @@ function openSessionDetail(b) {
     remWaBtn.style.display = 'none';
   }
 
+  // Pedir reseña en Google (manual — abre WhatsApp con el link de reseña YA armado
+  // para el PACIENTE, no para la psicóloga. Antes este botón abría reviewUrl en el
+  // propio navegador de la admin, lo que la mandaba a ella a escribir la reseña.)
+  const reviewBtn = document.getElementById('sp-btn-review-wa');
+  if (reviewBtn) {
+    if (waPhone.length >= 11 && typeof reviewUrl === 'string' && reviewUrl) {
+      const reviewMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Si te sirvió nuestra sesión, me encantaría que me dejaras una reseña en Google (toma menos de un minuto): ${reviewUrl}`;
+      reviewBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(reviewMsg)}`;
+      reviewBtn.style.display = '';
+    } else {
+      reviewBtn.style.display = 'none';
+    }
+  }
+
   // Link de pago (solo si está pendiente y ya se generó una orden Flow)
   const paylinkBox = document.getElementById('sp-paylink-box');
-  if (!isPaid && b.mp_preference_id) {
+  if (!sessionConfirmed && b.mp_preference_id) {
     const payUrl = `${flowCheckoutBase}?token=${b.mp_preference_id}`;
     const payMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te comparto el link de pago de tu sesión: ${payUrl}`;
     const waPayBtn = document.getElementById('sp-paylink-wa');
@@ -1715,16 +1854,22 @@ function openSessionDetail(b) {
   remEmail.dataset.bookingId = b.id;
   document.getElementById('sp-rem-msg').style.display = 'none';
 
-  // Amount & badge
+  // Amount & badge — refleja el pago REAL (paid_at), no el estado de la reserva.
   document.getElementById('sp-amount').textContent = formatCLP(b.amount);
   const badge = document.getElementById('sp-pay-badge');
-  if (isPaid && isManual)  { badge.textContent='En consulta';   badge.className='sp-pay-badge badge-manual'; }
-  else if (isPaid && isXfer){ badge.textContent='Transferencia'; badge.className='sp-pay-badge badge-transfer'; }
-  else if (isPaid)         { badge.textContent='Pagado';        badge.className='sp-pay-badge badge-paid'; }
-  else                     { badge.textContent='Pendiente';     badge.className='sp-pay-badge badge-pending'; }
+  if (isVoided)     { badge.textContent = 'Deuda anulada'; badge.className = 'sp-pay-badge badge-manual'; }
+  else if (isPaid)  { badge.textContent = b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado'; badge.className = 'sp-pay-badge badge-paid'; }
+  else              { badge.textContent = 'Por pagar'; badge.className = 'sp-pay-badge badge-pending'; }
 
-  document.getElementById('sp-confirm-form').style.display = isPaid ? 'none' : 'block';
-  document.getElementById('sp-confirm-id').value = b.id;
+  const showMarkPaid = !isPaid && !isVoided;
+  document.getElementById('sp-confirm-form').style.display = showMarkPaid ? 'block' : 'none';
+  document.getElementById('sp-confirm-id').value    = b.id;
+  document.getElementById('sp-void-debt-id').value  = b.id;
+  document.getElementById('sp-mark-paid-rut').value = b.patient_rut || '';
+
+  // "Anular pago" — deshacer un "Marcar como pagado" hecho por error.
+  document.getElementById('sp-unmark-paid-box').style.display = (isPaid && !isVoided) ? 'block' : 'none';
+  document.getElementById('sp-unmark-paid-id').value = b.id;
 
   // Date / time
   const dur  = b.duration_min ?? 50;
@@ -1755,10 +1900,21 @@ function openSessionDetail(b) {
   const boletaActions = document.getElementById('sp-boleta-actions');
   if (boletaResult) { boletaResult.textContent = ''; boletaResult.style.color = ''; }
   if (boletaActions) boletaActions.style.display = 'none';
-  // Si ya se emitió (queda registrado en notes), avisar y mostrar acciones
-  if (b.notes && /Boleta\s+Folio/i.test(b.notes)) {
-    const m = b.notes.match(/Boleta\s+Folio\s+(\d+)/i);
-    if (boletaResult) { boletaResult.textContent = `✓ Ya emitida (Folio ${m ? m[1] : ''})`; boletaResult.style.color = '#15803d'; }
+  const anularBoletaBtn = document.getElementById('sp-btn-anular-boleta');
+  // Si ya se emitió (queda registrado en notes), avisar y mostrar acciones.
+  // Toma la última línea "Boleta Folio N..." por si se anuló y se re-emitió.
+  const boletaLines = [...(b.notes ?? '').matchAll(/Boleta\s+Folio\s+(\d+)[^\n]*/gi)];
+  const lastBoleta = boletaLines.length ? boletaLines[boletaLines.length - 1][0] : null;
+  const lastFolio  = boletaLines.length ? boletaLines[boletaLines.length - 1][1] : null;
+  const boletaAnulada = lastBoleta ? /ANULADA/i.test(lastBoleta) : false;
+  if (lastBoleta && boletaAnulada) {
+    if (boletaResult) { boletaResult.textContent = `✕ Boleta anulada (Folio ${lastFolio}) — puedes emitir una nueva.`; boletaResult.style.color = '#b45309'; }
+    document.getElementById('sp-boleta-form').style.display = 'block';
+    if (boletaActions) boletaActions.style.display = 'none';
+    const emitBtn = document.getElementById('sp-btn-emitir');
+    if (emitBtn) emitBtn.style.display = '';   // se anuló — permite emitir una corregida
+  } else if (lastBoleta) {
+    if (boletaResult) { boletaResult.textContent = `✓ Ya emitida (Folio ${lastFolio})`; boletaResult.style.color = '#15803d'; }
     document.getElementById('sp-boleta-form').style.display = 'block';
     if (boletaActions) boletaActions.style.display = 'flex';
     const emitBtn = document.getElementById('sp-btn-emitir');
@@ -1801,6 +1957,61 @@ async function saveReminderToggle(input) {
   msg.style.display = 'block';
 }
 document.getElementById('sp-rem-email')?.addEventListener('change', (e) => saveReminderToggle(e.target));
+
+// ── Anular deuda ────────────────────────────────────────────────────────────
+document.getElementById('sp-btn-void-debt')?.addEventListener('click', () => {
+  if (confirm('¿Anular la deuda de esta sesión? No se marcará como pagada, solo dejará de aparecer como pendiente de cobro.')) {
+    document.getElementById('sp-void-debt-form').submit();
+  }
+});
+
+// ── Anular pago (deshacer "Marcar como pagado") ──────────────────────────────
+document.getElementById('sp-btn-unmark-paid')?.addEventListener('click', () => {
+  if (confirm('¿Anular este pago? La sesión vuelve a quedar "Por pagar". Esto no afecta ninguna boleta ya emitida.')) {
+    document.getElementById('sp-unmark-paid-form').submit();
+  }
+});
+
+// ── Marcar / quitar inasistencia ──────────────────────────────────────────────
+document.getElementById('sp-btn-no-show')?.addEventListener('click', () => {
+  const marking = document.getElementById('sp-no-show-action').value === 'mark_no_show';
+  const msg = marking
+    ? '¿Marcar esta sesión como inasistencia (el paciente no llegó)?'
+    : '¿Quitar la marca de inasistencia de esta sesión?';
+  if (confirm(msg)) {
+    document.getElementById('sp-no-show-form').submit();
+  }
+});
+
+// ── Anular boleta ya emitida ──────────────────────────────────────────────────
+document.getElementById('sp-btn-anular-boleta')?.addEventListener('click', async () => {
+  const btn    = document.getElementById('sp-btn-anular-boleta');
+  const result = document.getElementById('sp-boleta-result');
+  if (!currentBookingId) return;
+  if (!confirm('¿Anular esta boleta de honorarios? Se anula el documento en el SII — esta acción no se puede deshacer. Después podrás emitir una nueva si corresponde.')) return;
+
+  btn.disabled = true;
+  result.textContent = 'Anulando…'; result.style.color = '#6b7280';
+  try {
+    const res = await fetch('/api/admin/apigateway', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'anular', booking_id: currentBookingId }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      result.textContent = `✕ Boleta anulada (Folio ${data.folio ?? ''}) — puedes emitir una nueva.`;
+      result.style.color = '#b45309';
+      document.getElementById('sp-boleta-actions').style.display = 'none';
+      document.getElementById('sp-btn-emitir').style.display = '';
+    } else {
+      result.textContent = '✕ ' + (data.error ?? 'No se pudo anular'); result.style.color = '#dc2626';
+    }
+  } catch {
+    result.textContent = '✕ Error de conexión'; result.style.color = '#dc2626';
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // ── Reagendar toggle ──────────────────────────────────────────────────────────
 document.getElementById('sp-toggle-rsc')?.addEventListener('click', () => {

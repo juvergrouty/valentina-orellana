@@ -3,6 +3,7 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { refreshAccessToken } from '../../lib/googleCalendar';
+import { todayCL } from '../../lib/dateUtils';
 
 // Leer settings de Google
 const { data: rows } = await supabase.from('settings').select('key, value');
@@ -151,7 +152,7 @@ const embedUrl = googleConnected
             </div>
             <div>
               <label class="label" style="display:block;margin-bottom:0.3rem;">Fecha</label>
-              <input type="date" id="ev-date" value={new Date().toISOString().slice(0,10)} />
+              <input type="date" id="ev-date" value={todayCL()} />
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
               <div>

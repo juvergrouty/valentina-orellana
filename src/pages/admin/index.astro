@@ -3,9 +3,10 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { SESSION_LABELS } from '../../data/services';
+import { nowCL, todayCL } from '../../lib/dateUtils';
 
 // Reservas del día de hoy
-const today = new Date().toISOString().slice(0, 10);
+const today = todayCL();
 
 const { data: todayBookings } = await supabase
   .from('bookings')
@@ -15,7 +16,7 @@ const { data: todayBookings } = await supabase
   .order('session_time');
 
 // Próximas reservas confirmadas (7 días)
-const weekEnd = new Date();
+const weekEnd = nowCL();
 weekEnd.setDate(weekEnd.getDate() + 7);
 const weekEndStr = weekEnd.toISOString().slice(0, 10);
 
@@ -37,7 +38,8 @@ const { count: pendingCount } = await supabase
   .gte('session_date', today);
 
 // Reservas confirmadas totales del mes
-const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+const monthStartD = nowCL();
+const monthStart = new Date(monthStartD.getFullYear(), monthStartD.getMonth(), 1).toISOString().slice(0, 10);
 const { count: monthCount } = await supabase
   .from('bookings')
   .select('*', { count: 'exact', head: true })

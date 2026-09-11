@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
+import { todayCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
 
@@ -20,7 +21,7 @@ export const GET: APIRoute = async ({ url }) => {
     return res;
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayCL();
   const [{ data: slotsData }, { data: blk }] = await Promise.all([
     fetchWeekdays(),
     supabase.from('blocked_dates').select('date').gte('date', today),

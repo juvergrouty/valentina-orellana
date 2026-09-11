@@ -33,7 +33,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
   }
 
-  // ── Confirmar reserva ───────────────────────────────────────────────────────
+  // ── Confirmar reserva (link de pago pendiente → confirmada) ─────────────────
+  // Esto es distinto de "marcar como pagado": una reserva puede confirmarse sin
+  // que necesariamente se haya registrado el medio de pago (caso legacy). El
+  // botón "Marcar como pagado" del panel es el que corresponde usar quere se
+  // quiere dejar registro explícito del pago — ver action==='mark_paid'.
   if (action === 'confirm') {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
@@ -52,6 +56,72 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         } catch (e) { console.error('[confirm] boleta:', e); }
       }
     }
+    return redirect(dest);
+  }
+
+  // ── Marcar como pagado ───────────────────────────────────────────────────────
+  // Registra explícitamente que el pago SÍ se recibió (con qué medio), separado
+  // del estado de la reserva. Antes de esto, "Pago en consulta" dejaba la
+  // reserva como 'confirmed' desde que se agendaba, sin que eso reflejara si la
+  // psicóloga ya había recibido la plata — esto es lo que Valentina reportó
+  // como "aparece confirmada pero no significa que esté pagada".
+  if (action === 'mark_paid') {
+    const id     = form.get('id')?.toString();
+    const medio  = form.get('medio')?.toString()?.trim() || 'Manual';
+    const emitir = form.get('emitir_boleta') === 'on';
+    const rut    = form.get('rut')?.toString()?.trim();
+    if (!id) return redirect(dest);
+
+    let { error } = await supabase.from('bookings')
+      .update({ paid_at: new Date().toISOString(), payment_note: medio, status: 'confirmed' })
+      .eq('id', id);
+    if (error?.code === '42703') {
+      return redirect(dest + '&error=missing_migration');
+    }
+    if (error) {
+      return redirect(dest + '&error=insert_failed&detail=' + encodeURIComponent(error.message.slice(0, 200)));
+    }
+
+    if (emitir) {
+      try { await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true }); }
+      catch (e) { console.error('[mark_paid] boleta:', e); }
+    }
+    return redirect(dest);
+  }
+
+  // ── Anular deuda ─────────────────────────────────────────────────────────────
+  // Para cuando la sesión no se va a cobrar (cortesía, error, acuerdo con el
+  // paciente) — no la marca como pagada, solo deja de aparecer como pendiente.
+  if (action === 'void_debt') {
+    const id = form.get('id')?.toString();
+    if (!id) return redirect(dest);
+    const { error } = await supabase.from('bookings').update({ debt_voided: true }).eq('id', id);
+    if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+    return redirect(dest);
+  }
+
+  // ── Anular pago (deshacer "Marcar como pagado") ──────────────────────────────
+  // Para corregir un error al marcar una sesión como pagada. Vuelve a "Por
+  // pagar"; no toca el status de la reserva ni la boleta si ya se emitió.
+  if (action === 'unmark_paid') {
+    const id = form.get('id')?.toString();
+    if (!id) return redirect(dest);
+    const { error } = await supabase.from('bookings')
+      .update({ paid_at: null, payment_note: null })
+      .eq('id', id);
+    if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+    return redirect(dest);
+  }
+
+  // ── Marcar / quitar inasistencia ──────────────────────────────────────────────
+  // Independiente del pago y del estado de la reserva: el paciente no llegó.
+  if (action === 'mark_no_show' || action === 'unmark_no_show') {
+    const id = form.get('id')?.toString();
+    if (!id) return redirect(dest);
+    const { error } = await supabase.from('bookings')
+      .update({ no_show: action === 'mark_no_show' })
+      .eq('id', id);
+    if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
     return redirect(dest);
   }
 
@@ -76,7 +146,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       .from('bookings').select('id')
       .eq('session_date', session_date)
       .eq('session_time', session_time)
-      .neq('status', 'cancelled')
+      .not('status', 'in', '(cancelled,expired)')
       .neq('id', id)
       .maybeSingle();
 
@@ -98,23 +168,65 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const patient_email = form.get('patient_email')?.toString()?.trim().toLowerCase() ?? '';
     const patient_phone = form.get('patient_phone')?.toString()?.trim() ?? '';
     const notes         = form.get('notes')?.toString()?.trim() ?? '';
+    // Precio manual opcional: si la admin lo especifica, tiene prioridad sobre el
+    // precio por defecto del servicio (que sigue calculándose y mostrándose como base).
+    const overrideRaw   = form.get('amount_override')?.toString()?.trim() ?? '';
+    const overrideAmount = overrideRaw && !isNaN(parseInt(overrideRaw)) && parseInt(overrideRaw) > 0
+      ? parseInt(overrideRaw) : null;
 
     if (!session_type || !session_date || !session_time || !patient_name || !patient_email || !patient_phone) {
       return redirect(dest + '&error=missing_fields');
     }
 
-    const { data: priceRows } = await supabase.from('settings').select('key, value')
-      .eq('key', `price_${session_type.replace(/-/g, '_')}`);
-    const settingsPrice = priceRows?.[0]?.value ? parseInt(priceRows[0].value) : null;
-    const plan   = pricingPlans.find(p => p.id === session_type);
-    const amount = (settingsPrice && !isNaN(settingsPrice)) ? settingsPrice : (plan?.price ?? 0);
+    // Precio por defecto: SIEMPRE desde services_catalog (fuente autoritativa y
+    // actualizada desde /admin/servicios). Antes se leía de una fila vieja en
+    // `settings` o de un array hardcodeado en el código (`pricingPlans`), ambos
+    // desactualizados — eso causaba que se agendara a un precio antiguo/incorrecto.
+    const svcType     = session_type.startsWith('pareja') ? 'pareja' : 'individual';
+    const svcModality = session_type.includes('online') ? 'online' : 'presencial';
+    const { data: matchedSvc } = await supabase
+      .from('services_catalog')
+      .select('*')
+      .eq('type', svcType)
+      .in('modality', [svcModality, 'ambos'])
+      .eq('visible', true)
+      .order('sort_order', { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
-    const { data: booking, error } = await supabase.from('bookings').insert({
+    let defaultAmount = 0;
+    if (matchedSvc) {
+      defaultAmount = matchedSvc.modality === 'ambos'
+        ? (svcModality === 'online' ? (matchedSvc.price_online ?? matchedSvc.price) : (matchedSvc.price_presencial ?? matchedSvc.price))
+        : matchedSvc.price;
+    } else {
+      // Fallback legacy, solo si no hay ningún servicio visible que calce (no debería pasar en operación normal).
+      const { data: priceRows } = await supabase.from('settings').select('key, value')
+        .eq('key', `price_${session_type.replace(/-/g, '_')}`);
+      const settingsPrice = priceRows?.[0]?.value ? parseInt(priceRows[0].value) : null;
+      const plan = pricingPlans.find(p => p.id === session_type);
+      defaultAmount = (settingsPrice && !isNaN(settingsPrice)) ? settingsPrice : (plan?.price ?? 0);
+    }
+
+    const amount = overrideAmount ?? defaultAmount;
+
+    const basePayload: Record<string, unknown> = {
       session_type, session_date, session_time,
       patient_name, patient_email, patient_phone,
       notes: notes || null,
       status: 'confirmed', payment_method: 'manual', amount,
-    }).select().single();
+      created_by_admin: true, // creada desde el panel admin: nunca debe auto-eliminarse por falta de pago
+    };
+    if (matchedSvc) basePayload.service_id = matchedSvc.id;
+
+    let { data: booking, error } = await supabase.from('bookings').insert(basePayload).select().single();
+    if (error?.code === '42703') {
+      // Columna(s) nueva(s) todavía no existen en la base de datos — reintenta sin ellas
+      // para no romper el agendamiento (degradación igual que en el resto del archivo).
+      const { created_by_admin: _c, service_id: _s, ...retryPayload } = basePayload;
+      const retry = await supabase.from('bookings').insert(retryPayload).select().single();
+      booking = retry.data; error = retry.error;
+    }
 
     if (error || !booking) return redirect(dest + '&error=conflict');
     try { await syncBookingToCalendar(booking); } catch (e) { console.error('[create] sync:', e); }
@@ -161,11 +273,17 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const svcModality = svc.modality === 'ambos' ? modality_choice : svc.modality;
     const sessionType = svc.type === 'pareja' ? `pareja-${svcModality}` : svcModality;
 
+    // Precio manual opcional: si la admin lo especifica, reemplaza el precio del
+    // servicio como total del pack (se sigue repartiendo entre las sesiones igual).
+    const overrideRaw    = form.get('amount_override')?.toString()?.trim() ?? '';
+    const overrideAmount = overrideRaw && !isNaN(parseInt(overrideRaw)) && parseInt(overrideRaw) > 0
+      ? parseInt(overrideRaw) : null;
+
     // Precio por sesión: se reparte el total del pack entre las N sesiones para
     // que CADA sesión tenga su propio monto y pueda emitirse una boleta por sesión
     // (necesario para el reembolso en la isapre). El resto de la división lo
     // absorbe la primera sesión, así la suma cuadra exactamente con el total.
-    const totalPrice     = svc.price;
+    const totalPrice     = overrideAmount ?? svc.price;
     const durMin         = svc.duration_min ?? 50;
     const perSessionBase = Math.floor(totalPrice / sessions_count);
     const remainder      = totalPrice - perSessionBase * sessions_count;
@@ -175,6 +293,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const notifEmail = settingsRows?.find((r: { key: string }) => r.key === 'notification_email')?.value ?? 'juver@grouty.cl';
 
     const bookingIds: string[] = [];
+    let conflictCount = 0;
+    let lastInsertError: string | null = null;
 
     for (let i = 0; i < sessions_count; i++) {
       const d = new Date(`${session_date}T00:00:00`);
@@ -186,10 +306,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         .from('bookings').select('id')
         .eq('session_date', bDate)
         .eq('session_time', session_time)
-        .neq('status', 'cancelled')
+        .not('status', 'in', '(cancelled,expired)')
         .maybeSingle();
 
-      if (conflict) continue; // Skip slots with conflicts (pack continues)
+      if (conflict) { conflictCount++; continue; } // Skip slots with conflicts (pack continues)
 
       const payload: Record<string, unknown> = {
         session_type:   sessionType,
@@ -203,20 +323,37 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         payment_method: payment_mode === 'link' ? 'flow' : 'manual',
         amount:         perSessionBase + (i === 0 ? remainder : 0),
         duration_min:   durMin,
+        created_by_admin: true, // creada desde el panel admin: nunca debe auto-eliminarse por falta de pago,
+                                 // ni siquiera cuando payment_mode==='link' (queda en pending_payment esperando el pago)
       };
 
       // Try to insert, degrade gracefully if optional columns missing
       let { data: booking, error: insErr } = await supabase.from('bookings').insert(payload).select().single();
       if (insErr?.code === '42703') {
-        const { service_id: _s, duration_min: _d, ...base } = payload;
+        const { service_id: _s, duration_min: _d, created_by_admin: _c, ...base } = payload;
         const retry = await supabase.from('bookings').insert(base).select().single();
         booking = retry.data;
         insErr  = retry.error;
       }
-      if (booking) bookingIds.push(booking.id);
+      if (booking) {
+        bookingIds.push(booking.id);
+      } else if (insErr) {
+        // No silenciar el error: antes esto se perdía por completo y la admin
+        // no tenía forma de saber por qué "no pasó nada" al agendar.
+        console.error('[create-admin] insert failed:', insErr.code, insErr.message, { bDate, session_time });
+        lastInsertError = insErr.message ?? insErr.code ?? 'unknown';
+      }
     }
 
-    if (bookingIds.length === 0) return redirect(dest);
+    if (bookingIds.length === 0) {
+      if (lastInsertError) {
+        return redirect(dest + '&error=insert_failed&detail=' + encodeURIComponent(lastInsertError.slice(0, 200)));
+      }
+      if (conflictCount > 0) {
+        return redirect(dest + '&error=slot_conflict');
+      }
+      return redirect(dest + '&error=unknown_no_booking');
+    }
 
     // ── Modo LINK DE PAGO: generar orden Flow y enviarla al paciente ──────────
     if (payment_mode === 'link') {

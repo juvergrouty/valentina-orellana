@@ -2,9 +2,10 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { nowCL } from '../../lib/dateUtils';
 
 // Ventana: últimos 3 meses
-const now      = new Date();
+const now      = nowCL();
 const since    = new Date(now); since.setMonth(since.getMonth() - 3);
 const sinceStr = since.toISOString().split('T')[0];
 const todayStr = now.toISOString().split('T')[0];

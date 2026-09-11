@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { getAgwConfig, bheEmitidas, emitirBHE, bhePdf, bheEmail, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion } from '../../../lib/apigateway';
+import { getAgwConfig, bheEmitidas, emitirBHE, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion } from '../../../lib/apigateway';
 
 // YYYYMM del período en que se emitió/emitirá la boleta (según la fecha de la sesión)
 const periodoDeSesion = (sessionDate?: string | null) =>
@@ -155,6 +155,37 @@ export const POST: APIRoute = async ({ request }) => {
       return json({ ok: true, folio, pdf });
     } catch (e) {
       return json({ ok: false, error: e instanceof Error ? e.message : 'Error al obtener PDF' }, 502);
+    }
+  }
+
+  // ── Anular una boleta ya emitida ──────────────────────────────────────────
+  // Corrige un error (monto, RUT, sesión equivocada). Anula el documento en el
+  // SII; no borra el registro de la reserva, solo marca en las notas que la
+  // boleta quedó anulada, para que la ficha no la muestre como vigente.
+  if (action === 'anular') {
+    const bookingId = body.booking_id;
+    if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
+
+    const { data: b } = await supabase
+      .from('bookings').select('notes').eq('id', bookingId).single();
+    if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
+
+    const { folio } = parseBoleta(b.notes);
+    if (!folio) return json({ ok: false, error: 'Esta sesión no tiene una boleta emitida.' }, 400);
+    if (/Boleta Folio \d+.*ANULADA/is.test(b.notes ?? '')) {
+      return json({ ok: false, error: 'Esa boleta ya estaba anulada.' }, 400);
+    }
+
+    try {
+      await bheAnular(cfg.siiRut, folio, cfg);
+      const nuevaNota = (b.notes ?? '').replace(
+        new RegExp(`(Boleta Folio ${folio}[^\\n]*)`, 'i'),
+        '$1 · ANULADA'
+      );
+      await supabase.from('bookings').update({ notes: nuevaNota }).eq('id', bookingId);
+      return json({ ok: true, folio });
+    } catch (e) {
+      return json({ ok: false, error: e instanceof Error ? e.message : 'Error al anular' }, 502);
     }
   }
 

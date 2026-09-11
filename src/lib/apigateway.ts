@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { sendBoletaEmail } from './email';
+import { todayCL } from './dateUtils';
 
 /**
  * Integración con API Gateway (apigateway.cl) — Boletas de Honorarios Electrónicas (BHE).
@@ -133,7 +134,7 @@ export async function emitirBHE(params: {
   const boleta = {
     Encabezado: {
       IdDoc: {
-        FchEmis:       params.fecha ?? new Date().toISOString().slice(0, 10),
+        FchEmis:       params.fecha ?? todayCL(),
         TipoRetencion: params.tipoRetencion ?? 2,
       },
       Emisor: { RUTEmisor: c.siiRut },
@@ -218,7 +219,7 @@ function periodoDeFecha(ymd: string): string {
  * ocurre (o es el marcador 2099 de un cobro sin fecha), cae a la fecha de hoy.
  */
 export function fechaBoletaDesdeSesion(sessionDate?: string | null): string {
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = todayCL();
   if (!sessionDate) return hoy;
   if (sessionDate === '2099-12-31') return hoy;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(sessionDate)) return hoy;
