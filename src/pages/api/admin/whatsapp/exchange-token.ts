@@ -10,30 +10,37 @@ export const prerender = false;
 // siguiendo el mismo patrón que la conexión de Google Calendar.
 export const POST: APIRoute = async ({ request }) => {
   try {
-    const { code, wabaId, phoneNumberId, redirectUri } = await request.json();
+    // `redirectUri` ya no se usa en el canje (ver comentario más abajo) —
+    // se deja de desestructurar para no arrastrar una variable sin uso.
+    const { code, wabaId, phoneNumberId } = await request.json();
     if (!code) return json({ error: 'Falta el código de autorización.' }, 400);
 
     const appId     = import.meta.env.PUBLIC_META_APP_ID;
     const appSecret = import.meta.env.META_APP_SECRET;
     if (!appId || !appSecret) return json({ error: 'META_APP_SECRET / PUBLIC_META_APP_ID no configurados en Vercel.' }, 500);
 
-    // El código de Embedded Signup viene del diálogo de FB.login() con
-    // config_id (no de un redirect de OAuth clásico) — el canje es un
-    // intercambio servidor-a-servidor y, según la documentación de Meta,
-    // NO lleva redirect_uri. Mandarlo es lo que causaba el error real visto
-    // en producción: "Error validating verification code...redirect_uri is
-    // identical..." — Meta comparaba ese valor contra la URL de relay interna
-    // (xd_arbiter) que el SDK usa de verdad, que nunca coincide con nada que
-    // se mande manualmente.
-    void redirectUri; // ya no se usa; se deja desestructurado por compatibilidad con el body actual
-
+    // IMPORTANTE (corregido 11 sep 2026): comprobamos en vivo que, con el
+    // SDK de JavaScript en modo popup (FB.login con config_id, como exige
+    // Embedded Signup de WhatsApp), el diálogo de OAuth real SIEMPRE usa
+    // internamente la URL de relay de Meta (staticxx.facebook.com/x/connect/
+    // xd_arbiter/...) como redirect_uri — sin importar qué redirect_uri le
+    // pasemos a FB.login(). Esa URL cambia en cada intento (trae un hash
+    // aleatorio), así que nunca la podemos reproducir desde el backend.
+    // Por eso mandar CUALQUIER redirect_uri aquí (incluida la URL de esta
+    // página) garantiza el error "Error validating verification code...
+    // redirect_uri is identical...". La documentación de Meta para
+    // Embedded Signup (flujo basado en config_id) indica que este canje NO
+    // lleva redirect_uri — se omite por completo.
     const tokenRes = await fetch(
       `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&code=${encodeURIComponent(code)}`
     );
     const tokenData = await tokenRes.json();
     if (!tokenRes.ok || !tokenData.access_token) {
       console.error('[whatsapp/exchange-token] Graph error:', tokenData);
-      return json({ error: tokenData.error?.message ?? 'No se pudo canjear el código por un token.' }, 502);
+      // TEMPORAL (11 sep 2026): devolvemos el error completo de Meta (no solo
+      // el mensaje) para diagnosticar con precisión por qué falla el canje.
+      // Quitar este detalle extra una vez resuelto.
+      return json({ error: tokenData.error?.message ?? 'No se pudo canjear el código por un token.', debug: tokenData }, 502);
     }
 
     const upserts: Array<{ key: string; value: string }> = [
