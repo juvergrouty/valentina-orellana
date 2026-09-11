@@ -180,7 +180,9 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
             if (data.ok) {
               showStatus('✓ WhatsApp conectado correctamente. Recarga la página para ver el estado.', true);
             } else {
-              showStatus('Error: ' + (data.error ?? 'no se pudo conectar.'), false);
+              // TEMPORAL: se muestra data.debug (detalle crudo del error de
+              // Meta) para diagnosticar — quitar una vez resuelto.
+              showStatus('Error: ' + (data.error ?? 'no se pudo conectar.') + (data.debug ? ' — DEBUG: ' + JSON.stringify(data.debug) : ''), false);
             }
           })
           .catch(() => showStatus('Error de conexión al guardar.', false));

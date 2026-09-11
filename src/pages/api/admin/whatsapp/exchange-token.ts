@@ -37,7 +37,10 @@ export const POST: APIRoute = async ({ request }) => {
     const tokenData = await tokenRes.json();
     if (!tokenRes.ok || !tokenData.access_token) {
       console.error('[whatsapp/exchange-token] Graph error:', tokenData);
-      return json({ error: tokenData.error?.message ?? 'No se pudo canjear el código por un token.' }, 502);
+      // TEMPORAL (11 sep 2026): devolvemos el error completo de Meta (no solo
+      // el mensaje) para diagnosticar con precisión por qué falla el canje.
+      // Quitar este detalle extra una vez resuelto.
+      return json({ error: tokenData.error?.message ?? 'No se pudo canjear el código por un token.', debug: tokenData }, 502);
     }
 
     const upserts: Array<{ key: string; value: string }> = [
