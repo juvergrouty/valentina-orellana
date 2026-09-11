@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { getAgwConfig, bheEmitidas, emitirBHE, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion } from '../../../lib/apigateway';
+import type { BheCausal } from '../../../lib/apigateway';
 
 // YYYYMM del período en que se emitió/emitirá la boleta (según la fecha de la sesión)
 const periodoDeSesion = (sessionDate?: string | null) =>
@@ -175,9 +176,13 @@ export const POST: APIRoute = async ({ request }) => {
     if (/Boleta Folio \d+.*ANULADA/is.test(b.notes ?? '')) {
       return json({ ok: false, error: 'Esa boleta ya estaba anulada.' }, 400);
     }
+    const validCausales: BheCausal[] = ['no_pago', 'no_prestacion', 'error_digitacion'];
+    const causal: BheCausal = validCausales.includes(body.causal as BheCausal)
+      ? (body.causal as BheCausal)
+      : 'error_digitacion';
 
     try {
-      await bheAnular(cfg.siiRut, folio, cfg);
+      await bheAnular(cfg.siiRut, folio, causal, cfg);
       const nuevaNota = (b.notes ?? '').replace(
         new RegExp(`(Boleta Folio ${folio}[^\\n]*)`, 'i'),
         '$1 · ANULADA'

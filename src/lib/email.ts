@@ -361,6 +361,57 @@ export async function sendReviewRequestEmail(opts: {
   return { sent: true };
 }
 
+// ─── Email al cliente: seguimiento/evaluación después de la sesión ──────────
+// Contenido genérico (no es un instrumento clínico) — pensado como punto de
+// partida: si querés otro texto, u otro instrumento/formulario específico,
+// avísame y lo cambio. Si hay un link de formulario guardado en Configuración
+// (evaluation_form_url), se agrega al correo; si no, el correo solo invita a
+// responder por este medio.
+export async function sendEvaluationEmail(opts: {
+  patientName:  string;
+  patientEmail: string;
+  formUrl?:     string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+
+  const formBlock = opts.formUrl
+    ? `
+        <a href="${opts.formUrl}"
+           style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;
+                  text-decoration:none;font-family:'Inter',sans-serif;font-size:0.78rem;
+                  letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
+          Completar evaluación
+        </a>`
+    : `
+        <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;font-family:'Inter',sans-serif;">
+          Puedes responder directamente a este correo contándome cómo te sentiste con la sesión.
+        </p>`;
+
+  const res = await client.emails.send({
+    from: FROM,
+    to:   opts.patientEmail,
+    subject: '¿Cómo te sentiste con tu sesión?',
+    html: `
+      <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Un momento para ti</h1>
+        <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
+          Hola ${opts.patientName}, quería saber cómo te sentiste después de nuestra última sesión.
+          Tu evaluación me ayuda a acompañarte mejor en el proceso.
+        </p>
+        ${formBlock}
+        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
+                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
+          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+        </p>
+      </div>
+    `,
+  });
+  await logEmail('email/evaluación', opts.patientEmail, 'Evaluación post-sesión', !res.error, res.error?.message);
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
+}
+
 // ─── Email al cliente: pasos a seguir / qué esperar ──────────────────────────
 export async function sendStepsEmail(opts: {
   patientName:   string;

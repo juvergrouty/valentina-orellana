@@ -37,3 +37,13 @@ alter table bookings add column if not exists debt_voided boolean not null defau
 -- 6) Inasistencia: el paciente no llegó a la sesión. Es independiente del pago
 --    (puede haber cobrado igual, o no) y del estado de la reserva.
 alter table bookings add column if not exists no_show boolean not null default false;
+
+-- 7) Comunicaciones opcionales por reserva (panel "Agendar hora" → sección
+--    Comunicaciones al paciente). El correo de confirmación y el recordatorio
+--    por correo ya existían (send_confirmation al crear, reminder_email_enabled);
+--    esto agrega los dos que faltaban:
+--    - whatsapp_reminder_enabled: recordatorio por WhatsApp 4h antes de la sesión.
+--      Requiere WhatsApp Business conectado en Configuración (hoy no lo está).
+--    - evaluation_email_enabled: correo de seguimiento/evaluación después de la sesión.
+alter table bookings add column if not exists whatsapp_reminder_enabled boolean not null default false;
+alter table bookings add column if not exists evaluation_email_enabled boolean not null default false;

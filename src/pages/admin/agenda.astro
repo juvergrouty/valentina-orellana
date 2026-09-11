@@ -4,6 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { pricingPlans } from '../../data/services';
 import { getValidAccessToken } from '../../lib/syncCalendar';
+import { reviewRequestUrl } from '../../lib/googleReviews';
 import { nowCL } from '../../lib/dateUtils';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ const [bookingsRes, svcRes, patientRes, allSvcRes, settingsRes] = await Promise.
   supabase.from('services_catalog')
     .select('id, name, price, price_online, price_presencial, modality, type, duration_min')
     .eq('visible', true).order('sort_order'),
-  supabase.from('settings').select('key, value').in('key', ['google_place_id', 'clinic_address', 'flow_env']),
+  supabase.from('settings').select('key, value').in('key', ['google_review_url', 'clinic_address', 'flow_env']),
 ]);
 
 const bookings    = (bookingsRes.data ?? []) as Array<Record<string, any>>;
@@ -62,9 +63,7 @@ const allServices = allSvcRes.data ?? [];
 
 const cfg: Record<string, string> = {};
 (settingsRes.data ?? []).forEach((r: { key: string; value: string }) => { cfg[r.key] = r.value; });
-const reviewUrl = cfg['google_place_id']
-  ? `https://search.google.com/local/writereview?placeid=${encodeURIComponent(cfg['google_place_id'])}`
-  : '';
+const reviewUrl = reviewRequestUrl(cfg);
 const clinicAddress = cfg['clinic_address'] ?? '';
 const flowCheckoutBase = cfg['flow_env'] === 'production' ? 'https://www.flow.cl/app/web/pay.php' : 'https://sandbox.flow.cl/app/web/pay.php';
 
@@ -580,21 +579,30 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
               </div>
             </label>
           </div>
-          <div class="bp-comm-item bp-comm-disabled">
+          <div class="bp-comm-item">
             <label class="bp-comm-label">
-              <input type="checkbox" disabled>
+              <input type="checkbox" name="reminder_email_enabled" value="on" checked>
               <div>
-                <div class="bp-comm-name">Correo de recordatorio <span class="bp-soon-chip">Próximo</span></div>
+                <div class="bp-comm-name">Correo de recordatorio</div>
                 <div class="bp-comm-desc">Se enviará 24 horas antes de la sesión</div>
               </div>
             </label>
           </div>
-          <div class="bp-comm-item bp-comm-disabled">
+          <div class="bp-comm-item">
             <label class="bp-comm-label">
-              <input type="checkbox" disabled>
+              <input type="checkbox" name="whatsapp_reminder_enabled" value="on">
               <div>
-                <div class="bp-comm-name">WhatsApp de recordatorio <span class="bp-soon-chip">Próximo</span></div>
-                <div class="bp-comm-desc">Se enviará 4 horas antes</div>
+                <div class="bp-comm-name">WhatsApp de recordatorio <span class="bp-soon-chip">Requiere WhatsApp conectado</span></div>
+                <div class="bp-comm-desc">Se enviará 4 horas antes. No se enviará hasta que conectes WhatsApp Business en Configuración.</div>
+              </div>
+            </label>
+          </div>
+          <div class="bp-comm-item">
+            <label class="bp-comm-label">
+              <input type="checkbox" name="evaluation_email_enabled" value="on">
+              <div>
+                <div class="bp-comm-name">Correo de evaluación</div>
+                <div class="bp-comm-desc">Se enviará al terminar la sesión, preguntando cómo se sintió el paciente</div>
               </div>
             </label>
           </div>
@@ -881,6 +889,16 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
               Enviar por email al paciente
             </button>
+          </div>
+          <div id="sp-anular-boleta-box" style="display:none;margin-top:0.6rem;">
+            <div class="bp-field" style="margin-bottom:0.4rem;">
+              <label style="font-size:0.68rem;">Motivo de anulación (según SII)</label>
+              <select id="sp-anular-causal">
+                <option value="error_digitacion">Error en la digitación</option>
+                <option value="no_pago">No se efectuó el pago de los servicios</option>
+                <option value="no_prestacion">No se efectuó la prestación de servicios</option>
+              </select>
+            </div>
             <button type="button" class="sp-action-row" id="sp-btn-anular-boleta" style="padding:0.3rem 0;color:#b45309;">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
               Anular boleta
@@ -1900,7 +1918,8 @@ function openSessionDetail(b) {
   const boletaActions = document.getElementById('sp-boleta-actions');
   if (boletaResult) { boletaResult.textContent = ''; boletaResult.style.color = ''; }
   if (boletaActions) boletaActions.style.display = 'none';
-  const anularBoletaBtn = document.getElementById('sp-btn-anular-boleta');
+  const anularBoletaBox = document.getElementById('sp-anular-boleta-box');
+  if (anularBoletaBox) anularBoletaBox.style.display = 'none';
   // Si ya se emitió (queda registrado en notes), avisar y mostrar acciones.
   // Toma la última línea "Boleta Folio N..." por si se anuló y se re-emitió.
   const boletaLines = [...(b.notes ?? '').matchAll(/Boleta\s+Folio\s+(\d+)[^\n]*/gi)];
@@ -1917,6 +1936,7 @@ function openSessionDetail(b) {
     if (boletaResult) { boletaResult.textContent = `✓ Ya emitida (Folio ${lastFolio})`; boletaResult.style.color = '#15803d'; }
     document.getElementById('sp-boleta-form').style.display = 'block';
     if (boletaActions) boletaActions.style.display = 'flex';
+    if (anularBoletaBox) anularBoletaBox.style.display = 'block';
     const emitBtn = document.getElementById('sp-btn-emitir');
     if (emitBtn) emitBtn.style.display = 'none';   // ya emitida, ocultar re-emitir
   } else {
@@ -1990,18 +2010,20 @@ document.getElementById('sp-btn-anular-boleta')?.addEventListener('click', async
   if (!currentBookingId) return;
   if (!confirm('¿Anular esta boleta de honorarios? Se anula el documento en el SII — esta acción no se puede deshacer. Después podrás emitir una nueva si corresponde.')) return;
 
+  const causal = document.getElementById('sp-anular-causal')?.value || 'error_digitacion';
   btn.disabled = true;
   result.textContent = 'Anulando…'; result.style.color = '#6b7280';
   try {
     const res = await fetch('/api/admin/apigateway', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'anular', booking_id: currentBookingId }),
+      body: JSON.stringify({ action: 'anular', booking_id: currentBookingId, causal }),
     });
     const data = await res.json();
     if (data.ok) {
-      result.textContent = `✕ Boleta anulada (Folio ${data.folio ?? ''}) — puedes emitir una nueva.`;
+      result.textContent = `✕ Boleta anulada (Folio ${data.folio ?? ''}) — puedes emitir una nueva. Verifica en sii.cl que haya quedado anulada.`;
       result.style.color = '#b45309';
       document.getElementById('sp-boleta-actions').style.display = 'none';
+      document.getElementById('sp-anular-boleta-box').style.display = 'none';
       document.getElementById('sp-btn-emitir').style.display = '';
     } else {
       result.textContent = '✕ ' + (data.error ?? 'No se pudo anular'); result.style.color = '#dc2626';

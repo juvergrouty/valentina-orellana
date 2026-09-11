@@ -1,5 +1,16 @@
 import { supabase } from './supabase';
 
+// Link confirmado por Vale para pedir la reseña (el que se arma con el Place ID
+// vía search.google.com/local/writereview a veces cae en la ficha equivocada).
+// Configurable en Configuración → "Link para pedir la reseña" (google_review_url);
+// esto es solo el respaldo mientras ese campo esté vacío.
+export const DEFAULT_REVIEW_URL = 'https://g.page/r/CdjUAFE_CLwxEBM/review';
+
+/** URL que se le manda al paciente para pedirle la reseña (correo o WhatsApp). */
+export function reviewRequestUrl(cfg: Record<string, string>): string {
+  return cfg['google_review_url']?.trim() || DEFAULT_REVIEW_URL;
+}
+
 export interface GReview {
   author:   string;
   rating:   number;

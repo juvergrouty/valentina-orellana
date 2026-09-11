@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { sendReviewRequestEmail, sendStepsEmail, sendConfirmationToClient, sendReminderEmail } from '../../../lib/email';
+import { reviewRequestUrl } from '../../../lib/googleReviews';
 
 export const prerender = false;
 
@@ -79,16 +80,12 @@ export const POST: APIRoute = async ({ request }) => {
 
   // Leer settings necesarios
   const { data: rows } = await supabase.from('settings').select('key, value')
-    .in('key', ['google_place_id', 'clinic_address']);
+    .in('key', ['google_review_url', 'clinic_address']);
   const cfg: Record<string, string> = {};
   (rows ?? []).forEach((r: { key: string; value: string }) => { cfg[r.key] = r.value; });
 
   if (action === 'review_request') {
-    const placeId = cfg['google_place_id'];
-    if (!placeId) {
-      return json({ ok: false, error: 'Falta el Place ID de Google en Configuración para armar el enlace de reseña.' }, 400);
-    }
-    const reviewUrl = `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}`;
+    const reviewUrl = reviewRequestUrl(cfg);
     const res = await sendReviewRequestEmail({ patientName: name || 'hola', patientEmail: email, reviewUrl });
     if (!res.sent) return json({ ok: false, error: res.reason ?? 'No se pudo enviar el correo.' }, 500);
     return json({ ok: true });

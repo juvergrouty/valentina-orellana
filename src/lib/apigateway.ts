@@ -195,9 +195,25 @@ export async function codigoDeFolio(emisor: string, periodo: string, folio: numb
   return found?.codigo ?? null;
 }
 
+// Causales oficiales del SII para anular una BHE (guía SII "Anular boletas de
+// honorarios electrónicas"). El nombre exacto del campo que espera el API
+// Gateway para esto NO está confirmado contra la documentación de la cuenta
+// (developers.apigateway.cl) — se envía con el nombre más probable según el
+// patrón del resto del API, pero si el formato real es distinto, el API
+// devolverá un error explícito en vez de fallar en silencio.
+export type BheCausal = 'no_pago' | 'no_prestacion' | 'error_digitacion';
+const CAUSAL_LABEL: Record<BheCausal, string> = {
+  no_pago:          'No se efectuó el pago de los servicios por parte del receptor',
+  no_prestacion:    'No se efectuó la prestación de servicios',
+  error_digitacion: 'Error en la digitación',
+};
+
 /** Anula una BHE emitida. POST /api/v2/sii/bhe/emitidas/anular/{emisor}/{folio} */
-export async function bheAnular(emisor: string, folio: string | number, cfg?: AgwConfig) {
-  return agwPost(`/api/v2/sii/bhe/emitidas/anular/${emisor}/${folio}`, {}, cfg);
+export async function bheAnular(emisor: string, folio: string | number, causal: BheCausal, cfg?: AgwConfig) {
+  return agwPost(`/api/v2/sii/bhe/emitidas/anular/${emisor}/${folio}`, {
+    causal,
+    causal_glosa: CAUSAL_LABEL[causal],
+  }, cfg);
 }
 
 // Normaliza RUT a "XXXXXXXX-X" (sin puntos, con guion antes del dígito verificador)

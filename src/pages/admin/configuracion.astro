@@ -365,6 +365,15 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
             Créala en <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" style="color:var(--forest);">Google Cloud Console</a> con la <em>Places API</em> activada. La cuota gratuita cubre el uso normal.
           </p>
         </div>
+        <div>
+          <label class="label" style="margin-bottom:0.4rem;display:block;">Link para pedir la reseña</label>
+          <input type="text" name="google_review_url" value={settings['google_review_url'] ?? ''} placeholder="https://g.page/r/XXXXXXXX/review" />
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.4rem;">
+            El link que le llega al paciente (por correo o WhatsApp) para que deje la reseña — es distinto
+            del Place ID de arriba (ese solo sirve para traer tus reseñas y mostrarlas en el sitio). Si lo
+            dejas vacío, se usa el que confirmaste: g.page/r/CdjUAFE_CLwxEBM/review.
+          </p>
+        </div>
       </div>
       <div style="margin-top:1rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
         <button type="button" id="btn-reviews-refresh" class="btn btn-outline btn-sm">↻ Actualizar reseñas ahora</button>
