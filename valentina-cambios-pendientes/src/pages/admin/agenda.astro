@@ -1,0 +1,2107 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+import { pricingPlans } from '../../data/services';
+import { getValidAccessToken } from '../../lib/syncCalendar';
+import { nowCL } from '../../lib/dateUtils';
+
+// ── Week calculation ─────────────────────────────────────────────────────────
+const weekOffset = parseInt(Astro.url.searchParams.get('w') ?? '0');
+
+const NOW = nowCL();
+NOW.setHours(0, 0, 0, 0);
+const todayStr = NOW.toISOString().split('T')[0];
+
+function getWeekStart(offset: number): Date {
+  const d = new Date(NOW);
+  const dow = d.getDay();
+  const toMon = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + toMon + offset * 7);
+  return d;
+}
+
+const weekStart = getWeekStart(weekOffset);
+const weekEnd   = new Date(weekStart);
+weekEnd.setDate(weekStart.getDate() + 6);
+const weekStartStr = weekStart.toISOString().split('T')[0];
+const weekEndStr   = weekEnd.toISOString().split('T')[0];
+
+// ── Data fetching ─────────────────────────────────────────────────────────────
+// reminder_email_enabled / patient_rut / mp_preference_id son columnas nuevas —
+// si aún no existen en la base, reintenta sin ellas para no romper la página.
+async function fetchBookings() {
+  const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, patient_rut, paid_at, payment_note, debt_voided, no_show';
+  const res = await supabase.from('bookings').select(cols)
+    .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
+    .neq('status', 'cancelled').order('session_time');
+  if (res.error?.code === '42703') {
+    const fallbackCols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id';
+    return supabase.from('bookings').select(fallbackCols)
+      .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
+      .neq('status', 'cancelled').order('session_time');
+  }
+  return res;
+}
+
+const [bookingsRes, svcRes, patientRes, allSvcRes, settingsRes] = await Promise.all([
+  fetchBookings(),
+  supabase.from('services_catalog').select('id, name'),
+  supabase.from('patients').select('id, name, email, phone, rut').eq('active', true).order('name'),
+  supabase.from('services_catalog')
+    .select('id, name, price, price_online, price_presencial, modality, type, duration_min')
+    .eq('visible', true).order('sort_order'),
+  supabase.from('settings').select('key, value').in('key', ['google_place_id', 'clinic_address', 'flow_env']),
+]);
+
+const bookings    = (bookingsRes.data ?? []) as Array<Record<string, any>>;
+const svcMap: Record<string, string> = {};
+(svcRes.data ?? []).forEach((s: { id: string; name: string }) => { svcMap[s.id] = s.name; });
+const patientList = patientRes.data ?? [];
+const allServices = allSvcRes.data ?? [];
+
+const cfg: Record<string, string> = {};
+(settingsRes.data ?? []).forEach((r: { key: string; value: string }) => { cfg[r.key] = r.value; });
+const reviewUrl = cfg['google_place_id']
+  ? `https://search.google.com/local/writereview?placeid=${encodeURIComponent(cfg['google_place_id'])}`
+  : '';
+const clinicAddress = cfg['clinic_address'] ?? '';
+const flowCheckoutBase = cfg['flow_env'] === 'production' ? 'https://www.flow.cl/app/web/pay.php' : 'https://sandbox.flow.cl/app/web/pay.php';
+
+// TODOS los servicios (incluidos ocultos/paquetes) — para el filtro y los colores
+// del calendario. `allServices` (solo visibles) se sigue usando para agendar.
+const { data: allSvcFullRes } = await supabase
+  .from('services_catalog').select('id, name').order('sort_order');
+const allSvcFull = (allSvcFullRes ?? []) as Array<{ id: string; name: string }>;
+
+// Paleta de colores por servicio (para el modo "Colores por servicio" del calendario)
+const SVC_PALETTE = [
+  { bg: '#e0e7ff', bd: '#4f5ce8' }, { bg: '#dcfce7', bd: '#16a34a' },
+  { bg: '#fef3c7', bd: '#d97706' }, { bg: '#fce7f3', bd: '#db2777' },
+  { bg: '#cffafe', bd: '#0891b2' }, { bg: '#f3e8ff', bd: '#9333ea' },
+  { bg: '#ffedd5', bd: '#ea580c' }, { bg: '#dbeafe', bd: '#2563eb' },
+  { bg: '#fee2e2', bd: '#dc2626' }, { bg: '#d1fae5', bd: '#059669' },
+];
+const svcColor: Record<string, { bg: string; bd: string }> = {};
+allSvcFull.forEach((s, i) => { svcColor[s.id] = SVC_PALETTE[i % SVC_PALETTE.length]; });
+const NEUTRAL_COLOR = { bg: '#eef2f7', bd: '#94a3b8' };
+
+// ── Horarios disponibles configurados (para el overlay del calendario) ──────
+// El horario es POR SERVICIO → cada franja trae su service_id. Degrada si aún no existe.
+async function fetchAvailSlots() {
+  const withSvc = await supabase.from('availability_slots')
+    .select('day_of_week, start_time, active, service_id').eq('active', true);
+  if (withSvc.error?.code === '42703') {
+    return await supabase.from('availability_slots').select('day_of_week, start_time, active').eq('active', true);
+  }
+  return withSvc;
+}
+const { data: availSlotsRaw } = await fetchAvailSlots();
+type AvSlot = { start: string; min: number; svc: string; height: number };
+const availByDow: Record<number, AvSlot[]> = {};
+(availSlotsRaw ?? []).forEach((s: { day_of_week: number; start_time: string; service_id?: string }) => {
+  const hhmm = String(s.start_time).slice(0, 5);
+  const [h, m] = hhmm.split(':').map(Number);
+  (availByDow[s.day_of_week] ??= []).push({ start: hhmm, min: h * 60 + m, svc: s.service_id ?? '', height: 55 });
+});
+// Altura de cada bloque = distancia al siguiente slot del mismo día (para que teselen)
+Object.keys(availByDow).forEach(k => {
+  const arr = availByDow[+k].sort((a, b) => a.min - b.min);
+  arr.forEach((s, i) => {
+    const gap = i < arr.length - 1 ? arr[i + 1].min - s.min : 55;
+    s.height = Math.max(20, Math.min(gap, 90));
+  });
+});
+
+// Mapa email → RUT (para prellenar la emisión de boleta) y email → id de ficha
+// (para el botón "Escribir evolución" del panel — enlaza directo a la ficha si ya existe)
+const rutByEmail: Record<string, string> = {};
+const patientIdByEmail: Record<string, string> = {};
+patientList.forEach((p: { id: string; email: string | null; rut: string | null }) => {
+  if (p.email && p.rut) rutByEmail[p.email.toLowerCase()] = p.rut;
+  if (p.email) patientIdByEmail[p.email.toLowerCase()] = p.id;
+});
+
+// ── Eventos de Google Calendar de la semana (solo lectura) ──────────────────
+type GEvent = { date: string; time: string; dur: number; title: string };
+const gcalByDate: Record<string, GEvent[]> = {};
+try {
+  const auth = await getValidAccessToken();
+  if (auth) {
+    const tMin = new Date(weekStart); tMin.setDate(tMin.getDate() - 1);
+    const tMax = new Date(weekEnd);   tMax.setDate(tMax.getDate() + 2);
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(auth.calendarId)}/events`
+      + `?timeMin=${tMin.toISOString()}&timeMax=${tMax.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=100`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` } });
+    if (res.ok) {
+      const data = await res.json();
+      // Evitar duplicar los eventos que ya son reservas del sitio
+      const bookedGoogleIds = new Set(bookings.map((b: { google_event_id?: string }) => b.google_event_id).filter(Boolean));
+      for (const ev of (data.items ?? [])) {
+        if (ev.id && bookedGoogleIds.has(ev.id)) continue;
+        const sdt = ev.start?.dateTime;
+        if (!sdt) continue; // omitir eventos de todo el día
+        const date = sdt.slice(0, 10);
+        const time = sdt.slice(11, 16);
+        let dur = 60;
+        if (ev.end?.dateTime) {
+          dur = Math.max(20, Math.round((new Date(ev.end.dateTime).getTime() - new Date(sdt).getTime()) / 60000));
+        }
+        (gcalByDate[date] ??= []).push({ date, time, dur, title: ev.summary ?? 'Ocupado' });
+      }
+    }
+  }
+} catch (e) { console.error('[agenda] gcal:', e); }
+
+// ── Week days ─────────────────────────────────────────────────────────────────
+const DAYS_ES      = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
+const MONTHS_ES    = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+const MONTHS_LONG  = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const DAYS_LONG    = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+
+const weekDays = Array.from({ length: 7 }, (_, i) => {
+  const d = new Date(weekStart);
+  d.setDate(weekStart.getDate() + i);
+  const iso = d.toISOString().split('T')[0];
+  return {
+    dayName: DAYS_ES[i], dayNum: d.getDate(),
+    month: d.getMonth(), year: d.getFullYear(),
+    isoDate: iso, isToday: iso === todayStr,
+    dow: d.getDay(), // 0=Dom..6=Sáb (para mapear los horarios disponibles)
+  };
+});
+
+const weekLabel = `${weekStart.getDate()} – ${weekEnd.getDate()} ${MONTHS_ES[weekEnd.getMonth()]} ${weekEnd.getFullYear()}`;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+
+type BRow = (typeof bookings)[number];
+
+const byDate: Record<string, BRow[]> = {};
+bookings.forEach(b => { (byDate[b.session_date] ??= []).push(b); });
+
+function evStyle(time: string, dur: number | null): string {
+  const [h, m] = time.split(':').map(Number);
+  return `top:${(h - 6) * 60 + m}px;height:${Math.max(dur ?? 50, 24)}px`;
+}
+function evClass(status: string, pm: string | null): string {
+  if (status === 'confirmed' && (pm === 'manual' || pm === 'transferencia')) return 'ev-manual';
+  if (status === 'confirmed') return 'ev-confirmed';
+  return 'ev-pending';
+}
+function svcLabel(b: BRow): string {
+  if (b.service_id && svcMap[b.service_id]) return svcMap[b.service_id];
+  const m: Record<string, string> = { 'online':'Individual Online','presencial':'Individual Presencial','pareja-online':'Pareja Online','pareja-presencial':'Pareja Presencial' };
+  return m[b.session_type] ?? b.session_type;
+}
+
+const HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23];
+const errorParam   = Astro.url.searchParams.get('error');
+const errorDetail  = Astro.url.searchParams.get('detail');
+const paymentLink  = Astro.url.searchParams.get('payment_link');
+const plPhoneRaw   = (Astro.url.searchParams.get('pl_phone') ?? '').replace(/\D/g, '');
+const plWaMsg      = paymentLink ? `Hola 👋 Te comparto el enlace de pago para tu sesión: ${paymentLink}` : '';
+const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text=${encodeURIComponent(plWaMsg)}` : null;
+---
+
+<AdminLayout title="Agenda" current="/admin/agenda" fullHeight={true}>
+
+  <div class="cal-wrap">
+
+    <!-- ── Toolbar ──────────────────────────────────────────────────────── -->
+    <div class="cal-toolbar">
+      {errorParam === 'conflict' && (
+        <div class="cal-error-banner">⚠ Conflicto de horario — elige otro.</div>
+      )}
+      {errorParam === 'need_email' && (
+        <div class="cal-error-banner">⚠ El paciente necesita un correo para enviarle el link de pago.</div>
+      )}
+      {errorParam === 'flow_disabled' && (
+        <div class="cal-error-banner">⚠ Flow está deshabilitado en Configuración.</div>
+      )}
+      {errorParam === 'flow_error' && (
+        <div class="cal-error-banner">⚠ No se pudo generar el link de pago. Revisa la configuración de Flow.</div>
+      )}
+      {errorParam === 'missing_fields' && (
+        <div class="cal-error-banner">⚠ Faltan datos obligatorios (servicio, fecha, hora o paciente) — no se agendó nada.</div>
+      )}
+      {errorParam === 'slot_conflict' && (
+        <div class="cal-error-banner">⚠ No se creó ninguna sesión: todos los horarios elegidos ya estaban ocupados por otra reserva activa.</div>
+      )}
+      {errorParam === 'insert_failed' && (
+        <div class="cal-error-banner">⚠ No se pudo guardar la reserva en la base de datos{errorDetail ? `: ${errorDetail}` : ''}. No se cobró ni se envió nada — intenta de nuevo o avisa a soporte.</div>
+      )}
+      {errorParam === 'unknown_no_booking' && (
+        <div class="cal-error-banner">⚠ No se creó ninguna sesión por un motivo desconocido. Intenta de nuevo — si vuelve a pasar, avisa a soporte.</div>
+      )}
+      {errorParam === 'missing_migration' && (
+        <div class="cal-error-banner">⚠ Falta ejecutar la migración de base de datos pendiente antes de poder usar esto (columnas de pago).</div>
+      )}
+      <div class="cal-nav-group">
+        <a href="?w=0" class="cal-btn-today">Hoy</a>
+        <div class="cal-arrows">
+          <a href={`?w=${weekOffset - 1}`} class="cal-arrow" title="Semana anterior">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </a>
+          <a href={`?w=${weekOffset + 1}`} class="cal-arrow" title="Semana siguiente">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </a>
+        </div>
+        <span class="cal-week-label">{weekLabel}</span>
+      </div>
+      <div style="flex:1"></div>
+      <div class="cal-toolbar-right">
+        <div class="cal-view-chip">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          Semana
+        </div>
+
+        <!-- Menú "Mostrar": overlay de horarios disponibles + filtro por modalidad -->
+        <div class="cal-show-wrap">
+          <button id="cal-show-btn" type="button" class="cal-view-chip" style="cursor:pointer;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            Mostrar
+          </button>
+          <div id="cal-show-menu" class="cal-show-menu">
+            <label class="cal-show-item">
+              <input type="checkbox" id="toggle-avail" />
+              <span>Horarios disponibles</span>
+            </label>
+            <div class="cal-show-sep"></div>
+            <label class="cal-show-item">
+              <input type="checkbox" id="toggle-colors" />
+              <span>Colores por servicio</span>
+            </label>
+            <div class="cal-show-sep"></div>
+            <p class="cal-show-lbl">Filtrar por servicio</p>
+            <select id="svc-filter" style="width:100%;font-size:0.8rem;padding:0.35rem 0.4rem;border:1px solid #d1d5db;border-radius:5px;">
+              <option value="">Todos los servicios</option>
+              {allSvcFull.map((s) => (
+                <option value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <div class="cal-show-sep"></div>
+            <button type="button" id="open-horarios-btn" class="cal-show-config">⚙ Configurar horarios (por servicio) →</button>
+          </div>
+        </div>
+
+        <a href="/agenda" target="_blank" class="cal-link-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+          Mi link
+        </a>
+        <button id="open-new-btn" class="cal-btn-new">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Agendar
+        </button>
+      </div>
+    </div>
+
+    <!-- Leyenda de colores por servicio (visible con el toggle) -->
+    <div id="svc-legend" style="display:none;flex-wrap:wrap;gap:0.5rem 1rem;padding:0.5rem 1rem;border-bottom:1px solid #e5e7eb;">
+      {allSvcFull.map((s) => (
+        <span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.72rem;color:#374151;">
+          <span style={`width:12px;height:12px;border-radius:3px;background:${(svcColor[s.id] ?? NEUTRAL_COLOR).bg};border-left:3px solid ${(svcColor[s.id] ?? NEUTRAL_COLOR).bd};`}></span>
+          {s.name}
+        </span>
+      ))}
+    </div>
+
+    {paymentLink && (
+      <div style="margin:0.6rem 1rem;padding:0.75rem 1rem;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+        <span style="font-size:0.85rem;color:#166534;font-weight:600;">✓ Cita creada. Link de pago enviado por correo.</span>
+        <a href={paymentLink} target="_blank" rel="noopener" class="btn btn-outline btn-sm">Abrir link de pago</a>
+        {plWaUrl && <a href={plWaUrl} target="_blank" rel="noopener" class="btn btn-outline btn-sm">Enviar por WhatsApp</a>}
+        <button type="button" class="btn btn-outline btn-sm" data-copy-link={paymentLink}>Copiar link</button>
+      </div>
+    )}
+
+    <!-- ── Calendar ─────────────────────────────────────────────────────── -->
+    <div class="cal-scroll" id="cal-scroll">
+
+      <!-- Sticky headers -->
+      <div class="cal-headers">
+        <div class="cal-gutter-head"></div>
+        {weekDays.map(day => (
+          <div class={`cal-day-hdr${day.isToday ? ' today' : ''}`}>
+            <span class="hdr-dayname">{day.dayName}</span>
+            <span class={`hdr-daynum${day.isToday ? ' today-circle' : ''}`}>{day.dayNum}</span>
+          </div>
+        ))}
+      </div>
+
+      <!-- All-day row -->
+      <div class="cal-allday-row">
+        <div class="cal-gutter-allday"><span>Todo el día</span></div>
+        {weekDays.map(() => <div class="cal-allday-cell"></div>)}
+      </div>
+
+      <!-- Time grid -->
+      <div class="cal-grid" id="cal-grid">
+        <div class="cal-time-col">
+          {HOURS.map(h => (
+            <div class="cal-time-lbl" style={`top:${(h - 6) * 60}px`}>{h}:00</div>
+          ))}
+        </div>
+
+        {weekDays.map(day => (
+          <div
+            class={`cal-col${day.isToday ? ' today' : ''}`}
+            data-date={day.isoDate}
+            data-daynum={day.dayNum}
+            data-month={day.month}
+            data-year={day.year}
+          >
+            {HOURS.map(h => (
+              <div class="h-line" style={`top:${(h - 6) * 60}px`}></div>
+            ))}
+            {HOURS.slice(0, -1).map(h => (
+              <div class="h-half" style={`top:${(h - 6) * 60 + 30}px`}></div>
+            ))}
+
+            {/* Overlay de horarios disponibles (oculto por defecto; lo activa el menú "Mostrar") */}
+            {(availByDow[day.dow] ?? []).map(s => (
+              <div class="avail-block" data-svc={s.svc}
+                title={`Disponible ${s.start}${s.svc && svcMap[s.svc] ? ' · ' + svcMap[s.svc] : ''}`}
+                style={`top:${s.min - 360}px;height:${s.height - 2}px;--svcbg:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bg};--svcbd:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bd}`}></div>
+            ))}
+
+            {(byDate[day.isoDate] ?? []).map(b => (
+              <div
+                class={`cal-event ${evClass(b.status, b.payment_method)}`}
+                data-svc={b.service_id ?? ''}
+                style={`${evStyle(b.session_time, b.duration_min)};--svcbg:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bg};--svcbd:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bd}`}
+                data-booking={JSON.stringify({
+                  id: b.id,
+                  patient_name:   b.patient_name,
+                  patient_email:  b.patient_email,
+                  patient_phone:  b.patient_phone,
+                  session_type:   b.session_type,
+                  session_date:   b.session_date,
+                  session_time:   b.session_time,
+                  status:         b.status,
+                  amount:         b.amount,
+                  duration_min:   b.duration_min,
+                  payment_method: b.payment_method,
+                  service_label:  svcLabel(b),
+                  notes:          b.notes,
+                  patient_rut:    rutByEmail[(b.patient_email ?? '').toLowerCase()] || b.patient_rut || '',
+                  patient_id:     patientIdByEmail[(b.patient_email ?? '').toLowerCase()] ?? '',
+                  mp_preference_id: b.mp_preference_id ?? '',
+                  reminder_email_enabled: b.reminder_email_enabled !== false,
+                  created_pending:        b.status === 'pending_payment',
+                  paid_at:        b.paid_at ?? null,
+                  payment_note:   b.payment_note ?? '',
+                  debt_voided:    b.debt_voided ?? false,
+                  no_show:        b.no_show ?? false,
+                })}
+                title={`${b.patient_name} · ${b.session_time.slice(0, 5)}`}
+              >
+                <span class="ev-time">{b.session_time.slice(0, 5)}</span>
+                <span class="ev-name">{b.patient_name}</span>
+                {(b.duration_min ?? 50) > 35 && <span class="ev-type">{svcLabel(b)}</span>}
+              </div>
+            ))}
+
+            {(gcalByDate[day.isoDate] ?? []).map(g => (
+              <div class="cal-gcal-event" style={evStyle(g.time, g.dur)} title={`${g.title} · ${g.time} (Google Calendar)`}>
+                <span class="ev-time">{g.time}</span>
+                <span class="ev-name">{g.title}</span>
+                {g.dur > 35 && <span class="ev-type">Google Calendar</span>}
+              </div>
+            ))}
+
+            {day.isToday && <div class="cal-now-line" id="now-line"></div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       BOOKING PANEL — agendar nueva hora (click en slot vacío)
+       ════════════════════════════════════════════════════════════════════ -->
+  <div class="side-panel" id="booking-panel">
+    <div class="sp-header">
+      <div style="flex:1;min-width:0;">
+        <div class="bp-date-label" id="bp-date-label">Nueva sesión</div>
+        <div class="bp-tabs">
+          <button class="bp-tab active" id="bp-tab-agenda">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            Agendar hora
+          </button>
+          <button class="bp-tab" id="bp-tab-block">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            Bloquear hora
+          </button>
+        </div>
+      </div>
+      <button class="sp-close-btn" id="bp-close">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Agendar hora form -->
+    <div class="sp-body" id="bp-agenda-body">
+      <form method="POST" action="/api/admin/bookings" id="bp-form">
+        <input type="hidden" name="action" value="create-admin">
+        <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+
+        <!-- Paciente -->
+        <div class="bp-field">
+          <label>Paciente</label>
+          <select name="patient_id" id="bp-patient-sel" required>
+            <option value="">Selecciona una opción...</option>
+            {patientList.map(p => (
+              <option value={p.id} data-email={p.email ?? ''} data-phone={p.phone ?? ''}>
+                {p.name}
+              </option>
+            ))}
+            <option value="_new">+ Ingresar nuevo paciente</option>
+          </select>
+        </div>
+
+        <!-- Nuevo paciente (hidden by default) -->
+        <div id="bp-new-patient" style="display:none">
+          <div class="bp-field">
+            <label>Nombre completo *</label>
+            <input type="text" name="patient_name" id="bp-pname" placeholder="Nombre Apellido">
+          </div>
+          <div class="bp-field-row">
+            <div class="bp-field">
+              <label>Teléfono *</label>
+              <input type="tel" name="patient_phone" id="bp-pphone" placeholder="+56 9 XXXX XXXX">
+            </div>
+            <div class="bp-field">
+              <label>Correo</label>
+              <input type="email" name="patient_email" id="bp-pemail" placeholder="correo@mail.cl">
+            </div>
+          </div>
+        </div>
+
+        <!-- Servicio -->
+        <div class="bp-field">
+          <label>Servicio</label>
+          <select name="service_id" id="bp-service-sel" required>
+            <option value="">Selecciona un servicio...</option>
+            {allServices.map(s => (
+              <option
+                value={s.id}
+                data-price={s.price}
+                data-price-online={s.price_online ?? s.price}
+                data-price-pres={s.price_presencial ?? s.price}
+                data-modality={s.modality}
+                data-type={s.type}
+                data-dur={s.duration_min ?? 50}
+              >
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <!-- Modalidad (solo si modality=ambos) -->
+        <div class="bp-field-row" id="bp-modality-row" style="display:none">
+          <div class="bp-field">
+            <label>Modalidad</label>
+            <div class="bp-radio-group">
+              <label class="bp-radio-opt">
+                <input type="radio" name="modality_choice" value="presencial" id="bp-mod-pres" checked> Presencial
+              </label>
+              <label class="bp-radio-opt">
+                <input type="radio" name="modality_choice" value="online" id="bp-mod-online"> Online
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fecha y hora -->
+        <div class="bp-field-row">
+          <div class="bp-field">
+            <label>Fecha</label>
+            <input type="date" name="session_date" id="bp-date" required>
+          </div>
+          <div class="bp-field">
+            <label>Hora</label>
+            <input type="time" name="session_time" id="bp-time" required step="900">
+          </div>
+        </div>
+
+        <!-- Repetir / packs -->
+        <div class="bp-field">
+          <label>Sesiones (packs)</label>
+          <select name="sessions_count" id="bp-sessions">
+            <option value="1">1 sesión individual</option>
+            <option value="4">4 sesiones — semana a semana</option>
+            <option value="6">6 sesiones — semana a semana</option>
+            <option value="8">8 sesiones — semana a semana</option>
+            <option value="12">12 sesiones — semana a semana</option>
+          </select>
+        </div>
+
+        <!-- Precio -->
+        <div class="bp-price-block">
+          <div class="bp-price-value" id="bp-price-value">—</div>
+          <div class="bp-price-note" id="bp-price-note">Selecciona un servicio para ver el precio</div>
+        </div>
+
+        <!-- Precio manual (opcional) -->
+        <div class="bp-field">
+          <label>Precio manual (opcional)</label>
+          <input type="number" name="amount_override" min="0" step="1" placeholder="En blanco usa el precio del servicio de arriba">
+        </div>
+
+        <!-- Modo de pago -->
+        <div class="bp-field" style="margin-top:0.75rem;">
+          <label>Pago</label>
+          <div class="bp-radio-group">
+            <label class="bp-radio-opt">
+              <input type="radio" name="payment_mode" value="manual" checked> Pago en consulta
+            </label>
+            <label class="bp-radio-opt">
+              <input type="radio" name="payment_mode" value="link"> Enviar link de pago
+            </label>
+          </div>
+          <p id="bp-pay-note" style="font-size:0.72rem;color:#6b7280;margin-top:0.35rem;">
+            "En consulta" confirma la cita de inmediato. "Link de pago" la deja pendiente y le envía al paciente un enlace de Flow por correo.
+          </p>
+        </div>
+
+        <!-- Comunicaciones -->
+        <div class="bp-comms-block">
+          <div class="bp-comms-title">Comunicaciones al paciente</div>
+          <div class="bp-comm-item">
+            <label class="bp-comm-label">
+              <input type="checkbox" name="send_confirmation" value="on" checked>
+              <div>
+                <div class="bp-comm-name">Enviar correo de confirmación</div>
+                <div class="bp-comm-desc">Se enviará de inmediato al confirmar</div>
+              </div>
+            </label>
+          </div>
+          <div class="bp-comm-item bp-comm-disabled">
+            <label class="bp-comm-label">
+              <input type="checkbox" disabled>
+              <div>
+                <div class="bp-comm-name">Correo de recordatorio <span class="bp-soon-chip">Próximo</span></div>
+                <div class="bp-comm-desc">Se enviará 24 horas antes de la sesión</div>
+              </div>
+            </label>
+          </div>
+          <div class="bp-comm-item bp-comm-disabled">
+            <label class="bp-comm-label">
+              <input type="checkbox" disabled>
+              <div>
+                <div class="bp-comm-name">WhatsApp de recordatorio <span class="bp-soon-chip">Próximo</span></div>
+                <div class="bp-comm-desc">Se enviará 4 horas antes</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <button type="submit" class="bp-submit-btn" id="bp-submit">
+          Confirmar agendamiento
+        </button>
+      </form>
+    </div>
+
+    <!-- Bloquear hora tab body -->
+    <div class="sp-body" id="bp-block-body" style="display:none">
+      <p class="bp-blk-desc">Bloquea espacios en el periodo que necesites para no recibir nuevos agendamientos.</p>
+      <p class="bp-blk-subdesc">Las citas existentes en ese tiempo se mantendrán sin cambios.</p>
+
+      <form method="POST" action="/api/admin/bloqueos" id="bp-blk-form">
+        <input type="hidden" name="action" value="block-slot">
+        <input type="hidden" name="_redirect" value={`/admin/agenda?w=${weekOffset}`}>
+
+        <label class="bp-allday-check">
+          <input type="checkbox" name="all_day" id="bp-allday" value="1">
+          <span>Bloquea todo el día</span>
+        </label>
+
+        <div class="bp-blk-grid">
+          <div></div>
+          <div class="bp-blk-grid-hdr">Fecha</div>
+          <div class="bp-blk-grid-hdr" id="bp-blk-time-hdr">Hora</div>
+
+          <div class="bp-blk-grid-lbl">Desde</div>
+          <div><input type="date" name="date_from" id="bp-blk-dfrom" required></div>
+          <div id="bp-blk-tfrom-wrap"><input type="time" name="time_from" id="bp-blk-tfrom" step="900"></div>
+
+          <div class="bp-blk-grid-lbl">Hasta</div>
+          <div><input type="date" name="date_to" id="bp-blk-dto" required></div>
+          <div id="bp-blk-tto-wrap"><input type="time" name="time_to" id="bp-blk-tto" step="900"></div>
+        </div>
+
+        <div class="bp-field">
+          <label>Nombre bloqueo (opcional)</label>
+          <input type="text" name="label" id="bp-blk-label" placeholder="Ej: Vacaciones, Reunión...">
+        </div>
+
+        <div class="bp-feriados-box" id="bp-feriados-box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <div style="flex:1;min-width:0;">
+            <p class="bp-feriados-text">Bloquea los feriados y evita nuevos agendamientos esos días</p>
+            <button type="button" id="bp-btn-feriados" class="bp-feriados-btn">Bloquear feriados</button>
+          </div>
+          <button type="button" id="bp-dismiss-feriados" class="bp-feriados-x" title="Cerrar">✕</button>
+        </div>
+
+        <button type="submit" class="bp-submit-btn">Confirmar bloqueo</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       HORARIOS PANEL — configurar el horario semanal (por modalidad)
+       ════════════════════════════════════════════════════════════════════ -->
+  <div class="side-panel" id="horarios-panel">
+    <div class="sp-header">
+      <div style="flex:1;min-width:0;">
+        <div class="sp-service">Configurar horarios</div>
+        <div class="sp-status">Genera las franjas disponibles por modalidad</div>
+      </div>
+      <button class="sp-close-btn" id="hp-close" title="Cerrar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="sp-body">
+      <div class="bp-field">
+        <label>Días de atención</label>
+        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
+          {[[1,'Lu'],[2,'Ma'],[3,'Mi'],[4,'Ju'],[5,'Vi'],[6,'Sá'],[0,'Do']].map(([n, s]) => (
+            <button type="button" class="hp-day" data-day={n}>{s}</button>
+          ))}
+        </div>
+      </div>
+
+      <div class="bp-field">
+        <label>Modalidad</label>
+        <select id="hp-modality">
+          <option value="ambos">Ambas (online y presencial)</option>
+          <option value="online">Solo online</option>
+          <option value="presencial">Solo presencial</option>
+        </select>
+      </div>
+
+      <div class="bp-field">
+        <label>Presets</label>
+        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
+          <button type="button" class="hp-preset" data-s="08:00" data-e="13:00">Mañana</button>
+          <button type="button" class="hp-preset" data-s="14:00" data-e="20:00">Tarde</button>
+          <button type="button" class="hp-preset" data-s="08:00" data-e="20:00">Jornada</button>
+        </div>
+      </div>
+
+      <div class="bp-field-row">
+        <div class="bp-field"><label>Inicio</label><input type="time" id="hp-start" value="08:00" step="900" /></div>
+        <div class="bp-field"><label>Término</label><input type="time" id="hp-end" value="20:00" step="900" /></div>
+      </div>
+
+      <div class="bp-field">
+        <label>Intervalo entre citas</label>
+        <select id="hp-interval">
+          <option value="30">Cada 30 min</option>
+          <option value="45">Cada 45 min</option>
+          <option value="55">Cada 55 min</option>
+          <option value="60" selected>Cada 60 min</option>
+          <option value="90">Cada 90 min</option>
+        </select>
+      </div>
+
+      <p style="font-size:0.72rem;color:#6b7280;margin:0.25rem 0 0.5rem;">
+        Al aplicar, se reemplazan las franjas de <strong>esa modalidad</strong> en los días elegidos (no toca las otras).
+      </p>
+      <button type="button" class="bp-submit-btn" id="hp-apply">Aplicar horario</button>
+      <div id="hp-status" style="font-size:0.78rem;margin-top:0.5rem;text-align:center;"></div>
+
+      <div style="margin-top:1rem;border-top:1px solid #f3f4f6;padding-top:0.75rem;">
+        <a href="/admin/horarios" style="font-size:0.78rem;color:#4f5ce8;text-decoration:none;">Vacaciones y feriados →</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       SESSION PANEL — detalle de cita existente
+       ════════════════════════════════════════════════════════════════════ -->
+  <div class="side-panel" id="session-panel">
+    <div class="sp-header">
+      <div style="flex:1;min-width:0;">
+        <div class="sp-service" id="sp-service">—</div>
+        <div class="sp-status" id="sp-status"></div>
+      </div>
+      <button class="sp-close-btn" id="sp-close">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="sp-body">
+
+      <!-- Paciente -->
+      <div class="sp-section">
+        <div class="sp-patient-name" id="sp-patient-name"></div>
+        <div class="sp-patient-info" id="sp-patient-info"></div>
+        <div id="sp-meet-link" style="display:none;margin-top:0.5rem;gap:0.4rem;flex-wrap:wrap;">
+          <a href="#" id="sp-meet-href" target="_blank" class="sp-meet-btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            Unirse al Meet
+          </a>
+          <button type="button" id="sp-meet-copy" class="sp-meet-btn" style="background:transparent;color:var(--stone);border:1px solid var(--warm);">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            Copiar link
+          </button>
+        </div>
+      </div>
+
+      <!-- Acciones -->
+      <div class="sp-section">
+        <a href="#" id="sp-btn-ficha" class="sp-action-row">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+          Ver ficha del paciente
+        </a>
+        <a href="#" id="sp-btn-evolucion" class="sp-action-row">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          Escribir evolución
+        </a>
+        <a href="#" id="sp-btn-remind-wa" target="_blank" rel="noopener" class="sp-action-row">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+          Recordar sesión por WhatsApp
+        </a>
+        {reviewUrl && (
+          <a href="#" id="sp-btn-review-wa" target="_blank" rel="noopener" class="sp-action-row">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Pedir reseña en Google
+          </a>
+        )}
+        <button type="button" id="sp-btn-no-show" class="sp-action-row" style="width:100%;text-align:left;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span id="sp-btn-no-show-label">Marcar inasistencia</span>
+        </button>
+        <form method="POST" action="/api/admin/bookings" id="sp-no-show-form" style="margin:0;display:none;">
+          <input type="hidden" name="action" id="sp-no-show-action" value="mark_no_show">
+          <input type="hidden" name="id" id="sp-no-show-id">
+          <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+        </form>
+      </div>
+
+      <!-- Pago -->
+      <div class="sp-section">
+        <div class="sp-amount-row">
+          <span class="sp-amount" id="sp-amount"></span>
+          <span class="sp-pay-badge" id="sp-pay-badge"></span>
+        </div>
+        <div id="sp-confirm-form" style="display:none;margin-top:0.6rem;">
+          <form method="POST" action="/api/admin/bookings" style="margin:0;display:flex;flex-direction:column;gap:0.5rem;">
+            <input type="hidden" name="action" value="mark_paid">
+            <input type="hidden" name="id" id="sp-confirm-id">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+            <div class="bp-field">
+              <label style="font-size:0.68rem;">Medio de pago</label>
+              <select name="medio" id="sp-medio-pago">
+                <option value="Efectivo">Efectivo</option>
+                <option value="Transferencia">Transferencia</option>
+                <option value="Tarjeta">Tarjeta (fuera de Flow)</option>
+                <option value="Otro">Otro</option>
+              </select>
+            </div>
+            <input type="hidden" name="rut" id="sp-mark-paid-rut" value="">
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;cursor:pointer;">
+              <input type="checkbox" name="emitir_boleta" id="sp-mark-paid-boleta">
+              Emitir y enviar boleta al confirmar
+            </label>
+            <button type="submit" class="sp-btn-confirm">✓ Marcar como pagado</button>
+          </form>
+          <button type="button" id="sp-btn-void-debt" class="sp-action-row" style="padding:0.4rem 0;color:var(--stone);">
+            Anular deuda (no se cobrará esta sesión)
+          </button>
+          <form method="POST" action="/api/admin/bookings" id="sp-void-debt-form" style="margin:0;display:none;">
+            <input type="hidden" name="action" value="void_debt">
+            <input type="hidden" name="id" id="sp-void-debt-id">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+          </form>
+        </div>
+        <div id="sp-unmark-paid-box" style="display:none;margin-top:0.6rem;">
+          <button type="button" id="sp-btn-unmark-paid" class="sp-action-row" style="padding:0.4rem 0;color:var(--stone);">
+            Anular pago (fue un error, no estaba pagada)
+          </button>
+          <form method="POST" action="/api/admin/bookings" id="sp-unmark-paid-form" style="margin:0;display:none;">
+            <input type="hidden" name="action" value="unmark_paid">
+            <input type="hidden" name="id" id="sp-unmark-paid-id">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+          </form>
+        </div>
+        <div id="sp-paylink-box" style="display:none;margin-top:0.6rem;">
+          <p style="font-size:0.72rem;color:var(--stone);margin-bottom:0.4rem;">Link de pago pendiente:</p>
+          <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+            <a href="#" id="sp-paylink-wa" target="_blank" rel="noopener" class="sp-action-row" style="padding:0.3rem 0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+              WhatsApp
+            </a>
+            <a href="#" id="sp-paylink-mail" class="sp-action-row" style="padding:0.3rem 0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
+              Email
+            </a>
+            <button type="button" id="sp-paylink-copy" class="sp-action-row" style="padding:0.3rem 0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              Copiar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recordatorio automático -->
+      <div class="sp-section">
+        <p class="label" style="margin-bottom:0.5rem;">Recordatorio automático</p>
+        <label style="display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;padding:0.3rem 0;cursor:pointer;">
+          <span>Email 24h antes</span>
+          <input type="checkbox" id="sp-rem-email" data-field="reminder_email_enabled">
+        </label>
+        <p id="sp-rem-msg" style="display:none;font-size:0.72rem;color:var(--stone);margin-top:0.3rem;"></p>
+      </div>
+
+      <!-- Boleta de honorarios -->
+      <div class="sp-section">
+        <button class="sp-action-row" id="sp-toggle-boleta">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="11" x2="13" y2="11"/></svg>
+          Emitir boleta de honorarios
+        </button>
+        <div id="sp-boleta-form" style="display:none;margin-top:0.75rem;">
+          <div class="bp-field" style="margin-bottom:0.5rem;">
+            <label style="font-size:0.68rem;">RUT del paciente</label>
+            <input type="text" id="sp-boleta-rut" placeholder="12.345.678-9">
+          </div>
+          <button type="button" class="sp-btn-confirm" id="sp-btn-emitir">Emitir boleta</button>
+          <p id="sp-boleta-result" style="font-size:0.75rem;margin-top:0.5rem;line-height:1.5;"></p>
+          <div id="sp-boleta-actions" style="display:none;gap:0.4rem;margin-top:0.5rem;">
+            <button type="button" class="sp-action-row" id="sp-btn-pdf" style="padding:0.3rem 0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Descargar PDF
+            </button>
+            <button type="button" class="sp-action-row" id="sp-btn-email" style="padding:0.3rem 0;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
+              Enviar por email al paciente
+            </button>
+            <button type="button" class="sp-action-row" id="sp-btn-anular-boleta" style="padding:0.3rem 0;color:#b45309;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+              Anular boleta
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fecha / hora -->
+      <div class="sp-section">
+        <div class="sp-datetime" id="sp-datetime"></div>
+        <div class="sp-duration" id="sp-duration"></div>
+        <div class="sp-location" id="sp-location" style="margin-top:4px;"></div>
+      </div>
+
+      <!-- Reagendar -->
+      <div class="sp-section">
+        <button class="sp-action-row" id="sp-toggle-rsc">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+          Reagendar sesión
+        </button>
+        <div id="sp-rsc-form" style="display:none;margin-top:0.75rem;">
+          <form method="POST" action="/api/admin/bookings" style="margin:0;display:flex;flex-direction:column;gap:0.6rem;">
+            <input type="hidden" name="action" value="reschedule">
+            <input type="hidden" name="id" id="sp-rsc-id">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+            <div class="bp-field-row">
+              <div class="bp-field">
+                <label style="font-size:0.68rem;">Nueva fecha</label>
+                <input type="date" name="session_date" id="sp-rsc-date" required>
+              </div>
+              <div class="bp-field">
+                <label style="font-size:0.68rem;">Nueva hora</label>
+                <input type="time" name="session_time" id="sp-rsc-time" required step="900">
+              </div>
+            </div>
+            <button type="submit" class="sp-btn-confirm">Confirmar reagendamiento</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Anular -->
+      <div class="sp-section" style="border-bottom:none;">
+        <form method="POST" action="/api/admin/bookings" style="margin:0">
+          <input type="hidden" name="action" value="cancel">
+          <input type="hidden" name="id" id="sp-cancel-id">
+          <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+          <button
+            type="submit" class="sp-btn-cancel"
+            onclick="return confirm('¿Cancelar esta reserva? Esta acción no se puede deshacer.')"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            Anular reserva
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+</AdminLayout>
+
+<style>
+/* ── Wrapper ─────────────────────────────────────────────────────────────── */
+.cal-wrap {
+  display: flex; flex-direction: column;
+  height: 100vh; overflow: hidden; background: white;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+.cal-toolbar {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 1rem; border-bottom: 1px solid #e5e7eb;
+  background: white; flex-shrink: 0; min-height: 48px;
+}
+.cal-error-banner {
+  background: #fef2f2; border: 1px solid #fca5a5; color: #ef4444;
+  padding: 0.25rem 0.75rem; border-radius: 5px; font-size: 0.8rem;
+}
+.cal-nav-group { display: flex; align-items: center; gap: 0.35rem; }
+.cal-btn-today {
+  height: 30px; padding: 0 0.75rem; border: 1px solid #d1d5db; border-radius: 6px;
+  background: white; font-size: 0.8rem; font-weight: 500; color: #374151;
+  cursor: pointer; text-decoration: none; display: flex; align-items: center; transition: background .1s;
+}
+.cal-btn-today:hover { background: #f9fafb; }
+.cal-arrows { display: flex; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden; }
+.cal-arrow {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; background: white; color: #374151; text-decoration: none; transition: background .1s;
+}
+.cal-arrow:hover { background: #f9fafb; }
+.cal-arrow + .cal-arrow { border-left: 1px solid #d1d5db; }
+.cal-week-label { font-size: 0.925rem; font-weight: 600; color: #111827; padding: 0 0.25rem; white-space: nowrap; }
+.cal-toolbar-right { display: flex; align-items: center; gap: 0.4rem; }
+.cal-view-chip {
+  height: 30px; padding: 0 0.7rem; border: 1px solid #d1d5db; border-radius: 6px;
+  display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: #374151; user-select: none;
+}
+.cal-link-btn {
+  display: flex; align-items: center; gap: 0.3rem;
+  height: 30px; padding: 0 0.7rem; font-size: 0.8rem; color: #4f5ce8;
+  text-decoration: none; border-radius: 6px; transition: background .1s;
+}
+.cal-link-btn:hover { background: #f0f4ff; }
+.cal-btn-new {
+  display: flex; align-items: center; gap: 0.3rem;
+  height: 30px; padding: 0 0.8rem; background: #4f5ce8; color: white;
+  border: none; border-radius: 6px; font-size: 0.8rem; font-weight: 600;
+  cursor: pointer; transition: background .1s;
+}
+.cal-btn-new:hover { background: #3a4fde; }
+
+/* ── Scroll & grid ───────────────────────────────────────────────────────── */
+.cal-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.cal-scroll::-webkit-scrollbar { width: 6px; }
+.cal-scroll::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 3px; }
+.cal-scroll::-webkit-scrollbar-track { background: transparent; }
+
+.cal-headers {
+  display: flex; background: white; border-bottom: 1px solid #e5e7eb;
+  position: sticky; top: 0; z-index: 20;
+}
+.cal-gutter-head { width: 52px; flex-shrink: 0; border-right: 1px solid #f3f4f6; }
+.cal-day-hdr { flex: 1; text-align: center; padding: 0.45rem 0.2rem; border-left: 1px solid #f3f4f6; min-width: 0; }
+.hdr-dayname { display: block; font-size: 0.625rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.07em; line-height: 1; margin-bottom: 3px; }
+.cal-day-hdr.today .hdr-dayname { color: #4f5ce8; }
+.hdr-daynum { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; font-size: 0.925rem; font-weight: 700; color: #111827; line-height: 1; }
+.hdr-daynum.today-circle { background: #4f5ce8; color: white; }
+
+.cal-allday-row { display: flex; border-bottom: 1px solid #e5e7eb; background: white; }
+.cal-gutter-allday { width: 52px; flex-shrink: 0; border-right: 1px solid #f3f4f6; display: flex; align-items: center; justify-content: flex-end; padding: 3px 8px; }
+.cal-gutter-allday span { font-size: 0.57rem; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+.cal-allday-cell { flex: 1; min-height: 20px; border-left: 1px solid #f3f4f6; }
+
+.cal-grid { display: flex; position: relative; height: 1020px; }
+.cal-time-col { width: 52px; flex-shrink: 0; position: relative; border-right: 1px solid #f3f4f6; }
+.cal-time-lbl { position: absolute; right: 7px; transform: translateY(-50%); font-size: 0.6rem; color: #9ca3af; font-weight: 500; white-space: nowrap; user-select: none; pointer-events: none; }
+.cal-col { flex: 1; position: relative; border-left: 1px solid #f3f4f6; min-width: 0; cursor: crosshair; user-select: none; -webkit-user-select: none; touch-action: none; }
+.cal-col.today { background: #fafbff; }
+.h-line { position: absolute; left: 0; right: 0; height: 1px; background: #f3f4f6; pointer-events: none; }
+.h-half { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed #efefef; pointer-events: none; }
+
+/* ── Events ──────────────────────────────────────────────────────────────── */
+.cal-event { position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px; cursor: pointer; overflow: hidden; border: 1px solid; transition: filter .1s, box-shadow .1s; z-index: 1; }
+.cal-event:hover { filter: brightness(0.95); box-shadow: 0 2px 8px rgba(0,0,0,.1); z-index: 3; }
+.ev-confirmed { background: #dcfce7; border-color: #86efac; color: #166534; }
+.ev-pending   { background: #fef3c7; border-color: #f59e0b; color: #92400e; border-style: dashed; border-width: 2px; }
+.ev-manual    { background: #fef9c3; border-color: #fcd34d; color: #92400e; }
+.cal-gcal-event {
+  position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px;
+  overflow: hidden; z-index: 1; pointer-events: none;
+  background: repeating-linear-gradient(45deg, #eef1f5, #eef1f5 6px, #e5e9ef 6px, #e5e9ef 12px);
+  border: 1px dashed #9aa4b2; color: #64748b;
+}
+.ev-time { display: block; font-size: 0.6rem; font-weight: 600; opacity: 0.75; line-height: 1.2; }
+.ev-name { display: block; font-size: 0.72rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.35; }
+.ev-type { display: block; font-size: 0.62rem; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Now line ────────────────────────────────────────────────────────────── */
+.cal-now-line { position: absolute; left: -1px; right: 0; height: 2px; background: #ef4444; z-index: 10; pointer-events: none; }
+.cal-now-line::before { content: ''; position: absolute; left: -3px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+
+/* ── Shared side panel base ──────────────────────────────────────────────── */
+.side-panel {
+  position: fixed; right: 0; top: 0; bottom: 0; width: 308px;
+  background: white; border-left: 1px solid #e5e7eb; z-index: 100;
+  display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .22s ease;
+  box-shadow: -4px 0 24px rgba(0,0,0,.07);
+}
+.side-panel.open { transform: translateX(0); }
+.sp-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 1rem; border-bottom: 1px solid #f3f4f6; gap: 0.5rem; flex-shrink: 0;
+}
+.sp-close-btn { background: none; border: none; cursor: pointer; color: #9ca3af; padding: 2px; border-radius: 4px; display: flex; flex-shrink: 0; margin-top: 1px; }
+.sp-close-btn:hover { color: #374151; background: #f3f4f6; }
+.sp-body { flex: 1; overflow-y: auto; padding: 0.875rem 1rem; }
+.sp-section { padding-bottom: 0.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid #f3f4f6; }
+.sp-action-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: #374151; background: none; border: none; cursor: pointer; padding: 0.3rem 0; width: 100%; text-align: left; text-decoration: none; }
+.sp-action-row:hover { color: #4f5ce8; }
+
+/* ── Booking panel specific ──────────────────────────────────────────────── */
+.bp-date-label { font-size: 0.875rem; font-weight: 600; color: #111827; margin-bottom: 0.5rem; }
+.bp-tabs { display: flex; gap: 0.25rem; }
+.bp-tab {
+  display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem;
+  border: 1px solid #d1d5db; border-radius: 6px; background: white;
+  font-size: 0.75rem; font-weight: 500; color: #374151; cursor: pointer; transition: all .1s;
+}
+.bp-tab.active { background: #eff6ff; border-color: #93c5fd; color: #1e40af; }
+.bp-tab:hover:not(.active) { background: #f9fafb; }
+
+.bp-field { display: flex; flex-direction: column; gap: 0.2rem; flex: 1; }
+.bp-field label { font-size: 0.68rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+.bp-field-row { display: flex; gap: 0.6rem; }
+.bp-radio-group { display: flex; gap: 0.75rem; align-items: center; padding: 0.5rem 0; }
+.bp-radio-opt { display: flex; align-items: center; gap: 0.3rem; font-size: 0.82rem; color: #374151; cursor: pointer; }
+.bp-radio-opt input { accent-color: #4f5ce8; }
+
+.bp-price-block { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.75rem; margin: 0.25rem 0; }
+.bp-price-value { font-size: 1.35rem; font-weight: 700; color: #111827; }
+.bp-price-note { font-size: 0.72rem; color: #6b7280; margin-top: 2px; }
+
+.bp-comms-block { margin-top: 0.25rem; }
+.bp-comms-title { font-size: 0.75rem; font-weight: 700; color: #111827; margin-bottom: 0.15rem; }
+.bp-comm-item { padding: 0.5rem 0; border-bottom: 1px solid #f3f4f6; }
+.bp-comm-item:last-child { border-bottom: none; }
+.bp-comm-disabled { opacity: 0.5; }
+.bp-comm-label { display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; }
+.bp-comm-label input { margin-top: 2px; accent-color: #4f5ce8; flex-shrink: 0; }
+.bp-comm-name { font-size: 0.8rem; font-weight: 500; color: #111827; }
+.bp-comm-desc { font-size: 0.72rem; color: #9ca3af; margin-top: 1px; }
+.bp-soon-chip { font-size: 0.62rem; background: #e5e7eb; color: #6b7280; border-radius: 99px; padding: 1px 6px; margin-left: 4px; font-weight: 600; }
+
+.bp-submit-btn {
+  width: 100%; padding: 0.6rem; background: #4f5ce8; color: white; border: none;
+  border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  margin-top: 0.875rem; transition: background .1s;
+}
+.bp-submit-btn:hover { background: #3a4fde; }
+
+/* ── Session panel specific ──────────────────────────────────────────────── */
+.sp-service  { font-size: 0.875rem; font-weight: 600; color: #111827; line-height: 1.3; }
+.sp-status   { font-size: 0.72rem; margin-top: 3px; }
+.status-confirmed { color: #15803d; font-weight: 600; }
+.status-pending   { color: #b45309; font-weight: 600; }
+.sp-patient-name  { font-size: 0.875rem; font-weight: 600; color: #111827; }
+.sp-patient-info  { font-size: 0.75rem; color: #6b7280; line-height: 1.7; margin-top: 3px; white-space: pre-line; display: flex; flex-direction: column; }
+.sp-contact-link  { color: #6b7280; text-decoration: none; }
+.sp-contact-link:hover { color: #4f5ce8; text-decoration: underline; }
+.sp-meet-btn {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  font-size: 0.75rem; color: #4f5ce8; text-decoration: none; font-weight: 600;
+  background: #eff6ff; border: 1px solid #93c5fd; border-radius: 5px; padding: 3px 8px;
+  transition: background .1s;
+}
+.sp-meet-btn:hover { background: #dbeafe; }
+.sp-amount-row { display: flex; align-items: center; gap: 0.5rem; }
+.sp-amount { font-size: 1.05rem; font-weight: 700; color: #111827; }
+.sp-pay-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 99px; font-size: 0.7rem; font-weight: 600; }
+.badge-paid     { background: #dcfce7; color: #15803d; }
+.badge-pending  { background: #fef9c3; color: #92400e; }
+.badge-manual   { background: #e5e7eb; color: #374151; }
+.badge-transfer { background: #ede9fe; color: #5b21b6; }
+.sp-btn-confirm { width: 100%; padding: 0.45rem; background: #4f5ce8; color: white; border: none; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+.sp-btn-confirm:hover { background: #3a4fde; }
+.sp-datetime { font-size: 0.85rem; font-weight: 600; color: #111827; line-height: 1.4; }
+.sp-duration { font-size: 0.75rem; color: #6b7280; margin-top: 3px; }
+.sp-location { font-size: 0.78rem; color: #374151; }
+.sp-btn-cancel { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: #ef4444; background: none; border: none; cursor: pointer; padding: 0.25rem 0; }
+.sp-btn-cancel:hover { opacity: 0.75; }
+
+/* ── Drag selection highlight ────────────────────────────────────────────── */
+.cal-col.drag-sel { background: rgba(79,92,232,0.07); }
+.cal-col.drag-sel::after {
+  content: ''; position: absolute; left: 0; right: 0;
+  top: var(--drag-top, 0px); height: var(--drag-h, 0px);
+  background: rgba(79,92,232,0.18);
+  border: 1.5px solid rgba(79,92,232,0.5);
+  border-radius: 4px; pointer-events: none; z-index: 5;
+}
+
+/* ── Bloquear hora form ───────────────────────────────────────────────────── */
+.bp-blk-desc    { font-size: 0.82rem; color: #374151; line-height: 1.55; margin-bottom: 0.2rem; }
+.bp-blk-subdesc { font-size: 0.75rem; color: #9ca3af; line-height: 1.5; margin-bottom: 0.875rem; }
+.bp-allday-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: #374151; cursor: pointer; margin-bottom: 0.75rem; user-select: none; }
+.bp-allday-check input { accent-color: #4f5ce8; width: 14px; height: 14px; flex-shrink: 0; }
+
+.bp-blk-grid { display: grid; grid-template-columns: 42px 1fr 76px; gap: 5px 5px; align-items: center; }
+.bp-blk-grid-hdr { font-size: 0.62rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.07em; }
+.bp-blk-grid-lbl { font-size: 0.75rem; font-weight: 600; color: #374151; }
+.bp-blk-grid input[type="date"],
+.bp-blk-grid input[type="time"] { width: 100%; font-size: 0.77rem; padding: 0.28rem 0.35rem; }
+
+.bp-feriados-box {
+  display: flex; align-items: flex-start; gap: 0.5rem;
+  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+  padding: 0.6rem 0.65rem; margin: 0.75rem 0 0.15rem;
+}
+.bp-feriados-text { font-size: 0.74rem; color: #374151; line-height: 1.45; margin-bottom: 0.4rem; }
+.bp-feriados-btn {
+  font-size: 0.72rem; font-weight: 600; color: #4f5ce8; background: none;
+  border: 1px solid #c7d2fe; border-radius: 5px; padding: 3px 8px;
+  cursor: pointer; transition: background .1s;
+}
+.bp-feriados-btn:hover { background: #eff6ff; }
+.bp-feriados-x {
+  background: none; border: none; color: #9ca3af; cursor: pointer;
+  font-size: 0.875rem; padding: 0; flex-shrink: 0; line-height: 1;
+}
+.bp-feriados-x:hover { color: #374151; }
+
+/* Shared bp-field inside session panel reschedule form */
+#sp-rsc-form .bp-field label { font-size: 0.68rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; display: block; }
+
+/* ── Overlay de horarios disponibles (color por servicio) ───────────────── */
+.avail-block {
+  position: absolute; left: 2px; right: 2px; border-radius: 4px;
+  display: none; pointer-events: none; z-index: 1;
+  background: var(--svcbg, rgba(148,163,184,0.14));
+  border-left: 3px solid var(--svcbd, #94a3b8);
+}
+/* visible solo cuando el toggle está activo */
+.cal-scroll.avail-on .avail-block { display: block; }
+/* el filtro por servicio (dropdown) oculta las franjas de otros servicios */
+.avail-block.svc-hidden { display: none !important; }
+
+/* ── Menú "Mostrar" ─────────────────────────────────────────────────────── */
+.cal-show-wrap { position: relative; }
+.cal-show-menu {
+  display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  background: white; border: 1px solid #e5e7eb; border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.10); padding: 0.6rem; min-width: 220px;
+}
+.cal-show-menu.open { display: block; }
+.cal-show-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: #374151; cursor: pointer; padding: 0.3rem 0.2rem; }
+.cal-show-item input { width: 15px; height: 15px; accent-color: #4f5ce8; }
+.cal-show-sep { height: 1px; background: #f3f4f6; margin: 0.5rem 0; }
+.cal-show-lbl { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; margin: 0 0 0.4rem; }
+.cal-show-filter { display: flex; gap: 0.25rem; }
+.cal-show-filter button {
+  flex: 1; padding: 0.35rem 0.4rem; font-size: 0.72rem; border: 1px solid #d1d5db;
+  background: white; color: #374151; border-radius: 5px; cursor: pointer;
+}
+.cal-show-filter button.active { background: #4f5ce8; color: white; border-color: #4f5ce8; }
+.cal-show-config { width: 100%; text-align: left; background: none; border: none; cursor: pointer; font-size: 0.82rem; color: #4f5ce8; padding: 0.3rem 0.2rem; }
+.cal-show-config:hover { text-decoration: underline; }
+
+/* ── Panel "Configurar horarios" ────────────────────────────────────────── */
+.hp-day, .hp-preset {
+  padding: 0.4rem 0.7rem; border: 1.5px solid #d1d5db; background: white;
+  border-radius: 6px; font-size: 0.75rem; cursor: pointer; color: #374151;
+}
+.hp-day.active { background: #4f5ce8; color: white; border-color: #4f5ce8; }
+.hp-preset:hover { background: #f9fafb; }
+
+/* ── Colores por servicio + filtro de eventos ───────────────────────────── */
+.cal-scroll.colors-on .cal-event { background: var(--svcbg) !important; border-left: 4px solid var(--svcbd) !important; }
+.cal-scroll.colors-on .cal-event,
+.cal-scroll.colors-on .cal-event .ev-time { color: #1f2937 !important; }
+.cal-event.svc-hidden { display: none !important; }
+
+/* ── Mobile: calendario navegable con scroll horizontal ─────────────────── */
+@media (max-width: 768px) {
+  /* La barra superior se envuelve para no cortar botones (Hoy, flechas, Agendar) */
+  .cal-toolbar { flex-wrap: wrap; row-gap: 0.4rem; padding: 0.5rem 0.75rem; }
+  .cal-toolbar > div[style*="flex:1"] { display: none; }
+  .cal-toolbar-right { margin-left: auto; }
+
+  /* La grilla de 7 días no cabe en pantalla chica → scroll horizontal táctil */
+  .cal-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .cal-headers, .cal-allday-row, .cal-grid { min-width: 680px; }
+
+  /* Los paneles laterales ocupan casi todo el ancho en mobile */
+  .side-panel { width: 100vw; max-width: 340px; }
+}
+</style>
+
+<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase }}>
+// ── Copiar link de pago (banner tras crear cita con link) ──────────────────────
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-copy-link]');
+  if (!btn) return;
+  navigator.clipboard?.writeText(btn.dataset.copyLink).then(() => {
+    const prev = btn.textContent; btn.textContent = '✓ Copiado';
+    setTimeout(() => { btn.textContent = prev; }, 1500);
+  });
+});
+
+// ── Menú "Mostrar": overlay de horarios disponibles + colores + filtro por servicio ─
+(function () {
+  const btn    = document.getElementById('cal-show-btn');
+  const menu   = document.getElementById('cal-show-menu');
+  const scroll = document.getElementById('cal-scroll');
+  const toggle = document.getElementById('toggle-avail');
+  if (!btn || !menu || !scroll || !toggle) return;
+
+  btn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('open'); });
+  document.addEventListener('click', (e) => {
+    if (!menu.contains(e.target) && !btn.contains(e.target)) menu.classList.remove('open');
+  });
+
+  // Restaurar preferencia guardada del overlay
+  try {
+    if (localStorage.getItem('vo_avail_on') === '1') { toggle.checked = true; scroll.classList.add('avail-on'); }
+  } catch (e) {}
+
+  toggle.addEventListener('change', () => {
+    scroll.classList.toggle('avail-on', toggle.checked);
+    try { localStorage.setItem('vo_avail_on', toggle.checked ? '1' : '0'); } catch (e) {}
+  });
+
+  // ── Colores por servicio ──────────────────────────────────────────────────
+  const colorsToggle = document.getElementById('toggle-colors');
+  const legend = document.getElementById('svc-legend');
+  function applyColors(on) {
+    scroll.classList.toggle('colors-on', on);
+    if (legend) legend.style.display = on ? 'flex' : 'none';
+  }
+  try {
+    if (localStorage.getItem('vo_colors_on') === '1' && colorsToggle) { colorsToggle.checked = true; applyColors(true); }
+  } catch (e) {}
+  colorsToggle?.addEventListener('change', () => {
+    applyColors(colorsToggle.checked);
+    try { localStorage.setItem('vo_colors_on', colorsToggle.checked ? '1' : '0'); } catch (e) {}
+  });
+
+  // ── Filtro por servicio: oculta citas Y franjas del overlay de otros servicios ─
+  const svcFilter = document.getElementById('svc-filter');
+  function applySvcFilter(id) {
+    document.querySelectorAll('.cal-event, .avail-block').forEach((el) => {
+      el.classList.toggle('svc-hidden', !!id && el.dataset.svc !== id);
+    });
+  }
+  try {
+    const sf = localStorage.getItem('vo_svc_filter') || '';
+    if (sf && svcFilter) svcFilter.value = sf;
+    applySvcFilter(sf);
+  } catch (e) {}
+  svcFilter?.addEventListener('change', () => {
+    applySvcFilter(svcFilter.value);
+    try { localStorage.setItem('vo_svc_filter', svcFilter.value); } catch (e) {}
+  });
+
+  // "Configurar horarios" → ahora el horario es POR SERVICIO: se edita en Servicios
+  document.getElementById('open-horarios-btn')?.addEventListener('click', () => {
+    window.location.href = '/admin/servicios';
+  });
+})();
+
+// ── Panel "Configurar horarios" (generador semanal por modalidad) ──────────────
+(function () {
+  const panel = document.getElementById('horarios-panel');
+  if (!panel) return;
+  document.getElementById('hp-close')?.addEventListener('click', () => panel.classList.remove('open'));
+
+  const days = new Set([1, 2, 3, 4, 5]);
+  panel.querySelectorAll('.hp-day').forEach((b) => {
+    const n = parseInt(b.dataset.day);
+    if (days.has(n)) b.classList.add('active');
+    b.addEventListener('click', () => {
+      if (days.has(n)) { days.delete(n); b.classList.remove('active'); }
+      else { days.add(n); b.classList.add('active'); }
+    });
+  });
+
+  panel.querySelectorAll('.hp-preset').forEach((b) => b.addEventListener('click', () => {
+    document.getElementById('hp-start').value = b.dataset.s;
+    document.getElementById('hp-end').value   = b.dataset.e;
+  }));
+
+  document.getElementById('hp-apply')?.addEventListener('click', async () => {
+    const st = document.getElementById('hp-status');
+    if (days.size === 0) { st.textContent = 'Elige al menos un día.'; st.style.color = '#dc2626'; return; }
+    const payload = {
+      days:       [...days],
+      start_time: document.getElementById('hp-start').value,
+      end_time:   document.getElementById('hp-end').value,
+      interval:   parseInt(document.getElementById('hp-interval').value),
+      modality:   document.getElementById('hp-modality').value,
+    };
+    st.textContent = 'Aplicando…'; st.style.color = '#6b7280';
+    try {
+      const res = await fetch('/api/admin/slots/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        st.textContent = `✓ Horario aplicado (${d.count} franjas). Recargando…`; st.style.color = '#15803d';
+        setTimeout(() => location.reload(), 900);
+      } else {
+        st.textContent = '✕ ' + (d.error ?? 'Error'); st.style.color = '#dc2626';
+      }
+    } catch {
+      st.textContent = '✕ Error de conexión'; st.style.color = '#dc2626';
+    }
+  });
+})();
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const MONTHS_LONG = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const DAYS_LONG   = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+const DAYS_CAP    = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+
+function formatCLP(n) {
+  return new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP',maximumFractionDigits:0}).format(n ?? 0);
+}
+function addMins(t, mins) {
+  const [h, m] = t.split(':').map(Number);
+  const tot = h * 60 + m + mins;
+  return `${String(Math.floor(tot/60)%24).padStart(2,'0')}:${String(tot%60).padStart(2,'0')}`;
+}
+function isoToLong(iso) {
+  const [y, mo, d] = iso.split('-').map(Number);
+  const date = new Date(y, mo - 1, d);
+  return `${DAYS_CAP[date.getDay()]}, ${d} de ${MONTHS_LONG[mo-1]} de ${y}`;
+}
+function isoToLabel(iso) {
+  // "Viernes 12 de junio del 2026"
+  const [y, mo, d] = iso.split('-').map(Number);
+  const date = new Date(y, mo - 1, d);
+  return `${DAYS_CAP[date.getDay()]} ${d} de ${MONTHS_LONG[mo-1]} de ${y}`;
+}
+
+// ── Now line ──────────────────────────────────────────────────────────────────
+const nowLine = document.getElementById('now-line');
+function updateNowLine() {
+  if (!nowLine) return;
+  const n = new Date();
+  const mins = (n.getHours() - 6) * 60 + n.getMinutes();
+  if (mins < 0 || mins > 1020) { nowLine.style.display = 'none'; return; }
+  nowLine.style.display = '';
+  nowLine.style.top = mins + 'px';
+}
+updateNowLine();
+setInterval(updateNowLine, 60_000);
+
+// Scroll to current hour
+const calScroll = document.getElementById('cal-scroll');
+if (calScroll) calScroll.scrollTop = Math.max(0, (new Date().getHours() - 8) * 60);
+
+// ── Panel helpers ─────────────────────────────────────────────────────────────
+const bookingPanel = document.getElementById('booking-panel');
+const sessionPanel = document.getElementById('session-panel');
+
+function openBookingPanel(date, time) {
+  sessionPanel.classList.remove('open');
+  bookingPanel.classList.add('open');
+}
+function openSessionPanel() {
+  bookingPanel.classList.remove('open');
+  sessionPanel.classList.add('open');
+}
+function closeAll() {
+  bookingPanel.classList.remove('open');
+  sessionPanel.classList.remove('open');
+  if (typeof clearDragSel === 'function') clearDragSel();
+}
+
+document.getElementById('bp-close')?.addEventListener('click', closeAll);
+document.getElementById('sp-close')?.addEventListener('click', closeAll);
+
+document.addEventListener('click', e => {
+  if (bookingPanel.classList.contains('open') || sessionPanel.classList.contains('open')) {
+    if (!bookingPanel.contains(e.target) && !sessionPanel.contains(e.target) && !e.target.closest('.cal-event') && !e.target.closest('.cal-col') && !e.target.closest('#open-new-btn')) {
+      closeAll();
+    }
+  }
+});
+
+// ── Click-to-book + drag-to-block ────────────────────────────────────────────
+const calGrid    = document.getElementById('cal-grid');
+const calScrollEl = document.getElementById('cal-scroll');
+
+function getTimeFromClientY(clientY) {
+  const gridRect = calGrid.getBoundingClientRect();
+  const relY     = Math.max(0, Math.min(1019, clientY - gridRect.top));
+  const snapped  = Math.floor(relY / 15) * 15;
+  const h        = 6 + Math.floor(snapped / 60);
+  const m        = snapped % 60;
+  return { time: `${String(Math.min(h,22)).padStart(2,'0')}:${String(m).padStart(2,'0')}`, snapped };
+}
+
+let dragState = null;
+const allCols = Array.from(document.querySelectorAll('.cal-col'));
+
+function clearDragSel() {
+  allCols.forEach(c => {
+    c.classList.remove('drag-sel');
+    c.style.removeProperty('--drag-top');
+    c.style.removeProperty('--drag-h');
+  });
+}
+
+// Find column index whose horizontal span contains clientX (geometry — never fails)
+function colIndexAtX(clientX) {
+  for (let i = 0; i < allCols.length; i++) {
+    const r = allCols[i].getBoundingClientRect();
+    if (clientX < r.right) return i;
+  }
+  return allCols.length - 1;
+}
+
+function applyDragSel(startIdx, endIdx, fromSnap, toSnap) {
+  const lo   = Math.min(startIdx, endIdx), hi = Math.max(startIdx, endIdx);
+  const from = Math.min(fromSnap, toSnap);
+  const to   = Math.max(fromSnap, toSnap);
+  allCols.forEach((c, i) => {
+    if (i >= lo && i <= hi) {
+      c.classList.add('drag-sel');
+      c.style.setProperty('--drag-top', `${from}px`);
+      c.style.setProperty('--drag-h',   `${Math.max(15, to - from)}px`);
+    } else {
+      c.classList.remove('drag-sel');
+      c.style.removeProperty('--drag-top');
+      c.style.removeProperty('--drag-h');
+    }
+  });
+}
+
+allCols.forEach(col => {
+  col.addEventListener('mousedown', e => {
+    if (e.target.closest('.cal-event')) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
+
+    const startIdx = allCols.indexOf(col);
+    const { time, snapped } = getTimeFromClientY(e.clientY);
+    dragState = {
+      startDate: col.dataset.date, startTime: time,
+      startX: e.clientX, startY: e.clientY,
+      startIdx, startSnap: snapped,
+      endIdx: startIdx, endSnap: snapped,
+      isDragging: false,
+    };
+
+    function onMove(ev) {
+      if (!dragState) return;
+      const dist = Math.hypot(ev.clientX - dragState.startX, ev.clientY - dragState.startY);
+      if (dist > 8 && !dragState.isDragging) {
+        dragState.isDragging = true;
+        document.body.style.cursor = 'copy';
+        calScrollEl.style.overflowY = 'hidden';
+      }
+      if (!dragState.isDragging) return;
+      dragState.endIdx  = colIndexAtX(ev.clientX);
+      dragState.endSnap = getTimeFromClientY(ev.clientY).snapped;
+      applyDragSel(dragState.startIdx, dragState.endIdx, dragState.startSnap, dragState.endSnap);
+    }
+
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup',   onUp);
+      document.body.style.cursor  = '';
+      calScrollEl.style.overflowY = '';
+      if (!dragState) return;
+      const state = dragState;
+      dragState   = null;
+
+      if (state.isDragging) {
+        // Keep highlight visible while the panel is open
+        applyDragSel(state.startIdx, state.endIdx, state.startSnap, state.endSnap);
+
+        const lo = Math.min(state.startIdx, state.endIdx);
+        const hi = Math.max(state.startIdx, state.endIdx);
+        const fromSnap = Math.min(state.startSnap, state.endSnap);
+        const toSnap   = Math.max(state.startSnap, state.endSnap);
+        const snapToTime = s => {
+          const h = 6 + Math.floor(s / 60), m = s % 60;
+          return `${String(Math.min(h,23)).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        };
+        const fromDate = allCols[lo].dataset.date;
+        const toDate   = allCols[hi].dataset.date;
+        const fromTime = snapToTime(fromSnap);
+        const toTime   = snapToTime(Math.max(toSnap, fromSnap + 15));
+        openBloqueoPanel(fromDate, fromTime, toDate, toTime);
+      } else {
+        clearDragSel();
+        const date = state.startDate;
+        const time = state.startTime;
+        document.getElementById('bp-date').value = date;
+        document.getElementById('bp-time').value = time;
+        document.getElementById('bp-date-label').textContent = isoToLabel(date);
+        document.getElementById('bp-tab-agenda').classList.add('active');
+        document.getElementById('bp-tab-block').classList.remove('active');
+        document.getElementById('bp-agenda-body').style.display = '';
+        document.getElementById('bp-block-body').style.display  = 'none';
+        openBookingPanel(date, time);
+      }
+    }
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup',   onUp);
+  });
+});
+
+// Toolbar "+ Agendar" button
+document.getElementById('open-new-btn')?.addEventListener('click', () => {
+  // Fecha de hoy en la zona horaria de Chile (toISOString() da la fecha en UTC,
+  // que se adelanta durante la tarde/noche en Chile — ver src/lib/dateUtils.ts).
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+  const now   = new Date();
+  const roundedH = now.getHours();
+  const time  = `${String(roundedH).padStart(2,'0')}:00`;
+  document.getElementById('bp-date').value = today;
+  document.getElementById('bp-time').value = time;
+  document.getElementById('bp-date-label').textContent = isoToLabel(today);
+  openBookingPanel(today, time);
+});
+
+// ── Booking panel: patient selector ──────────────────────────────────────────
+const bpPatientSel = document.getElementById('bp-patient-sel');
+const bpNewPatient = document.getElementById('bp-new-patient');
+bpPatientSel?.addEventListener('change', () => {
+  const isNew = bpPatientSel.value === '_new';
+  bpNewPatient.style.display = isNew ? 'block' : 'none';
+  const opt = bpPatientSel.selectedOptions[0];
+  if (!isNew && bpPatientSel.value) {
+    // existing patient — clear new-patient hidden fields
+    document.getElementById('bp-pname').value  = '';
+    document.getElementById('bp-pemail').value = '';
+    document.getElementById('bp-pphone').value = '';
+  }
+});
+
+// ── Booking panel: service selector → price ──────────────────────────────────
+const bpServiceSel = document.getElementById('bp-service-sel');
+const bpSessionsSel = document.getElementById('bp-sessions');
+const bpPriceValue  = document.getElementById('bp-price-value');
+const bpPriceNote   = document.getElementById('bp-price-note');
+const bpModalityRow = document.getElementById('bp-modality-row');
+
+function updatePrice() {
+  const opt    = bpServiceSel?.selectedOptions[0];
+  if (!opt || !opt.value) {
+    bpPriceValue.textContent = '—';
+    bpPriceNote.textContent  = 'Selecciona un servicio para ver el precio';
+    return;
+  }
+  const modality = opt.dataset.modality;
+  let price;
+  if (modality === 'ambos') {
+    const isOnline = document.getElementById('bp-mod-online')?.checked;
+    price = parseInt(isOnline ? (opt.dataset.priceOnline || opt.dataset.price) : (opt.dataset.pricePres || opt.dataset.price));
+  } else {
+    price = parseInt(opt.dataset.price || '0');
+  }
+  const count = parseInt(bpSessionsSel?.value || '1');
+  bpPriceValue.textContent = formatCLP(price);
+  bpPriceNote.textContent  = count > 1
+    ? `Precio total del paquete · ${count} sesiones semanales`
+    : 'Precio de la sesión';
+}
+
+bpServiceSel?.addEventListener('change', () => {
+  const opt      = bpServiceSel.selectedOptions[0];
+  const modality = opt?.dataset.modality;
+  bpModalityRow.style.display = modality === 'ambos' ? 'flex' : 'none';
+  updatePrice();
+});
+bpSessionsSel?.addEventListener('change', updatePrice);
+document.querySelectorAll('input[name="modality_choice"]').forEach(r => r.addEventListener('change', updatePrice));
+
+// ── Booking panel: tabs ───────────────────────────────────────────────────────
+document.getElementById('bp-tab-agenda')?.addEventListener('click', () => {
+  document.getElementById('bp-tab-agenda').classList.add('active');
+  document.getElementById('bp-tab-block').classList.remove('active');
+  document.getElementById('bp-agenda-body').style.display = '';
+  document.getElementById('bp-block-body').style.display  = 'none';
+});
+document.getElementById('bp-tab-block')?.addEventListener('click', () => {
+  document.getElementById('bp-tab-block').classList.add('active');
+  document.getElementById('bp-tab-agenda').classList.remove('active');
+  document.getElementById('bp-block-body').style.display  = '';
+  document.getElementById('bp-agenda-body').style.display = 'none';
+});
+
+// ── openBloqueoPanel ──────────────────────────────────────────────────────────
+function openBloqueoPanel(fromDate, fromTime, toDate, toTime) {
+  document.getElementById('bp-tab-block').classList.add('active');
+  document.getElementById('bp-tab-agenda').classList.remove('active');
+  document.getElementById('bp-block-body').style.display  = '';
+  document.getElementById('bp-agenda-body').style.display = 'none';
+
+  document.getElementById('bp-blk-dfrom').value = fromDate;
+  document.getElementById('bp-blk-dto').value   = toDate;
+  document.getElementById('bp-blk-tfrom').value = fromTime;
+  document.getElementById('bp-blk-tto').value   = toTime;
+  document.getElementById('bp-blk-label').value = '';
+  document.getElementById('bp-allday').checked  = false;
+  // Ensure time fields visible
+  document.getElementById('bp-blk-tfrom-wrap').style.visibility = '';
+  document.getElementById('bp-blk-tto-wrap').style.visibility   = '';
+
+  const label = fromDate === toDate ? isoToLabel(fromDate) : `${isoToLabel(fromDate)} – ${isoToLabel(toDate)}`;
+  document.getElementById('bp-date-label').textContent = label;
+
+  sessionPanel.classList.remove('open');
+  bookingPanel.classList.add('open');
+}
+
+// ── Bloquear hora: all-day toggle ─────────────────────────────────────────────
+document.getElementById('bp-allday')?.addEventListener('change', function() {
+  const hide = this.checked;
+  document.getElementById('bp-blk-tfrom-wrap').style.visibility = hide ? 'hidden' : '';
+  document.getElementById('bp-blk-tto-wrap').style.visibility   = hide ? 'hidden' : '';
+  document.getElementById('bp-blk-time-hdr').style.visibility   = hide ? 'hidden' : '';
+});
+
+// ── Bloquear feriados ─────────────────────────────────────────────────────────
+document.getElementById('bp-dismiss-feriados')?.addEventListener('click', () => {
+  document.getElementById('bp-feriados-box').style.display = 'none';
+});
+document.getElementById('bp-btn-feriados')?.addEventListener('click', async () => {
+  const btn = document.getElementById('bp-btn-feriados');
+  btn.textContent = 'Bloqueando…';
+  btn.disabled    = true;
+  try {
+    const fd = new FormData();
+    fd.set('action', 'block-feriados');
+    fd.set('_redirect', window.location.pathname + window.location.search);
+    const res = await fetch('/api/admin/bloqueos', { method: 'POST', body: fd });
+    if (res.ok || res.redirected) {
+      btn.textContent = '✓ Feriados bloqueados';
+      btn.style.color = '#15803d';
+      btn.style.borderColor = '#86efac';
+    }
+  } catch {
+    btn.textContent = 'Error — intenta de nuevo';
+    btn.disabled    = false;
+  }
+});
+
+// ── Session panel: click on event ─────────────────────────────────────────────
+document.querySelectorAll('.cal-event').forEach(el => {
+  el.addEventListener('click', e => {
+    e.stopPropagation();
+    try { openSessionDetail(JSON.parse(el.dataset.booking || '{}')); }
+    catch {}
+  });
+});
+
+function openSessionDetail(b) {
+  document.getElementById('sp-service').textContent = b.service_label || b.session_type;
+
+  // sessionConfirmed: la CITA está agendada/confirmada (no cancelada, no en
+  // espera de un link de pago). isPaid: el PAGO se recibió de verdad — son dos
+  // cosas distintas. Antes se usaba solo el status de la reserva para ambas,
+  // por eso "Pago en consulta" quedaba mostrado como si ya estuviera pagado
+  // apenas se agendaba, sin que la psicóloga hubiera cobrado todavía.
+  const sessionConfirmed = b.status === 'confirmed';
+  const isPaid    = !!b.paid_at;
+  const isVoided  = !!b.debt_voided;
+  const isNoShow  = !!b.no_show;
+  const statusEl = document.getElementById('sp-status');
+  if (isNoShow) {
+    statusEl.textContent = 'Inasistencia';
+    statusEl.className   = 'sp-status status-pending';
+  } else {
+    statusEl.textContent = sessionConfirmed ? 'Confirmada' : 'Pendiente de pago';
+    statusEl.className   = 'sp-status ' + (sessionConfirmed ? 'status-confirmed' : 'status-pending');
+  }
+
+  document.getElementById('sp-patient-name').textContent = b.patient_name;
+  // Email y teléfono son clicables (correo / WhatsApp directo, sin plantilla) —
+  // igual que en Encuadrado, donde el panel de la cita permite contactar al
+  // paciente sin salir de ahí.
+  const infoDiv = document.getElementById('sp-patient-info');
+  infoDiv.innerHTML = '';
+  const infoWaDigits = (b.patient_phone || '').replace(/\D/g, '');
+  const infoWaPhone  = infoWaDigits.length === 9 ? '56' + infoWaDigits : infoWaDigits;
+  if (b.patient_email) {
+    const a = document.createElement('a');
+    a.href = `mailto:${b.patient_email}`;
+    a.textContent = b.patient_email;
+    a.className = 'sp-contact-link';
+    infoDiv.appendChild(a);
+  }
+  if (b.patient_phone) {
+    const a = document.createElement('a');
+    a.href = infoWaPhone.length >= 11 ? `https://wa.me/${infoWaPhone}` : `tel:${b.patient_phone}`;
+    a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = b.patient_phone;
+    a.className = 'sp-contact-link';
+    infoDiv.appendChild(a);
+  }
+
+  // Meet link (stored as "Meet: https://..." in notes)
+  const meetMatch = b.notes?.match(/Meet:\s*(https:\/\/\S+)/);
+  const meetDiv  = document.getElementById('sp-meet-link');
+  if (meetMatch) {
+    document.getElementById('sp-meet-href').href = meetMatch[1];
+    meetDiv.style.display = 'flex';
+    document.getElementById('sp-meet-copy').onclick = () => {
+      navigator.clipboard.writeText(meetMatch[1]).then(() => {
+        const btn = document.getElementById('sp-meet-copy');
+        const original = btn.innerHTML;
+        btn.textContent = '✓ Copiado';
+        setTimeout(() => { btn.innerHTML = original; }, 1500);
+      });
+    };
+  } else {
+    meetDiv.style.display = 'none';
+  }
+
+  // Marcar / quitar inasistencia
+  document.getElementById('sp-no-show-id').value = b.id;
+  document.getElementById('sp-no-show-action').value = isNoShow ? 'unmark_no_show' : 'mark_no_show';
+  document.getElementById('sp-btn-no-show-label').textContent = isNoShow ? 'Quitar marca de inasistencia' : 'Marcar inasistencia';
+
+  // Ver ficha link
+  const fichaBtn = document.getElementById('sp-btn-ficha');
+  const fichaFallback = b.patient_email
+    ? `/admin/pacientes?q=${encodeURIComponent(b.patient_email)}`
+    : `/admin/pacientes?q=${encodeURIComponent(b.patient_name)}`;
+  fichaBtn.href = fichaFallback;
+
+  // Escribir evolución: si ya tiene ficha, va directo al formulario de nota;
+  // si no, cae en la misma búsqueda (la ficha aún no existe — se crea sola
+  // en cuanto el paciente pague, o se crea a mano desde ahí).
+  const evolBtn = document.getElementById('sp-btn-evolucion');
+  evolBtn.href = b.patient_id ? `/admin/pacientes/${b.patient_id}?tab=notas#nueva-nota` : fichaFallback;
+
+  // Recordar sesión por WhatsApp (manual — abre WhatsApp con el mensaje ya armado)
+  const remWaBtn = document.getElementById('sp-btn-remind-wa');
+  const waDigits = (b.patient_phone || '').replace(/\D/g, '');
+  const waPhone  = waDigits.length === 9 ? '56' + waDigits : waDigits;
+  const remTime  = b.session_time.slice(0, 5);
+  if (waPhone.length >= 11) {
+    const isOnlineRem = b.session_type?.includes('online');
+    const whereLine = isOnlineRem
+      ? 'Es una sesión online — te paso el link de la videollamada apenas se acerque la hora.'
+      : (clinicAddress ? `Te espero en: ${clinicAddress}` : 'Es una sesión presencial en mi consulta.');
+    const msg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te recuerdo tu sesión del ${isoToLabel(b.session_date)} a las ${remTime}. ${whereLine}`;
+    remWaBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`;
+    remWaBtn.style.display = '';
+  } else {
+    remWaBtn.style.display = 'none';
+  }
+
+  // Pedir reseña en Google (manual — abre WhatsApp con el link de reseña YA armado
+  // para el PACIENTE, no para la psicóloga. Antes este botón abría reviewUrl en el
+  // propio navegador de la admin, lo que la mandaba a ella a escribir la reseña.)
+  const reviewBtn = document.getElementById('sp-btn-review-wa');
+  if (reviewBtn) {
+    if (waPhone.length >= 11 && typeof reviewUrl === 'string' && reviewUrl) {
+      const reviewMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Si te sirvió nuestra sesión, me encantaría que me dejaras una reseña en Google (toma menos de un minuto): ${reviewUrl}`;
+      reviewBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(reviewMsg)}`;
+      reviewBtn.style.display = '';
+    } else {
+      reviewBtn.style.display = 'none';
+    }
+  }
+
+  // Link de pago (solo si está pendiente y ya se generó una orden Flow)
+  const paylinkBox = document.getElementById('sp-paylink-box');
+  if (!sessionConfirmed && b.mp_preference_id) {
+    const payUrl = `${flowCheckoutBase}?token=${b.mp_preference_id}`;
+    const payMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te comparto el link de pago de tu sesión: ${payUrl}`;
+    const waPayBtn = document.getElementById('sp-paylink-wa');
+    if (waPhone.length >= 11) {
+      waPayBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(payMsg)}`;
+      waPayBtn.style.display = '';
+    } else {
+      waPayBtn.style.display = 'none';
+    }
+    const mailBtn = document.getElementById('sp-paylink-mail');
+    if (b.patient_email) {
+      mailBtn.href = `mailto:${b.patient_email}?subject=${encodeURIComponent('Link de pago — Ps. Valentina Orellana')}&body=${encodeURIComponent(payMsg)}`;
+      mailBtn.style.display = '';
+    } else {
+      mailBtn.style.display = 'none';
+    }
+    document.getElementById('sp-paylink-copy').onclick = () => {
+      navigator.clipboard.writeText(payUrl).then(() => {
+        const btn = document.getElementById('sp-paylink-copy');
+        const original = btn.innerHTML;
+        btn.textContent = '✓ Copiado';
+        setTimeout(() => { btn.innerHTML = original; }, 1500);
+      });
+    };
+    paylinkBox.style.display = 'block';
+  } else {
+    paylinkBox.style.display = 'none';
+  }
+
+  // Recordatorio automático (interruptor por reserva)
+  const remEmail = document.getElementById('sp-rem-email');
+  remEmail.checked = b.reminder_email_enabled !== false;
+  remEmail.dataset.bookingId = b.id;
+  document.getElementById('sp-rem-msg').style.display = 'none';
+
+  // Amount & badge — refleja el pago REAL (paid_at), no el estado de la reserva.
+  document.getElementById('sp-amount').textContent = formatCLP(b.amount);
+  const badge = document.getElementById('sp-pay-badge');
+  if (isVoided)     { badge.textContent = 'Deuda anulada'; badge.className = 'sp-pay-badge badge-manual'; }
+  else if (isPaid)  { badge.textContent = b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado'; badge.className = 'sp-pay-badge badge-paid'; }
+  else              { badge.textContent = 'Por pagar'; badge.className = 'sp-pay-badge badge-pending'; }
+
+  const showMarkPaid = !isPaid && !isVoided;
+  document.getElementById('sp-confirm-form').style.display = showMarkPaid ? 'block' : 'none';
+  document.getElementById('sp-confirm-id').value    = b.id;
+  document.getElementById('sp-void-debt-id').value  = b.id;
+  document.getElementById('sp-mark-paid-rut').value = b.patient_rut || '';
+
+  // "Anular pago" — deshacer un "Marcar como pagado" hecho por error.
+  document.getElementById('sp-unmark-paid-box').style.display = (isPaid && !isVoided) ? 'block' : 'none';
+  document.getElementById('sp-unmark-paid-id').value = b.id;
+
+  // Date / time
+  const dur  = b.duration_min ?? 50;
+  const t5   = b.session_time.slice(0, 5);
+  document.getElementById('sp-datetime').textContent = isoToLong(b.session_date);
+  document.getElementById('sp-duration').textContent = `${t5} – ${addMins(t5, dur)} · ${dur} min`;
+
+  const isOnline = b.session_type?.includes('online');
+  document.getElementById('sp-location').innerHTML = isOnline
+    ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:3px"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Sesión online'
+    : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:3px"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>En mi consulta · Las Condes';
+
+  // Reagendar pre-fill
+  document.getElementById('sp-rsc-id').value   = b.id;
+  document.getElementById('sp-rsc-date').value = b.session_date;
+  document.getElementById('sp-rsc-time').value = t5;
+  document.getElementById('sp-rsc-form').style.display = 'none';
+
+  // Cancel
+  document.getElementById('sp-cancel-id').value = b.id;
+
+  // Boleta de honorarios
+  currentBookingId = b.id;
+  const boletaRut = document.getElementById('sp-boleta-rut');
+  if (boletaRut) boletaRut.value = b.patient_rut || '';
+  document.getElementById('sp-boleta-form').style.display = 'none';
+  const boletaResult  = document.getElementById('sp-boleta-result');
+  const boletaActions = document.getElementById('sp-boleta-actions');
+  if (boletaResult) { boletaResult.textContent = ''; boletaResult.style.color = ''; }
+  if (boletaActions) boletaActions.style.display = 'none';
+  const anularBoletaBtn = document.getElementById('sp-btn-anular-boleta');
+  // Si ya se emitió (queda registrado en notes), avisar y mostrar acciones.
+  // Toma la última línea "Boleta Folio N..." por si se anuló y se re-emitió.
+  const boletaLines = [...(b.notes ?? '').matchAll(/Boleta\s+Folio\s+(\d+)[^\n]*/gi)];
+  const lastBoleta = boletaLines.length ? boletaLines[boletaLines.length - 1][0] : null;
+  const lastFolio  = boletaLines.length ? boletaLines[boletaLines.length - 1][1] : null;
+  const boletaAnulada = lastBoleta ? /ANULADA/i.test(lastBoleta) : false;
+  if (lastBoleta && boletaAnulada) {
+    if (boletaResult) { boletaResult.textContent = `✕ Boleta anulada (Folio ${lastFolio}) — puedes emitir una nueva.`; boletaResult.style.color = '#b45309'; }
+    document.getElementById('sp-boleta-form').style.display = 'block';
+    if (boletaActions) boletaActions.style.display = 'none';
+    const emitBtn = document.getElementById('sp-btn-emitir');
+    if (emitBtn) emitBtn.style.display = '';   // se anuló — permite emitir una corregida
+  } else if (lastBoleta) {
+    if (boletaResult) { boletaResult.textContent = `✓ Ya emitida (Folio ${lastFolio})`; boletaResult.style.color = '#15803d'; }
+    document.getElementById('sp-boleta-form').style.display = 'block';
+    if (boletaActions) boletaActions.style.display = 'flex';
+    const emitBtn = document.getElementById('sp-btn-emitir');
+    if (emitBtn) emitBtn.style.display = 'none';   // ya emitida, ocultar re-emitir
+  } else {
+    const emitBtn = document.getElementById('sp-btn-emitir');
+    if (emitBtn) emitBtn.style.display = '';
+  }
+
+  openSessionPanel();
+}
+
+// ── Recordatorios: guardar el interruptor al cambiarlo ────────────────────────
+async function saveReminderToggle(input) {
+  const bookingId = input.dataset.bookingId;
+  const field = input.dataset.field;
+  const msg = document.getElementById('sp-rem-msg');
+  if (!bookingId) return;
+  try {
+    const fd = new FormData();
+    fd.set('action', 'update-reminders');
+    fd.set('id', bookingId);
+    fd.set('field', field);
+    fd.set('value', input.checked ? 'true' : 'false');
+    const res = await fetch('/api/admin/bookings', { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      msg.textContent = '✓ Guardado';
+      msg.style.color = '#15803d';
+    } else {
+      msg.textContent = data.error ?? 'No se pudo guardar (falta actualizar la base de datos).';
+      msg.style.color = '#dc2626';
+      input.checked = !input.checked; // revertir visualmente
+    }
+  } catch {
+    msg.textContent = 'Error de conexión.';
+    msg.style.color = '#dc2626';
+    input.checked = !input.checked;
+  }
+  msg.style.display = 'block';
+}
+document.getElementById('sp-rem-email')?.addEventListener('change', (e) => saveReminderToggle(e.target));
+
+// ── Anular deuda ────────────────────────────────────────────────────────────
+document.getElementById('sp-btn-void-debt')?.addEventListener('click', () => {
+  if (confirm('¿Anular la deuda de esta sesión? No se marcará como pagada, solo dejará de aparecer como pendiente de cobro.')) {
+    document.getElementById('sp-void-debt-form').submit();
+  }
+});
+
+// ── Anular pago (deshacer "Marcar como pagado") ──────────────────────────────
+document.getElementById('sp-btn-unmark-paid')?.addEventListener('click', () => {
+  if (confirm('¿Anular este pago? La sesión vuelve a quedar "Por pagar". Esto no afecta ninguna boleta ya emitida.')) {
+    document.getElementById('sp-unmark-paid-form').submit();
+  }
+});
+
+// ── Marcar / quitar inasistencia ──────────────────────────────────────────────
+document.getElementById('sp-btn-no-show')?.addEventListener('click', () => {
+  const marking = document.getElementById('sp-no-show-action').value === 'mark_no_show';
+  const msg = marking
+    ? '¿Marcar esta sesión como inasistencia (el paciente no llegó)?'
+    : '¿Quitar la marca de inasistencia de esta sesión?';
+  if (confirm(msg)) {
+    document.getElementById('sp-no-show-form').submit();
+  }
+});
+
+// ── Anular boleta ya emitida ──────────────────────────────────────────────────
+document.getElementById('sp-btn-anular-boleta')?.addEventListener('click', async () => {
+  const btn    = document.getElementById('sp-btn-anular-boleta');
+  const result = document.getElementById('sp-boleta-result');
+  if (!currentBookingId) return;
+  if (!confirm('¿Anular esta boleta de honorarios? Se anula el documento en el SII — esta acción no se puede deshacer. Después podrás emitir una nueva si corresponde.')) return;
+
+  btn.disabled = true;
+  result.textContent = 'Anulando…'; result.style.color = '#6b7280';
+  try {
+    const res = await fetch('/api/admin/apigateway', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'anular', booking_id: currentBookingId }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      result.textContent = `✕ Boleta anulada (Folio ${data.folio ?? ''}) — puedes emitir una nueva.`;
+      result.style.color = '#b45309';
+      document.getElementById('sp-boleta-actions').style.display = 'none';
+      document.getElementById('sp-btn-emitir').style.display = '';
+    } else {
+      result.textContent = '✕ ' + (data.error ?? 'No se pudo anular'); result.style.color = '#dc2626';
+    }
+  } catch {
+    result.textContent = '✕ Error de conexión'; result.style.color = '#dc2626';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ── Reagendar toggle ──────────────────────────────────────────────────────────
+document.getElementById('sp-toggle-rsc')?.addEventListener('click', () => {
+  const form = document.getElementById('sp-rsc-form');
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+
+// ── Emitir boleta ───────────────────────────────────────────────────────────
+let currentBookingId = null;
+document.getElementById('sp-toggle-boleta')?.addEventListener('click', () => {
+  const form = document.getElementById('sp-boleta-form');
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+document.getElementById('sp-btn-emitir')?.addEventListener('click', async () => {
+  const btn    = document.getElementById('sp-btn-emitir');
+  const rut    = document.getElementById('sp-boleta-rut').value.trim();
+  const result = document.getElementById('sp-boleta-result');
+  if (!currentBookingId) return;
+  if (!rut) { result.textContent = 'Ingresa el RUT del paciente.'; result.style.color = '#dc2626'; return; }
+  if (!confirm('¿Emitir la boleta de honorarios? Esta acción genera un documento tributario real en el SII.')) return;
+
+  btn.disabled = true;
+  result.textContent = 'Emitiendo…'; result.style.color = '#6b7280';
+  try {
+    const res = await fetch('/api/admin/apigateway', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'emitir', booking_id: currentBookingId, rut }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const folio = data.folio ? ` · Folio ${data.folio}` : '';
+      result.textContent = `✓ Boleta emitida${folio}`; result.style.color = '#15803d';
+      document.getElementById('sp-boleta-actions').style.display = 'flex';
+      btn.style.display = 'none';
+    } else {
+      result.textContent = '✕ ' + (data.error ?? 'Error al emitir'); result.style.color = '#dc2626';
+    }
+  } catch {
+    result.textContent = '✕ Error de conexión'; result.style.color = '#dc2626';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ── Descargar PDF de la boleta ────────────────────────────────────────────────
+document.getElementById('sp-btn-pdf')?.addEventListener('click', async () => {
+  const result = document.getElementById('sp-boleta-result');
+  if (!currentBookingId) return;
+  result.textContent = 'Generando PDF…'; result.style.color = '#6b7280';
+  try {
+    const res  = await fetch('/api/admin/apigateway', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pdf', booking_id: currentBookingId }),
+    });
+    const data = await res.json();
+    if (data.ok && data.pdf) {
+      // base64 → blob → descarga
+      const bytes = Uint8Array.from(atob(data.pdf), c => c.charCodeAt(0));
+      const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const a     = document.createElement('a');
+      a.href = url; a.download = `boleta-${data.folio ?? 'honorarios'}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      result.textContent = '✓ PDF descargado'; result.style.color = '#15803d';
+    } else {
+      result.textContent = '✕ ' + (data.error ?? 'No se pudo obtener el PDF'); result.style.color = '#dc2626';
+    }
+  } catch {
+    result.textContent = '✕ Error al descargar'; result.style.color = '#dc2626';
+  }
+});
+
+// ── Enviar boleta por email ─────────────────────────────────────────────────
+document.getElementById('sp-btn-email')?.addEventListener('click', async () => {
+  const result = document.getElementById('sp-boleta-result');
+  if (!currentBookingId) return;
+  result.textContent = 'Enviando email…'; result.style.color = '#6b7280';
+  try {
+    const res  = await fetch('/api/admin/apigateway', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'email', booking_id: currentBookingId }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      result.textContent = `✓ Enviada a ${data.email}`; result.style.color = '#15803d';
+    } else {
+      result.textContent = '✕ ' + (data.error ?? 'No se pudo enviar'); result.style.color = '#dc2626';
+    }
+  } catch {
+    result.textContent = '✕ Error al enviar'; result.style.color = '#dc2626';
+  }
+});
+</script>

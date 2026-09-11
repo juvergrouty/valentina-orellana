@@ -1,0 +1,1119 @@
+---
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { supabase } from '../lib/supabase';
+
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+
+// Verificar si el pago en consulta está habilitado
+const { data: settingsRows } = await supabase.from('settings').select('key, value');
+const settings: Record<string, string> = {};
+(settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
+const manualPaymentEnabled    = settings['manual_payment_enabled'] !== 'false';
+const transferPaymentEnabled  = settings['transfer_payment_enabled'] === 'true';
+const recaptchaSiteKey        = settings['recaptcha_site_key'] ?? '';
+
+// Pre-selección de grupo desde URL (ej: /agenda?grupo=individual)
+const grupoParam    = Astro.url.searchParams.get('grupo')    ?? null;
+const servicioParam = Astro.url.searchParams.get('servicio') ?? null;
+
+const { data: catalogServices } = await supabase
+  .from('services_catalog')
+  .select('id, name, description, type, modality, price, duration_min, price_online, price_presencial, duration_min_online, duration_min_presencial')
+  .eq('visible', true)
+  .order('sort_order')
+  .order('created_at');
+---
+
+<BaseLayout
+  title="Reserva tu sesión"
+  description="Agenda una sesión con Ps. Valentina Orellana y paga de forma segura con Flow · Webpay · MACH."
+>
+  <section class="relative overflow-hidden min-h-[300px] md:min-h-[360px] flex items-end border-b border-dust">
+    <img src="/images/hero-paginas.jpg" alt="" class="absolute inset-0 w-full h-full object-cover object-center" aria-hidden="true" />
+    <div class="absolute inset-0 bg-gradient-to-t from-ink/80 via-ink/30 to-ink/10"></div>
+    <div class="relative z-10 container-site py-14 md:py-20 w-full">
+      <p class="label text-white/60 mb-3">Agenda en línea</p>
+      <div class="w-10 h-0.5 bg-white/30 mb-5"></div>
+      <h1 class="font-heading font-semibold text-white leading-tight mb-4" style="font-size:clamp(2rem,5vw,3.8rem);letter-spacing:-0.02em;">
+        Reserva tu sesión
+      </h1>
+      <p class="font-body text-white/75 font-light text-lg max-w-lg leading-relaxed">Elige tu horario y paga de forma segura con Flow.</p>
+    </div>
+  </section>
+
+  <!-- Indicador de pasos -->
+  <div id="booking-bar" class="bg-white border-b border-dust sticky top-[72px] md:top-[80px] z-40">
+    <div class="container-site py-4">
+      <div class="flex items-center gap-2 md:gap-4">
+        {['Tipo de sesión', 'Fecha y hora', 'Tus datos', 'Pago'].map((label, i) => (
+          <div class="flex items-center gap-2 flex-1">
+            <div
+              id={`step-indicator-${i + 1}`}
+              class="w-6 h-6 flex items-center justify-center text-[10px] tracking-widest font-body flex-shrink-0 transition-all duration-200 step-indicator border border-dust text-stone"
+              data-step={i + 1}
+            >
+              {i + 1}
+            </div>
+            <span
+              id={`step-label-${i + 1}`}
+              class="hidden md:block font-body text-[10px] tracking-widest uppercase step-label text-stone"
+              data-step={i + 1}
+            >
+              {label}
+            </span>
+            {i < 3 && <div class="flex-1 h-px bg-dust ml-1"></div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+
+  <section class="py-section bg-sand">
+    <div class="container-site">
+
+      <!-- Resumen del servicio elegido (visible en pasos 2-4) -->
+      <div id="service-summary" class="hidden mb-8 flex items-center gap-3 border border-dust bg-white px-5 py-4 rounded-sm max-w-2xl">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#576352" stroke-width="1.75" class="flex-shrink-0">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/>
+        </svg>
+        <div class="min-w-0">
+          <p id="summary-name" class="font-heading font-semibold text-base text-ink leading-tight"></p>
+          <p id="summary-detail" class="font-body text-sm text-stone"></p>
+        </div>
+      </div>
+
+      <!-- ── PASO 1: Tipo de sesión ─────────────────────────────────────── -->
+      <div id="step-1" class="booking-step">
+        <p class="label text-stone mb-4">Paso 1</p>
+        <div class="divider mb-6"></div>
+        <h2 class="font-heading font-light text-3xl text-ink mb-8">¿Para quién es la sesión?</h2>
+
+        <!-- 1a: Elegir grupo (Individual / Pareja) -->
+        <div id="group-selection" class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+          <button type="button" class="group-card bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer" data-group="individual">
+            <div class="icon-circle mb-5 pointer-events-none">
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+            </div>
+            <p class="font-heading font-semibold text-2xl text-ink mb-2">Individual</p>
+            <p class="font-body text-sm text-stone font-light">Sesión de psicología para ti</p>
+          </button>
+          <button type="button" class="group-card bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer" data-group="pareja">
+            <div class="icon-circle mb-5 pointer-events-none">
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg>
+            </div>
+            <p class="font-heading font-semibold text-2xl text-ink mb-2">Pareja</p>
+            <p class="font-body text-sm text-stone font-light">Sesión para ambos</p>
+          </button>
+        </div>
+
+        <!-- 1b: Elegir servicio — aparece al elegir grupo -->
+        <div id="service-selection" class="hidden mt-10">
+          <button type="button" id="back-to-group" class="label text-stone hover:text-ink transition-colors mb-6 flex items-center gap-2">← Volver</button>
+          <h2 class="font-heading font-light text-3xl text-ink mb-2">¿Qué tipo de sesión necesitas?</h2>
+          <p id="service-subtitle" class="font-body text-sm text-stone mb-8"></p>
+          <div id="service-cards" class="flex flex-col gap-4 max-w-2xl"></div>
+        </div>
+
+        <!-- 1c: Modalidad para servicio pre-seleccionado (viene de /servicios) -->
+        <div id="modality-for-service" class="hidden mt-4">
+          <button type="button" id="back-to-servicios" class="label text-stone hover:text-ink transition-colors mb-8 flex items-center gap-2">← Volver a servicios</button>
+          <p class="label text-stone mb-4">Paso 1</p>
+          <div class="divider mb-6"></div>
+          <p id="presel-service-name" class="font-heading font-semibold text-2xl text-ink mb-2"></p>
+          <p id="presel-service-desc" class="font-body text-sm text-stone mb-8 leading-relaxed"></p>
+          <h2 class="font-heading font-light text-3xl text-ink mb-8">¿Online o presencial?</h2>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+            <button type="button" id="presel-online-btn"
+              class="bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer">
+              <p class="label text-forest mb-3">Desde cualquier lugar</p>
+              <p class="font-heading font-semibold text-2xl text-ink mb-1">Online</p>
+              <p id="presel-price-online" class="font-heading font-light text-xl text-ink mb-3"></p>
+              <div class="h-px bg-dust my-3"></div>
+              <p class="font-body text-sm text-stone">Videollamada · Zoom o Meet</p>
+            </button>
+            <button type="button" id="presel-presencial-btn"
+              class="bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer">
+              <p class="label text-gold mb-3">Más solicitado</p>
+              <p class="font-heading font-semibold text-2xl text-ink mb-1">Presencial</p>
+              <p id="presel-price-presencial" class="font-heading font-light text-xl text-ink mb-3"></p>
+              <div class="h-px bg-dust my-3"></div>
+              <p class="font-body text-sm text-stone">Las Condes</p>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PASO 2: Fecha y hora ───────────────────────────────────────── -->
+      <div id="step-2" class="booking-step hidden">
+        <button type="button" id="back-to-1" class="label text-stone hover:text-ink transition-colors mb-8 flex items-center gap-2">
+          ← Volver
+        </button>
+        <p class="label text-stone mb-4">Paso 2</p>
+        <div class="divider mb-6"></div>
+        <h2 class="font-heading font-light text-3xl text-ink mb-8">Elige fecha y hora</h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-dust">
+          <!-- Calendario -->
+          <div class="bg-white p-5 sm:p-8 md:p-10">
+            <div class="flex items-center justify-between mb-7">
+              <button id="prev-month" type="button"
+                class="w-11 h-11 flex items-center justify-center hover:bg-warm transition-colors text-stone hover:text-ink text-xl rounded-sm">
+                ‹
+              </button>
+              <p id="calendar-title" class="font-heading font-semibold text-xl text-ink tracking-wide"></p>
+              <button id="next-month" type="button"
+                class="w-11 h-11 flex items-center justify-center hover:bg-warm transition-colors text-stone hover:text-ink text-xl rounded-sm">
+                ›
+              </button>
+            </div>
+            <div class="grid grid-cols-7 gap-1 mb-2">
+              {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map((d) => (
+                <div class="text-center font-body text-[11px] tracking-widest text-stone/60 py-1.5 uppercase">{d}</div>
+              ))}
+            </div>
+            <div id="calendar-grid" class="grid grid-cols-7 gap-1"></div>
+
+            <!-- Leyenda para orientar al cliente -->
+            <div class="flex items-center justify-center gap-4 mt-5 pt-4 border-t border-dust/60">
+              <span class="flex items-center gap-1.5 text-[11px] text-stone">
+                <span class="inline-block w-3.5 h-3.5 rounded-full" style="box-shadow:inset 0 0 0 2px #576352;"></span>
+                Hoy
+              </span>
+              <span class="flex items-center gap-1.5 text-[11px] text-stone/60">
+                <span class="inline-block w-3.5 h-3.5 rounded-full bg-ink"></span>
+                Seleccionado
+              </span>
+              <span class="flex items-center gap-1.5 text-[11px] text-stone/50">
+                <span class="line-through">00</span>
+                No disponible
+              </span>
+            </div>
+          </div>
+
+          <!-- Slots de hora -->
+          <div class="bg-sand p-5 sm:p-8 md:p-10 flex flex-col">
+            <div id="slots-placeholder" class="flex-1 flex items-center justify-center text-center py-8">
+              <div>
+                <p class="font-heading font-light text-2xl text-ink/30 mb-2">—</p>
+                <p class="font-body text-sm text-stone/60 leading-relaxed">Selecciona un día<br />para ver los horarios</p>
+              </div>
+            </div>
+            <div id="slots-container" class="hidden flex-col flex-1">
+              <!-- Header horarios -->
+              <div class="mb-6 pb-5 border-b border-dust">
+                <p class="label text-stone mb-1">Horarios disponibles</p>
+                <p id="slots-date-label" class="font-heading font-semibold text-2xl text-ink"></p>
+              </div>
+              <div id="slots-grid" class="grid grid-cols-3 gap-2.5"></div>
+              <p id="no-slots-msg" class="hidden font-body text-sm text-stone/60 text-center py-8 leading-relaxed">
+                Sin horarios disponibles<br />para este día.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── PASO 3: Datos del paciente ────────────────────────────────── -->
+      <div id="step-3" class="booking-step hidden">
+        <button type="button" id="back-to-2" class="label text-stone hover:text-ink transition-colors mb-8 flex items-center gap-2">
+          ← Volver
+        </button>
+        <p class="label text-stone mb-4">Paso 3</p>
+        <div class="divider mb-6"></div>
+        <h2 class="font-heading font-light text-3xl text-ink mb-6">Tus datos</h2>
+
+        <!-- Resumen de la reserva -->
+        <div id="booking-summary" class="bg-warm border border-dust px-7 py-5 mb-8 font-body text-sm"></div>
+
+        <form id="patient-form" class="bg-white border border-dust p-8 md:p-10 flex flex-col gap-7" novalidate>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-7">
+            <div>
+              <label class="label text-stone block mb-2" for="patient_name">Nombre completo *</label>
+              <input id="patient_name" name="patient_name" type="text" required autocomplete="name"
+                placeholder="Tu nombre completo" class="field" />
+              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa tu nombre.</p>
+            </div>
+            <div>
+              <label class="label text-stone block mb-2" for="patient_phone">Teléfono *</label>
+              <div class="flex border border-dust focus-within:border-ink transition-colors bg-white">
+                <span class="flex items-center px-3 font-body text-sm text-stone bg-warm border-r border-dust select-none">+56</span>
+                <input id="patient_phone" name="patient_phone" type="tel" required
+                  placeholder="9 9999 9999" maxlength="11"
+                  class="flex-1 px-3 py-2.5 font-body text-sm text-ink bg-white outline-none placeholder:text-dust" />
+              </div>
+              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa tu teléfono.</p>
+            </div>
+          </div>
+          <div>
+            <label class="label text-stone block mb-2" for="patient_email">Correo electrónico *</label>
+            <input id="patient_email" name="patient_email" type="email" required autocomplete="email"
+              placeholder="tu@correo.cl" class="field" />
+            <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa un correo válido.</p>
+          </div>
+          <div>
+            <label class="label text-stone block mb-2" for="patient_rut">RUT *</label>
+            <input id="patient_rut" name="patient_rut" type="text" required autocomplete="off"
+              placeholder="12.345.678-9" class="field" />
+            <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa tu RUT (necesario para emitir tu boleta de honorarios automáticamente).</p>
+          </div>
+          <div>
+            <label class="label text-stone block mb-2" for="motivo_consulta">Motivo de consulta *</label>
+            <select id="motivo_consulta" name="motivo_consulta" required class="field bg-transparent cursor-pointer">
+              <option value="" disabled selected>Selecciona el motivo principal...</option>
+            </select>
+            <p class="field-error hidden font-body text-xs text-red-500 mt-1">Selecciona un motivo de consulta.</p>
+          </div>
+          <div>
+            <label class="label text-stone block mb-2" for="patient_notes">¿Algo que quieras contarme antes? (opcional)</label>
+            <textarea id="patient_notes" name="patient_notes" rows="3"
+              placeholder="Puedes describir brevemente tu situación..."
+              class="field resize-none"></textarea>
+          </div>
+          <div class="bg-warm border border-dust p-4 text-left">
+            <p class="label text-stone mb-2">Condiciones del servicio</p>
+            <ul class="font-body text-xs text-stone leading-relaxed space-y-1 pl-3 list-disc">
+              <li>Para reagendar, avísame con al menos <strong>24 horas de anticipación</strong>.</li>
+              <li>Las sesiones no tienen reembolso por cancelación una vez confirmado el pago.</li>
+              <li>Tu reserva se confirma solo cuando el pago es procesado.</li>
+            </ul>
+          </div>
+          <div>
+            <button type="submit" id="submit-patient" class="btn-dark text-[10px] py-3.5 px-8 w-full">
+              Continuar al pago
+            </button>
+            <p id="form-error" class="hidden font-body text-xs text-red-500 text-center mt-3"></p>
+          </div>
+        </form>
+      </div>
+
+      <!-- ── PASO 4: Pago ───────────────────────────────────────────────── -->
+      <div id="step-4" class="booking-step hidden">
+        <p class="label text-stone mb-4">Paso 4</p>
+        <div class="divider mb-6"></div>
+        <h2 class="font-heading font-light text-3xl text-ink mb-8 text-center">Completa tu pago</h2>
+        <div class="bg-white border border-dust max-w-md mx-auto p-10 text-center flex flex-col items-center gap-6">
+          <div id="payment-loading" class="flex flex-col items-center gap-4 py-4">
+            <div class="w-8 h-8 border border-ink border-t-transparent animate-spin"></div>
+            <p class="label text-stone">Preparando el pago seguro...</p>
+          </div>
+          <div id="payment-ready" class="hidden w-full flex flex-col items-center gap-6">
+            <div id="payment-summary" class="font-body text-sm text-stone w-full"></div>
+            <div class="h-px bg-dust w-full"></div>
+            <a id="mp-checkout-btn" href="#" target="_blank" rel="noopener noreferrer"
+              class="btn-dark w-full text-center text-xs py-3.5">
+              Pagar con Flow
+            </a>
+            {manualPaymentEnabled && (
+              <button id="manual-pay-btn" type="button"
+                class="w-full text-center font-body text-xs tracking-widest uppercase py-3.5 border border-dust text-stone hover:border-ink hover:text-ink transition-colors duration-200">
+                Pagar en consulta
+              </button>
+            )}
+            {transferPaymentEnabled && (
+              <button id="transfer-pay-btn" type="button"
+                class="w-full text-center font-body text-xs tracking-widest uppercase py-3.5 border border-dust text-stone hover:border-forest hover:text-forest hover:border-forest/60 transition-colors duration-200">
+                Pagar por transferencia
+              </button>
+            )}
+            <p class="label text-stone leading-relaxed text-center">
+              Pago 100% seguro · Webpay, MACH,<br />tarjeta de crédito y débito.
+            </p>
+          </div>
+          <div id="payment-error" class="hidden w-full">
+            <p class="font-body text-sm text-red-500 mb-5" id="payment-error-msg"></p>
+            <a href="https://wa.me/56972735696" target="_blank" rel="noopener noreferrer" class="btn-outline text-[10px] py-3 px-6">
+              Coordinar por WhatsApp
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Garantías -->
+  <section class="bg-warm border-t border-dust">
+    <div class="container-site">
+      <div class="grid grid-cols-3 divide-x divide-dust">
+        {[
+          ['Pago seguro', 'Flow · SSL'],
+          ['Reprogramación', 'Hasta 24 h antes'],
+          ['Confidencialidad', '100% privado'],
+        ].map(([title, sub]) => (
+          <div class="text-center py-7 px-4">
+            <p class="font-heading font-light text-sm text-ink">{title}</p>
+            <p class="label text-stone mt-1">{sub}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<!-- is:global: el calendario y los horarios se generan con innerHTML/createElement (JS)
+     y no llevan el atributo de scoping de Astro. Acotado a sus contenedores. -->
+<style is:global>
+  #calendar-grid .day-btn {
+    @apply w-full aspect-square text-sm font-body flex items-center justify-center transition-all duration-150 rounded-full;
+  }
+  #calendar-grid .day-available {
+    @apply text-ink cursor-pointer;
+  }
+  #calendar-grid .day-available:hover { @apply bg-warm; }
+  /* Días pasados: claramente NO seleccionables */
+  #calendar-grid .day-past {
+    @apply text-dust/40 cursor-not-allowed line-through;
+  }
+  /* Días sin atención para el servicio (ej. sáb/dom) o feriados: no seleccionables */
+  #calendar-grid .day-off {
+    @apply text-dust/50 cursor-not-allowed;
+    background: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.03) 4px, rgba(0,0,0,0.03) 8px);
+  }
+  #calendar-grid .day-selected {
+    @apply bg-ink text-sand font-semibold;
+  }
+  /* HOY: aro verde para ubicarse fácil */
+  #calendar-grid .day-today:not(.day-selected) {
+    @apply font-bold text-forest;
+    box-shadow: inset 0 0 0 2px #576352;
+  }
+  #slots-grid .slot-btn {
+    @apply py-3.5 w-full font-heading font-light text-base text-ink border border-dust bg-white
+           hover:border-forest hover:text-forest transition-all duration-150 cursor-pointer;
+    letter-spacing: 0.01em;
+  }
+  #slots-grid .slot-selected {
+    @apply bg-ink text-sand border-ink font-normal;
+  }
+  #slots-grid .slot-selected:hover {
+    @apply text-sand border-ink;
+  }
+</style>
+
+<script define:vars={{ recaptchaSiteKey }}>
+  window.__RECAPTCHA_SITE_KEY__ = recaptchaSiteKey;
+</script>
+{recaptchaSiteKey && (
+  <script src={`https://www.google.com/recaptcha/api.js?render=${recaptchaSiteKey}`} is:inline></script>
+)}
+
+<script define:vars={{ catalogServicesRaw: JSON.stringify(catalogServices ?? []), preselectedGroup: grupoParam, preselectedServicioId: servicioParam }}>
+  // ─── Estado ───────────────────────────────────────────────────────────────
+  const state = {
+    step:            1,
+    serviceId:       null,
+    modalityChoice:  null,
+    sessionTitle:    null,
+    sessionPrice:    null,
+    sessionDuration: null,
+    selectedDate:    null,  // 'YYYY-MM-DD'
+    selectedTime:    null,  // 'HH:MM'
+    calendarYear:    null,
+    calendarMonth:   null,
+    loadedSlots:     {},    // { 'YYYY-MM-DD': ['09:00', ...] }
+    availableWeekdays: null, // Set de días de semana con horario (0=Dom..6=Sáb); null = aún sin cargar
+    blockedDates:      new Set(), // fechas 'YYYY-MM-DD' bloqueadas (feriados/vacaciones)
+  };
+
+  const catalogServices = JSON.parse(catalogServicesRaw);
+
+  const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const show = (id) => $(id)?.classList.remove('hidden');
+  const hide = (id) => $(id)?.classList.add('hidden');
+
+  function formatDateEs(iso) {
+    const [y, m, d] = iso.split('-');
+    return `${parseInt(d)} de ${MONTHS_ES[parseInt(m) - 1]} de ${y}`;
+  }
+
+  function formatCLP(n) {
+    return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+  }
+
+  // ─── Indicador de pasos ───────────────────────────────────────────────────
+  function updateStepIndicators(currentStep) {
+    for (let i = 1; i <= 4; i++) {
+      const ind   = $(`step-indicator-${i}`);
+      const label = $(`step-label-${i}`);
+      if (!ind) continue;
+      ind.className = 'w-6 h-6 flex items-center justify-center text-[10px] tracking-widest font-body flex-shrink-0 transition-all duration-200 step-indicator';
+      if (i < currentStep) {
+        ind.classList.add('bg-ink', 'text-sand', 'border', 'border-ink');
+        ind.textContent = '✓';
+      } else if (i === currentStep) {
+        ind.classList.add('border', 'border-ink', 'text-ink', 'bg-warm');
+        ind.textContent = String(i);
+      } else {
+        ind.classList.add('border', 'border-dust', 'text-stone');
+        ind.textContent = String(i);
+      }
+      if (label) {
+        label.className = 'hidden md:block font-body text-[10px] tracking-widest uppercase step-label';
+        if (i === currentStep) label.classList.add('text-ink');
+        else label.classList.add('text-stone');
+      }
+    }
+  }
+
+  function goToStep(n) {
+    state.step = n;
+    document.querySelectorAll('.booking-step').forEach((el) => el.classList.add('hidden'));
+    $(`step-${n}`)?.classList.remove('hidden');
+    updateStepIndicators(n);
+    // Resumen del servicio: visible desde el paso 2 en adelante
+    const sum = $('service-summary');
+    if (sum) sum.style.display = n >= 2 ? 'flex' : 'none';
+    const bar = document.getElementById('booking-bar');
+    if (bar) {
+      const top = bar.getBoundingClientRect().top + window.scrollY - 1;
+      window.scrollTo({ top, behavior: 'smooth' });
+    }
+  }
+
+  // ─── PASO 1: Grupo → Servicio → Paso 2 ──────────────────────────────────
+  let selectedGroup = null; // 'individual' | 'pareja'
+
+  function renderServiceCards(group) {
+    const container = $('service-cards');
+    if (!container) return;
+    const services = catalogServices.filter((s) => s.type === group);
+    container.innerHTML = '';
+
+    if (!services.length) {
+      container.innerHTML = '<p class="font-body text-sm text-stone py-4">No hay servicios disponibles.</p>';
+      return;
+    }
+
+    services.forEach((svc) => {
+      const card = document.createElement('div');
+      card.className = 'bg-white border border-dust p-8 transition-all duration-200';
+
+      if (svc.modality === 'ambos') {
+        const priceOnline = svc.price_online     ?? svc.price;
+        const pricePres   = svc.price_presencial ?? svc.price;
+        const durOnline   = svc.duration_min_online     ?? svc.duration_min ?? 50;
+        const durPres     = svc.duration_min_presencial ?? svc.duration_min ?? 50;
+
+        card.innerHTML = `
+          <p class="font-heading font-semibold text-xl text-ink mb-1">${svc.name}</p>
+          ${svc.description ? `<p class="font-body text-sm text-stone mb-5 leading-relaxed">${svc.description}</p>` : '<div class="mb-5"></div>'}
+          <div class="h-px bg-dust mb-5"></div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button type="button" class="svc-opt-btn text-left border border-dust p-5 bg-sand hover:bg-warm hover:border-forest/40 transition-all cursor-pointer"
+                    data-svc-id="${svc.id}" data-modality="online" data-price="${priceOnline}" data-dur="${durOnline}" data-title="${svc.name}">
+              <p class="label text-forest mb-2">Online</p>
+              <p class="font-heading font-semibold text-xl text-ink">${formatCLP(priceOnline)}</p>
+              <p class="font-body text-xs text-stone mt-1">${durOnline} min · Videollamada</p>
+            </button>
+            <button type="button" class="svc-opt-btn text-left border border-dust p-5 bg-sand hover:bg-warm hover:border-forest/40 transition-all cursor-pointer"
+                    data-svc-id="${svc.id}" data-modality="presencial" data-price="${pricePres}" data-dur="${durPres}" data-title="${svc.name}">
+              <p class="label text-gold mb-2">Presencial</p>
+              <p class="font-heading font-semibold text-xl text-ink">${formatCLP(pricePres)}</p>
+              <p class="font-body text-xs text-stone mt-1">${durPres} min · Las Condes</p>
+            </button>
+          </div>
+        `;
+      } else {
+        const price    = svc.price;
+        const dur      = svc.duration_min ?? 50;
+        const tagColor = svc.modality === 'online' ? 'text-forest' : 'text-gold';
+        const tagText  = svc.modality === 'online' ? 'Online' : 'Presencial';
+        const modLabel = svc.modality === 'online' ? 'Videollamada · Zoom o Meet' : 'Las Condes';
+
+        card.className += ' cursor-pointer hover:border-forest/40 hover:bg-warm';
+        card.innerHTML = `
+          <p class="label ${tagColor} mb-2">${tagText}</p>
+          <p class="font-heading font-semibold text-2xl text-ink mb-1">${svc.name}</p>
+          ${svc.description ? `<p class="font-body text-sm text-stone mb-4 leading-relaxed">${svc.description}</p>` : '<div class="mb-4"></div>'}
+          <div class="h-px bg-dust my-4"></div>
+          <p class="font-heading font-light text-xl text-ink">${formatCLP(price)} · ${dur} min</p>
+          <p class="font-body text-xs text-stone mt-1">${modLabel}</p>
+        `;
+        card.addEventListener('click', () =>
+          selectService(svc.id, svc.modality, price, dur, svc.name)
+        );
+      }
+
+      container.appendChild(card);
+    });
+
+    container.querySelectorAll('.svc-opt-btn').forEach((btn) => {
+      btn.addEventListener('click', () =>
+        selectService(btn.dataset.svcId, btn.dataset.modality, parseInt(btn.dataset.price), parseInt(btn.dataset.dur), btn.dataset.title)
+      );
+    });
+  }
+
+  // ── Medición de embudo para GTM (GA4 / Google Ads) ────────────────────────
+  function voItem() {
+    return {
+      item_id:       String(state.serviceId || ''),
+      item_name:     String(state.sessionTitle || ''),
+      item_category: state.modalityChoice === 'online' ? 'online' : 'presencial',
+      price:         Number(state.sessionPrice) || 0,
+      quantity:      1,
+    };
+  }
+  function voPush(eventName) {
+    try {
+      window.dataLayer = window.dataLayer || [];
+      window.dataLayer.push({ ecommerce: null });
+      window.dataLayer.push({
+        event: eventName,
+        ecommerce: { currency: 'CLP', value: Number(state.sessionPrice) || 0, items: [voItem()] },
+      });
+    } catch (e) { /* medición no debe romper el flujo */ }
+  }
+
+  function selectService(serviceId, modality, price, duration, name) {
+    state.serviceId       = serviceId;
+    state.modalityChoice  = modality;
+    state.sessionPrice    = price;
+    state.sessionDuration = duration;
+    state.sessionTitle    = name + (modality === 'online' ? ' Online' : ' Presencial');
+    state.loadedSlots     = {};
+
+    // Poblar el resumen del servicio (nombre + modalidad + precio + duración)
+    const sName = $('summary-name');
+    const sDet  = $('summary-detail');
+    if (sName) sName.textContent = state.sessionTitle;
+    if (sDet)  sDet.textContent  = `${formatCLP(price)} · ${duration} min · ${modality === 'online' ? 'Videollamada (Meet)' : 'Las Condes'}`;
+
+    updateMotivoSelect(selectedGroup);
+
+    const now = new Date();
+    state.calendarYear  = now.getFullYear();
+    state.calendarMonth = now.getMonth();
+
+    voPush('view_item'); // el paciente "ve" el servicio elegido
+
+    goToStep(2);
+    renderCalendar();
+    loadAvailabilitySummary(); // días sin horario / feriados → deshabilitar en el calendario
+  }
+
+  // Carga qué días de la semana tienen horario y qué fechas están bloqueadas
+  async function loadAvailabilitySummary() {
+    state.availableWeekdays = null;
+    state.blockedDates = new Set();
+    if (!state.serviceId) return;
+    try {
+      const res = await fetch(`/api/availability/summary?service_id=${encodeURIComponent(state.serviceId)}`);
+      const d = await res.json();
+      state.availableWeekdays = new Set(d.weekdays ?? []);
+      state.blockedDates = new Set(d.blocked ?? []);
+      renderCalendar(); // re-pintar ya con los días deshabilitados
+    } catch { /* si falla, el calendario sigue mostrando los días (el clic dirá "sin horarios") */ }
+  }
+
+  function activateGroup(group) {
+    selectedGroup = group;
+    if ($('service-subtitle')) $('service-subtitle').textContent = group === 'individual'
+      ? 'Sesión Individual — elige el tipo de terapia'
+      : 'Sesión de Pareja — elige el tipo de terapia';
+    $('group-selection')?.classList.add('hidden');
+    $('service-selection')?.classList.remove('hidden');
+    renderServiceCards(group);
+  }
+
+  // ── Servicio pre-seleccionado desde /servicios (?servicio=UUID) ──────────────
+  // Se define aquí pero se EJECUTA al final del script (ver runPreselection()),
+  // cuando ya están inicializadas todas las constantes (ej. MOTIVOS) — evita TDZ.
+  function runPreselection() {
+    if (preselectedServicioId) {
+    const svc = catalogServices.find((s) => s.id === preselectedServicioId);
+    if (svc) {
+      selectedGroup = svc.type;
+      if (svc.modality === 'ambos') {
+        const priceOnline = svc.price_online     ?? svc.price;
+        const pricePres   = svc.price_presencial ?? svc.price;
+        const durOnline   = svc.duration_min_online     ?? svc.duration_min ?? 50;
+        const durPres     = svc.duration_min_presencial ?? svc.duration_min ?? 50;
+
+        $('presel-service-name').textContent  = svc.name;
+        $('presel-service-desc').textContent  = svc.description ?? '';
+        $('presel-price-online').textContent     = formatCLP(priceOnline) + ' · ' + durOnline + ' min';
+        $('presel-price-presencial').textContent = formatCLP(pricePres)   + ' · ' + durPres   + ' min';
+
+        $('presel-online-btn').addEventListener('click', () =>
+          selectService(svc.id, 'online', priceOnline, durOnline, svc.name)
+        );
+        $('presel-presencial-btn').addEventListener('click', () =>
+          selectService(svc.id, 'presencial', pricePres, durPres, svc.name)
+        );
+
+        $('group-selection').classList.add('hidden');
+        $('modality-for-service').classList.remove('hidden');
+      } else {
+        // Modalidad única → saltar directo al paso 2
+        selectService(svc.id, svc.modality, svc.price, svc.duration_min ?? 50, svc.name);
+      }
+    }
+    } else if (preselectedGroup === 'individual' || preselectedGroup === 'pareja') {
+      activateGroup(preselectedGroup);
+    }
+  }
+
+  $('back-to-servicios')?.addEventListener('click', () => {
+    window.location.href = '/servicios';
+  });
+
+  document.querySelectorAll('.group-card').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.group-card').forEach((b) => b.classList.remove('border-forest', 'bg-warm'));
+      btn.classList.add('border-forest', 'bg-warm');
+      activateGroup(btn.dataset.group);
+    });
+  });
+
+  $('back-to-group')?.addEventListener('click', () => {
+    if (preselectedGroup) {
+      window.location.href = '/servicios';
+    } else {
+      $('service-selection').classList.add('hidden');
+      $('group-selection').classList.remove('hidden');
+      selectedGroup = null;
+    }
+  });
+
+  $('back-to-1')?.addEventListener('click', () => {
+    goToStep(1);
+    // Si venía con servicio pre-seleccionado, asegurarse de mostrar 1c
+    if (preselectedServicioId) {
+      $('group-selection')?.classList.add('hidden');
+      $('service-selection')?.classList.add('hidden');
+      $('modality-for-service')?.classList.remove('hidden');
+    }
+  });
+  $('back-to-2')?.addEventListener('click', () => goToStep(2));
+
+  // ─── Calendario ──────────────────────────────────────────────────────────
+  $('prev-month')?.addEventListener('click', () => {
+    const d = new Date(state.calendarYear, state.calendarMonth - 1, 1);
+    const now = new Date(); now.setHours(0,0,0,0);
+    if (d < new Date(now.getFullYear(), now.getMonth(), 1)) return;
+    state.calendarYear  = d.getFullYear();
+    state.calendarMonth = d.getMonth();
+    renderCalendar();
+  });
+
+  $('next-month')?.addEventListener('click', () => {
+    const d = new Date(state.calendarYear, state.calendarMonth + 1, 1);
+    // Limitar a 3 meses adelante
+    const limit = new Date(); limit.setMonth(limit.getMonth() + 3);
+    if (d > limit) return;
+    state.calendarYear  = d.getFullYear();
+    state.calendarMonth = d.getMonth();
+    renderCalendar();
+  });
+
+  function isoDate(y, m, d) {
+    return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  async function renderCalendar() {
+    const y = state.calendarYear;
+    const m = state.calendarMonth;
+    $('calendar-title').textContent = `${MONTHS_ES[m]} ${y}`;
+
+    const grid = $('calendar-grid');
+    grid.innerHTML = '';
+
+    const firstDay  = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const today     = new Date(); today.setHours(0,0,0,0);
+
+    // Celdas vacías antes del primer día
+    for (let i = 0; i < firstDay; i++) {
+      grid.insertAdjacentHTML('beforeend', '<div></div>');
+    }
+
+    // Para saber qué días tienen slots, hacemos una consulta liviana por mes
+    // Cargamos todos los días del mes de una vez usando un fetch por cada día visible
+    // (optimización futura: endpoint por mes)
+    const dayButtons = [];
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso      = isoDate(y, m, d);
+      const dateObj  = new Date(iso + 'T00:00:00');
+      const isPast   = dateObj < today;
+      const isSelected = iso === state.selectedDate;
+
+      // Fecha de hoy en la zona horaria de Chile (toISOString() da la fecha en UTC,
+      // que se adelanta durante la tarde/noche en Chile — ver src/lib/dateUtils.ts).
+      const isToday = iso === new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+      // Día sin horario para este servicio (ej. no atiende sáb/dom) o feriado bloqueado
+      const dow        = dateObj.getDay();
+      const noWeekday  = state.availableWeekdays !== null && !state.availableWeekdays.has(dow);
+      const isBlocked  = state.blockedDates.has(iso);
+      const unavailable = noWeekday || isBlocked;
+      const disabled   = isPast || unavailable;
+
+      let cls = 'day-btn ';
+      if (isPast) {
+        cls += 'day-past';
+      } else if (unavailable) {
+        cls += 'day-off';
+      } else if (isSelected) {
+        cls += 'day-selected';
+      } else {
+        cls += 'day-available';
+        if (isToday) cls += ' day-today';
+      }
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = cls;
+      btn.textContent = d;
+      btn.dataset.iso = iso;
+      btn.disabled = disabled;
+      if (isBlocked) btn.title = 'No disponible (feriado o bloqueado)';
+      else if (noWeekday) btn.title = 'Este día no hay atención para este servicio';
+
+      if (!disabled) {
+        btn.addEventListener('click', () => selectDate(iso));
+      }
+
+      grid.appendChild(btn);
+      dayButtons.push({ btn, iso, isPast });
+    }
+  }
+
+  async function selectDate(iso) {
+    state.selectedDate = iso;
+    state.selectedTime = null;
+
+    // Actualizar estilos del calendario
+    document.querySelectorAll('.day-btn').forEach((b) => {
+      if (b.dataset.iso === iso) {
+        b.className = b.className.replace('day-available', 'day-selected');
+      } else if (!b.disabled) {
+        b.className = b.className.replace('day-selected', 'day-available');
+      }
+    });
+
+    // Mostrar slots
+    hide('slots-placeholder');
+    const sc = $('slots-container');
+    if (sc) { sc.classList.remove('hidden'); sc.style.display = 'flex'; sc.style.flexDirection = 'column'; }
+    $('slots-date-label').textContent = formatDateEs(iso);
+    $('slots-grid').innerHTML = '<p class="col-span-3 text-xs text-muted py-2">Cargando horarios...</p>';
+    hide('no-slots-msg');
+
+    // Fetch slots — el horario es por servicio, así que la caché incluye el service_id
+    const cacheKey = `${iso}|${state.serviceId ?? ''}`;
+    let slots = state.loadedSlots[cacheKey];
+    if (!slots) {
+      try {
+        const dur = state.sessionDuration ? `&duration=${state.sessionDuration}` : '';
+        const svc = state.serviceId ? `&service_id=${encodeURIComponent(state.serviceId)}` : '';
+        const res = await fetch(`/api/availability?date=${iso}${dur}${svc}`);
+        const data = await res.json();
+        slots = data.slots ?? [];
+        state.loadedSlots[cacheKey] = slots;
+      } catch {
+        slots = [];
+      }
+    }
+
+    renderSlots(slots);
+  }
+
+  function renderSlots(slots) {
+    const grid = $('slots-grid');
+    grid.innerHTML = '';
+
+    if (!slots.length) {
+      show('no-slots-msg');
+      return;
+    }
+    hide('no-slots-msg');
+
+    slots.forEach((time) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `slot-btn ${state.selectedTime === time ? 'slot-selected' : ''}`;
+      btn.textContent = time;
+      btn.dataset.time = time;
+      btn.addEventListener('click', () => selectTime(time));
+      grid.appendChild(btn);
+    });
+  }
+
+  function selectTime(time) {
+    state.selectedTime = time;
+
+    document.querySelectorAll('.slot-btn').forEach((b) => {
+      if (b.dataset.time === time) b.className = b.className.replace('slot-btn', 'slot-btn slot-selected').replace('slot-selected slot-selected', 'slot-selected');
+      else b.classList.remove('slot-selected');
+    });
+    // Pequeño delay para que el usuario vea la selección antes de avanzar
+    setTimeout(() => {
+      buildBookingSummary();
+      goToStep(3);
+    }, 250);
+  }
+
+  // ─── PASO 3: formulario ───────────────────────────────────────────────────
+  // ─── Motivos de consulta por grupo ───────────────────────────────────────
+  const MOTIVOS = {
+    individual: [
+      'Ansiedad o estrés',
+      'Depresión o tristeza persistente',
+      'Baja autoestima o inseguridad',
+      'Duelo o pérdida',
+      'Dificultades en relaciones personales',
+      'Problemas laborales o burnout',
+      'Trauma o experiencias difíciles del pasado',
+      'Crisis existencial o falta de propósito',
+      'Desarrollo personal y autoconocimiento',
+      'Otro',
+    ],
+    pareja: [
+      'Problemas de comunicación',
+      'Infidelidad o ruptura de confianza',
+      'Crisis o distanciamiento emocional',
+      'Dificultades de convivencia',
+      'Celos o inseguridades en la relación',
+      'Decisiones importantes (hijos, matrimonio, separación)',
+      'Violencia o conflictos frecuentes',
+      'Retomar la conexión y el vínculo',
+      'Otro',
+    ],
+  };
+
+  function updateMotivoSelect(group) {
+    const select = $('motivo_consulta');
+    if (!select) return;
+    const opciones = MOTIVOS[group] ?? MOTIVOS.individual;
+    select.innerHTML = '<option value="" disabled selected>Selecciona el motivo principal...</option>';
+    opciones.forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      select.appendChild(opt);
+    });
+  }
+
+  function buildBookingSummary() {
+    $('booking-summary').innerHTML = `
+      <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+        <span class="text-muted">Sesión:</span>     <span class="font-medium">${state.sessionTitle}</span>
+        <span class="text-muted">Fecha:</span>       <span class="font-medium">${formatDateEs(state.selectedDate)}</span>
+        <span class="text-muted">Hora:</span>        <span class="font-medium">${state.selectedTime}</span>
+        <span class="text-muted">Valor:</span>       <span class="font-medium text-primary">${formatCLP(state.sessionPrice)}</span>
+      </div>
+    `;
+  }
+
+  $('patient-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hide('form-error');
+
+    const name   = $('patient_name').value.trim();
+    const email  = $('patient_email').value.trim();
+    const rut    = $('patient_rut').value.trim();
+    const phoneRaw = $('patient_phone').value.replace(/\D/g, '');
+    const phone  = phoneRaw.length === 9 ? `+56${phoneRaw}` : '';
+    const motivo = $('motivo_consulta').value.trim();
+    const notes  = motivo
+      ? `Motivo: ${motivo}` + ($('patient_notes').value.trim() ? `\n\n${$('patient_notes').value.trim()}` : '')
+      : $('patient_notes').value.trim();
+
+    // Validación
+    let valid = true;
+    document.querySelectorAll('.field-error').forEach((el) => el.classList.add('hidden'));
+
+    if (!name)   { $('patient_name').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('patient_email').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!phone)  { $('patient_phone').closest('div').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    const rutClean = rut.replace(/\./g, '').replace(/\s/g, '');
+    if (!/^\d{7,8}-[\dkK]$/.test(rutClean)) { $('patient_rut').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!motivo) { $('motivo_consulta').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!valid) return;
+
+    const btn = $('submit-patient');
+    btn.textContent = 'Procesando...';
+    btn.disabled = true;
+
+    goToStep(4);
+    show('payment-loading');
+    hide('payment-ready');
+    hide('payment-error');
+
+    voPush('begin_checkout'); // el paciente inicia el pago
+
+    let recaptchaToken = '';
+    if (window.__RECAPTCHA_SITE_KEY__ && window.grecaptcha) {
+      try {
+        recaptchaToken = await new Promise((resolve, reject) => {
+          grecaptcha.ready(() => {
+            grecaptcha.execute(window.__RECAPTCHA_SITE_KEY__, { action: 'submit_booking' })
+              .then(resolve)
+              .catch(reject);
+          });
+        });
+      } catch (err) {
+        console.error('[recaptcha] error obteniendo token', err);
+      }
+    }
+
+    try {
+      const res = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_id:      state.serviceId,
+          modality_choice: state.modalityChoice,
+          session_date:    state.selectedDate,
+          session_time:    state.selectedTime,
+          patient_name:    name,
+          patient_email:   email,
+          patient_phone:   phone,
+          patient_rut:     rutClean,
+          notes,
+          recaptcha_token: recaptchaToken,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.checkoutUrl) {
+        // Email inválido → volver al paso 3 y marcar el campo
+        if (data.errorType === 'invalid_email') {
+          goToStep(3);
+          const emailInput = document.getElementById('patient_email');
+          const emailErr   = emailInput?.nextElementSibling;
+          if (emailErr) {
+            emailErr.textContent = 'Correo no válido para el pago. Usa un correo real (ej: nombre@gmail.com).';
+            emailErr.classList.remove('hidden');
+          }
+          emailInput?.focus();
+          emailInput?.select();
+          return; // finally re-habilitará el botón
+        }
+        const msg = data.error ?? 'Error desconocido';
+        const detail = data.detail ? ` — ${data.detail}` : '';
+        throw new Error(msg + detail);
+      }
+
+      // Guardar el bookingId para usarlo en "Pagar en consulta"
+      state.bookingId = data.bookingId;
+
+      // Mostrar botón de pago
+      hide('payment-loading');
+      show('payment-ready');
+
+      $('payment-summary').innerHTML = `
+        <p class="font-heading text-xl text-dark">${formatCLP(state.sessionPrice)}</p>
+        <p class="text-xs text-muted mt-1">${state.sessionTitle} · ${formatDateEs(state.selectedDate)} · ${state.selectedTime}</p>
+      `;
+
+      $('mp-checkout-btn').href = data.checkoutUrl;
+      // En modo local/desarrollo usar sandbox_init_point si está disponible
+      // En producción usa checkoutUrl directamente
+
+    } catch (err) {
+      hide('payment-loading');
+      show('payment-error');
+      $('payment-error-msg').textContent = err.message ?? 'Ocurrió un error. Por favor contáctanos por WhatsApp.';
+    } finally {
+      btn.textContent = 'Continuar al pago';
+      btn.disabled = false;
+    }
+  });
+
+  // ─── Pago en consulta ─────────────────────────────────────────────────────
+  document.getElementById('manual-pay-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('manual-pay-btn');
+    btn.textContent = 'Confirmando...';
+    btn.disabled = true;
+
+    try {
+      if (!state.bookingId) throw new Error('Reserva no encontrada.');
+
+      const res = await fetch('/api/bookings/confirm-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId: state.bookingId }),
+      });
+
+      const data = await res.json();
+      if (data.confirmed) {
+        window.location.href = '/confirmacion?manual=1';
+      } else {
+        throw new Error(data.error ?? 'Error al confirmar');
+      }
+    } catch (err) {
+      hide('payment-error');
+      show('payment-error');
+      $('payment-error-msg').textContent = err.message ?? 'Error al procesar. Intenta nuevamente.';
+      btn.textContent = 'Pagar en consulta';
+      btn.disabled = false;
+    }
+  });
+
+  // ─── Pago por transferencia ───────────────────────────────────────────────
+  document.getElementById('transfer-pay-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('transfer-pay-btn');
+    if (!btn) return;
+    btn.textContent = 'Confirmando...';
+    btn.disabled = true;
+
+    try {
+      if (!state.bookingId) throw new Error('Reserva no encontrada.');
+
+      const res = await fetch('/api/bookings/confirm-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId: state.bookingId, paymentMethod: 'transferencia' }),
+      });
+
+      const data = await res.json();
+      if (data.confirmed) {
+        window.location.href = '/confirmacion?transferencia=1';
+      } else {
+        throw new Error(data.error ?? 'Error al confirmar');
+      }
+    } catch (err) {
+      show('payment-error');
+      $('payment-error-msg').textContent = err.message ?? 'Error al procesar. Intenta nuevamente.';
+      btn.textContent = 'Pagar por transferencia';
+      btn.disabled = false;
+    }
+  });
+
+  // ─── Formato teléfono ─────────────────────────────────────────────────────
+  const phoneInput = $('patient_phone');
+  if (phoneInput) {
+    phoneInput.addEventListener('input', () => {
+      // Solo dígitos
+      let digits = phoneInput.value.replace(/\D/g, '').slice(0, 9);
+      // Formato: 9 9999 9999
+      if (digits.length <= 1) {
+        phoneInput.value = digits;
+      } else if (digits.length <= 5) {
+        phoneInput.value = `${digits[0]} ${digits.slice(1)}`;
+      } else {
+        phoneInput.value = `${digits[0]} ${digits.slice(1, 5)} ${digits.slice(5)}`;
+      }
+    });
+    phoneInput.addEventListener('keydown', (e) => {
+      // Permitir: backspace, delete, tab, flechas, ctrl/cmd+a/c/v/x
+      const allowed = ['Backspace','Delete','Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
+      if (allowed.includes(e.key)) return;
+      if ((e.ctrlKey || e.metaKey) && ['a','c','v','x'].includes(e.key.toLowerCase())) return;
+      // Bloquear si no es dígito
+      if (!/^\d$/.test(e.key)) e.preventDefault();
+    });
+  }
+
+  // ─── Init ─────────────────────────────────────────────────────────────────
+  updateStepIndicators(1);
+  runPreselection();  // preselección de servicio/grupo (al final: todo ya inicializado)
+</script>
