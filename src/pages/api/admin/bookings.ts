@@ -6,6 +6,7 @@ import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail } from '../../../lib/email';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { upsertPatientFromBooking } from '../../../lib/patients';
+import { sendWhatsappTemplate } from '../../../lib/whatsapp';
 
 export const prerender = false;
 
@@ -409,8 +410,38 @@ export const POST: APIRoute = async ({ request, redirect }) => {
           });
         } catch (e) { console.error('[create-admin] payment-link email:', e); }
 
-        // Redirigir mostrando el link (para copiar / WhatsApp)
-        return redirect(dest + `&payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}`);
+        // Enviar el link también por WhatsApp automáticamente, si hay teléfono y
+        // la plantilla ya está aprobada por Meta (si no, se degrada solo — el
+        // banner manual de abajo sigue disponible como respaldo).
+        let waSent = false;
+        if (finalPhone) {
+          try {
+            const { data: tplRows } = await supabase.from('settings').select('key, value')
+              .in('key', ['whatsapp_payment_template_name', 'whatsapp_payment_template_lang']);
+            const tplCfg: Record<string, string> = {};
+            (tplRows ?? []).forEach((r: { key: string; value: string }) => { tplCfg[r.key] = r.value; });
+            const templateName = tplCfg['whatsapp_payment_template_name'];
+            if (templateName) {
+              const { data: addrRow } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
+              const isOnline = sessionType.includes('online');
+              const modalidad = isOnline ? 'Online (por videollamada)' : (addrRow?.value?.trim() || 'Presencial en consulta');
+              const fechaHora = `${session_date} a las ${session_time}`;
+              const valorTxt  = `$${totalPrice.toLocaleString('es-CL')}`;
+              const res = await sendWhatsappTemplate(
+                finalPhone,
+                templateName,
+                tplCfg['whatsapp_payment_template_lang'] || 'es',
+                [finalName.split(' ')[0] || 'hola', svc.name, fechaHora, modalidad, valorTxt, paymentUrl],
+              );
+              waSent = res.sent;
+              if (!res.sent) console.error('[create-admin] payment-link whatsapp:', res.reason);
+            }
+          } catch (e) { console.error('[create-admin] payment-link whatsapp:', e); }
+        }
+
+        // Redirigir mostrando el link (el banner de "compartir por WhatsApp" solo
+        // se muestra si el envío automático no se hizo, para no duplicar el mensaje)
+        return redirect(dest + `&payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}&pl_wa_sent=${waSent ? '1' : '0'}`);
       } catch (e) {
         console.error('[create-admin] flow order:', e);
         return redirect(dest + '&error=flow_error');

@@ -201,8 +201,11 @@ const errorParam   = Astro.url.searchParams.get('error');
 const errorDetail  = Astro.url.searchParams.get('detail');
 const paymentLink  = Astro.url.searchParams.get('payment_link');
 const plPhoneRaw   = (Astro.url.searchParams.get('pl_phone') ?? '').replace(/\D/g, '');
+const plWaSent     = Astro.url.searchParams.get('pl_wa_sent') === '1';
 const plWaMsg      = paymentLink ? `Hola 👋 Te comparto el enlace de pago para tu sesión: ${paymentLink}` : '';
-const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text=${encodeURIComponent(plWaMsg)}` : null;
+// El botón manual de WhatsApp solo se muestra si el envío automático (plantilla
+// de Meta) no se hizo — para no mandar el mensaje duplicado.
+const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${plPhoneRaw}?text=${encodeURIComponent(plWaMsg)}` : null;
 ---
 
 <AdminLayout title="Agenda" current="/admin/agenda" fullHeight={true}>
@@ -309,7 +312,9 @@ const plWaUrl      = plPhoneRaw.length >= 11 ? `https://wa.me/${plPhoneRaw}?text
 
     {paymentLink && (
       <div style="margin:0.6rem 1rem;padding:0.75rem 1rem;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
-        <span style="font-size:0.85rem;color:#166534;font-weight:600;">✓ Cita creada. Link de pago enviado por correo.</span>
+        <span style="font-size:0.85rem;color:#166534;font-weight:600;">
+          ✓ Cita creada. Link de pago enviado por correo{plWaSent ? ' y por WhatsApp' : ''}.
+        </span>
         <a href={paymentLink} target="_blank" rel="noopener" class="btn btn-outline btn-sm">Abrir link de pago</a>
         {plWaUrl && <a href={plWaUrl} target="_blank" rel="noopener" class="btn btn-outline btn-sm">Enviar por WhatsApp</a>}
         <button type="button" class="btn btn-outline btn-sm" data-copy-link={paymentLink}>Copiar link</button>

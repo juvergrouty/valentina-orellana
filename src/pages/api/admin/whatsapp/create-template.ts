@@ -17,6 +17,10 @@ export const POST: APIRoute = async ({ request }) => {
 
   const name     = String(body.name ?? '').trim();
   const bodyText = String(body.bodyText ?? '').trim();
+  // 'reminder' (recordatorio 4h) o 'payment' (link de pago al reservar) — decide
+  // en qué settings queda guardado el nombre, para que cada automatización use
+  // la plantilla que le corresponde.
+  const kind = body.kind === 'payment' ? 'payment' : 'reminder';
   const sampleValues = Array.isArray(body.sampleValues)
     ? (body.sampleValues as string[])
     : String(body.sampleValues ?? '').split('|').map(s => s.trim()).filter(Boolean);
@@ -28,13 +32,13 @@ export const POST: APIRoute = async ({ request }) => {
   const res = await createMessageTemplate({ name, bodyText, sampleValues });
   if (!res.ok) return json({ ok: false, error: res.reason ?? 'No se pudo crear la plantilla.' }, 502);
 
-  // Guarda el nombre para que el cron de recordatorios la use en cuanto Meta la
-  // apruebe (el cron intenta enviarla igual; si aún no está aprobada, Meta lo
-  // rechaza con un motivo explícito y simplemente reintenta más tarde).
+  // Guarda el nombre para que la automatización correspondiente la use en cuanto
+  // Meta la apruebe (el envío se intenta igual antes; si aún no está aprobada,
+  // Meta lo rechaza con un motivo explícito y simplemente reintenta más tarde).
   await supabase.from('settings').upsert(
     [
-      { key: 'whatsapp_reminder_template_name', value: name, updated_at: new Date().toISOString() },
-      { key: 'whatsapp_reminder_template_lang',  value: 'es', updated_at: new Date().toISOString() },
+      { key: `whatsapp_${kind}_template_name`, value: name, updated_at: new Date().toISOString() },
+      { key: `whatsapp_${kind}_template_lang`,  value: 'es', updated_at: new Date().toISOString() },
     ],
     { onConflict: 'key' },
   );

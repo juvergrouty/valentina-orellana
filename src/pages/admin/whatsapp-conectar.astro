@@ -65,15 +65,15 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
         <div style="display:flex;flex-direction:column;gap:0.85rem;">
           <label class="tpl-opt" style="display:flex;gap:0.6rem;align-items:flex-start;cursor:pointer;">
             <input type="radio" name="tpl-choice" value="0" checked style="margin-top:3px;">
-            <span style="font-size:0.85rem;">Hola {'{{1}}'}, te recordamos tu hora de hoy a las {'{{2}}'} hrs. Cualquier cambio, respóndenos por este medio. — Valentina Orellana</span>
+            <span style="font-size:0.85rem;">Hola {'{{1}}'}, te recordamos tu hora de hoy a las {'{{2}}'} hrs. Cualquier cambio, respóndenos por este medio (necesitamos al menos 24 horas de anticipación). — Ps. Valentina Orellana</span>
           </label>
           <label class="tpl-opt" style="display:flex;gap:0.6rem;align-items:flex-start;cursor:pointer;">
             <input type="radio" name="tpl-choice" value="1" style="margin-top:3px;">
-            <span style="font-size:0.85rem;">Hola {'{{1}}'}, te recordamos tu sesión de hoy a las {'{{2}}'} hrs con Ps. Valentina Orellana. Cualquier cambio, respóndenos por este medio.</span>
+            <span style="font-size:0.85rem;">Hola {'{{1}}'}, te recordamos tu sesión de hoy a las {'{{2}}'} hrs. Cualquier cambio, respóndenos por este medio; necesitamos al menos 24 horas de anticipación para reagendar. — Ps. Valentina Orellana</span>
           </label>
           <label class="tpl-opt" style="display:flex;gap:0.6rem;align-items:flex-start;cursor:pointer;">
             <input type="radio" name="tpl-choice" value="2" style="margin-top:3px;">
-            <span style="font-size:0.85rem;">Hola {'{{1}}'}, este es un recordatorio de tu hora de hoy a las {'{{2}}'} hrs. Si necesitas reagendar o cancelar, respóndenos por este medio.</span>
+            <span style="font-size:0.85rem;">Hola {'{{1}}'}, este es un recordatorio de tu hora de hoy a las {'{{2}}'} hrs. Si necesitas reagendar o cancelar, respóndenos por este medio (con al menos 24 horas de anticipación). — Ps. Valentina Orellana</span>
           </label>
           <label class="tpl-opt" style="display:flex;gap:0.6rem;align-items:flex-start;cursor:pointer;">
             <input type="radio" name="tpl-choice" value="custom" style="margin-top:3px;">
@@ -83,6 +83,41 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
 
           <button id="btn-create-tpl" class="btn btn-dark" style="margin-top:0.5rem;">Enviar plantilla a revisión</button>
           <p id="tpl-status" style="display:none;font-size:0.82rem;padding:0.85rem;border-radius:6px;"></p>
+        </div>
+      )}
+    </div>
+  )}
+
+  {connected && (
+    <div class="card" style="max-width:560px;margin:1.5rem auto 0;padding:2.5rem;">
+      <p class="label" style="margin-bottom:0.75rem;">Plantilla de link de pago</p>
+      <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.3rem;margin-bottom:1rem;">
+        Se envía sola cuando agendas con "Enviar link de pago"
+      </h2>
+      <p style="font-size:0.85rem;color:var(--stone);line-height:1.6;margin-bottom:1.25rem;">
+        Misma lógica que el recordatorio: Meta exige una plantilla pre-aprobada. Esta se usa cuando
+        agendas a un paciente desde Agenda con la opción "Enviar link de pago" — se manda el mismo
+        link que hoy va por correo, pero por WhatsApp además. El servicio, la modalidad, el valor y el
+        link cambian solos según la reserva; no hace falta una plantilla distinta por servicio.
+      </p>
+      {!cfg['whatsapp_waba_id'] ? (
+        <div style="background:#fef2f2;border:1px solid #fecaca;padding:0.85rem;border-radius:6px;font-size:0.82rem;color:#991b1b;">
+          Falta el ID de tu cuenta de WhatsApp Business (waba_id) — vuelve a conectar arriba para que quede guardado.
+        </div>
+      ) : (
+        <div style="display:flex;flex-direction:column;gap:0.85rem;">
+          <label class="tpl-opt" style="display:flex;gap:0.6rem;align-items:flex-start;cursor:pointer;">
+            <input type="radio" name="tpl-pay-choice" value="0" checked style="margin-top:3px;">
+            <span style="font-size:0.85rem;">Hola {'{{1}}'}, aquí tienes tu link de pago para completar la reserva de tu {'{{2}}'} el {'{{3}}'}. Modalidad: {'{{4}}'}. Valor: {'{{5}}'}. En cuanto se registre el pago, tu hora queda confirmada automáticamente. Link de pago: {'{{6}}'} ¡Gracias! — Ps. Valentina Orellana</span>
+          </label>
+          <label class="tpl-opt" style="display:flex;gap:0.6rem;align-items:flex-start;cursor:pointer;">
+            <input type="radio" name="tpl-pay-choice" value="custom" style="margin-top:3px;">
+            <span style="font-size:0.85rem;">Otro texto (usa {'{{1}}'} nombre, {'{{2}}'} servicio, {'{{3}}'} fecha/hora, {'{{4}}'} modalidad, {'{{5}}'} valor, {'{{6}}'} link):</span>
+          </label>
+          <textarea id="tpl-pay-custom" rows="3" placeholder="Escribe tu propio texto con {{1}}…{{6}}…" style="font-size:0.85rem;padding:0.6rem;border:1px solid var(--dust);border-radius:6px;resize:vertical;"></textarea>
+
+          <button id="btn-create-tpl-pay" class="btn btn-dark" style="margin-top:0.5rem;">Enviar plantilla a revisión</button>
+          <p id="tpl-pay-status" style="display:none;font-size:0.82rem;padding:0.85rem;border-radius:6px;"></p>
         </div>
       )}
     </div>
@@ -161,51 +196,76 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
 
   // ── Crear plantilla de recordatorio ───────────────────────────────────────
   const TPL_TEXTS = [
-    'Hola {{1}}, te recordamos tu hora de hoy a las {{2}} hrs. Cualquier cambio, respóndenos por este medio. — Valentina Orellana',
-    'Hola {{1}}, te recordamos tu sesión de hoy a las {{2}} hrs con Ps. Valentina Orellana. Cualquier cambio, respóndenos por este medio.',
-    'Hola {{1}}, este es un recordatorio de tu hora de hoy a las {{2}} hrs. Si necesitas reagendar o cancelar, respóndenos por este medio.',
+    'Hola {{1}}, te recordamos tu hora de hoy a las {{2}} hrs. Cualquier cambio, respóndenos por este medio (necesitamos al menos 24 horas de anticipación). — Ps. Valentina Orellana',
+    'Hola {{1}}, te recordamos tu sesión de hoy a las {{2}} hrs. Cualquier cambio, respóndenos por este medio; necesitamos al menos 24 horas de anticipación para reagendar. — Ps. Valentina Orellana',
+    'Hola {{1}}, este es un recordatorio de tu hora de hoy a las {{2}} hrs. Si necesitas reagendar o cancelar, respóndenos por este medio (con al menos 24 horas de anticipación). — Ps. Valentina Orellana',
   ];
 
-  function showTplStatus(msg, ok) {
-    const el = document.getElementById('tpl-status');
-    if (!el) return;
-    el.textContent = msg;
-    el.style.display = 'block';
-    el.style.background = ok ? '#f0fdf4' : '#fef2f2';
-    el.style.color = ok ? '#166534' : '#991b1b';
-    el.style.border = ok ? '1px solid #86efac' : '1px solid #fecaca';
+  const TPL_PAY_TEXT = 'Hola {{1}}, aquí tienes tu link de pago para completar la reserva de tu {{2}} el {{3}}. Modalidad: {{4}}. Valor: {{5}}. En cuanto se registre el pago, tu hora queda confirmada automáticamente. Link de pago: {{6}} ¡Gracias! — Ps. Valentina Orellana';
+
+  function makeStatusFn(elId) {
+    return (msg, ok) => {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      el.textContent = msg;
+      el.style.display = 'block';
+      el.style.background = ok ? '#f0fdf4' : '#fef2f2';
+      el.style.color = ok ? '#166534' : '#991b1b';
+      el.style.border = ok ? '1px solid #86efac' : '1px solid #fecaca';
+    };
   }
+  const showTplStatus    = makeStatusFn('tpl-status');
+  const showTplPayStatus = makeStatusFn('tpl-pay-status');
 
-  document.getElementById('btn-create-tpl')?.addEventListener('click', async () => {
-    const choice = document.querySelector('input[name="tpl-choice"]:checked')?.value;
-    const bodyText = choice === 'custom'
-      ? (document.getElementById('tpl-custom')?.value ?? '').trim()
-      : TPL_TEXTS[Number(choice)];
-
+  async function submitTemplate({ kind, name, bodyText, sampleValues, minVars, showFn }) {
     if (!bodyText || !bodyText.includes('{{1}}')) {
-      showTplStatus('El texto debe incluir al menos {{1}} (nombre del paciente).', false);
+      showFn('El texto debe incluir al menos {{1}} (nombre del paciente).', false);
       return;
     }
-
-    showTplStatus('Enviando a revisión…', true);
+    for (let i = 1; i <= minVars; i++) {
+      if (!bodyText.includes('{{' + i + '}}')) {
+        showFn('Falta la variable {{' + i + '}} en el texto.', false);
+        return;
+      }
+    }
+    showFn('Enviando a revisión…', true);
     try {
       const res = await fetch('/api/admin/whatsapp/create-template', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'recordatorio_sesion_' + Date.now(),
-          bodyText,
-          sampleValues: ['María', '16:00'],
-        }),
+        body: JSON.stringify({ kind, name: name + '_' + Date.now(), bodyText, sampleValues }),
       });
       const data = await res.json();
       if (data.ok) {
-        showTplStatus('✓ Enviada a revisión (estado: ' + (data.status ?? 'PENDING') + '). Meta suele tardar minutos a un día en aprobarla — revisa en tu Business Manager, sección WhatsApp Manager → Plantillas de mensaje.', true);
+        showFn('✓ Enviada a revisión (estado: ' + (data.status ?? 'PENDING') + '). Meta suele tardar minutos a un día en aprobarla — revisa en tu Business Manager, sección WhatsApp Manager → Plantillas de mensaje.', true);
       } else {
-        showTplStatus('Error: ' + (data.error ?? 'no se pudo crear la plantilla.'), false);
+        showFn('Error: ' + (data.error ?? 'no se pudo crear la plantilla.'), false);
       }
     } catch {
-      showTplStatus('Error de conexión al enviar la plantilla.', false);
+      showFn('Error de conexión al enviar la plantilla.', false);
     }
+  }
+
+  document.getElementById('btn-create-tpl')?.addEventListener('click', () => {
+    const choice = document.querySelector('input[name="tpl-choice"]:checked')?.value;
+    const bodyText = choice === 'custom'
+      ? (document.getElementById('tpl-custom')?.value ?? '').trim()
+      : TPL_TEXTS[Number(choice)];
+    submitTemplate({ kind: 'reminder', name: 'recordatorio_sesion', bodyText, sampleValues: ['María', '16:00'], minVars: 2, showFn: showTplStatus });
+  });
+
+  document.getElementById('btn-create-tpl-pay')?.addEventListener('click', () => {
+    const choice = document.querySelector('input[name="tpl-pay-choice"]:checked')?.value;
+    const bodyText = choice === 'custom'
+      ? (document.getElementById('tpl-pay-custom')?.value ?? '').trim()
+      : TPL_PAY_TEXT;
+    submitTemplate({
+      kind: 'payment',
+      name: 'link_pago_reserva',
+      bodyText,
+      sampleValues: ['María', 'Sesión Individual Online', 'martes 16 de septiembre a las 16:00', 'Online (por videollamada)', '$60.000', 'https://www.flow.cl/app/web/pay.php?token=abc123'],
+      minVars: 6,
+      showFn: showTplPayStatus,
+    });
   });
 </script>
