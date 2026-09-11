@@ -2,14 +2,13 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { sendReminderEmail, emailTypeEnabled } from '../../../lib/email';
 import { sendWhatsappText, sendWhatsappTemplate } from '../../../lib/whatsapp';
-import { nowCL } from '../../../lib/dateUtils';
+import { nowCL, hoursUntilSessionCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
 
 const MARKER = 'RecordatorioEnviado';
 const WA_MARKER = 'RecordatorioWhatsAppEnviado';
 const WA_WINDOW_HOURS = 4; // fijo, tal como se describe en el panel "Agendar hora"
-const CHILE_OFFSET_MS = 4 * 60 * 60 * 1000; // Chile UTC-4/-3; usamos -4 (conservador)
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
@@ -47,7 +46,6 @@ export const GET: APIRoute = async ({ request }) => {
   const templateLang  = tplCfg['whatsapp_reminder_template_lang'] || 'es';
 
   const now      = Date.now();
-  const windowMs = windowHours * 60 * 60 * 1000;
   // "hoy"/"mañana" en la fecha calendario de Chile (no UTC — ver src/lib/dateUtils.ts)
   const today    = nowCL(new Date(now)).toISOString().slice(0, 10);
   const tomorrow = nowCL(new Date(now + 2 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
@@ -83,7 +81,10 @@ export const GET: APIRoute = async ({ request }) => {
   for (const b of bookings ?? []) {
     if (b.session_date === '2099-12-31') { skipped++; waSkipped++; continue; } // cobro manual sin fecha
     const time = (b.session_time ?? '00:00').slice(0, 5);
-    const startUtc = Date.parse(`${b.session_date}T${time}:00Z`) + CHILE_OFFSET_MS;
+    // Horas hasta el inicio de la sesión, en hora real de Chile (considera el
+    // horario de verano automáticamente — el offset fijo anterior asumía
+    // siempre UTC-4 y se desfasaba 1 hora mientras rige horario de verano).
+    const hoursUntil = hoursUntilSessionCL(b.session_date, time);
     // Notas "vivas" de esta vuelta — si el correo y el WhatsApp se marcan en la
     // misma ejecución, la segunda escritura no debe pisar la marca que dejó la primera.
     let liveNotes = b.notes ?? '';
@@ -94,7 +95,7 @@ export const GET: APIRoute = async ({ request }) => {
       if (!b.patient_email) { skipped++; break doEmail; }
       if (b.reminder_email_enabled === false) { skipped++; break doEmail; }
       if (liveNotes.includes(MARKER)) { skipped++; break doEmail; }
-      if (isNaN(startUtc) || startUtc <= now || startUtc > now + windowMs) { skipped++; break doEmail; }
+      if (isNaN(hoursUntil) || hoursUntil <= 0 || hoursUntil > windowHours) { skipped++; break doEmail; }
 
       let serviceName: string | undefined;
       if (b.service_id) {
@@ -131,8 +132,7 @@ export const GET: APIRoute = async ({ request }) => {
       if (b.whatsapp_reminder_enabled !== true) { waSkipped++; break doWhatsapp; }
       if (!b.patient_phone) { waSkipped++; break doWhatsapp; }
       if (liveNotes.includes(WA_MARKER)) { waSkipped++; break doWhatsapp; }
-      const waWindowMs = WA_WINDOW_HOURS * 60 * 60 * 1000;
-      if (isNaN(startUtc) || startUtc <= now || startUtc > now + waWindowMs) { waSkipped++; break doWhatsapp; }
+      if (isNaN(hoursUntil) || hoursUntil <= 0 || hoursUntil > WA_WINDOW_HOURS) { waSkipped++; break doWhatsapp; }
 
       const firstName = (b.patient_name ?? '').split(' ')[0] || 'hola';
 

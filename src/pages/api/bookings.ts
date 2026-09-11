@@ -4,6 +4,7 @@ import { createPaymentOrder } from '../../lib/flow';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
 import { logInfo, logWarn, logError } from '../../lib/logger';
 import { upsertPatientFromBooking } from '../../lib/patients';
+import { hoursUntilSessionCL } from '../../lib/dateUtils';
 
 export const prerender = false;
 
@@ -88,9 +89,13 @@ async function handleBooking(request: Request) {
         return json({ error: 'Formato de fecha u hora inválido.' }, 400);
   }
 
-  const requested = new Date(`${session_date}T${session_time}:00`);
-    if (requested <= new Date()) {
-          return json({ error: 'No puedes reservar en una fecha pasada.' }, 400);
+  // OJO: comparar con hoursUntilSessionCL (hora de Chile), no con
+  // `new Date(session_date+'T'+session_time) <= new Date()` — ese parseo naive
+  // se interpreta en la zona horaria del servidor (UTC en Vercel), lo que
+  // desfasaba la comparación en 3-4 horas y podía rechazar horarios futuros
+  // válidos (o aceptar horarios ya pasados) según la hora del día.
+  if (hoursUntilSessionCL(session_date, session_time) <= 0) {
+        return json({ error: 'No puedes reservar en una fecha pasada.' }, 400);
     }
 
   // ── Limpiar reservas pending_payment expiradas (>30 min) ─────────────────────

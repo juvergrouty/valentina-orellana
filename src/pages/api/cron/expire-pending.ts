@@ -5,10 +5,12 @@ import { deleteBookingFromCalendar } from '../../../lib/syncCalendar';
 
 export const prerender = false;
 
-// Antes eran 3 minutos — absurdamente corto: los pagos por transferencia (Khipu)
-// dentro de Flow pueden tardar bastante más que eso en confirmarse, y una reserva
-// se liberaba antes de que el paciente alcanzara a pagar. Se sube a 45 minutos.
-const EXPIRE_AFTER_MS = 45 * 60 * 1000;
+// Antes eran 3 minutos — absurdamente corto: no alcanza a llenar los datos,
+// buscar la tarjeta y pagar. 30 minutos es el tiempo real que necesita un
+// paciente, y coincide con el umbral de limpieza que ya usan bookings.ts y
+// availability.ts (evita que availability.ts libere un horario 15 minutos
+// antes de que este cron llegue a notificar al paciente y borrar la fila).
+const EXPIRE_AFTER_MS = 30 * 60 * 1000;
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });

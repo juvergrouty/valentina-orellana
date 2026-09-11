@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { sendReviewRequestEmail, sendEvaluationEmail } from '../../../lib/email';
 import { reviewRequestUrl } from '../../../lib/googleReviews';
-import { nowCL } from '../../../lib/dateUtils';
+import { nowCL, hoursUntilSessionCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
 
@@ -11,9 +11,6 @@ const MARKER = 'ReseñaSolicitada';
 // Correo de evaluación (opt-in por reserva, sección "Comunicaciones al paciente"
 // del panel Agendar hora) — independiente de la solicitud de reseña de Google.
 const EVAL_MARKER = 'EvaluacionEnviada';
-// Chile está en UTC-4/-3; usamos -4 (offset máximo) para ser conservadores:
-// así una sesión se considera "terminada" solo cuando ya pasó con seguridad.
-const CHILE_OFFSET_MS = 4 * 60 * 60 * 1000;
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
@@ -81,11 +78,12 @@ export const GET: APIRoute = async ({ request }) => {
     if (!b.patient_email) { skipped++; evalSkipped++; continue; }
     if (b.session_date === '2099-12-31') { skipped++; evalSkipped++; continue; } // cobro manual sin fecha
 
-    // ¿La sesión ya terminó? (hora local Chile + duración; con buffer conservador)
+    // ¿La sesión ya terminó? (hora real de Chile, considera horario de verano
+    // automáticamente — el offset fijo anterior asumía siempre UTC-4).
     const time = (b.session_time ?? '00:00').slice(0, 5);
-    const startUtc = Date.parse(`${b.session_date}T${time}:00Z`) + CHILE_OFFSET_MS;
-    const endUtc   = startUtc + (b.duration_min ?? 50) * 60 * 1000;
-    const alreadyEnded = !isNaN(endUtc) && endUtc <= now;
+    const hoursUntil   = hoursUntilSessionCL(b.session_date, time);
+    const durationHrs  = (b.duration_min ?? 50) / 60;
+    const alreadyEnded = !isNaN(hoursUntil) && hoursUntil <= -durationHrs;
     // Notas "vivas" de esta vuelta — si los dos correos se marcan en la misma
     // ejecución, la segunda escritura no debe pisar la marca que dejó la primera.
     let liveNotes = b.notes ?? '';

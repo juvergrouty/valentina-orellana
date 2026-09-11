@@ -291,12 +291,19 @@ export async function emitBoletaParaReserva(
       const nota = `${b.notes ? b.notes + '\n' : ''}Boleta Folio ${folio}${codigo ? ' · Cod ' + codigo : ''}`;
       await supabase.from('bookings').update({ notes: nota }).eq('id', bookingId);
     }
-    if (opts.enviarEmail && codigo && b.patient_email) {
+    if (opts.enviarEmail && codigo) {
       try {
         const pdfBase64 = await bhePdf(codigo, cfg);
         if (pdfBase64) {
-          await sendBoletaEmail({ to: b.patient_email, patientName: b.patient_name, folio, pdfBase64 });
-        } else {
+          if (b.patient_email) {
+            await sendBoletaEmail({ to: b.patient_email, patientName: b.patient_name, folio, pdfBase64 });
+          }
+          // Copia para Valentina — para que tenga registro de cada boleta emitida
+          // sin tener que entrar al admin a revisarlas una por una.
+          const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
+          const adminEmail = notifRow?.value ?? 'juver@grouty.cl';
+          await sendBoletaEmail({ to: adminEmail, patientName: b.patient_name, folio, pdfBase64 });
+        } else if (b.patient_email) {
           await bheEmail(codigo, b.patient_email, cfg); // fallback: email genérico de apigateway.cl
         }
       } catch { /* no bloquear la emisión por un fallo de envío */ }

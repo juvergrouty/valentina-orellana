@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
+import { hoursUntilSessionCL } from '../../lib/dateUtils';
 
 export const prerender = false;
 
@@ -53,9 +54,10 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ error: 'Esa fecha no está disponible.' }, 409);
   }
 
-  // Verificar con al menos 24h de anticipación
-  const newDateTime = new Date(`${session_date}T${session_time}:00`);
-  if (newDateTime.getTime() - Date.now() < 24 * 60 * 60 * 1000) {
+  // Verificar con al menos 24h de anticipación (en hora de Chile — el parseo
+  // naive anterior se interpretaba en UTC, el huso del servidor, y desfasaba
+  // el chequeo en 3-4 horas).
+  if (hoursUntilSessionCL(session_date, session_time) < 24) {
     return json({ error: 'El reagendamiento debe realizarse con al menos 24 horas de anticipación.' }, 400);
   }
 
