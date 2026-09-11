@@ -99,10 +99,25 @@ async function handleBooking(request: Request) {
     }
 
   // ── Limpiar reservas pending_payment expiradas (>30 min) ─────────────────────
+  // BUG REAL encontrado el 11 sep 2026: este delete no excluía created_by_admin,
+  // a diferencia de availability.ts. Una reserva que Valentina agenda desde el
+  // panel con link de pago (pending_payment, created_by_admin=true) podía quedar
+  // más de 30 min esperando el pago del paciente — y cualquier OTRO paciente
+  // reservando online mientras tanto disparaba este delete y la borraba, aunque
+  // el pago llegara después (el webhook de Flow ya no encontraba la fila).
+  // Las reservas creadas por ella NUNCA se autoeliminan — solo ella puede
+  // borrarlas manualmente desde el panel.
   const expiry = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    await supabase.from('bookings').delete()
+  {
+    const { error: cleanupErr } = await supabase.from('bookings').delete()
       .eq('status', 'pending_payment')
+      .eq('created_by_admin', false)
       .lt('created_at', expiry);
+    if (cleanupErr?.code === '42703') {
+      // Columna created_by_admin todavía no existe (migración vieja) — no borrar
+      // nada en ese caso, para no arriesgarse a repetir el mismo bug.
+    }
+  }
 
   // ── Verificar disponibilidad ─────────────────────────────────────────────────
   const { data: existing } = await supabase

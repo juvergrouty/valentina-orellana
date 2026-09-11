@@ -32,7 +32,7 @@ const weekEndStr   = weekEnd.toISOString().split('T')[0];
 // reminder_email_enabled / patient_rut / mp_preference_id son columnas nuevas —
 // si aún no existen en la base, reintenta sin ellas para no romper la página.
 async function fetchBookings() {
-  const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, patient_rut, paid_at, payment_note, debt_voided, no_show';
+  const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, review_email_enabled, patient_rut, paid_at, payment_note, debt_voided, no_show';
   const res = await supabase.from('bookings').select(cols)
     .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
     .neq('status', 'cancelled').order('session_time');
@@ -394,6 +394,7 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
                   patient_id:     patientIdByEmail[(b.patient_email ?? '').toLowerCase()] ?? '',
                   mp_preference_id: b.mp_preference_id ?? '',
                   reminder_email_enabled: b.reminder_email_enabled !== false,
+                  review_email_enabled:   b.review_email_enabled === true,
                   created_pending:        b.status === 'pending_payment',
                   paid_at:        b.paid_at ?? null,
                   payment_note:   b.payment_note ?? '',
@@ -608,6 +609,15 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
               <div>
                 <div class="bp-comm-name">Correo de evaluación</div>
                 <div class="bp-comm-desc">Se enviará al terminar la sesión, preguntando cómo se sintió el paciente</div>
+              </div>
+            </label>
+          </div>
+          <div class="bp-comm-item">
+            <label class="bp-comm-label">
+              <input type="checkbox" name="review_email_enabled" value="on">
+              <div>
+                <div class="bp-comm-name">Solicitud de reseña de Google</div>
+                <div class="bp-comm-desc">Se enviará al terminar la sesión, con el link para dejar una reseña. Cuando el paciente reserva solo por el sitio, esto queda desactivado por defecto — actívalo aquí caso a caso.</div>
               </div>
             </label>
           </div>
@@ -868,6 +878,10 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
         <label style="display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;padding:0.3rem 0;cursor:pointer;">
           <span>Email 24h antes</span>
           <input type="checkbox" id="sp-rem-email" data-field="reminder_email_enabled">
+        </label>
+        <label style="display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;padding:0.3rem 0;cursor:pointer;">
+          <span>Solicitar reseña de Google al terminar</span>
+          <input type="checkbox" id="sp-rem-review" data-field="review_email_enabled">
         </label>
         <p id="sp-rem-msg" style="display:none;font-size:0.72rem;color:var(--stone);margin-top:0.3rem;"></p>
       </div>
@@ -1875,6 +1889,9 @@ function openSessionDetail(b) {
   const remEmail = document.getElementById('sp-rem-email');
   remEmail.checked = b.reminder_email_enabled !== false;
   remEmail.dataset.bookingId = b.id;
+  const remReview = document.getElementById('sp-rem-review');
+  remReview.checked = b.review_email_enabled === true;
+  remReview.dataset.bookingId = b.id;
   document.getElementById('sp-rem-msg').style.display = 'none';
 
   // Amount & badge — refleja el pago REAL (paid_at), no el estado de la reserva.
@@ -1982,6 +1999,7 @@ async function saveReminderToggle(input) {
   msg.style.display = 'block';
 }
 document.getElementById('sp-rem-email')?.addEventListener('change', (e) => saveReminderToggle(e.target));
+document.getElementById('sp-rem-review')?.addEventListener('change', (e) => saveReminderToggle(e.target));
 
 // ── Anular deuda ────────────────────────────────────────────────────────────
 document.getElementById('sp-btn-void-debt')?.addEventListener('click', () => {
@@ -2058,7 +2076,20 @@ document.getElementById('sp-btn-emitir')?.addEventListener('click', async () => 
   const result = document.getElementById('sp-boleta-result');
   if (!currentBookingId) return;
   if (!rut) { result.textContent = 'Ingresa el RUT del paciente.'; result.style.color = '#dc2626'; return; }
-  if (!confirm('¿Emitir la boleta de honorarios? Esta acción genera un documento tributario real en el SII.')) return;
+  // Confirmación en la misma página en vez de confirm() nativo — el diálogo
+  // nativo bloquea el hilo del navegador hasta que alguien lo cierra a mano,
+  // lo que además de verse feo puede dejar la página aparentemente "colgada".
+  if (btn.dataset.confirming !== 'true') {
+    btn.dataset.confirming = 'true';
+    btn.textContent = '¿Confirmar? Genera un documento real en el SII — clic de nuevo';
+    result.textContent = '';
+    setTimeout(() => {
+      if (btn.dataset.confirming === 'true') { btn.dataset.confirming = 'false'; btn.textContent = 'Emitir boleta'; }
+    }, 8000);
+    return;
+  }
+  btn.dataset.confirming = 'false';
+  btn.textContent = 'Emitir boleta';
 
   btn.disabled = true;
   result.textContent = 'Emitiendo…'; result.style.color = '#6b7280';

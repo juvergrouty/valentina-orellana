@@ -20,7 +20,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const id    = form.get('id')?.toString();
     const field = form.get('field')?.toString();
     const value = form.get('value')?.toString() === 'true';
-    const allowed = ['reminder_email_enabled', 'whatsapp_reminder_enabled'];
+    const allowed = ['reminder_email_enabled', 'whatsapp_reminder_enabled', 'evaluation_email_enabled', 'review_email_enabled'];
     if (!id || !field || !allowed.includes(field)) {
       return new Response(JSON.stringify({ ok: false, error: 'Solicitud inválida.' }), { status: 400 });
     }
@@ -250,6 +250,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const remEmailOn      = form.get('reminder_email_enabled') !== null;
     const remWhatsappOn   = form.get('whatsapp_reminder_enabled') !== null;
     const evalEmailOn     = form.get('evaluation_email_enabled') !== null;
+    const reviewEmailOn   = form.get('review_email_enabled') !== null;
     // Modo de pago: 'manual' (pago en consulta, confirma de una) o 'link' (envía link de pago Flow)
     const payment_mode    = form.get('payment_mode')?.toString() === 'link' ? 'link' : 'manual';
 
@@ -334,13 +335,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         reminder_email_enabled:   remEmailOn,
         whatsapp_reminder_enabled: remWhatsappOn,
         evaluation_email_enabled: evalEmailOn,
+        review_email_enabled:     reviewEmailOn,
       };
 
       // Try to insert, degrade gracefully if optional columns missing
       let { data: booking, error: insErr } = await supabase.from('bookings').insert(payload).select().single();
       if (insErr?.code === '42703') {
         const { service_id: _s, duration_min: _d, created_by_admin: _c,
-                whatsapp_reminder_enabled: _w, evaluation_email_enabled: _e, ...base } = payload;
+                whatsapp_reminder_enabled: _w, evaluation_email_enabled: _e,
+                review_email_enabled: _rv, ...base } = payload;
         let retry = await supabase.from('bookings').insert(base).select().single();
         // Si tampoco existe reminder_email_enabled (migración muy vieja / aún no corrida), reintenta sin ella también.
         if (retry.error?.code === '42703') {

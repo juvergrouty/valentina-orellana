@@ -49,7 +49,7 @@ export const GET: APIRoute = async ({ request }) => {
   {
     const q = await supabase
       .from('bookings')
-      .select('id, patient_name, patient_email, session_date, session_time, duration_min, notes, evaluation_email_enabled')
+      .select('id, patient_name, patient_email, session_date, session_time, duration_min, notes, evaluation_email_enabled, review_email_enabled, created_by_admin')
       .eq('status', 'confirmed')
       .gte('session_date', fromDate)
       .lte('session_date', today)
@@ -91,6 +91,14 @@ export const GET: APIRoute = async ({ request }) => {
     doReview: {
       if (!alreadyEnded) { skipped++; break doReview; }
       if (liveNotes.includes(MARKER)) { skipped++; break doReview; }        // ya enviada
+      // review_email_enabled es opt-in y por defecto false: si el paciente
+      // reservó solo por el sitio, NO se le pide reseña automáticamente (a
+      // diferencia del recordatorio y la boleta, que sí van por defecto).
+      // Cuando Valentina agenda desde el panel, lo activa con el checkbox.
+      // `undefined` (no `false`) significa que la migración de esta columna
+      // todavía no corrió en la base de datos — se degrada al comportamiento
+      // anterior (enviar a todos) para no dejar de mandar reseñas por eso.
+      if (b.review_email_enabled === false) { skipped++; break doReview; }
 
       const res = await sendReviewRequestEmail({
         patientName:  b.patient_name || 'hola',
