@@ -10,15 +10,24 @@ export const prerender = false;
 // siguiendo el mismo patrón que la conexión de Google Calendar.
 export const POST: APIRoute = async ({ request }) => {
   try {
-    const { code, wabaId, phoneNumberId } = await request.json();
+    const { code, wabaId, phoneNumberId, redirectUri } = await request.json();
     if (!code) return json({ error: 'Falta el código de autorización.' }, 400);
 
     const appId     = import.meta.env.PUBLIC_META_APP_ID;
     const appSecret = import.meta.env.META_APP_SECRET;
     if (!appId || !appSecret) return json({ error: 'META_APP_SECRET / PUBLIC_META_APP_ID no configurados en Vercel.' }, 500);
 
+    // Meta exige que el `redirect_uri` de este canje sea idéntico al que
+    // "vio" durante el diálogo de OAuth abierto por el SDK de JavaScript —
+    // que es la URL de la página donde se llamó a FB.login() (este mismo
+    // panel). Si no se manda (o no coincide), Meta responde con
+    // "Error validating verification code...redirect_uri is identical...".
+    const redirect = typeof redirectUri === 'string' && redirectUri
+      ? redirectUri
+      : 'https://www.valentinaorellana.cl/admin/whatsapp-conectar';
+
     const tokenRes = await fetch(
-      `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&code=${encodeURIComponent(code)}`
+      `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&redirect_uri=${encodeURIComponent(redirect)}&code=${encodeURIComponent(code)}`
     );
     const tokenData = await tokenRes.json();
     if (!tokenRes.ok || !tokenData.access_token) {

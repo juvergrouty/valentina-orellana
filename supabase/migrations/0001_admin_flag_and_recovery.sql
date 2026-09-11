@@ -18,11 +18,14 @@ create unique index if not exists idx_bookings_recovery_token
   on bookings(recovery_token) where recovery_token is not null;
 
 -- 4) El horario de una reserva 'expired' debe quedar libre para otras personas
---    (antes el índice único solo excluía 'cancelled').
+--    (antes el índice único solo excluía 'cancelled'). Se excluye además la
+--    fecha comodín 2099-12-31 (usada para "cobro manual sin fecha", que no es
+--    un horario real y por eso puede repetirse entre varias reservas) — sin
+--    esto la creación del índice falla si hay más de un cobro manual activo.
 drop index if exists idx_bookings_slot;
 create unique index idx_bookings_slot
   on bookings(session_date, session_time)
-  where status not in ('cancelled', 'expired');
+  where status not in ('cancelled', 'expired') and session_date <> '2099-12-31';
 
 -- 5) Estado real de pago, separado del estado de la reserva. Antes "confirmada"
 --    y "pagada" eran lo mismo en el código (bug: una reserva "Pago en consulta"

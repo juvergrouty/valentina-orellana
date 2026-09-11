@@ -169,7 +169,15 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
         fetch('/api/admin/whatsapp/exchange-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: response.authResponse.code, wabaId: capturedWaba, phoneNumberId: capturedPhone }),
+          body: JSON.stringify({
+            code: response.authResponse.code,
+            wabaId: capturedWaba,
+            phoneNumberId: capturedPhone,
+            // Debe ser idéntica a la URL de esta página — Meta valida el
+            // código de autorización contra el redirect_uri "implícito" del
+            // diálogo de OAuth que abrió el SDK de JavaScript.
+            redirectUri: window.location.origin + window.location.pathname,
+          }),
         })
           .then((r) => r.json())
           .then((data) => {
