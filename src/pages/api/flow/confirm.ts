@@ -65,7 +65,12 @@ export const POST: APIRoute = async ({ request }) => {
     console.log(`[Flow webhook] token=${token} status=${status.status} order=${status.flowOrder} env=${cfg['flow_env'] ?? 'default'}`);
 
     if (status.status === 2) {
-      // ✅ Pagado — confirmar la reserva
+      // ✅ Pagado — confirmar la reserva.
+      // Filtramos también por status='pending_payment': Flow reintenta este webhook
+      // si no recibe 200, así que sin este filtro cada reintento repetiría el envío
+      // de correos, la creación del evento en Google Calendar y el intento de boleta.
+      // Si la reserva ya estaba 'confirmed' (reintento), este update no matchea
+      // ninguna fila y el bloque de abajo se salta — reintento idempotente.
       let { data: updated, error } = await supabase
         .from('bookings')
         .update({
@@ -75,6 +80,7 @@ export const POST: APIRoute = async ({ request }) => {
           payment_note:   'Flow',
         })
         .eq('mp_preference_id', token)
+        .eq('status', 'pending_payment')
         .select()
         .single();
 
@@ -85,13 +91,17 @@ export const POST: APIRoute = async ({ request }) => {
           .from('bookings')
           .update({ status: 'confirmed', mp_payment_id: String(status.flowOrder) })
           .eq('mp_preference_id', token)
+          .eq('status', 'pending_payment')
           .select()
           .single();
         updated = retry.data;
         error   = retry.error;
       }
 
-      if (error) {
+      // PGRST116 = "no matching row": esperado en un reintento de Flow sobre una
+      // reserva que ya quedó 'confirmed' — no es un error real, solo evita repetir
+      // correos/calendario/boleta.
+      if (error && error.code !== 'PGRST116') {
         console.error('[Flow webhook] Error confirmando reserva:', error);
       } else if (updated) {
         const adminEmail = cfg['notification_email'] ?? 'juver@grouty.cl';

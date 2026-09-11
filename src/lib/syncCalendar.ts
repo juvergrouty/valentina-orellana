@@ -77,6 +77,13 @@ export async function syncBookingToCalendar(booking: BookingForCalendar): Promis
   error?: string;
 }> {
   try {
+    // Si esta reserva ya tiene un evento creado, no crear uno duplicado
+    // (defensa adicional por si esta función se llama dos veces para la misma reserva).
+    const { data: existing } = await supabase.from('bookings').select('google_event_id').eq('id', booking.id).single();
+    if (existing?.google_event_id) {
+      return { success: true };
+    }
+
     // Leer settings de Google
     const { data: rows } = await supabase.from('settings').select('key, value')
       .in('key', ['google_access_token','google_refresh_token','google_token_expiry','google_calendar_id','google_calendar_name']);

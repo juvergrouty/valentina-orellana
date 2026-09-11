@@ -17,17 +17,18 @@ export const POST: APIRoute = async ({ request }) => {
     const appSecret = import.meta.env.META_APP_SECRET;
     if (!appId || !appSecret) return json({ error: 'META_APP_SECRET / PUBLIC_META_APP_ID no configurados en Vercel.' }, 500);
 
-    // Meta exige que el `redirect_uri` de este canje sea idéntico al que
-    // "vio" durante el diálogo de OAuth abierto por el SDK de JavaScript —
-    // que es la URL de la página donde se llamó a FB.login() (este mismo
-    // panel). Si no se manda (o no coincide), Meta responde con
-    // "Error validating verification code...redirect_uri is identical...".
-    const redirect = typeof redirectUri === 'string' && redirectUri
-      ? redirectUri
-      : 'https://www.valentinaorellana.cl/admin/whatsapp-conectar';
+    // El código de Embedded Signup viene del diálogo de FB.login() con
+    // config_id (no de un redirect de OAuth clásico) — el canje es un
+    // intercambio servidor-a-servidor y, según la documentación de Meta,
+    // NO lleva redirect_uri. Mandarlo es lo que causaba el error real visto
+    // en producción: "Error validating verification code...redirect_uri is
+    // identical..." — Meta comparaba ese valor contra la URL de relay interna
+    // (xd_arbiter) que el SDK usa de verdad, que nunca coincide con nada que
+    // se mande manualmente.
+    void redirectUri; // ya no se usa; se deja desestructurado por compatibilidad con el body actual
 
     const tokenRes = await fetch(
-      `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&redirect_uri=${encodeURIComponent(redirect)}&code=${encodeURIComponent(code)}`
+      `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&code=${encodeURIComponent(code)}`
     );
     const tokenData = await tokenRes.json();
     if (!tokenRes.ok || !tokenData.access_token) {
