@@ -140,10 +140,6 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
   let capturedWaba = null;
   let capturedPhone = null;
 
-  // Fijo (sin query string ni hash) para que sea idéntico en el diálogo de
-  // OAuth (FB.login) y en el canje del código (exchange-token.ts).
-  const REDIRECT_URI = window.location.origin + window.location.pathname;
-
   window.addEventListener('message', (event) => {
     if (!event.origin.endsWith('facebook.com')) return;
     try {
@@ -177,9 +173,6 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
             code: response.authResponse.code,
             wabaId: capturedWaba,
             phoneNumberId: capturedPhone,
-            // Debe ser idéntica al redirect_uri que de verdad usó el diálogo
-            // de OAuth (ver más abajo, en las opciones de FB.login).
-            redirectUri: REDIRECT_URI,
           }),
         })
           .then((r) => r.json())
@@ -198,15 +191,13 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
       config_id: configId,
       response_type: 'code',
       override_default_response_type: true,
-      // Sin esto, el SDK de JavaScript usa internamente su propia URL de
-      // relay (staticxx.facebook.com/x/connect/xd_arbiter/...) como
-      // redirect_uri del diálogo de OAuth — nunca la URL de esta página.
-      // Como el backend (exchange-token.ts) valida el código contra la URL
-      // de esta página, sin fijar este valor explícitamente NUNCA van a
-      // coincidir y Meta responde "Error validating verification code...
-      // redirect_uri is identical...". Fijándolo acá, el diálogo de OAuth
-      // usa esta misma URL, igual a la que manda el fetch de arriba.
-      redirect_uri: REDIRECT_URI,
+      // NOTA (11 sep 2026): probamos pasar `redirect_uri` aquí para forzar
+      // que el diálogo de OAuth usara la URL de esta página, pero
+      // comprobado en vivo que el SDK de JavaScript en modo popup lo
+      // ignora — sigue usando internamente su propia URL de relay
+      // (staticxx.facebook.com/x/connect/xd_arbiter/...), que cambia en
+      // cada intento. Por eso el canje del código (exchange-token.ts) ya
+      // NO manda redirect_uri al servidor de Meta — ver ese archivo.
       extras: { setup: {} },
     });
   }
