@@ -185,10 +185,15 @@ function evStyle(time: string, dur: number | null): string {
   const [h, m] = time.split(':').map(Number);
   return `top:${(h - 6) * 60 + m}px;height:${Math.max(dur ?? 50, 24)}px`;
 }
-function evClass(status: string, pm: string | null): string {
-  if (status === 'confirmed' && (pm === 'manual' || pm === 'transferencia')) return 'ev-manual';
-  if (status === 'confirmed') return 'ev-confirmed';
-  return 'ev-pending';
+function evClass(status: string, pm: string | null, paidAt: string | null | undefined, debtVoided: boolean | null | undefined): string {
+  let base = 'ev-pending';
+  if (status === 'confirmed' && (pm === 'manual' || pm === 'transferencia')) base = 'ev-manual';
+  else if (status === 'confirmed') base = 'ev-confirmed';
+  // Confirmada pero sin pago real registrado (paid_at) y sin haber sido
+  // anulada la deuda — se marca en rojo para que salte a la vista en el
+  // calendario, sin depender de cruzar Encuadrado ni ningún sistema externo.
+  if (status === 'confirmed' && !paidAt && debtVoided !== true) base += ' ev-unpaid';
+  return base;
 }
 function svcLabel(b: BRow): string {
   if (b.service_id && svcMap[b.service_id]) return svcMap[b.service_id];
@@ -373,7 +378,7 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
 
             {(byDate[day.isoDate] ?? []).map(b => (
               <div
-                class={`cal-event ${evClass(b.status, b.payment_method)}`}
+                class={`cal-event ${evClass(b.status, b.payment_method, b.paid_at, b.debt_voided)}`}
                 data-svc={b.service_id ?? ''}
                 style={`${evStyle(b.session_time, b.duration_min)};--svcbg:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bg};--svcbd:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bd}`}
                 data-booking={JSON.stringify({
@@ -1066,6 +1071,10 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
 .ev-confirmed { background: #dcfce7; border-color: #86efac; color: #166534; }
 .ev-pending   { background: #fef3c7; border-color: #f59e0b; color: #92400e; border-style: dashed; border-width: 2px; }
 .ev-manual    { background: #fef9c3; border-color: #fcd34d; color: #92400e; }
+/* Confirmada sin pago real registrado — outline en vez de background/border
+   para que el aviso se vea también en modo "Colores por servicio" (que
+   sobreescribe background y border-left con !important, ver .colors-on). */
+.ev-unpaid    { outline: 2px solid #dc2626; outline-offset: -2px; }
 .cal-gcal-event {
   position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px;
   overflow: hidden; z-index: 1; pointer-events: none;

@@ -2,6 +2,8 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { getAgwConfig, bheEmitidas, emitirBHE, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion } from '../../../lib/apigateway';
 import type { BheCausal } from '../../../lib/apigateway';
+import { logError } from '../../../lib/logger';
+import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 
 // YYYYMM del período en que se emitió/emitirá la boleta (según la fecha de la sesión)
 const periodoDeSesion = (sessionDate?: string | null) =>
@@ -128,6 +130,18 @@ export const POST: APIRoute = async ({ request }) => {
 
     try {
       const result = await bheEmail(codigo, email, cfg);
+      // Copia para Valentina — para que tenga registro de cada boleta enviada
+      // sin tener que entrar al admin a revisarlas una por una. No bloquea la
+      // respuesta si falla (el paciente ya recibió la suya).
+      try {
+        const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
+        const adminEmail = notifRow?.value || ADMIN_EMAIL_FALLBACK;
+        if (adminEmail.toLowerCase() !== email.toLowerCase()) {
+          await bheEmail(codigo, adminEmail, cfg);
+        }
+      } catch (e) {
+        await logError('boleta/copia-admin', 'Falló el envío de la copia de la boleta a Valentina', { bookingId, folio, error: e instanceof Error ? e.message : String(e) });
+      }
       return json({ ok: true, email, result });
     } catch (e) {
       return json({ ok: false, error: e instanceof Error ? e.message : 'Error al enviar' }, 502);

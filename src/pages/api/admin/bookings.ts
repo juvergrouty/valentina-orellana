@@ -3,7 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
 import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar } from '../../../lib/syncCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
-import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail } from '../../../lib/email';
+import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
@@ -295,9 +295,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const perSessionBase = Math.floor(totalPrice / sessions_count);
     const remainder      = totalPrice - perSessionBase * sessions_count;
 
-    // Notification email
+    // Notification email — si el setting no está configurado, se usa el correo
+    // real de Valentina (nunca se manda a un tercero al azar ni se pierde el aviso).
     const { data: settingsRows } = await supabase.from('settings').select('key, value').in('key', ['notification_email']);
-    const notifEmail = settingsRows?.find((r: { key: string }) => r.key === 'notification_email')?.value ?? 'juver@grouty.cl';
+    const notifEmail = settingsRows?.find((r: { key: string }) => r.key === 'notification_email')?.value || ADMIN_EMAIL_FALLBACK;
 
     const bookingIds: string[] = [];
     let conflictCount = 0;
@@ -440,6 +441,25 @@ export const POST: APIRoute = async ({ request, redirect }) => {
               if (!res.sent) console.error('[create-admin] payment-link whatsapp:', res.reason);
             }
           } catch (e) { console.error('[create-admin] payment-link whatsapp:', e); }
+        }
+
+        // Aviso a Valentina de que se agendó/generó un link de pago — antes esta
+        // rama terminaba (return) sin notificarla nunca, a diferencia del modo
+        // manual; por eso el aviso de "nueva reserva" no llegaba para reservas
+        // con link de pago (el caso más común al agendar desde el panel).
+        {
+          const emailData = {
+            patient_name:   finalName,
+            patient_email:  finalEmail,
+            patient_phone:  finalPhone,
+            session_type:   sessionType,
+            session_date,
+            session_time,
+            amount:         totalPrice,
+            payment_method: 'link',
+            service_name:   svc.name,
+          };
+          try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[create-admin] notif (link):', e); }
         }
 
         // Redirigir mostrando el link (el banner de "compartir por WhatsApp" solo

@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
-import { sendBoletaEmail } from './email';
+import { sendBoletaEmail, ADMIN_EMAIL_FALLBACK } from './email';
 import { todayCL } from './dateUtils';
+import { logError } from './logger';
 
 /**
  * Integración con API Gateway (apigateway.cl) — Boletas de Honorarios Electrónicas (BHE).
@@ -299,14 +300,19 @@ export async function emitBoletaParaReserva(
             await sendBoletaEmail({ to: b.patient_email, patientName: b.patient_name, folio, pdfBase64 });
           }
           // Copia para Valentina — para que tenga registro de cada boleta emitida
-          // sin tener que entrar al admin a revisarlas una por una.
+          // sin tener que entrar al admin a revisarlas una por una. Si el setting
+          // no está configurado, se usa su correo real (nunca uno de terceros).
           const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
-          const adminEmail = notifRow?.value ?? 'juver@grouty.cl';
-          await sendBoletaEmail({ to: adminEmail, patientName: b.patient_name, folio, pdfBase64 });
+          await sendBoletaEmail({ to: notifRow?.value || ADMIN_EMAIL_FALLBACK, patientName: b.patient_name, folio, pdfBase64 });
         } else if (b.patient_email) {
           await bheEmail(codigo, b.patient_email, cfg); // fallback: email genérico de apigateway.cl
         }
-      } catch { /* no bloquear la emisión por un fallo de envío */ }
+      } catch (e) {
+        // No bloquear la emisión por un fallo de envío, pero que quede visible
+        // en /admin/logs — antes este catch vacío ocultaba por completo
+        // cualquier falla al enviar la boleta o su copia.
+        await logError('boleta/envio', 'Falló el envío de la boleta o su copia', { bookingId, folio, error: e instanceof Error ? e.message : String(e) });
+      }
     }
     return { ok: true, folio, codigo };
   } catch (e) {

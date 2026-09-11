@@ -1,6 +1,6 @@
 import { Resend } from 'resend';
 import { supabase } from './supabase';
-import { logEmail } from './logger';
+import { logEmail, logError } from './logger';
 
 // Inicialización perezosa — no falla si la key no está configurada
 let _resend: Resend | null = null;
@@ -12,6 +12,11 @@ function getResend(): Resend | null {
 }
 
 const FROM = import.meta.env.EMAIL_FROM ?? 'onboarding@resend.dev';
+
+// Respaldo si el setting `notification_email` no está configurado — el correo
+// real de Valentina, NUNCA una dirección de terceros. Preferible a omitir el
+// envío: un aviso o una boleta perdidos no deben quedar "en el aire".
+export const ADMIN_EMAIL_FALLBACK = 'vinculosquesostienen@gmail.com';
 
 /**
  * ¿Está habilitado este tipo de correo automático? Lee el setting
@@ -533,6 +538,7 @@ export async function sendBoletaEmail(opts: {
       </div>`,
     attachments: [{ filename: `boleta-${opts.folio ?? 'honorarios'}.pdf`, content: opts.pdfBase64 }],
   });
+  await logEmail('email/boleta', opts.to, `Boleta${folioTxt}`, !res.error, res.error?.message);
   if (res.error) return { sent: false, reason: res.error.message };
   return { sent: true };
 }
@@ -616,8 +622,13 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
   if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
 
   const sessionLabel = SESSION_LABELS[data.session_type] ?? data.session_type;
+  // La oficina donde subarrienda usa Reservo para el registro de horas
+  // presenciales, pero esa cuenta no es de Valentina (solo tiene un perfil
+  // dentro de ella) — no se puede integrar por API, así que el recordatorio
+  // es este aviso en el correo de cada reserva presencial.
+  const isPresencial = data.session_type.includes('presencial');
 
-  await client.emails.send({
+  const res = await client.emails.send({
     from:    FROM,
     to:      adminEmail,
     subject: `Nueva reserva — ${data.patient_name} · ${formatDate(data.session_date)} ${data.session_time}`,
@@ -626,6 +637,11 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
         <h2 style="font-size:1rem;font-weight:600;margin-bottom:1.25rem;border-bottom:2px solid #576352;padding-bottom:0.5rem;">
           Nueva reserva confirmada
         </h2>
+
+        ${isPresencial ? `
+        <p style="font-size:0.8rem;background:#FDF2E9;border-left:3px solid #b5533c;padding:0.6rem 0.8rem;margin-bottom:1rem;">
+          📋 Sesión presencial — recuerda anotarla también en Reservo.
+        </p>` : ''}
 
         <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
           <tr><td style="padding:0.35rem 0;color:#6B6860;width:40%;">Paciente</td>
@@ -655,4 +671,5 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
       </div>
     `,
   });
+  await logEmail('email/notif-admin', adminEmail, 'Nueva reserva', !res.error, res.error?.message);
 }
