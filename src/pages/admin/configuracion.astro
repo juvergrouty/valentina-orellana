@@ -2,6 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { ADMIN_EMAIL_FALLBACK } from '../../lib/email';
 
 // Cargar settings actuales
 const { data: rows } = await supabase.from('settings').select('key, value');
@@ -12,7 +13,7 @@ const manualEnabled      = settings['manual_payment_enabled'] !== 'false';
 const transferEnabled    = settings['transfer_payment_enabled'] === 'true';
 const flowEnabled        = settings['flow_enabled'] !== 'false';
 const flowEnv           = settings['flow_env'] ?? 'sandbox'; // default sandbox si no hay fila
-const notificationEmail = settings['notification_email'] ?? 'juver@grouty.cl';
+const notificationEmail = settings['notification_email'] || ADMIN_EMAIL_FALLBACK;
 const emailFrom         = settings['email_from'] ?? '';
 // Google Calendar
 const googleEmail    = settings['google_user_email'] ?? null;

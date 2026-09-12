@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { sendPendingExpiredEmail, sendExpiredBookingAdminAlert } from '../../../lib/email';
+import { sendPendingExpiredEmail, sendExpiredBookingAdminAlert, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { deleteBookingFromCalendar } from '../../../lib/syncCalendar';
 
 export const prerender = false;
@@ -58,7 +58,7 @@ export const GET: APIRoute = async ({ request }) => {
   const toExpire = (expired ?? []).filter((b: { created_by_admin?: boolean }) => !b.created_by_admin);
 
   const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
-  const adminEmail = notifRow?.value ?? 'juver@grouty.cl';
+  const adminEmail = notifRow?.value || ADMIN_EMAIL_FALLBACK;
 
   const siteUrl = (import.meta.env.PUBLIC_SITE_URL ?? 'https://www.valentinaorellana.cl').replace(/\/$/, '');
 

@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
+import { sendConfirmationToClient, sendNotificationToAdmin, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 
@@ -45,7 +45,7 @@ export const POST: APIRoute = async ({ request }) => {
   if (paymentMethod === 'transferencia' && settings['transfer_payment_enabled'] === 'false') {
     return json({ error: 'El pago por transferencia no está habilitado.' }, 403);
   }
-  const notificationEmail = settings['notification_email'] ?? 'juver@grouty.cl';
+  const notificationEmail = settings['notification_email'] || ADMIN_EMAIL_FALLBACK;
 
   // Confirmar la reserva
   const { error: updateErr } = await supabase

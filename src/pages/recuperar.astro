@@ -20,6 +20,7 @@ type Outcome = 'not_found' | 'too_late' | 'taken' | 'flow_error' | 'ok';
 let outcome: Outcome = 'not_found';
 let errorDetail = '';
 let redirectUrl: string | null = null;
+let serviceId: string | null = null;
 
 if (token) {
   const { data: booking } = await supabase
@@ -32,6 +33,7 @@ if (token) {
   if (!booking) {
     outcome = 'not_found';
   } else {
+    serviceId = booking.service_id ?? null;
     const hoursLeft = hoursUntilSessionCL(booking.session_date, booking.session_time);
 
     if (hoursLeft < 4) {
@@ -134,9 +136,9 @@ if (outcome === 'ok' && redirectUrl) {
     )}
     {outcome === 'taken' && (
       <>
-        <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">Ese horario ya no está disponible</h1>
+        <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">Horario no disponible</h1>
         <p style="color:#6B6860;line-height:1.6;margin:1rem 0 2rem;">
-          Alguien más tomó ese horario mientras tanto. Por favor agenda un nuevo horario disponible.
+          Alguien más tomó ese horario mientras tanto. Elige un nuevo horario para el mismo servicio a continuación.
         </p>
       </>
     )}
@@ -149,7 +151,7 @@ if (outcome === 'ok' && redirectUrl) {
         </p>
       </>
     )}
-    <a href="/agenda"
+    <a href={serviceId && (outcome === 'taken' || outcome === 'too_late') ? `/agenda?servicio=${serviceId}` : '/agenda'}
        style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;
               text-decoration:none;font-size:0.78rem;letter-spacing:0.1em;text-transform:uppercase;
               border-radius:4px;margin-right:0.5rem;">

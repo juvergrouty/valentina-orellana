@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
-import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
+import { sendConfirmationToClient, sendNotificationToAdmin, ADMIN_EMAIL_FALLBACK } from '../../lib/email';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
 
 export const prerender = false;
@@ -71,7 +71,7 @@ export const POST: APIRoute = async ({ request }) => {
   const { data: settingsRows } = await supabase.from('settings').select('key, value');
   const cfg: Record<string, string> = {};
   (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { cfg[key] = value; });
-  const adminEmail = cfg['notification_email'] ?? 'juver@grouty.cl';
+  const adminEmail = cfg['notification_email'] || ADMIN_EMAIL_FALLBACK;
 
   const emailData = {
     patient_name:   booking.patient_name,

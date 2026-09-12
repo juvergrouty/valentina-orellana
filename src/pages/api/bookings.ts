@@ -4,6 +4,7 @@ import { createPaymentOrder } from '../../lib/flow';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
 import { logInfo, logWarn, logError } from '../../lib/logger';
 import { upsertPatientFromBooking } from '../../lib/patients';
+import { ADMIN_EMAIL_FALLBACK } from '../../lib/email';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
 
 export const prerender = false;
@@ -218,8 +219,18 @@ async function handleBooking(request: Request) {
   }
     booking = bookingData;
 
+  // Guardar al paciente ni bien llena el formulario, no solo cuando paga — así
+  // su nombre/correo/teléfono/RUT quedan en la ficha aunque abandone antes de
+  // pagar o su hora expire, y Valentina puede rescatarlo manualmente.
+  await upsertPatientFromBooking({
+    patient_name:  patient_name.trim(),
+    patient_email: patient_email.trim().toLowerCase(),
+    patient_phone: patient_phone.trim(),
+    rut:           rutClean,
+  }).catch((e) => logError('bookings', 'No se pudo guardar el paciente al crear la reserva', { error: e instanceof Error ? e.message : String(e) }));
+
   // ── Leer config desde settings ───────────────────────────────────────────────
-  const notificationEmail  = settings['notification_email'] ?? 'juver@grouty.cl';
+  const notificationEmail  = settings['notification_email'] || ADMIN_EMAIL_FALLBACK;
     const manualEnabled      = settings['manual_payment_enabled'] !== 'false';
     const flowEnabled        = settings['flow_enabled'] !== 'false';
     const flowEnvSetting     = settings['flow_env']; // 'sandbox' | 'production' | undefined
@@ -262,9 +273,8 @@ async function handleBooking(request: Request) {
           .update({ status: 'confirmed', payment_method: 'manual' })
           .eq('id', booking.id);
 
-      // Enviar emails (sin bloquear la respuesta)
+      // Enviar emails (sin bloquear la respuesta) — el paciente ya se guardó arriba
       const ed = { ...emailData, payment_method: 'manual' };
-        await upsertPatientFromBooking({ patient_name: ed.patient_name, patient_email: ed.patient_email, patient_phone: ed.patient_phone, rut: rutClean });
         Promise.all([
                 sendConfirmationToClient(ed).catch(console.error),
                 sendNotificationToAdmin(ed, notificationEmail).catch(console.error),

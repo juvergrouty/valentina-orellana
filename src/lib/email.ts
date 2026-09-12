@@ -588,7 +588,7 @@ export async function sendExpiredBookingAdminAlert(
   const client = getResend();
   if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
 
-  await client.emails.send({
+  const res = await client.emails.send({
     from:    FROM,
     to:      adminEmail,
     subject: `⚠️ Hora liberada automáticamente — ${data.patient_name} · ${formatDate(data.session_date)} ${data.session_time}`,
@@ -614,6 +614,7 @@ export async function sendExpiredBookingAdminAlert(
       </div>
     `,
   });
+  await logEmail('email/hora-liberada-admin', adminEmail, 'Hora liberada automáticamente', !res.error, res.error?.message);
 }
 
 // ─── Email al admin: nueva reserva ───────────────────────────────────────────
