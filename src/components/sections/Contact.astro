@@ -92,13 +92,40 @@
 <script>
   const form   = document.getElementById('contact-form') as HTMLFormElement;
   const status = document.getElementById('form-status');
+  const button = form?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
 
-  form?.addEventListener('submit', (e) => {
+  form?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (status) {
-      status.textContent = 'Mensaje enviado — te responderé a la brevedad.';
+    if (!status || !button) return;
+
+    const data = new FormData(form);
+    if (!data.get('nombre') || !data.get('email')) {
+      status.textContent = 'Ingresa al menos tu nombre y correo.';
       status.classList.remove('hidden');
+      return;
     }
-    form.reset();
+
+    button.disabled = true;
+    status.textContent = 'Enviando...';
+    status.classList.remove('hidden');
+
+    try {
+      const res = await fetch('/api/contacto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(data)),
+      });
+      const result = await res.json();
+      if (result.ok) {
+        status.textContent = 'Mensaje enviado — te responderé a la brevedad.';
+        form.reset();
+      } else {
+        status.textContent = result.error || 'No se pudo enviar el mensaje. Intenta por WhatsApp.';
+      }
+    } catch {
+      status.textContent = 'No se pudo enviar el mensaje. Intenta por WhatsApp.';
+    } finally {
+      button.disabled = false;
+    }
   });
 </script>

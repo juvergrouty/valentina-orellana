@@ -673,3 +673,44 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
   });
   await logEmail('email/notif-admin', adminEmail, 'Nueva reserva', !res.error, res.error?.message);
 }
+
+function escapeHtml(s: string) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ─── Email al admin: mensaje del formulario de contacto ──────────────────────
+export async function sendContactFormEmail(data: {
+  nombre:  string;
+  email:   string;
+  motivo?: string;
+  mensaje?: string;
+}, adminEmail: string): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+
+  const res = await client.emails.send({
+    from:     FROM,
+    to:       adminEmail,
+    replyTo:  data.email,
+    subject:  `Nuevo mensaje de contacto — ${data.nombre}`,
+    html: `
+      <div style="font-family:'Inter',sans-serif;max-width:480px;margin:0 auto;padding:1.5rem;color:#1A1A18;background:#FAF7F4;">
+        <h2 style="font-size:1rem;font-weight:600;margin-bottom:1.25rem;border-bottom:2px solid #576352;padding-bottom:0.5rem;">
+          Nuevo mensaje desde el sitio
+        </h2>
+        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+          <tr><td style="padding:0.35rem 0;color:#6B6860;width:30%;">Nombre</td>
+              <td style="padding:0.35rem 0;font-weight:500;">${escapeHtml(data.nombre)}</td></tr>
+          <tr><td style="padding:0.35rem 0;color:#6B6860;">Correo</td>
+              <td style="padding:0.35rem 0;">${escapeHtml(data.email)}</td></tr>
+          ${data.motivo ? `<tr><td style="padding:0.35rem 0;color:#6B6860;">Motivo</td>
+              <td style="padding:0.35rem 0;">${escapeHtml(data.motivo)}</td></tr>` : ''}
+        </table>
+        ${data.mensaje ? `<p style="font-size:0.85rem;line-height:1.6;margin-top:1rem;white-space:pre-wrap;">${escapeHtml(data.mensaje)}</p>` : ''}
+      </div>
+    `,
+  });
+  await logEmail('email/contacto', adminEmail, 'Nuevo mensaje de contacto', !res.error, res.error?.message);
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
+}
