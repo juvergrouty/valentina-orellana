@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { logError } from './logger';
 
 export interface WhatsappCfg {
   accessToken:   string;
@@ -71,12 +72,16 @@ export async function sendWhatsappText(toPhone: string, body: string): Promise<{
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error('[whatsapp] send error:', JSON.stringify(data));
-      return { sent: false, reason: data?.error?.message ?? `graph_error_${res.status}` };
+      const reason = data?.error?.message ?? `graph_error_${res.status}`;
+      await logError('whatsapp/texto', 'Falló el envío de WhatsApp', { to, reason });
+      return { sent: false, reason };
     }
     return { sent: true };
   } catch (e) {
     console.error('[whatsapp] send exception:', e);
-    return { sent: false, reason: e instanceof Error ? e.message : 'unknown' };
+    const reason = e instanceof Error ? e.message : 'unknown';
+    await logError('whatsapp/texto', 'Excepción al enviar WhatsApp', { to, reason });
+    return { sent: false, reason };
   }
 }
 
@@ -116,12 +121,16 @@ export async function sendWhatsappTemplate(
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error('[whatsapp] send template error:', JSON.stringify(data));
-      return { sent: false, reason: data?.error?.error_user_msg ?? data?.error?.message ?? `graph_error_${res.status}` };
+      const reason = data?.error?.error_user_msg ?? data?.error?.message ?? `graph_error_${res.status}`;
+      await logError('whatsapp/plantilla', 'Falló el envío de WhatsApp por plantilla', { to, templateName, reason });
+      return { sent: false, reason };
     }
     return { sent: true };
   } catch (e) {
     console.error('[whatsapp] send template exception:', e);
-    return { sent: false, reason: e instanceof Error ? e.message : 'unknown' };
+    const reason = e instanceof Error ? e.message : 'unknown';
+    await logError('whatsapp/plantilla', 'Excepción al enviar WhatsApp por plantilla', { to, templateName, reason });
+    return { sent: false, reason };
   }
 }
 

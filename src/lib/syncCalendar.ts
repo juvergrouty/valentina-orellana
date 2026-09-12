@@ -6,6 +6,7 @@
 
 import { supabase } from './supabase';
 import { refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime } from './googleCalendar';
+import { logError } from './logger';
 
 const SESSION_LABELS: Record<string, string> = {
   'online':            'Sesión Individual Online',
@@ -54,20 +55,30 @@ export async function getValidAccessToken(): Promise<{ token: string; calendarId
 
 /** Elimina el evento de Google Calendar asociado a una reserva */
 export async function deleteBookingFromCalendar(bookingId: string): Promise<void> {
-  const { data: booking } = await supabase.from('bookings').select('google_event_id').eq('id', bookingId).single();
-  if (!booking?.google_event_id) return;
-  const auth = await getValidAccessToken();
-  if (!auth) return;
-  await deleteCalendarEvent(auth.token, auth.calendarId, booking.google_event_id);
+  try {
+    const { data: booking } = await supabase.from('bookings').select('google_event_id').eq('id', bookingId).single();
+    if (!booking?.google_event_id) return;
+    const auth = await getValidAccessToken();
+    if (!auth) return;
+    await deleteCalendarEvent(auth.token, auth.calendarId, booking.google_event_id);
+  } catch (e) {
+    // No relanzar: los llamadores ya tratan esto como "mejor esfuerzo", pero
+    // antes una falla (ej. token de Google vencido) no dejaba ningún rastro.
+    await logError('calendar/eliminar', 'No se pudo eliminar el evento de Google Calendar', { bookingId, error: e instanceof Error ? e.message : String(e) });
+  }
 }
 
 /** Actualiza fecha/hora del evento en Google Calendar al reagendar */
 export async function rescheduleBookingInCalendar(bookingId: string, date: string, time: string, durationMin = 55): Promise<void> {
-  const { data: booking } = await supabase.from('bookings').select('google_event_id').eq('id', bookingId).single();
-  if (!booking?.google_event_id) return;
-  const auth = await getValidAccessToken();
-  if (!auth) return;
-  await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin);
+  try {
+    const { data: booking } = await supabase.from('bookings').select('google_event_id').eq('id', bookingId).single();
+    if (!booking?.google_event_id) return;
+    const auth = await getValidAccessToken();
+    if (!auth) return;
+    await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin);
+  } catch (e) {
+    await logError('calendar/reagendar', 'No se pudo actualizar el evento de Google Calendar', { bookingId, date, time, error: e instanceof Error ? e.message : String(e) });
+  }
 }
 
 export async function syncBookingToCalendar(booking: BookingForCalendar): Promise<{
@@ -152,6 +163,7 @@ export async function syncBookingToCalendar(booking: BookingForCalendar): Promis
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[syncCalendar] Error:', msg);
+    await logError('calendar/crear', 'No se pudo crear el evento de Google Calendar', { bookingId: booking.id, error: msg });
     return { success: false, error: msg };
   }
 }

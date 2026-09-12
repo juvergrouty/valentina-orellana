@@ -316,7 +316,11 @@ export async function emitBoletaParaReserva(
     }
     return { ok: true, folio, codigo };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'Error al emitir' };
+    const msg = e instanceof Error ? e.message : 'Error al emitir';
+    // Centralizado aquí (no solo en el llamador) para que ningún caller que
+    // olvide revisar `.ok` deje una boleta fallida sin registro visible.
+    await logError('boleta/emision', 'Falló la emisión de la boleta ante el SII', { bookingId, error: msg });
+    return { ok: false, error: msg };
   }
 }
 

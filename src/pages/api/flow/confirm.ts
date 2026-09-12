@@ -23,6 +23,8 @@ import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/
 import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
+import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
+import { logError } from '../../../lib/logger';
 
 export const prerender = false;
 
@@ -102,9 +104,13 @@ export const POST: APIRoute = async ({ request }) => {
       // reserva que ya quedó 'confirmed' — no es un error real, solo evita repetir
       // correos/calendario/boleta.
       if (error && error.code !== 'PGRST116') {
+        // Crítico: el pago llegó de verdad (Flow ya confirmó status=2) pero la
+        // reserva no quedó marcada como pagada — antes esto solo se veía en los
+        // logs de Vercel, que nadie revisa; ahora queda visible en /admin/logs.
         console.error('[Flow webhook] Error confirmando reserva:', error);
+        await logError('flow/confirmar-reserva', 'Pago recibido pero la reserva no se pudo marcar como confirmada', { token, flowOrder: status.flowOrder, error: error.message });
       } else if (updated) {
-        const adminEmail = cfg['notification_email'] ?? 'juver@grouty.cl';
+        const adminEmail = cfg['notification_email'] || ADMIN_EMAIL_FALLBACK;
 
         const emailData = {
           patient_name:   updated.patient_name,
@@ -131,6 +137,7 @@ export const POST: APIRoute = async ({ request }) => {
         // así que se intenta emitir siempre que el paciente haya dejado su RUT.
         try {
           if (updated.patient_rut) {
+            // emitBoletaParaReserva ya registra en /admin/logs si falla (boleta/emision).
             const boletaRes = await emitBoletaParaReserva(updated.id, { rutOverride: updated.patient_rut, enviarEmail: true });
             if (!boletaRes.ok) console.error('[Flow webhook] boleta automática no emitida:', boletaRes.error);
           } else {
@@ -138,6 +145,7 @@ export const POST: APIRoute = async ({ request }) => {
           }
         } catch (e) {
           console.error('[Flow webhook] boleta automática:', e);
+          await logError('flow/boleta-automatica', 'Excepción al emitir la boleta automática tras el pago', { bookingId: updated.id, error: e instanceof Error ? e.message : String(e) });
         }
       }
 
@@ -148,12 +156,16 @@ export const POST: APIRoute = async ({ request }) => {
         .update({ status: 'cancelled' })
         .eq('mp_preference_id', token);
 
-      if (error) console.error('[Flow webhook] Error cancelando reserva:', error);
+      if (error) {
+        console.error('[Flow webhook] Error cancelando reserva:', error);
+        await logError('flow/cancelar-reserva', 'No se pudo marcar la reserva como cancelada tras rechazo/anulación del pago', { token, error: error.message });
+      }
     }
     // status=1 (pendiente) → no hacemos nada, esperamos otro webhook
 
   } catch (err) {
     console.error('[Flow webhook] Error consultando estado:', err);
+    await logError('flow/webhook', 'Excepción al consultar/procesar el estado del pago en Flow', { token, error: err instanceof Error ? err.message : String(err) });
     // Devolvemos 500 para que Flow reintente más tarde
     return new Response('Error interno', { status: 500 });
   }
