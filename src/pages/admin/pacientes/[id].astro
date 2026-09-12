@@ -37,7 +37,7 @@ function formatDateTime(iso: string) {
 function age(iso: string | null) {
   if (!iso) return null;
   const d = new Date(iso);
-  const today = new Date();
+  const today = nowCL();
   let a = today.getFullYear() - d.getFullYear();
   if (today.getMonth() < d.getMonth() || (today.getMonth() === d.getMonth() && today.getDate() < d.getDate())) a--;
   return a;

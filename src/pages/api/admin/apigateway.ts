@@ -4,6 +4,7 @@ import { getAgwConfig, bheEmitidas, emitirBHE, bhePdf, bheEmail, bheAnular, codi
 import type { BheCausal } from '../../../lib/apigateway';
 import { logError } from '../../../lib/logger';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
+import { nowCL } from '../../../lib/dateUtils';
 
 // YYYYMM del período en que se emitió/emitirá la boleta (según la fecha de la sesión)
 const periodoDeSesion = (sessionDate?: string | null) =>
@@ -48,8 +49,8 @@ export const POST: APIRoute = async ({ request }) => {
         error: 'El token está guardado, pero para probar el producto de Boletas de Honorarios necesitas también el RUT y la clave SII.' }, 400);
     }
     try {
-      const now     = new Date();
-      const periodo = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`; // YYYYMM (sin guion)
+      const now     = nowCL();
+      const periodo = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`; // YYYYMM (sin guion), hora de Chile
       const result  = await bheEmitidas(cfg.siiRut, periodo, 1, cfg);
       return json({ ok: true, periodo, result });
     } catch (e) {
