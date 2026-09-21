@@ -38,7 +38,7 @@ if (googleConnected) {
     const evRes  = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events` +
       `?timeMin=${now}&timeMax=${future}&orderBy=startTime&singleEvents=true&maxResults=20`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(5000) }
     );
     if (evRes.ok) {
       const evData = await evRes.json();

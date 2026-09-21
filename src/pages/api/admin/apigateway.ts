@@ -129,8 +129,26 @@ export const POST: APIRoute = async ({ request }) => {
     }
     if (!codigo) return json({ ok: false, error: 'No se pudo resolver el código de la boleta (folio ' + folio + ').' }, 502);
 
+    // Resguardo contra envíos duplicados (p.ej. doble clic, o un reintento del
+    // navegador): si esta misma boleta ya se envió a este mismo correo hace
+    // menos de 2 minutos, no se reenvía — se avisa que ya se mandó. El botón
+    // en el admin ya se bloquea al hacer clic, pero esto cubre los casos que
+    // se le puedan escapar (dos pestañas abiertas, recarga de página, etc.).
+    const sentMarker = new RegExp(`BoletaEmailEnviada (\\S+) ${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
+    const sentMatch  = sentMarker.exec(b.notes ?? '');
+    if (sentMatch) {
+      const sentAt = Date.parse(sentMatch[1]);
+      if (!isNaN(sentAt) && Date.now() - sentAt < 2 * 60 * 1000) {
+        return json({ ok: true, email, skipped: 'ya_enviada_hace_poco' });
+      }
+    }
+
     try {
       const result = await bheEmail(codigo, email, cfg);
+      {
+        const marca = `${b.notes ? b.notes + '\n' : ''}BoletaEmailEnviada ${new Date().toISOString()} ${email}`;
+        await supabase.from('bookings').update({ notes: marca }).eq('id', bookingId);
+      }
       // Copia para Valentina — para que tenga registro de cada boleta enviada
       // sin tener que entrar al admin a revisarlas una por una. No bloquea la
       // respuesta si falla (el paciente ya recibió la suya).

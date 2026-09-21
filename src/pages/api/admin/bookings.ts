@@ -267,11 +267,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     let finalName  = form.get('patient_name')?.toString()?.trim()  ?? '';
     let finalEmail = form.get('patient_email')?.toString()?.trim().toLowerCase() ?? '';
     let finalPhone = form.get('patient_phone')?.toString()?.trim() ?? '';
+    // RUT: necesario para poder emitir la boleta de honorarios sola cuando el
+    // paciente pague el link. Si es un paciente ya existente, se usa el RUT de
+    // su ficha; si es nuevo, el que se haya escrito en el formulario (opcional).
+    let finalRut   = form.get('patient_rut')?.toString()?.trim() ?? '';
 
     if (patient_id && patient_id !== '_new') {
       const { data: p } = await supabase
-        .from('patients').select('name, email, phone').eq('id', patient_id).single();
-      if (p) { finalName = p.name; finalEmail = p.email ?? finalEmail; finalPhone = p.phone ?? finalPhone; }
+        .from('patients').select('name, email, phone, rut').eq('id', patient_id).single();
+      if (p) { finalName = p.name; finalEmail = p.email ?? finalEmail; finalPhone = p.phone ?? finalPhone; finalRut = p.rut ?? finalRut; }
     }
 
     if (!finalName) return redirect(dest + '&error=missing_fields');
@@ -327,6 +331,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         patient_name:   finalName,
         patient_email:  finalEmail,
         patient_phone:  finalPhone,
+        patient_rut:    finalRut || null,
         status:         payment_mode === 'link' ? 'pending_payment' : 'confirmed',
         payment_method: payment_mode === 'link' ? 'flow' : 'manual',
         amount:         perSessionBase + (i === 0 ? remainder : 0),
@@ -476,7 +481,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       const { data: b } = await supabase.from('bookings').select('*').eq('id', bid).single();
       if (b) { try { await syncBookingToCalendar(b); } catch (e) { console.error('[create-admin] sync:', e); } }
     }
-    try { await upsertPatientFromBooking({ patient_name: finalName, patient_email: finalEmail, patient_phone: finalPhone }); } catch (e) { console.error('[create-admin] patient:', e); }
+    try { await upsertPatientFromBooking({ patient_name: finalName, patient_email: finalEmail, patient_phone: finalPhone, rut: finalRut }); } catch (e) { console.error('[create-admin] patient:', e); }
 
     if (sendConf && finalEmail) {
       const emailData = {

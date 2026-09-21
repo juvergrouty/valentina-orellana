@@ -14,6 +14,10 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
   access_token: string;
   expires_in: number;
 }> {
+  // Corregido: esta llamada se hace en cada carga de /admin/agenda y
+  // /admin/calendario (bloquea el renderizado de la página entera hasta que
+  // responde). Sin timeout, un Google lento o caído dejaba el admin "pegado"
+  // hasta que Vercel mataba la función — de ahí el calendario que no cargaba.
   const res = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -23,6 +27,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
       refresh_token: refreshToken,
       grant_type:    'refresh_token',
     }),
+    signal: AbortSignal.timeout(6000),
   });
   if (!res.ok) throw new Error(`Token refresh failed: ${await res.text()}`);
   return res.json();

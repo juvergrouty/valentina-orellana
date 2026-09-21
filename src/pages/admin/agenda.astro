@@ -131,7 +131,9 @@ try {
     const tMax = new Date(weekEnd);   tMax.setDate(tMax.getDate() + 2);
     const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(auth.calendarId)}/events`
       + `?timeMin=${tMin.toISOString()}&timeMax=${tMax.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=100`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` } });
+    // Timeout corto (era la causa más probable del calendario "pegado": esta
+    // llamada bloquea el renderizado de toda la página y antes no tenía límite).
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` }, signal: AbortSignal.timeout(5000) });
     if (res.ok) {
       const data = await res.json();
       // Evitar duplicar los eventos que ya son reservas del sitio
@@ -487,6 +489,13 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
               <label>Correo</label>
               <input type="email" name="patient_email" id="bp-pemail" placeholder="correo@mail.cl">
             </div>
+          </div>
+          <div class="bp-field">
+            <label>RUT (para la boleta de honorarios)</label>
+            <input type="text" name="patient_rut" id="bp-prut" placeholder="12.345.678-9">
+            <p style="font-size:0.72rem;color:var(--stone);margin-top:0.25rem;">
+              Si lo dejas vacío y envías un link de pago, la boleta no se podrá emitir sola cuando pague — tendrás que emitirla a mano después.
+            </p>
           </div>
         </div>
 
@@ -1630,6 +1639,7 @@ bpPatientSel?.addEventListener('change', () => {
     document.getElementById('bp-pname').value  = '';
     document.getElementById('bp-pemail').value = '';
     document.getElementById('bp-pphone').value = '';
+    document.getElementById('bp-prut').value   = '';
   }
 });
 
@@ -2152,9 +2162,15 @@ document.getElementById('sp-btn-pdf')?.addEventListener('click', async () => {
 });
 
 // ── Enviar boleta por email ─────────────────────────────────────────────────
-document.getElementById('sp-btn-email')?.addEventListener('click', async () => {
+document.getElementById('sp-btn-email')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  // Antes: sin bloqueo del botón, un doble/triple clic (o un clic mientras
+  // "parecía" no responder) disparaba varios envíos reales del mismo correo
+  // al paciente — esto es lo que causó el caso de la boleta enviada 3 veces.
+  if (btn.disabled) return;
+  btn.disabled = true;
   const result = document.getElementById('sp-boleta-result');
-  if (!currentBookingId) return;
+  if (!currentBookingId) { btn.disabled = false; return; }
   result.textContent = 'Enviando email…'; result.style.color = '#6b7280';
   try {
     const res  = await fetch('/api/admin/apigateway', {
@@ -2169,6 +2185,10 @@ document.getElementById('sp-btn-email')?.addEventListener('click', async () => {
     }
   } catch {
     result.textContent = '✕ Error al enviar'; result.style.color = '#dc2626';
+  } finally {
+    // Reactivado después de un momento, no de inmediato — evita que un
+    // segundo clic accidental justo al terminar dispare otro envío real.
+    setTimeout(() => { btn.disabled = false; }, 3000);
   }
 });
 </script>

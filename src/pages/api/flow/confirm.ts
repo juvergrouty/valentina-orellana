@@ -24,7 +24,7 @@ import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
-import { logError } from '../../../lib/logger';
+import { logError, logWarn } from '../../../lib/logger';
 
 export const prerender = false;
 
@@ -134,14 +134,27 @@ export const POST: APIRoute = async ({ request }) => {
         // Boleta de honorarios automática al confirmarse el pago online. A diferencia
         // del checkbox "boleta_auto" por servicio (pensado para cuando el pago se
         // confirma a mano desde el admin), aquí el pago fue online y real vía Flow,
-        // así que se intenta emitir siempre que el paciente haya dejado su RUT.
+        // así que se intenta emitir siempre.
+        //
+        // IMPORTANTE (corregido): antes esto se saltaba por completo si la reserva
+        // no traía patient_rut (p.ej. reservas creadas por Valentina desde el admin
+        // con "Enviar link de pago", que no pide RUT), y solo quedaba un
+        // console.warn — invisible para ella, así que nunca se enteraba de que la
+        // boleta no había salido. emitBoletaParaReserva ya sabe buscar el RUT en la
+        // ficha del paciente (tabla patients) si la reserva no trae uno propio, así
+        // que ahora se llama siempre y solo se registra como aviso real en
+        // /admin/logs si de verdad no hay RUT en ningún lado.
         try {
-          if (updated.patient_rut) {
-            // emitBoletaParaReserva ya registra en /admin/logs si falla (boleta/emision).
-            const boletaRes = await emitBoletaParaReserva(updated.id, { rutOverride: updated.patient_rut, enviarEmail: true });
-            if (!boletaRes.ok) console.error('[Flow webhook] boleta automática no emitida:', boletaRes.error);
-          } else {
-            console.warn('[Flow webhook] boleta automática omitida: la reserva no tiene RUT.');
+          const boletaRes = await emitBoletaParaReserva(updated.id, {
+            rutOverride: updated.patient_rut || undefined,
+            enviarEmail: true,
+          });
+          if (!boletaRes.ok) {
+            const esFaltaRut = (boletaRes.error ?? '').toLowerCase().includes('rut');
+            await logWarn('flow/boleta-automatica', esFaltaRut
+              ? `Boleta no emitida: falta el RUT de ${updated.patient_name} (${updated.patient_email}). Agrégalo en su ficha y emite la boleta manualmente desde el calendario.`
+              : `Boleta no emitida automáticamente: ${boletaRes.error}`,
+              { bookingId: updated.id, patientEmail: updated.patient_email, error: boletaRes.error });
           }
         } catch (e) {
           console.error('[Flow webhook] boleta automática:', e);
