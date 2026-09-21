@@ -5,6 +5,7 @@ import type { BheCausal } from '../../../lib/apigateway';
 import { logError } from '../../../lib/logger';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { nowCL } from '../../../lib/dateUtils';
+import { upsertPatientFromBooking } from '../../../lib/patients';
 
 // YYYYMM del período en que se emitió/emitirá la boleta (según la fecha de la sesión)
 const periodoDeSesion = (sessionDate?: string | null) =>
@@ -73,6 +74,19 @@ export const POST: APIRoute = async ({ request }) => {
     const rutRaw = (body.rut ?? '').trim() || p?.rut || '';
     if (!rutRaw) return json({ ok: false, error: 'Falta el RUT del paciente (requerido para la boleta).' }, 400);
     const rut = normalizeRut(rutRaw);
+
+    // CORREGIDO: el RUT que se escribe acá se usaba solo para esta boleta y se
+    // perdía — nunca quedaba guardado en la ficha del paciente. Por eso la
+    // próxima vez (y sobre todo la boleta AUTOMÁTICA al pagar por Flow, que no
+    // pasa por este formulario) no lo encontraba en ningún lado, aunque
+    // Valentina "siempre lo pusiera" al emitir a mano. Ahora queda guardado.
+    if (!p?.rut || p.rut !== rut) {
+      try {
+        await upsertPatientFromBooking({ patient_name: b.patient_name, patient_email: b.patient_email, rut });
+      } catch (e) {
+        await logError('boleta/guardar-rut', 'No se pudo guardar el RUT en la ficha del paciente', { bookingId, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
 
     if (!b.amount) return json({ ok: false, error: 'La reserva no tiene monto.' }, 400);
 

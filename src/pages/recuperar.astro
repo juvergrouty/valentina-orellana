@@ -115,7 +115,7 @@ if (outcome === 'ok' && redirectUrl) {
   return Astro.redirect(redirectUrl, 302);
 }
 ---
-<Layout title="Recuperar tu hora — Ps. Valentina Orellana">
+<Layout title="Recuperar tu hora — Ps. Valentina Orellana" noindex>
   <main style="max-width:520px;margin:4rem auto;padding:0 1.5rem;font-family:'Inter',sans-serif;text-align:center;">
     {outcome === 'not_found' && (
       <>

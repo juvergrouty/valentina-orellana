@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { sendBoletaEmail, ADMIN_EMAIL_FALLBACK } from './email';
 import { todayCL } from './dateUtils';
 import { logError } from './logger';
+import { upsertPatientFromBooking } from './patients';
 
 /**
  * Integración con API Gateway (apigateway.cl) — Boletas de Honorarios Electrónicas (BHE).
@@ -267,6 +268,22 @@ export async function emitBoletaParaReserva(
   const rutRaw = (opts.rutOverride ?? '').trim() || p?.rut || '';
   if (!rutRaw) return { ok: false, error: 'Falta el RUT del paciente.' };
   if (!b.amount) return { ok: false, error: 'La reserva no tiene monto.' };
+
+  // CORREGIDO: este es el punto único por donde pasan TODAS las emisiones de
+  // boleta (manual desde "Marcar como pagado", automática al confirmarse el
+  // pago por Flow, etc.). Antes, un RUT escrito a mano (rutOverride) se usaba
+  // solo para esa boleta puntual y se perdía — nunca quedaba en la ficha del
+  // paciente. Por eso Valentina "siempre lo ponía" al emitir, pero la próxima
+  // vez (sobre todo la boleta automática, que no pasa por ningún formulario)
+  // no lo encontraba en ningún lado. Ahora se guarda acá, una sola vez, para
+  // que beneficie a todos los flujos que llaman esta función.
+  if (b.patient_email && (!p?.rut || p.rut !== rutRaw)) {
+    try {
+      await upsertPatientFromBooking({ patient_name: p?.name ?? b.patient_name, patient_email: b.patient_email, rut: rutRaw });
+    } catch (e) {
+      await logError('boleta/guardar-rut', 'No se pudo guardar el RUT en la ficha del paciente', { bookingId, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
 
   let glosa = 'Atención psicológica';
   if (b.service_id) {

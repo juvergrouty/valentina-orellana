@@ -7,16 +7,33 @@ interface Props {
   title: string;
   description?: string;
   image?: string;
+  noindex?: boolean;
 }
 
 const {
   title,
   description = 'Psicóloga Valentina Orellana — Psicología de adultos, terapia de pareja y trauma en Santiago, Chile. Atención online y presencial.',
   image = '/images/og-default.jpg',
+  noindex = false,
 } = Astro.props;
 
 const canonicalPath = Astro.url.pathname !== '/' ? Astro.url.pathname.replace(/\/$/, '') : '/';
 const canonicalURL = new URL(canonicalPath, Astro.site);
+// WhatsApp, Facebook y LinkedIn exigen una URL absoluta para la imagen de vista previa.
+const ogImage = new URL(image, Astro.site).href;
+
+// Datos estructurados (Google): solo en la portada.
+const jsonLd = Astro.url.pathname === '/' ? {
+  '@context': 'https://schema.org',
+  '@type': 'ProfessionalService',
+  name: 'Ps. Valentina Orellana — Psicóloga Clínica',
+  description,
+  url: 'https://www.valentinaorellana.cl/',
+  image: ogImage,
+  telephone: '+56972735696',
+  areaServed: [{ '@type': 'City', name: 'Las Condes' }, { '@type': 'Country', name: 'Chile' }],
+  availableLanguage: 'es',
+} : null;
 ---
 
 <!doctype html>
@@ -34,9 +51,19 @@ const canonicalURL = new URL(canonicalPath, Astro.site);
     <meta name="description" content={description} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:image" content={image} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta property="og:url" content={canonicalURL} />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Ps. Valentina Orellana" />
+    <meta property="og:locale" content="es_CL" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
     <link rel="canonical" href={canonicalURL} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{title} | Ps. Valentina Orellana</title>
