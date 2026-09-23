@@ -44,6 +44,11 @@
 
     <!-- Formulario -->
     <form id="contact-form" class="flex flex-col gap-8" novalidate>
+      <!-- Campo trampa anti-spam: las personas no lo ven ni lo llenan -->
+      <div aria-hidden="true" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;">
+        <label for="website">No completar</label>
+        <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
+      </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-8">
         <div>

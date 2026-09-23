@@ -1,4 +1,7 @@
 {
+  "rewrites": [
+    { "source": "/favicon.ico", "destination": "/favicon.svg" }
+  ],
   "crons": [
     { "path": "/api/cron/instagram-refresh",      "schedule": "0 3 1 * *" },
     { "path": "/api/cron/google-reviews-refresh", "schedule": "0 6 * * *" },

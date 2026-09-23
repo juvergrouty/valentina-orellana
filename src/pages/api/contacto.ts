@@ -20,8 +20,18 @@ export const POST: APIRoute = async ({ request }) => {
   const motivo  = (body.motivo ?? '').trim();
   const mensaje = (body.mensaje ?? '').trim();
 
+  // Campo trampa (invisible para personas): si viene lleno es un bot. Se responde
+  // "ok" sin enviar nada, para que no sepa que fue descartado.
+  if ((body.website ?? '').trim()) return json({ ok: true });
+
   if (!nombre || !email) {
     return json({ ok: false, error: 'Faltan el nombre o el correo.' }, 400);
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    return json({ ok: false, error: 'El correo no parece válido.' }, 400);
+  }
+  if (nombre.length > 100 || email.length > 200 || motivo.length > 100 || mensaje.length > 3000) {
+    return json({ ok: false, error: 'El mensaje es demasiado largo.' }, 400);
   }
 
   const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();

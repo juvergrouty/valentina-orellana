@@ -116,7 +116,7 @@ if (outcome === 'ok' && redirectUrl) {
 }
 ---
 <Layout title="Recuperar tu hora — Ps. Valentina Orellana" noindex>
-  <main style="max-width:520px;margin:4rem auto;padding:0 1.5rem;font-family:'Inter',sans-serif;text-align:center;">
+  <div style="max-width:520px;margin:9rem auto 5rem;padding:0 1.5rem;font-family:'Inter',sans-serif;text-align:center;">
     {outcome === 'not_found' && (
       <>
         <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">No encontramos esa reserva</h1>
@@ -163,5 +163,5 @@ if (outcome === 'ok' && redirectUrl) {
               border:1px solid #576352;border-radius:4px;">
       Escribir por WhatsApp
     </a>
-  </main>
+  </div>
 </Layout>

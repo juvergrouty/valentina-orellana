@@ -20,9 +20,10 @@ function json(data: unknown, status = 200) {
 // sesión empieza dentro de la ventana configurada (reminder_window_hours, default 24h).
 export const GET: APIRoute = async ({ request }) => {
   const secret = import.meta.env.CRON_SECRET;
-  if (secret) {
+  // Falla cerrado: si CRON_SECRET no está configurado, nadie puede llamar al cron.
+  {
     const auth = request.headers.get('authorization');
-    if (auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
+    if (!secret || auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
   }
 
   // Interruptor global de correo (Configuración). Es independiente del de

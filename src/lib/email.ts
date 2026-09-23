@@ -92,7 +92,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
           Tu sesión está confirmada
         </h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:2rem;font-family:'Inter',sans-serif;">
-          Hola ${data.patient_name}, aquí están los detalles de tu reserva.
+          Hola ${escapeHtml(data.patient_name)}, aquí están los detalles de tu reserva.
         </p>
 
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
@@ -183,7 +183,7 @@ export async function sendPaymentLinkEmail(opts: {
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Enlace de pago de tu sesión</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
-          Hola ${opts.patientName}, para confirmar tu reserva realiza el pago con el siguiente enlace seguro.
+          Hola ${escapeHtml(opts.patientName)}, para confirmar tu reserva realiza el pago con el siguiente enlace seguro.
         </p>
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
           <table style="width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:0.85rem;">
@@ -230,7 +230,7 @@ export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent:
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Te espero pronto 🌿</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
-          Hola ${data.patient_name}, te recuerdo tu sesión de hoy.
+          Hola ${escapeHtml(data.patient_name)}, te recuerdo tu sesión de hoy.
         </p>
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.88rem;line-height:1.8;">
           <p style="margin:0;"><strong>${sessionLabel}</strong></p>
@@ -293,7 +293,7 @@ export async function sendPendingExpiredEmail(data: {
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Tu horario fue liberado</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;line-height:1.6;">
-          Hola ${data.patient_name}, habías reservado el <strong>${formatDate(data.session_date)} a las ${data.session_time}</strong>,
+          Hola ${escapeHtml(data.patient_name)}, habías reservado el <strong>${formatDate(data.session_date)} a las ${data.session_time}</strong>,
           pero el pago no se completó a tiempo, así que el horario quedó disponible nuevamente para otra persona.
         </p>
         ${recoverBlock}
@@ -341,7 +341,7 @@ export async function sendReviewRequestEmail(opts: {
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Gracias por confiar en este proceso</h1>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.25rem;font-family:'Inter',sans-serif;">
-          Hola ${opts.patientName}, espero que nuestras sesiones te hayan sido de ayuda.
+          Hola ${escapeHtml(opts.patientName)}, espero que nuestras sesiones te hayan sido de ayuda.
           Si te parece bien, me encantaría que dejaras una breve reseña en Google.
           Tu experiencia le sirve a otras personas que buscan apoyo y están dando el primer paso.
         </p>
@@ -401,7 +401,7 @@ export async function sendEvaluationEmail(opts: {
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Un momento para ti</h1>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
-          Hola ${opts.patientName}, quería saber cómo te sentiste después de nuestra última sesión.
+          Hola ${escapeHtml(opts.patientName)}, quería saber cómo te sentiste después de nuestra última sesión.
           Tu evaluación me ayuda a acompañarte mejor en el proceso.
         </p>
         ${formBlock}
@@ -438,7 +438,7 @@ export async function sendStepsEmail(opts: {
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Bienvenida/o a tu proceso</h1>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
-          Hola ${opts.patientName}, aquí tienes todo lo que necesitas saber para que estés tranquila/o.
+          Hola ${escapeHtml(opts.patientName)}, aquí tienes todo lo que necesitas saber para que estés tranquila/o.
           Estos son los pasos y lo que recibirás por correo.
         </p>
 
@@ -522,7 +522,7 @@ export async function sendBoletaEmail(opts: {
     subject: `Tu boleta de honorarios${folioTxt} — Ps. Valentina Orellana`,
     html: `
       <div style="font-family:'Inter',sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
-        <p style="font-size:0.95rem;color:#6B6860;margin-bottom:1.25rem;">Hola ${opts.patientName},</p>
+        <p style="font-size:0.95rem;color:#6B6860;margin-bottom:1.25rem;">Hola ${escapeHtml(opts.patientName)},</p>
         <p style="font-size:0.92rem;line-height:1.7;">
           Muchas gracias por tu sesión. Te adjunto tu <strong>boleta de honorarios electrónica${folioTxt}</strong>
           por la atención psicológica.
@@ -599,9 +599,9 @@ export async function sendExpiredBookingAdminAlert(
         </h2>
         <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
           <tr><td style="padding:0.35rem 0;color:#6B6860;width:40%;">Paciente</td>
-              <td style="padding:0.35rem 0;font-weight:500;">${data.patient_name}</td></tr>
+              <td style="padding:0.35rem 0;font-weight:500;">${escapeHtml(data.patient_name)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Email</td>
-              <td style="padding:0.35rem 0;">${data.patient_email}</td></tr>
+              <td style="padding:0.35rem 0;">${escapeHtml(data.patient_email)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Fecha reservada</td>
               <td style="padding:0.35rem 0;font-weight:500;">${formatDate(data.session_date)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Hora</td>
@@ -646,11 +646,11 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
 
         <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
           <tr><td style="padding:0.35rem 0;color:#6B6860;width:40%;">Paciente</td>
-              <td style="padding:0.35rem 0;font-weight:500;">${data.patient_name}</td></tr>
+              <td style="padding:0.35rem 0;font-weight:500;">${escapeHtml(data.patient_name)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Email</td>
-              <td style="padding:0.35rem 0;">${data.patient_email}</td></tr>
+              <td style="padding:0.35rem 0;">${escapeHtml(data.patient_email)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Teléfono</td>
-              <td style="padding:0.35rem 0;">${data.patient_phone}</td></tr>
+              <td style="padding:0.35rem 0;">${escapeHtml(data.patient_phone)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Sesión</td>
               <td style="padding:0.35rem 0;">${sessionLabel}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Fecha</td>
@@ -675,8 +675,8 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
   await logEmail('email/notif-admin', adminEmail, 'Nueva reserva', !res.error, res.error?.message);
 }
 
-function escapeHtml(s: string) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function escapeHtml(s: string | null | undefined) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ─── Email al admin: mensaje del formulario de contacto ──────────────────────

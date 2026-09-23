@@ -1,0 +1,24 @@
+---
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
+Astro.response.status = 404;
+---
+
+<BaseLayout title="Página no encontrada" description="La página que buscas no existe o cambió de dirección." noindex>
+  <section class="pt-40 pb-24 md:pt-48 md:pb-32 bg-white">
+    <div class="container-site text-center max-w-xl mx-auto">
+      <p class="label text-stone mb-4">Error 404</p>
+      <div class="divider mb-6 mx-auto"></div>
+      <h1 class="section-title mb-6">No encontramos esa página</h1>
+      <p class="body-text mb-10">
+        Puede que el enlace haya cambiado o esté incompleto. Puedes volver al inicio,
+        revisar los servicios o reservar directamente tu sesión.
+      </p>
+      <div class="flex flex-wrap gap-3 justify-center">
+        <a href="/" class="btn-dark text-[10px] py-3 px-6">Volver al inicio</a>
+        <a href="/servicios" class="btn-dark text-[10px] py-3 px-6">Ver servicios</a>
+        <a href="/agenda" class="btn-dark text-[10px] py-3 px-6">Agendar sesión</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

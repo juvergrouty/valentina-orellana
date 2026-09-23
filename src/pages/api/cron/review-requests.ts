@@ -21,9 +21,10 @@ function json(data: unknown, status = 200) {
 // (una vez por sesión: se marca la reserva para no repetir).
 export const GET: APIRoute = async ({ request }) => {
   const secret = import.meta.env.CRON_SECRET;
-  if (secret) {
+  // Falla cerrado: si CRON_SECRET no está configurado, nadie puede llamar al cron.
+  {
     const auth = request.headers.get('authorization');
-    if (auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
+    if (!secret || auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
   }
 
   // Config: toggle + link de reseña (google_review_url; si no está configurado
