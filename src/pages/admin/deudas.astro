@@ -1,0 +1,253 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+// "Deuda real" = misma definición ya usada en el calendario (agenda.astro,
+// función evClass): una reserva CONFIRMADA (la sesión se dio o se va a dar)
+// que todavía no tiene paid_at (nadie registró que se cobró) y cuya deuda no
+// fue anulada explícitamente. Las reservas pending_payment (alguien reservando
+// online, aún sin confirmar) NO cuentan como deuda — son otra cosa.
+const { data: rows } = await supabase
+  .from('bookings')
+  .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, notes')
+  .eq('status', 'confirmed')
+  .is('paid_at', null)
+  .or('debt_voided.is.null,debt_voided.eq.false')
+  .gt('amount', 0)
+  .order('session_date', { ascending: true });
+
+const { data: patients } = await supabase.from('patients').select('id, name, email, rut');
+const rutByEmail: Record<string, string> = {};
+const patientIdByEmail: Record<string, string> = {};
+(patients ?? []).forEach((p: { id: string; email: string | null; rut: string | null }) => {
+  if (p.email && p.rut) rutByEmail[p.email.toLowerCase()] = p.rut;
+  if (p.email) patientIdByEmail[p.email.toLowerCase()] = p.id;
+});
+
+const SESSION_LABELS: Record<string, string> = {
+  'online': 'Individual Online', 'presencial': 'Individual Presencial',
+  'pareja-online': 'Pareja Online', 'pareja-presencial': 'Pareja Presencial',
+};
+
+type DebtBooking = {
+  id: string; session_date: string; session_time: string | null;
+  session_type: string; amount: number;
+};
+type DebtPatient = {
+  key: string; name: string; email: string | null; phone: string | null;
+  bookings: DebtBooking[]; total: number; lastSessionDate: string;
+};
+
+const byPatient: Record<string, DebtPatient> = {};
+(rows ?? []).forEach((b: any) => {
+  const key = (b.patient_email ?? '').toLowerCase() || `${b.patient_name}|${b.patient_phone ?? ''}`;
+  const entry = (byPatient[key] ??= {
+    key, name: b.patient_name, email: b.patient_email, phone: b.patient_phone,
+    bookings: [], total: 0, lastSessionDate: b.session_date,
+  });
+  entry.bookings.push({
+    id: b.id, session_date: b.session_date, session_time: b.session_time,
+    session_type: b.session_type, amount: b.amount ?? 0,
+  });
+  entry.total += b.amount ?? 0;
+  if (b.session_date > entry.lastSessionDate) entry.lastSessionDate = b.session_date;
+});
+
+// Deudores más antiguos primero (la última sesión sin pagar más vieja arriba) —
+// son las que más urge resolver.
+const debtors = Object.values(byPatient).sort((a, b) => a.lastSessionDate.localeCompare(b.lastSessionDate));
+const grandTotal = debtors.reduce((s, d) => s + d.total, 0);
+
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+function formatDate(iso: string) {
+  if (iso === '2099-12-31') return 'Sin fecha (cobro manual)';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+---
+
+<AdminLayout title="Deudas pendientes" current="/admin/finanzas">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+    <div>
+      <a href="/admin/finanzas" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Finanzas</a>
+      <h1 style="margin-top:0.5rem;">Deudas pendientes</h1>
+      <p style="color:var(--stone);font-size:0.88rem;">Sesiones confirmadas que aún no se han pagado.</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <div style="text-align:right;">
+        <p class="label" style="color:#dc2626;">Total pendiente</p>
+        <p style="font-size:1.4rem;font-weight:700;">{formatCLP(grandTotal)}</p>
+      </div>
+      <a href="/admin/cobros" class="btn btn-outline btn-sm">+ Nuevo cobro</a>
+    </div>
+  </div>
+
+  {!debtors.length ? (
+    <div class="card" style="text-align:center;padding:3rem;">
+      <p style="color:var(--stone);font-size:0.9rem;">No hay deudas pendientes. 🎉</p>
+    </div>
+  ) : (
+    <>
+      <input type="text" id="debt-search" placeholder="Buscar por nombre..." autocomplete="off"
+        style="max-width:320px;margin-bottom:1rem;" />
+
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>Paciente</th>
+              <th>Última sesión sin pagar</th>
+              <th>Sesiones</th>
+              <th>Monto pendiente</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {debtors.map((d) => {
+              const waPhone = (d.phone ?? '').replace(/\D/g, '');
+              const waNumber = waPhone.length === 9 ? '56' + waPhone : waPhone;
+              const firstName = d.name.split(' ')[0];
+              const waMsg = encodeURIComponent(
+                `Hola ${firstName}, te escribo de la consulta de Valentina Orellana — tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores. ¿Me confirmas cuándo podrías regularizarlo?`
+              );
+              const waUrl = waNumber.length >= 11 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
+              const patientId = d.email ? patientIdByEmail[d.email.toLowerCase()] : null;
+              return (
+                <>
+                  <tr class="debt-row" data-key={d.key} data-name={d.name.toLowerCase()}>
+                    <td>
+                      <button type="button" class="btn-toggle-debt" data-key={d.key}
+                        style="background:none;border:none;cursor:pointer;font-size:0.9rem;color:var(--stone);">▸</button>
+                    </td>
+                    <td>
+                      <p style="font-weight:600;font-size:0.88rem;">{d.name}</p>
+                      {d.email && <p style="font-size:0.75rem;color:var(--stone);">{d.email}</p>}
+                    </td>
+                    <td style="font-size:0.84rem;color:var(--stone);">{formatDate(d.lastSessionDate)}</td>
+                    <td style="font-size:0.84rem;">{d.bookings.length}</td>
+                    <td style="font-weight:600;font-size:0.88rem;white-space:nowrap;">{formatCLP(d.total)}</td>
+                    <td style="white-space:nowrap;">
+                      {waUrl && (
+                        <a href={waUrl} target="_blank" title="Recordar por WhatsApp"
+                          style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:#25D366;border-radius:50%;color:white;margin-right:0.4rem;">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                          </svg>
+                        </a>
+                      )}
+                      {patientId && (
+                        <a href={`/admin/pacientes/${patientId}?tab=sesiones`} class="btn btn-outline btn-sm">Ver ficha</a>
+                      )}
+                    </td>
+                  </tr>
+                  <tr class="debt-detail" data-key={d.key} style="display:none;">
+                    <td colspan="6" style="background:var(--sand);padding:0;">
+                      <div style="padding:1rem 1.5rem;display:flex;flex-direction:column;gap:0.75rem;">
+                        {d.bookings.map((b) => (
+                          <div style="background:white;border:1px solid var(--dust);border-radius:var(--radius);padding:0.85rem 1rem;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+                              <div>
+                                <p style="font-weight:600;font-size:0.85rem;">{SESSION_LABELS[b.session_type] ?? b.session_type}</p>
+                                <p style="font-size:0.78rem;color:var(--stone);">
+                                  {formatDate(b.session_date)}{b.session_time ? ` · ${b.session_time.slice(0,5)}` : ''} · {formatCLP(b.amount)}
+                                </p>
+                              </div>
+                              <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                                <button type="button" class="btn btn-outline btn-sm btn-toggle-pay" data-bid={b.id}>💰 Marcar pagado</button>
+                                <button type="button" class="btn btn-outline btn-sm btn-void-debt" data-bid={b.id} style="color:var(--stone);">Anular deuda</button>
+                              </div>
+                            </div>
+                            <div id={`pay-${b.id}`} style="display:none;margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--warm);">
+                              <form method="POST" action="/api/admin/bookings" style="margin:0;display:flex;align-items:flex-end;gap:0.75rem;flex-wrap:wrap;">
+                                <input type="hidden" name="action" value="mark_paid" />
+                                <input type="hidden" name="id" value={b.id} />
+                                <input type="hidden" name="redirect" value="/admin/deudas" />
+                                <input type="hidden" name="rut" value={(d.email && rutByEmail[d.email.toLowerCase()]) ?? ''} />
+                                <div class="bp-field" style="margin:0;">
+                                  <label style="font-size:0.68rem;">Medio de pago</label>
+                                  <select name="medio">
+                                    <option value="Efectivo">Efectivo</option>
+                                    <option value="Transferencia">Transferencia</option>
+                                    <option value="Tarjeta">Tarjeta (fuera de Flow)</option>
+                                    <option value="Otro">Otro</option>
+                                  </select>
+                                </div>
+                                <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;cursor:pointer;">
+                                  <input type="checkbox" name="emitir_boleta" />
+                                  Emitir y enviar boleta
+                                </label>
+                                <button type="submit" class="btn btn-dark btn-sm">✓ Marcar como pagado</button>
+                              </form>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                </>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )}
+
+</AdminLayout>
+
+<script>
+(function () {
+  // Expandir/contraer el detalle de sesiones de un paciente
+  document.addEventListener('click', (e) => {
+    const toggle = e.target.closest('.btn-toggle-debt');
+    if (toggle) {
+      const key = toggle.dataset.key;
+      const detail = document.querySelector(`.debt-detail[data-key="${CSS.escape(key)}"]`);
+      if (detail) {
+        const open = detail.style.display !== 'none';
+        detail.style.display = open ? 'none' : '';
+        toggle.textContent = open ? '▸' : '▾';
+      }
+      return;
+    }
+
+    const payToggle = e.target.closest('.btn-toggle-pay');
+    if (payToggle) {
+      const box = document.getElementById(`pay-${payToggle.dataset.bid}`);
+      if (box) box.style.display = box.style.display === 'none' ? '' : 'none';
+      return;
+    }
+
+    const voidBtn = e.target.closest('.btn-void-debt');
+    if (voidBtn) {
+      if (!confirm('¿Anular la deuda de esta sesión? No se marcará como pagada, solo dejará de aparecer como pendiente de cobro.')) return;
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/api/admin/bookings';
+      form.innerHTML = `
+        <input type="hidden" name="action" value="void_debt">
+        <input type="hidden" name="id" value="${voidBtn.dataset.bid}">
+        <input type="hidden" name="redirect" value="/admin/deudas">
+      `;
+      document.body.appendChild(form);
+      form.submit();
+    }
+  });
+
+  // Buscador por nombre (cliente, sin recargar)
+  const search = document.getElementById('debt-search');
+  search?.addEventListener('input', function () {
+    const q = this.value.trim().toLowerCase();
+    document.querySelectorAll('.debt-row').forEach((row) => {
+      const match = !q || row.dataset.name.includes(q);
+      row.style.display = match ? '' : 'none';
+      const detail = document.querySelector(`.debt-detail[data-key="${CSS.escape(row.dataset.key)}"]`);
+      if (detail && !match) detail.style.display = 'none';
+    });
+  });
+})();
+</script>

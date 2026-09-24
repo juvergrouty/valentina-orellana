@@ -16,15 +16,20 @@ const todayStr = now.toISOString().split('T')[0];
 // Todas las reservas no canceladas
 const { data: all } = await supabase
   .from('bookings')
-  .select('amount, status, payment_method, session_type, session_date')
+  .select('amount, status, payment_method, session_type, session_date, paid_at, debt_voided')
   .neq('status', 'cancelled');
 const bookings = all ?? [];
 
 const isConfirmed = (s: string) => s === 'confirmed';
 
-// ── Total por cobrar histórico (pendientes de pago) ────────────────────────
+// ── Total por cobrar histórico (deuda real pendiente) ───────────────────────
+// Misma definición usada en /admin/deudas y en el calendario (agenda.astro,
+// evClass): reserva CONFIRMADA sin paid_at y sin deuda anulada. Antes contaba
+// cualquier reserva no confirmada (incluidas pending_payment sin terminar de
+// pagar, que no son realmente "deuda") y no descontaba las deudas ya anuladas
+// — este número no coincidía con lo que se ve al hacer clic en "Ir a cobrar".
 const totalPorCobrar = bookings
-  .filter(b => !isConfirmed(b.status) && b.amount)
+  .filter(b => isConfirmed(b.status) && !b.paid_at && b.debt_voided !== true && b.amount)
   .reduce((sum, b) => sum + (b.amount ?? 0), 0);
 
 // ── Reservas del mes seleccionado ──────────────────────────────────────────
@@ -90,7 +95,7 @@ const formatCLP = (n: number) =>
           <div class="fin-card-label" style="color:#dc2626;">Total por cobrar histórico</div>
           <div class="fin-card-value">{formatCLP(totalPorCobrar)}</div>
           <div class="fin-card-foot">
-            <a href="/admin/cobros" class="btn btn-outline btn-sm">Ir a cobrar →</a>
+            <a href="/admin/deudas" class="btn btn-outline btn-sm">Ir a cobrar →</a>
           </div>
         </div>
       </div>
