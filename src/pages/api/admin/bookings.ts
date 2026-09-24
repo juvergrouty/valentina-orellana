@@ -50,11 +50,34 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       try { await syncBookingToCalendar(booking); } catch (e) { console.error('[confirm] sync:', e); }
       try { await upsertPatientFromBooking({ ...booking, rut: booking.patient_rut }); } catch (e) { console.error('[confirm] patient:', e); }
       // Emisión automática de boleta si el servicio lo tiene activado
+      let svcName: string | undefined;
       if (booking.service_id) {
         try {
-          const { data: svc } = await supabase.from('services_catalog').select('boleta_auto').eq('id', booking.service_id).maybeSingle();
+          const { data: svc } = await supabase.from('services_catalog').select('name, boleta_auto').eq('id', booking.service_id).maybeSingle();
+          svcName = svc?.name;
           if (svc?.boleta_auto) await emitBoletaParaReserva(id, { enviarEmail: true });
         } catch (e) { console.error('[confirm] boleta:', e); }
+      }
+      // CORREGIDO: esta acción confirmaba la reserva pero nunca avisaba a nadie
+      // — ni al paciente (correo de confirmación) ni a Valentina (aviso de
+      // nueva reserva) — a diferencia de 'mark_paid' y 'create-admin', que sí
+      // lo hacían. Se detectó en la auditoría de correos del 24-09-2026.
+      if (booking.patient_email) {
+        const { data: settingsRows } = await supabase.from('settings').select('key, value').in('key', ['notification_email']);
+        const notifEmail = settingsRows?.find((r: { key: string }) => r.key === 'notification_email')?.value || ADMIN_EMAIL_FALLBACK;
+        const emailData = {
+          patient_name:   booking.patient_name,
+          patient_email:  booking.patient_email,
+          patient_phone:  booking.patient_phone,
+          session_type:   booking.session_type,
+          session_date:   booking.session_date,
+          session_time:   booking.session_time,
+          amount:         booking.amount,
+          payment_method: booking.payment_method ?? 'manual',
+          service_name:   svcName,
+        };
+        try { await sendConfirmationToClient(emailData); } catch (e) { console.error('[confirm] email cliente:', e); }
+        try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[confirm] email admin:', e); }
       }
     }
     return redirect(dest);
