@@ -689,10 +689,20 @@ export async function sendContactFormEmail(data: {
   const client = getResend();
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
 
+  // El formulario solo valida con un regex laxo (para no rechazar correos
+  // raros pero válidos). Si ese correo no pasa el formato más estricto que
+  // exige Resend para el header Reply-To, Resend rechazaba TODO el envío —
+  // o sea Valentina se quedaba sin saber que alguien había escrito. Detectado
+  // el 12-09-2026: un visitante escribió y el aviso nunca le llegó.
+  // Ahora: si el correo no sirve como Reply-To, se manda igual sin ese header
+  // — ella pierde el "responder directo" pero nunca el aviso del mensaje.
+  const REPLY_TO_STRICT = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]{2,}$/;
+  const replyTo = REPLY_TO_STRICT.test(data.email) ? data.email : undefined;
+
   const res = await client.emails.send({
     from:     FROM,
     to:       adminEmail,
-    replyTo:  data.email,
+    ...(replyTo ? { replyTo } : {}),
     subject:  `Nuevo mensaje de contacto — ${data.nombre}`,
     html: `
       <div style="font-family:'Inter',sans-serif;max-width:480px;margin:0 auto;padding:1.5rem;color:#1A1A18;background:#FAF7F4;">
