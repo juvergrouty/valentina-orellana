@@ -6,6 +6,7 @@ import { logInfo, logWarn, logError } from '../../lib/logger';
 import { upsertPatientFromBooking } from '../../lib/patients';
 import { ADMIN_EMAIL_FALLBACK } from '../../lib/email';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
+import { expireStaleBookings } from '../../lib/expireBooking';
 
 export const prerender = false;
 
@@ -99,26 +100,13 @@ async function handleBooking(request: Request) {
         return json({ error: 'No puedes reservar en una fecha pasada.' }, 400);
     }
 
-  // ── Limpiar reservas pending_payment expiradas (>30 min) ─────────────────────
-  // BUG REAL encontrado el 11 sep 2026: este delete no excluía created_by_admin,
-  // a diferencia de availability.ts. Una reserva que Valentina agenda desde el
-  // panel con link de pago (pending_payment, created_by_admin=true) podía quedar
-  // más de 30 min esperando el pago del paciente — y cualquier OTRO paciente
-  // reservando online mientras tanto disparaba este delete y la borraba, aunque
-  // el pago llegara después (el webhook de Flow ya no encontraba la fila).
-  // Las reservas creadas por ella NUNCA se autoeliminan — solo ella puede
-  // borrarlas manualmente desde el panel.
-  const expiry = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  {
-    const { error: cleanupErr } = await supabase.from('bookings').delete()
-      .eq('status', 'pending_payment')
-      .eq('created_by_admin', false)
-      .lt('created_at', expiry);
-    if (cleanupErr?.code === '42703') {
-      // Columna created_by_admin todavía no existe (migración vieja) — no borrar
-      // nada en ese caso, para no arriesgarse a repetir el mismo bug.
-    }
-  }
+  // ── Liberar reservas pending_payment expiradas (>30 min) ─────────────────────
+  // Las reservas creadas por la propia admin (created_by_admin=true) nunca se
+  // tocan acá — eso ya lo respeta expireStaleBookings(). Antes esto borraba la
+  // fila en silencio; ahora usa la misma función "amable" que availability.ts y
+  // el cron, que además avisa al paciente con un link para recuperar su hora.
+  try { await expireStaleBookings(); }
+  catch (e) { await logError('bookings/expirar', 'Falló la limpieza de reservas vencidas', { error: e instanceof Error ? e.message : String(e) }); }
 
   // ── Verificar disponibilidad ─────────────────────────────────────────────────
   const { data: existing } = await supabase

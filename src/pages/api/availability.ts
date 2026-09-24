@@ -1,36 +1,21 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
 import { nowCL } from '../../lib/dateUtils';
+import { expireStaleBookings } from '../../lib/expireBooking';
+import { logError } from '../../lib/logger';
 
 export const prerender = false;
 
-// Limpiar reservas pending_payment con más de 30 min — no bloqueante.
-// IMPORTANTE: nunca debe tocar reservas creadas por la propia admin
-// (created_by_admin=true) — esas solo se liberan si ella misma las cancela.
-// Se degrada automáticamente si la columna aún no existe en la base de datos.
-async function cleanupExpiredPending() {
-  const expiry = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  const { error } = await supabase
-    .from('bookings')
-    .delete()
-    .eq('status', 'pending_payment')
-    .eq('created_by_admin', false)
-    .lt('created_at', expiry);
-  if (error?.code === '42703') {
-    const retry = await supabase
-      .from('bookings')
-      .delete()
-      .eq('status', 'pending_payment')
-      .lt('created_at', expiry);
-    if (retry.error) console.warn('[availability] cleanup error:', retry.error.message);
-  } else if (error) {
-    console.warn('[availability] cleanup error:', error.message);
-  }
-}
-
 export const GET: APIRoute = async ({ url }) => {
-  // Limpiar reservas expiradas en segundo plano
-  cleanupExpiredPending();
+  // Liberar reservas pending_payment vencidas (>30 min) antes de calcular qué
+  // horarios están ocupados. Antes esto borraba la fila en silencio, sin avisar
+  // al paciente — ahora usa la misma función "amable" (correo + link de
+  // recuperación) que usan bookings.ts y el cron. Se espera el resultado (no es
+  // fire-and-forget) para que el estado quede consistente antes de calcular
+  // disponibilidad; en la enorme mayoría de las cargas no hay ninguna fila
+  // vencida, así que no agrega demora real.
+  try { await expireStaleBookings(); }
+  catch (e) { await logError('availability/expirar', 'Falló la limpieza de reservas vencidas', { error: e instanceof Error ? e.message : String(e) }); }
 
   const dateParam = url.searchParams.get('date');
 
