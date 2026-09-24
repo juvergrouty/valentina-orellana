@@ -4,7 +4,12 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { upsertPatientFromBooking } from '../../lib/patients';
 
-const siteUrl = (import.meta.env.PUBLIC_SITE_URL ?? 'https://www.valentinaorellana.cl').replace(/\/$/, '');
+// Se arma desde la URL real de la petición (no desde PUBLIC_SITE_URL): esa
+// variable de entorno en Vercel resultó estar apuntando al dominio de Vercel
+// (*.vercel.app) en vez de valentinaorellana.cl — el link de "Cobrar todo"
+// salía apuntando ahí. Astro.url.origin siempre refleja el dominio real por
+// el que entró la visita, así no depende de esa variable.
+const siteUrl = Astro.url.origin;
 
 // "Deuda real" = misma definición ya usada en el calendario (agenda.astro,
 // función evClass): una reserva CONFIRMADA (la sesión se dio o se va a dar)
