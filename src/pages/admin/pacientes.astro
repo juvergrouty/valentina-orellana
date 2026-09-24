@@ -28,7 +28,7 @@ const [{ count: countAll }, { count: countActive }, { count: countInactive }] = 
 const todayStr = todayCL();
 const { data: bookings } = await supabase
   .from('bookings')
-  .select('patient_email, session_date, status, amount')
+  .select('patient_email, session_date, status, amount, paid_at, debt_voided')
   .neq('status', 'cancelled');
 
 type Stat = { last: string | null; next: string | null; due: number };
@@ -42,7 +42,13 @@ const statByEmail: Record<string, Stat> = {};
   } else {
     if (!s.next || b.session_date < s.next) s.next = b.session_date;
   }
-  if (b.status !== 'confirmed' && b.amount) s.due += b.amount;
+  // CORREGIDO: misma definición de deuda que /admin/deudas y finanzas.astro
+  // (confirmada + sin paid_at + sin anular) — antes contaba cualquier reserva
+  // no confirmada (incluidas pending_payment sin terminar de pagar, que no es
+  // deuda real todavía) y no descontaba las deudas ya anuladas. Por eso esta
+  // lista podía mostrar "por pagar" en rojo para algo que la ficha del
+  // paciente (que sí usaba la definición correcta) mostraba distinto.
+  if (b.status === 'confirmed' && !b.paid_at && b.debt_voided !== true && b.amount) s.due += b.amount;
 });
 
 // ── Helpers ────────────────────────────────────────────────────────────────
