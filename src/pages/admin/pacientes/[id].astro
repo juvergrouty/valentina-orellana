@@ -6,11 +6,15 @@ import { nowCL } from '../../../lib/dateUtils';
 
 const { id } = Astro.params;
 
-const [{ data: patient }, { data: notes }, { data: bookings }] = await Promise.all([
+const [{ data: patient }, { data: notes }, { data: bookings }, { data: allSvc }] = await Promise.all([
   supabase.from('patients').select('*').eq('id', id!).single(),
   supabase.from('session_notes').select('*').eq('patient_id', id!).order('session_date', { ascending: false }),
   supabase.from('bookings').select('*').eq('patient_email', '').order('session_date', { ascending: false }).limit(0),
+  supabase.from('services_catalog')
+    .select('id, name, price, price_online, price_presencial, modality, type, duration_min')
+    .eq('visible', true).order('sort_order'),
 ]);
+const allServices = allSvc ?? [];
 
 // Buscar reservas por email del paciente si tiene email
 let patientBookings: any[] = [];
@@ -452,21 +456,38 @@ const formatCLP = (n: number) =>
       <button id="close-agenda-modal" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--stone);">✕</button>
     </div>
 
-    <form method="POST" action="/api/admin/bookings" style="display:flex;flex-direction:column;gap:1rem;">
-      <input type="hidden" name="action" value="create" />
-      <input type="hidden" name="patient_name" value={patient.name} />
-      <input type="hidden" name="patient_email" value={patient.email ?? ''} />
-      <input type="hidden" name="patient_phone" value={patient.phone ?? ''} />
+    <form method="POST" action="/api/admin/bookings" style="display:flex;flex-direction:column;gap:1rem;" id="pt-bp-form">
+      <input type="hidden" name="action" value="create-admin" />
+      <input type="hidden" name="patient_id" value={patient.id} />
       <input type="hidden" name="redirect" value={`${redirectBase}?tab=sesiones&saved=1`} />
 
       <div>
-        <label class="label" style="display:block;margin-bottom:0.3rem;">Tipo de sesión</label>
-        <select name="session_type" required>
-          <option value="presencial">Ind. Presencial</option>
-          <option value="online">Ind. Online</option>
-          <option value="pareja-presencial">Pareja Presencial</option>
-          <option value="pareja-online">Pareja Online</option>
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Servicio</label>
+        <select name="service_id" id="pt-bp-service" required>
+          <option value="">Selecciona un servicio...</option>
+          {allServices.map((s: any) => (
+            <option
+              value={s.id}
+              data-price={s.price}
+              data-price-online={s.price_online ?? s.price}
+              data-price-pres={s.price_presencial ?? s.price}
+              data-modality={s.modality}
+            >
+              {s.name}
+            </option>
+          ))}
         </select>
+      </div>
+
+      <!-- Modalidad (solo si el servicio permite ambas) -->
+      <div id="pt-bp-modality-row" style="display:none;">
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Modalidad</label>
+        <label style="margin-right:1rem;font-size:0.85rem;">
+          <input type="radio" name="modality_choice" value="presencial" id="pt-bp-mod-pres" checked /> Presencial
+        </label>
+        <label style="font-size:0.85rem;">
+          <input type="radio" name="modality_choice" value="online" id="pt-bp-mod-online" /> Online
+        </label>
       </div>
 
       <div>
@@ -486,12 +507,57 @@ const formatCLP = (n: number) =>
 
       <div id="custom-time-wrap" style="display:none;">
         <label class="label" style="display:block;margin-bottom:0.3rem;">Horario personalizado</label>
-        <input type="time" name="custom_time" step="300" />
+        <input type="time" name="session_time_custom" id="pt-bp-custom-time" step="300" />
+      </div>
+
+      <div id="pt-bp-price" style="font-size:0.82rem;color:var(--stone);"></div>
+
+      <div>
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Precio manual (opcional — en blanco usa el precio del servicio)</label>
+        <input type="number" name="amount_override" min="0" step="1" placeholder="Ej: 60000" />
+      </div>
+
+      <!-- Modo de pago: el fix — antes esta ficha SIEMPRE creaba la sesión como
+           "pago en consulta" sin dar la opción de enviar un link de pago (Flow,
+           por correo y WhatsApp si está conectado), a diferencia del panel del
+           calendario. Ahora usa el mismo action=create-admin que el calendario,
+           que ya soporta ambos modos. -->
+      <div>
+        <label class="label" style="display:block;margin-bottom:0.3rem;">Pago</label>
+        <label style="margin-right:1rem;font-size:0.85rem;">
+          <input type="radio" name="payment_mode" value="manual" checked /> Pago en consulta
+        </label>
+        <label style="font-size:0.85rem;">
+          <input type="radio" name="payment_mode" value="link" /> Enviar link de pago
+        </label>
+        <p style="font-size:0.72rem;color:var(--stone);margin-top:0.35rem;">
+          "En consulta" confirma la cita de inmediato. "Link de pago" la deja pendiente y le envía al paciente
+          un enlace de Flow por correo (y por WhatsApp si ya lo conectaste en Configuración).
+        </p>
       </div>
 
       <div>
-        <label class="label" style="display:block;margin-bottom:0.3rem;">Precio (opcional — en blanco usa el precio del servicio)</label>
-        <input type="number" name="amount_override" min="0" step="1" placeholder="Ej: 60000" />
+        <label class="label" style="display:block;margin-bottom:0.5rem;">Comunicaciones al paciente</label>
+        <label style="display:flex;align-items:flex-start;gap:0.5rem;font-size:0.82rem;margin-bottom:0.4rem;">
+          <input type="checkbox" name="send_confirmation" value="on" checked style="margin-top:0.2rem;" />
+          <span>Enviar correo de confirmación</span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:0.5rem;font-size:0.82rem;margin-bottom:0.4rem;">
+          <input type="checkbox" name="reminder_email_enabled" value="on" checked style="margin-top:0.2rem;" />
+          <span>Correo de recordatorio (24 h antes)</span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:0.5rem;font-size:0.82rem;margin-bottom:0.4rem;">
+          <input type="checkbox" name="whatsapp_reminder_enabled" value="on" style="margin-top:0.2rem;" />
+          <span>WhatsApp de recordatorio (4 h antes) — requiere WhatsApp conectado</span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:0.5rem;font-size:0.82rem;margin-bottom:0.4rem;">
+          <input type="checkbox" name="evaluation_email_enabled" value="on" style="margin-top:0.2rem;" />
+          <span>Correo de evaluación al terminar la sesión</span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:0.5rem;font-size:0.82rem;">
+          <input type="checkbox" name="review_email_enabled" value="on" style="margin-top:0.2rem;" />
+          <span>Solicitud de reseña de Google al terminar</span>
+        </label>
       </div>
 
       <div>
@@ -500,7 +566,7 @@ const formatCLP = (n: number) =>
       </div>
 
       <button type="submit" class="btn btn-dark" style="width:100%;justify-content:center;margin-top:0.5rem;">
-        Crear sesión confirmada
+        Agendar sesión
       </button>
     </form>
   </div>
@@ -682,5 +748,44 @@ const formatCLP = (n: number) =>
 
   agendaSelect?.addEventListener('change', () => {
     customWrap.style.display = agendaSelect.value === 'custom' ? 'block' : 'none';
+  });
+
+  // ── Servicio → mostrar selector de modalidad + precio de referencia ─────────
+  const ptSvcSel   = document.getElementById('pt-bp-service');
+  const ptModRow   = document.getElementById('pt-bp-modality-row');
+  const ptPriceBox = document.getElementById('pt-bp-price');
+  function ptUpdatePrice() {
+    const opt = ptSvcSel?.selectedOptions[0];
+    if (!ptPriceBox) return;
+    if (!opt || !opt.value) { ptPriceBox.textContent = ''; return; }
+    const modality = opt.dataset.modality;
+    let price;
+    if (modality === 'ambos') {
+      const isOnline = document.getElementById('pt-bp-mod-online')?.checked;
+      price = parseInt(isOnline ? (opt.dataset.priceOnline || opt.dataset.price) : (opt.dataset.pricePres || opt.dataset.price));
+    } else {
+      price = parseInt(opt.dataset.price || '0');
+    }
+    ptPriceBox.textContent = isNaN(price) ? '' : `Precio de referencia: $${price.toLocaleString('es-CL')}`;
+  }
+  ptSvcSel?.addEventListener('change', () => {
+    const opt = ptSvcSel.selectedOptions[0];
+    if (ptModRow) ptModRow.style.display = opt?.dataset.modality === 'ambos' ? 'block' : 'none';
+    ptUpdatePrice();
+  });
+  document.querySelectorAll('input[name="modality_choice"]').forEach(r => r.addEventListener('change', ptUpdatePrice));
+
+  // ── Horario personalizado: al enviar, usar el valor real en vez de "custom" ─
+  document.getElementById('pt-bp-form')?.addEventListener('submit', (e) => {
+    if (agendaSelect?.value === 'custom') {
+      const custom = document.getElementById('pt-bp-custom-time');
+      if (!custom.value) {
+        e.preventDefault();
+        alert('Ingresa el horario personalizado.');
+        return;
+      }
+      agendaSelect.removeAttribute('name');
+      custom.setAttribute('name', 'session_time');
+    }
   });
 </script>

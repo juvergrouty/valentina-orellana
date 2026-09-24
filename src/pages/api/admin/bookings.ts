@@ -253,6 +253,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const reviewEmailOn   = form.get('review_email_enabled') !== null;
     // Modo de pago: 'manual' (pago en consulta, confirma de una) o 'link' (envía link de pago Flow)
     const payment_mode    = form.get('payment_mode')?.toString() === 'link' ? 'link' : 'manual';
+    const notesText        = form.get('notes')?.toString()?.trim() ?? '';
 
     if (!service_id || !session_date || !session_time) {
       return redirect(dest + '&error=missing_fields');
@@ -332,6 +333,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         patient_email:  finalEmail,
         patient_phone:  finalPhone,
         patient_rut:    finalRut || null,
+        notes:          notesText || null,
         status:         payment_mode === 'link' ? 'pending_payment' : 'confirmed',
         payment_method: payment_mode === 'link' ? 'flow' : 'manual',
         amount:         perSessionBase + (i === 0 ? remainder : 0),
