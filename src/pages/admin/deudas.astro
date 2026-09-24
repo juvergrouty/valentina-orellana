@@ -147,16 +147,27 @@ function formatDate(iso: string) {
                   <tr class="debt-detail" data-key={d.key} style="display:none;">
                     <td colspan="6" style="background:var(--sand);padding:0;">
                       <div style="padding:1rem 1.5rem;display:flex;flex-direction:column;gap:0.75rem;">
-                        {d.bookings.map((b) => (
+                        {d.bookings.map((b) => {
+                          const label = SESSION_LABELS[b.session_type] ?? b.session_type;
+                          const modality = b.session_type.includes('online') ? 'online' : 'presencial';
+                          const cobrarUrl = `/admin/cobros?${new URLSearchParams({
+                            name: d.name, email: d.email ?? '', phone: d.phone ?? '',
+                            amount: String(b.amount), desc: label,
+                            date: b.session_date === '2099-12-31' ? '' : b.session_date,
+                            time: b.session_time ? b.session_time.slice(0, 5) : '',
+                            modality,
+                          }).toString()}`;
+                          return (
                           <div style="background:white;border:1px solid var(--dust);border-radius:var(--radius);padding:0.85rem 1rem;">
                             <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
                               <div>
-                                <p style="font-weight:600;font-size:0.85rem;">{SESSION_LABELS[b.session_type] ?? b.session_type}</p>
+                                <p style="font-weight:600;font-size:0.85rem;">{label}</p>
                                 <p style="font-size:0.78rem;color:var(--stone);">
                                   {formatDate(b.session_date)}{b.session_time ? ` · ${b.session_time.slice(0,5)}` : ''} · {formatCLP(b.amount)}
                                 </p>
                               </div>
                               <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                                <a href={cobrarUrl} class="btn btn-dark btn-sm">💳 Cobrar</a>
                                 <button type="button" class="btn btn-outline btn-sm btn-toggle-pay" data-bid={b.id}>💰 Marcar pagado</button>
                                 <button type="button" class="btn btn-outline btn-sm btn-void-debt" data-bid={b.id} style="color:var(--stone);">Anular deuda</button>
                               </div>
@@ -184,7 +195,8 @@ function formatDate(iso: string) {
                               </form>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </td>
                   </tr>

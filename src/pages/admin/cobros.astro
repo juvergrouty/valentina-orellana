@@ -17,6 +17,23 @@ const { data: services } = await supabase
   .eq('visible', true)
   .order('sort_order');
 
+// Pre-llenado opcional desde un link "Cobrar" de /admin/deudas (una sesión ya
+// confirmada y realizada, pendiente de pago) — solo rellena el formulario,
+// no genera nada por sí solo hasta que ella presione "Generar enlace de cobro".
+const qp = Astro.url.searchParams;
+const prefill = {
+  name:  qp.get('name')  ?? '',
+  email: qp.get('email') ?? '',
+  phone: qp.get('phone') ?? '',
+  amount: qp.get('amount') ?? '',
+  desc:   qp.get('desc')   ?? '',
+  date:   qp.get('date')   ?? '',
+  time:   qp.get('time')   ?? '',
+  modality: qp.get('modality') === 'online' ? 'online' : 'presencial',
+};
+const hasPrefill = !!(prefill.name && prefill.amount);
+const prefillJson = JSON.stringify(prefill);
+
 // Historial de cobros manuales (últimos 30)
 const { data: cobros } = await supabase
   .from('bookings')
@@ -304,7 +321,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
   #patient-results { position: absolute; }
 </style>
 
-<script define:vars={{ patientsJson, servicesJson }}>
+<script define:vars={{ patientsJson, servicesJson, prefillJson, hasPrefill }}>
 (function () {
   const patients = JSON.parse(patientsJson);
   const services = JSON.parse(servicesJson);
@@ -454,6 +471,26 @@ const servicesJson  = JSON.stringify(services  ?? []);
 
   modPresencial.addEventListener('change', updateModalityUI);
   modOnline.addEventListener('change', updateModalityUI);
+
+  // ── Pre-llenado desde /admin/deudas (botón "Cobrar" de una sesión puntual) ──
+  // Solo rellena los campos — no genera ni envía nada por sí solo.
+  if (hasPrefill) {
+    const prefill = JSON.parse(prefillJson);
+    setTab('personalizado');
+    customName.value  = prefill.name;
+    customEmail.value = prefill.email;
+    customPhone.value = prefill.phone;
+    cobroAmount.value = prefill.amount;
+    cobroDesc.value   = prefill.desc;
+    cobroDate.value   = prefill.date;
+    cobroTime.value   = prefill.time;
+    if (prefill.modality === 'online') {
+      modOnline.checked = true;
+    } else {
+      modPresencial.checked = true;
+    }
+    updateModalityUI();
+  }
 
   serviceSelect.addEventListener('change', function () {
     const opt = this.options[this.selectedIndex];
