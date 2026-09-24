@@ -489,7 +489,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
             payment_method: 'link',
             service_name:   svc.name,
           };
-          try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[create-admin] notif (link):', e); }
+          try { await sendNotificationToAdmin(emailData, notifEmail, true); } catch (e) { console.error('[create-admin] notif (link):', e); }
         }
 
         // Redirigir mostrando el link (el banner de "compartir por WhatsApp" solo

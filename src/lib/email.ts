@@ -618,7 +618,7 @@ export async function sendExpiredBookingAdminAlert(
 }
 
 // ─── Email al admin: nueva reserva ───────────────────────────────────────────
-export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail: string) {
+export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail: string, pendingPayment = false) {
   const client = getResend();
   if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
 
@@ -629,15 +629,29 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
   // es este aviso en el correo de cada reserva presencial.
   const isPresencial = data.session_type.includes('presencial');
 
+  // CORREGIDO: cuando se genera un link de pago desde el panel (agendar +
+  // "Enviar link de pago"), este correo se mandaba diciendo "confirmada"
+  // aunque el paciente todavía no había pagado nada — la reserva queda en
+  // pending_payment hasta que el pago llegue. Eso hacía pensar que la sesión
+  // ya estaba pagada cuando en realidad seguía pendiente. `pendingPayment`
+  // distingue ambos casos sin tocar el resto de las llamadas (todas confirman
+  // de verdad, así que quedan con el texto de siempre).
   const res = await client.emails.send({
     from:    FROM,
     to:      adminEmail,
-    subject: `Nueva reserva — ${data.patient_name} · ${formatDate(data.session_date)} ${data.session_time}`,
+    subject: pendingPayment
+      ? `Link de pago enviado — ${data.patient_name} · ${formatDate(data.session_date)} ${data.session_time}`
+      : `Nueva reserva — ${data.patient_name} · ${formatDate(data.session_date)} ${data.session_time}`,
     html: `
       <div style="font-family:'Inter',sans-serif;max-width:480px;margin:0 auto;padding:1.5rem;color:#1A1A18;background:#FAF7F4;">
         <h2 style="font-size:1rem;font-weight:600;margin-bottom:1.25rem;border-bottom:2px solid #576352;padding-bottom:0.5rem;">
-          Nueva reserva confirmada
+          ${pendingPayment ? 'Link de pago enviado — aún sin pagar' : 'Nueva reserva confirmada'}
         </h2>
+
+        ${pendingPayment ? `
+        <p style="font-size:0.8rem;background:#FDF2E9;border-left:3px solid #b5533c;padding:0.6rem 0.8rem;margin-bottom:1rem;">
+          ⏳ Esta reserva queda pendiente hasta que el paciente pague el link — no la cuentes como confirmada todavía.
+        </p>` : ''}
 
         ${isPresencial ? `
         <p style="font-size:0.8rem;background:#FDF2E9;border-left:3px solid #b5533c;padding:0.6rem 0.8rem;margin-bottom:1rem;">

@@ -2,6 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { upsertPatientFromBooking } from '../../lib/patients';
 
 const siteUrl = (import.meta.env.PUBLIC_SITE_URL ?? 'https://www.valentinaorellana.cl').replace(/\/$/, '');
 
@@ -60,6 +61,22 @@ const byPatient: Record<string, DebtPatient> = {};
 // son las que más urge resolver.
 const debtors = Object.values(byPatient).sort((a, b) => a.lastSessionDate.localeCompare(b.lastSessionDate));
 const grandTotal = debtors.reduce((s, d) => s + d.total, 0);
+
+// Detectado en producción (24 sep 2026): pacientes con deuda pero sin fila en
+// `patients` (reservas de antes de que el upsert cubriera todos los caminos)
+// se quedaban sin "Cobrar todo" ni "Ver ficha" — no había id de paciente para
+// armar el link. Se completa la ficha acá mismo, una sola vez por paciente
+// (después de la primera vez ya existe y esto no vuelve a escribir nada).
+for (const d of debtors) {
+  const emailLower = (d.email ?? '').toLowerCase();
+  if (!emailLower || patientIdByEmail[emailLower]) continue;
+  await upsertPatientFromBooking({ patient_name: d.name, patient_email: d.email, patient_phone: d.phone });
+  const { data: newPatient } = await supabase.from('patients').select('id, rut').eq('email', emailLower).maybeSingle();
+  if (newPatient) {
+    patientIdByEmail[emailLower] = newPatient.id;
+    if (newPatient.rut) rutByEmail[emailLower] = newPatient.rut;
+  }
+}
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);

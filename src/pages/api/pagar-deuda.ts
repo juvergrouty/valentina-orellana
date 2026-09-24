@@ -53,7 +53,11 @@ export const POST: APIRoute = async ({ request }) => {
       subject,
       amount,
       email:           patient.email,
-      orderId:         `deuda-${patient.id}-${Date.now()}`,
+      // Flow exige que commerceOrder tenga máximo 45 caracteres — un UUID de
+      // paciente + timestamp se pasaba (56). Solo necesita ser único: el
+      // webhook nunca busca por esto, busca por el token real de Flow
+      // (mp_preference_id), así que un id corto basta.
+      orderId:         `deuda-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       urlConfirmation: `${siteUrl}/api/flow/confirm`,
       urlReturn:       `${siteUrl}/api/flow/return`,
       baseUrl,
