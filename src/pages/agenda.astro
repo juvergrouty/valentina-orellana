@@ -207,8 +207,21 @@ const { data: catalogServices } = await supabase
                 <p id="slots-date-label" class="font-heading font-semibold text-2xl text-ink"></p>
               </div>
               <div id="slots-grid" class="grid grid-cols-3 gap-2.5"></div>
-              <p id="no-slots-msg" class="hidden font-body text-sm text-stone/60 text-center py-8 leading-relaxed">
-                Sin horarios disponibles<br />para este día.
+              <div id="no-slots-msg" class="hidden font-body text-sm text-stone/60 text-center py-8 leading-relaxed">
+                <p>Sin horarios disponibles<br />para este día.</p>
+                <a
+                  href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20estoy%20buscando%20un%20sobrecupo%20o%20un%20horario%20disponible%20distinto%20a%20los%20que%20aparecen%20en%20la%20agenda.%20%C2%BFMe%20puedes%20ayudar%3F"
+                  target="_blank" rel="noopener"
+                  class="inline-block mt-3 text-forest underline underline-offset-2 hover:text-ink transition-colors"
+                >Escríbeme para un sobrecupo</a>
+              </div>
+              <p id="slots-help-msg" class="hidden font-body text-xs text-stone/60 text-center pt-4 mt-2 border-t border-dust">
+                ¿Ninguna hora te acomoda?
+                <a
+                  href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20estoy%20buscando%20un%20sobrecupo%20o%20un%20horario%20disponible%20distinto%20a%20los%20que%20aparecen%20en%20la%20agenda.%20%C2%BFMe%20puedes%20ayudar%3F"
+                  target="_blank" rel="noopener"
+                  class="text-forest underline underline-offset-2 hover:text-ink transition-colors"
+                >Escríbeme</a>
               </p>
             </div>
           </div>
@@ -804,6 +817,7 @@ const { data: catalogServices } = await supabase
     $('slots-date-label').textContent = formatDateEs(iso);
     $('slots-grid').innerHTML = '<p class="col-span-3 text-xs text-muted py-2">Cargando horarios...</p>';
     hide('no-slots-msg');
+    hide('slots-help-msg');
 
     // Fetch slots — el horario es por servicio, así que la caché incluye el service_id
     const cacheKey = `${iso}|${state.serviceId ?? ''}`;
@@ -830,9 +844,11 @@ const { data: catalogServices } = await supabase
 
     if (!slots.length) {
       show('no-slots-msg');
+      hide('slots-help-msg');
       return;
     }
     hide('no-slots-msg');
+    show('slots-help-msg');
 
     slots.forEach((time) => {
       const btn = document.createElement('button');
