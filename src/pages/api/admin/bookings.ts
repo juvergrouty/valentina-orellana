@@ -7,6 +7,7 @@ import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
+import { logWarn } from '../../../lib/logger';
 
 export const prerender = false;
 
@@ -55,7 +56,16 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         try {
           const { data: svc } = await supabase.from('services_catalog').select('name, boleta_auto').eq('id', booking.service_id).maybeSingle();
           svcName = svc?.name;
-          if (svc?.boleta_auto) await emitBoletaParaReserva(id, { enviarEmail: true });
+          // CORREGIDO: el resultado de esto nunca se revisaba — si la emisión
+          // fallaba (ej. apigateway.cl sin folio, ver el fix en apigateway.ts),
+          // esta acción quedaba en silencio total, igual que el webhook de Flow
+          // antes de su propio fix. Ahora, si falla, queda visible en /admin/logs.
+          if (svc?.boleta_auto) {
+            const boletaRes = await emitBoletaParaReserva(id, { enviarEmail: true });
+            if (!boletaRes.ok) {
+              await logWarn('boleta/confirmar-manual', `Boleta no emitida al confirmar manualmente: ${boletaRes.error}`, { bookingId: id, error: boletaRes.error });
+            }
+          }
         } catch (e) { console.error('[confirm] boleta:', e); }
       }
       // CORREGIDO: esta acción confirmaba la reserva pero nunca avisaba a nadie
@@ -107,8 +117,13 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     }
 
     if (emitir) {
-      try { await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true }); }
-      catch (e) { console.error('[mark_paid] boleta:', e); }
+      try {
+        const boletaRes = await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true });
+        if (!boletaRes.ok) {
+          await logWarn('boleta/marcar-pagado', `Boleta no emitida al marcar como pagado: ${boletaRes.error}`, { bookingId: id, error: boletaRes.error });
+          return redirect(dest + '&error=boleta_failed&detail=' + encodeURIComponent(boletaRes.error ?? ''));
+        }
+      } catch (e) { console.error('[mark_paid] boleta:', e); }
     }
     return redirect(dest);
   }

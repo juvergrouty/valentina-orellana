@@ -248,6 +248,9 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
       {errorParam === 'missing_migration' && (
         <div class="cal-error-banner">⚠ Falta ejecutar la migración de base de datos pendiente antes de poder usar esto (columnas de pago).</div>
       )}
+      {errorParam === 'boleta_failed' && (
+        <div class="cal-error-banner">⚠ El pago se registró, pero la boleta NO se emitió{errorDetail ? `: ${errorDetail}` : ''}. Emítela manualmente desde el calendario.</div>
+      )}
       <div class="cal-nav-group">
         <a href="?w=0" class="cal-btn-today">Hoy</a>
         <div class="cal-arrows">

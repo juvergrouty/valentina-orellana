@@ -303,15 +303,30 @@ export async function emitBoletaParaReserva(
     }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
 
     const folio = result?.data?.Encabezado?.IdDoc?.Folio ?? null;
+
+    // ENCONTRADO (24 sep 2026, caso real de Werner Lange): si apigateway.cl
+    // respondía 200 (sin lanzar excepción) pero SIN folio en el lugar
+    // esperado — una respuesta "exitosa" pero vacía/con otra forma — el resto
+    // de esta función se saltaba entero en silencio (el bloque de abajo nunca
+    // corría) y esto igual devolvía { ok: true, folio: null }. El llamador
+    // (flow/confirm.ts) solo revisa `.ok`, así que veía éxito y no avisaba
+    // nada — la boleta jamás se emitió ni se envió a nadie, sin ningún rastro
+    // en los logs. Ahora una respuesta sin folio se trata como el error real
+    // que es, con el cuerpo de la respuesta guardado para poder diagnosticarlo.
+    if (!folio) {
+      await logError('boleta/emision', 'apigateway.cl respondió sin folio — la boleta probablemente no se generó', { bookingId, response: JSON.stringify(result ?? null).slice(0, 800) });
+      return { ok: false, error: 'La emisión no devolvió folio (respuesta inesperada de apigateway.cl).' };
+    }
+
     let codigo: string | null = null;
-    if (folio) {
-      try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeFecha(fecha), folio, cfg); } catch (e) {
-        // Antes este catch quedaba vacío: si fallaba (p.ej. el SII aún no
-        // propagaba el folio), el bloque de abajo (opts.enviarEmail && codigo)
-        // se saltaba entero en silencio — la boleta quedaba emitida pero SIN
-        // enviarse a nadie (ni paciente ni Valentina) y sin dejar rastro.
-        await logError('boleta/codigo', 'No se pudo resolver el código de la boleta ante el SII — no se enviará el correo automático de esta boleta', { bookingId, folio, error: e instanceof Error ? e.message : String(e) });
-      }
+    try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeFecha(fecha), folio, cfg); } catch (e) {
+      // Antes este catch quedaba vacío: si fallaba (p.ej. el SII aún no
+      // propagaba el folio), el bloque de abajo (opts.enviarEmail && codigo)
+      // se saltaba entero en silencio — la boleta quedaba emitida pero SIN
+      // enviarse a nadie (ni paciente ni Valentina) y sin dejar rastro.
+      await logError('boleta/codigo', 'No se pudo resolver el código de la boleta ante el SII — no se enviará el correo automático de esta boleta', { bookingId, folio, error: e instanceof Error ? e.message : String(e) });
+    }
+    {
       const nota = `${b.notes ? b.notes + '\n' : ''}Boleta Folio ${folio}${codigo ? ' · Cod ' + codigo : ''}`;
       await supabase.from('bookings').update({ notes: nota }).eq('id', bookingId);
     }
