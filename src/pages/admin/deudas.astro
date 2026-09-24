@@ -3,6 +3,8 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 
+const siteUrl = (import.meta.env.PUBLIC_SITE_URL ?? 'https://www.valentinaorellana.cl').replace(/\/$/, '');
+
 // "Deuda real" = misma definición ya usada en el calendario (agenda.astro,
 // función evClass): una reserva CONFIRMADA (la sesión se dio o se va a dar)
 // que todavía no tiene paid_at (nadie registró que se cobró) y cuya deuda no
@@ -111,11 +113,18 @@ function formatDate(iso: string) {
               const waPhone = (d.phone ?? '').replace(/\D/g, '');
               const waNumber = waPhone.length === 9 ? '56' + waPhone : waPhone;
               const firstName = d.name.split(' ')[0];
+              const patientId = d.email ? patientIdByEmail[d.email.toLowerCase()] : null;
+              // Si el paciente está registrado, el mensaje incluye el link de pago
+              // (/pagar/[id]) — esa página siempre recalcula en vivo lo que
+              // realmente debe al momento de abrirla, así que da lo mismo si ya
+              // le mandaste otro link antes o si pagó parte por otro medio.
+              const payUrl = patientId ? `${siteUrl}/pagar/${patientId}` : null;
               const waMsg = encodeURIComponent(
-                `Hola ${firstName}, te escribo de la consulta de Valentina Orellana — tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores. ¿Me confirmas cuándo podrías regularizarlo?`
+                payUrl
+                  ? `Hola ${firstName}, tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores. Puedes revisarlo y pagarlo aquí: ${payUrl}`
+                  : `Hola ${firstName}, te escribo de la consulta de Valentina Orellana — tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores. ¿Me confirmas cuándo podrías regularizarlo?`
               );
               const waUrl = waNumber.length >= 11 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
-              const patientId = d.email ? patientIdByEmail[d.email.toLowerCase()] : null;
               return (
                 <>
                   <tr class="debt-row" data-key={d.key} data-name={d.name.toLowerCase()}>
@@ -139,6 +148,9 @@ function formatDate(iso: string) {
                           </svg>
                         </a>
                       )}
+                      {payUrl && (
+                        <a href={payUrl} target="_blank" class="btn btn-dark btn-sm" style="margin-right:0.4rem;">💳 Cobrar todo</a>
+                      )}
                       {patientId && (
                         <a href={`/admin/pacientes/${patientId}?tab=sesiones`} class="btn btn-outline btn-sm">Ver ficha</a>
                       )}
@@ -149,14 +161,6 @@ function formatDate(iso: string) {
                       <div style="padding:1rem 1.5rem;display:flex;flex-direction:column;gap:0.75rem;">
                         {d.bookings.map((b) => {
                           const label = SESSION_LABELS[b.session_type] ?? b.session_type;
-                          const modality = b.session_type.includes('online') ? 'online' : 'presencial';
-                          const cobrarUrl = `/admin/cobros?${new URLSearchParams({
-                            name: d.name, email: d.email ?? '', phone: d.phone ?? '',
-                            amount: String(b.amount), desc: label,
-                            date: b.session_date === '2099-12-31' ? '' : b.session_date,
-                            time: b.session_time ? b.session_time.slice(0, 5) : '',
-                            modality,
-                          }).toString()}`;
                           return (
                           <div style="background:white;border:1px solid var(--dust);border-radius:var(--radius);padding:0.85rem 1rem;">
                             <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
@@ -167,7 +171,6 @@ function formatDate(iso: string) {
                                 </p>
                               </div>
                               <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-                                <a href={cobrarUrl} class="btn btn-dark btn-sm">💳 Cobrar</a>
                                 <button type="button" class="btn btn-outline btn-sm btn-toggle-pay" data-bid={b.id}>💰 Marcar pagado</button>
                                 <button type="button" class="btn btn-outline btn-sm btn-void-debt" data-bid={b.id} style="color:var(--stone);">Anular deuda</button>
                               </div>

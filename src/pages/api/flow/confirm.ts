@@ -67,107 +67,133 @@ export const POST: APIRoute = async ({ request }) => {
     console.log(`[Flow webhook] token=${token} status=${status.status} order=${status.flowOrder} env=${cfg['flow_env'] ?? 'default'}`);
 
     if (status.status === 2) {
-      // ✅ Pagado — confirmar la reserva.
-      // Filtramos también por status='pending_payment': Flow reintenta este webhook
-      // si no recibe 200, así que sin este filtro cada reintento repetiría el envío
-      // de correos, la creación del evento en Google Calendar y el intento de boleta.
-      // Si la reserva ya estaba 'confirmed' (reintento), este update no matchea
-      // ninguna fila y el bloque de abajo se salta — reintento idempotente.
-      let { data: updated, error } = await supabase
-        .from('bookings')
-        .update({
-          status:         'confirmed',
-          mp_payment_id:  String(status.flowOrder),
-          paid_at:        new Date().toISOString(),
-          payment_note:   'Flow',
-        })
+      // ✅ Pagado — confirmar la(s) reserva(s) cubiertas por este token.
+      // Normalmente es UNA sola (el flujo de siempre: agendar y pagar). Pero
+      // desde /pagar/[id] (cobro de deuda combinada) un mismo pago de Flow
+      // puede cubrir VARIAS reservas a la vez — todas comparten el mismo
+      // mp_preference_id porque pagar-deuda.ts las marcó juntas al crear la
+      // orden. Por eso esto ya no asume una sola fila.
+      //
+      // Idempotencia: se usa paid_at IS NULL (no status='pending_payment')
+      // como guardia — así cubre tanto una reserva nueva (pending_payment)
+      // como una reserva de deuda que ya estaba 'confirmed' pero sin pagar.
+      // Un reintento de Flow no vuelve a matchear nada porque paid_at ya quedó
+      // seteado la primera vez.
+      let { data: candidates, error: selErr } = await supabase
+        .from('bookings').select('*')
         .eq('mp_preference_id', token)
-        .eq('status', 'pending_payment')
-        .select()
-        .single();
+        .is('paid_at', null);
 
-      if (error?.code === '42703') {
-        // Migración de paid_at/payment_note todavía no aplicada — no perder el
-        // pago real por eso, reintenta sin esas columnas.
+      if (selErr?.code === '42703') {
+        // Migración de paid_at todavía no aplicada — degrada al comportamiento
+        // anterior (una sola fila, por status).
         const retry = await supabase
-          .from('bookings')
-          .update({ status: 'confirmed', mp_payment_id: String(status.flowOrder) })
+          .from('bookings').select('*')
           .eq('mp_preference_id', token)
-          .eq('status', 'pending_payment')
-          .select()
-          .single();
-        updated = retry.data;
-        error   = retry.error;
+          .eq('status', 'pending_payment');
+        candidates = retry.data;
+        selErr = retry.error;
       }
 
-      // PGRST116 = "no matching row": esperado en un reintento de Flow sobre una
-      // reserva que ya quedó 'confirmed' — no es un error real, solo evita repetir
-      // correos/calendario/boleta.
-      if (error && error.code !== 'PGRST116') {
-        // Crítico: el pago llegó de verdad (Flow ya confirmó status=2) pero la
-        // reserva no quedó marcada como pagada — antes esto solo se veía en los
-        // logs de Vercel, que nadie revisa; ahora queda visible en /admin/logs.
-        console.error('[Flow webhook] Error confirmando reserva:', error);
-        await logError('flow/confirmar-reserva', 'Pago recibido pero la reserva no se pudo marcar como confirmada', { token, flowOrder: status.flowOrder, error: error.message });
-      } else if (updated) {
-        const adminEmail = cfg['notification_email'] || ADMIN_EMAIL_FALLBACK;
+      if (selErr) {
+        console.error('[Flow webhook] Error buscando reservas:', selErr);
+        await logError('flow/confirmar-reserva', 'Pago recibido pero no se pudo buscar la(s) reserva(s) a marcar', { token, flowOrder: status.flowOrder, error: selErr.message });
+      } else if (candidates && candidates.length) {
+        const ids = candidates.map((c: { id: string }) => c.id);
+        const wasNew = new Set(candidates.filter((c: { status: string }) => c.status === 'pending_payment').map((c: { id: string }) => c.id));
 
-        const emailData = {
-          patient_name:   updated.patient_name,
-          patient_email:  updated.patient_email,
-          patient_phone:  updated.patient_phone,
-          session_type:   updated.session_type,
-          session_date:   updated.session_date,
-          session_time:   updated.session_time,
-          amount:         updated.amount,
-          payment_method: 'flow',
-        };
-        // AWAIT: es un webhook; si no esperamos, la función serverless termina y
-        // mata la sincronización con Google Calendar / los correos.
-        await Promise.all([
-          sendConfirmationToClient(emailData).catch(console.error),
-          sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
-          syncBookingToCalendar(updated).catch(console.error),
-          upsertPatientFromBooking({ ...emailData, rut: updated.patient_rut }).catch(console.error),
-        ]);
+        let { data: updated, error } = await supabase
+          .from('bookings')
+          .update({ status: 'confirmed', mp_payment_id: String(status.flowOrder), paid_at: new Date().toISOString(), payment_note: 'Flow' })
+          .in('id', ids)
+          .is('paid_at', null) // guardia de carrera: solo toma las que sigan sin pagar
+          .select();
 
-        // Boleta de honorarios automática al confirmarse el pago online. A diferencia
-        // del checkbox "boleta_auto" por servicio (pensado para cuando el pago se
-        // confirma a mano desde el admin), aquí el pago fue online y real vía Flow,
-        // así que se intenta emitir siempre.
-        //
-        // IMPORTANTE (corregido): antes esto se saltaba por completo si la reserva
-        // no traía patient_rut (p.ej. reservas creadas por Valentina desde el admin
-        // con "Enviar link de pago", que no pide RUT), y solo quedaba un
-        // console.warn — invisible para ella, así que nunca se enteraba de que la
-        // boleta no había salido. emitBoletaParaReserva ya sabe buscar el RUT en la
-        // ficha del paciente (tabla patients) si la reserva no trae uno propio, así
-        // que ahora se llama siempre y solo se registra como aviso real en
-        // /admin/logs si de verdad no hay RUT en ningún lado.
-        try {
-          const boletaRes = await emitBoletaParaReserva(updated.id, {
-            rutOverride: updated.patient_rut || undefined,
-            enviarEmail: true,
-          });
-          if (!boletaRes.ok) {
-            const esFaltaRut = (boletaRes.error ?? '').toLowerCase().includes('rut');
-            await logWarn('flow/boleta-automatica', esFaltaRut
-              ? `Boleta no emitida: falta el RUT de ${updated.patient_name} (${updated.patient_email}). Agrégalo en su ficha y emite la boleta manualmente desde el calendario.`
-              : `Boleta no emitida automáticamente: ${boletaRes.error}`,
-              { bookingId: updated.id, patientEmail: updated.patient_email, error: boletaRes.error });
+        if (error?.code === '42703') {
+          const retry = await supabase
+            .from('bookings')
+            .update({ status: 'confirmed', mp_payment_id: String(status.flowOrder) })
+            .in('id', ids)
+            .select();
+          updated = retry.data;
+          error   = retry.error;
+        }
+
+        if (error) {
+          // Crítico: el pago llegó de verdad (Flow ya confirmó status=2) pero
+          // la(s) reserva(s) no quedaron marcadas como pagadas — antes esto solo
+          // se veía en los logs de Vercel, que nadie revisa; ahora queda visible
+          // en /admin/logs.
+          console.error('[Flow webhook] Error confirmando reserva(s):', error);
+          await logError('flow/confirmar-reserva', 'Pago recibido pero la(s) reserva(s) no se pudieron marcar como confirmadas', { token, flowOrder: status.flowOrder, ids, error: error.message });
+        }
+
+        for (const updatedRow of updated ?? []) {
+          // Solo las reservas nuevas (pending_payment → confirmed) llevan el
+          // flujo completo de "tu sesión quedó agendada" — correo de
+          // confirmación, aviso a Valentina, evento en Google Calendar. Una
+          // reserva de deuda (ya estaba 'confirmed', la sesión ya ocurrió) solo
+          // necesita quedar marcada como pagada y con su boleta — el correo de
+          // la boleta ya cumple el rol de "recibo de tu pago".
+          if (wasNew.has(updatedRow.id)) {
+            const adminEmail = cfg['notification_email'] || ADMIN_EMAIL_FALLBACK;
+            const emailData = {
+              patient_name:   updatedRow.patient_name,
+              patient_email:  updatedRow.patient_email,
+              patient_phone:  updatedRow.patient_phone,
+              session_type:   updatedRow.session_type,
+              session_date:   updatedRow.session_date,
+              session_time:   updatedRow.session_time,
+              amount:         updatedRow.amount,
+              payment_method: 'flow',
+            };
+            // AWAIT: es un webhook; si no esperamos, la función serverless
+            // termina y mata la sincronización con Google Calendar / los correos.
+            await Promise.all([
+              sendConfirmationToClient(emailData).catch(console.error),
+              sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
+              syncBookingToCalendar(updatedRow).catch(console.error),
+              upsertPatientFromBooking({ ...emailData, rut: updatedRow.patient_rut }).catch(console.error),
+            ]);
           }
-        } catch (e) {
-          console.error('[Flow webhook] boleta automática:', e);
-          await logError('flow/boleta-automatica', 'Excepción al emitir la boleta automática tras el pago', { bookingId: updated.id, error: e instanceof Error ? e.message : String(e) });
+
+          // Boleta de honorarios automática al confirmarse el pago online, una
+          // por reserva (si el pago cubrió 2 sesiones, salen 2 boletas — igual
+          // que Encuadrado). IMPORTANTE (corregido): antes esto se saltaba por
+          // completo si la reserva no traía patient_rut, y solo quedaba un
+          // console.warn invisible. emitBoletaParaReserva ya sabe buscar el RUT
+          // en la ficha del paciente si la reserva no trae uno propio.
+          try {
+            const boletaRes = await emitBoletaParaReserva(updatedRow.id, {
+              rutOverride: updatedRow.patient_rut || undefined,
+              enviarEmail: true,
+            });
+            if (!boletaRes.ok) {
+              const esFaltaRut = (boletaRes.error ?? '').toLowerCase().includes('rut');
+              await logWarn('flow/boleta-automatica', esFaltaRut
+                ? `Boleta no emitida: falta el RUT de ${updatedRow.patient_name} (${updatedRow.patient_email}). Agrégalo en su ficha y emite la boleta manualmente desde el calendario.`
+                : `Boleta no emitida automáticamente: ${boletaRes.error}`,
+                { bookingId: updatedRow.id, patientEmail: updatedRow.patient_email, error: boletaRes.error });
+            }
+          } catch (e) {
+            console.error('[Flow webhook] boleta automática:', e);
+            await logError('flow/boleta-automatica', 'Excepción al emitir la boleta automática tras el pago', { bookingId: updatedRow.id, error: e instanceof Error ? e.message : String(e) });
+          }
         }
       }
+      // candidates vacío: reintento de Flow sobre un pago ya procesado — no es
+      // un error, solo evita repetir correos/calendario/boleta.
 
     } else if (status.status === 3 || status.status === 4) {
-      // ❌ Rechazado o anulado — cancelar la reserva
+      // ❌ Rechazado o anulado — cancelar SOLO si era una reserva nueva sin pagar
+      // (status='pending_payment'). Nunca tocar una reserva de deuda que ya
+      // estaba 'confirmed' (la sesión ya ocurrió) — cancelarla borraría una
+      // sesión real de su historial solo porque el reintento de pago falló.
       const { error } = await supabase
         .from('bookings')
         .update({ status: 'cancelled' })
-        .eq('mp_preference_id', token);
+        .eq('mp_preference_id', token)
+        .eq('status', 'pending_payment');
 
       if (error) {
         console.error('[Flow webhook] Error cancelando reserva:', error);

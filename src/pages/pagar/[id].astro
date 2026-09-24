@@ -1,0 +1,112 @@
+---
+export const prerender = false;
+import Layout from '../../layouts/BaseLayout.astro';
+import { supabase } from '../../lib/supabase';
+import { getPendingDebtByEmail } from '../../lib/debt';
+
+// Página pública (sin login) que el paciente abre desde el link que Valentina
+// le manda por WhatsApp/email. A diferencia de un link de pago con monto fijo,
+// esta página consulta la deuda REAL en el momento en que se abre — si el
+// paciente ya pagó parte por otro medio, o si Valentina le mandó un link viejo,
+// siempre muestra lo que realmente falta, nunca un monto atrasado.
+const { id } = Astro.params;
+
+const { data: patient } = await supabase
+  .from('patients').select('id, name, email').eq('id', id!).maybeSingle();
+
+const pending = patient?.email ? await getPendingDebtByEmail(patient.email) : [];
+const total = pending.reduce((s, b) => s + b.amount, 0);
+
+const SESSION_LABELS: Record<string, string> = {
+  'online': 'Sesión individual online', 'presencial': 'Sesión individual presencial',
+  'pareja-online': 'Sesión de pareja online', 'pareja-presencial': 'Sesión de pareja presencial',
+};
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+function formatDate(iso: string) {
+  if (iso === '2099-12-31') return '';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+const pendingJson = JSON.stringify({ patientId: patient?.id ?? null });
+---
+
+<Layout title="Pagar sesiones pendientes" description="Revisa y paga tus sesiones pendientes con Ps. Valentina Orellana." noindex>
+  <section class="max-w-xl mx-auto px-5 py-16 md:py-24">
+    {!patient ? (
+      <div class="text-center">
+        <p class="font-heading text-2xl mb-3">Link no válido</p>
+        <p class="text-stone">Este link de pago no es correcto. Escríbele a Valentina para que te mande uno nuevo.</p>
+      </div>
+    ) : !pending.length ? (
+      <div class="text-center">
+        <p class="font-heading text-2xl mb-3">Hola {patient.name.split(' ')[0]} 🎉</p>
+        <p class="text-stone">No tienes pagos pendientes en este momento.</p>
+      </div>
+    ) : (
+      <>
+        <p class="label text-stone mb-1">Hola {patient.name.split(' ')[0]}</p>
+        <h1 class="font-heading text-2xl md:text-3xl mb-2">Sesiones por pagar</h1>
+        <p class="text-stone text-sm mb-8">Revisa y paga las sesiones que tienes con Ps. Valentina Orellana.</p>
+
+        <div class="border border-dust rounded-lg divide-y divide-dust mb-6">
+          {pending.map((b) => (
+            <div class="flex items-center justify-between px-5 py-4">
+              <div>
+                <p class="font-medium text-sm">{SESSION_LABELS[b.session_type] ?? b.session_type}</p>
+                {formatDate(b.session_date) && (
+                  <p class="text-xs text-stone mt-0.5">{formatDate(b.session_date)}{b.session_time ? ` a las ${b.session_time.slice(0,5)}` : ''}</p>
+                )}
+              </div>
+              <p class="font-medium text-sm whitespace-nowrap">{formatCLP(b.amount)}</p>
+            </div>
+          ))}
+          <div class="flex items-center justify-between px-5 py-4 bg-sand">
+            <p class="font-medium text-sm">Total a pagar</p>
+            <p class="font-heading text-xl font-semibold">{formatCLP(total)}</p>
+          </div>
+        </div>
+
+        <button type="button" id="btn-pagar" class="btn-dark w-full justify-center text-center">Ir a pagar</button>
+        <p id="pagar-error" class="hidden text-sm text-red-600 text-center mt-3"></p>
+        <p class="text-xs text-stone text-center mt-6">Si tienes dudas sobre los montos o las sesiones, escríbele directamente a Valentina.</p>
+      </>
+    )}
+  </section>
+</Layout>
+
+<script define:vars={{ pendingJson }}>
+(function () {
+  const btn = document.getElementById('btn-pagar');
+  if (!btn) return;
+  const { patientId } = JSON.parse(pendingJson);
+  const errEl = document.getElementById('pagar-error');
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Preparando pago…';
+    errEl.classList.add('hidden');
+    try {
+      const res = await fetch('/api/pagar-deuda', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patientId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        errEl.textContent = data.error ?? 'No se pudo iniciar el pago. Intenta de nuevo.';
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Ir a pagar';
+        return;
+      }
+      window.location.href = data.paymentUrl;
+    } catch {
+      errEl.textContent = 'Error de conexión. Intenta de nuevo.';
+      errEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Ir a pagar';
+    }
+  });
+})();
+</script>

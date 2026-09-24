@@ -36,6 +36,7 @@ const SESSION_LABELS: Record<string, string> = {
 type PageState = 'paid' | 'rejected' | 'pending' | 'error';
 let pageState: PageState = 'error';
 let booking: Record<string, string | number> | null = null;
+let allBookings: Record<string, string | number>[] = [];
 let paymentMedia: string | null = null;
 
 // Cargar settings para datos de transferencia
@@ -75,23 +76,24 @@ if (manual || transferencia) {
 
     paymentMedia = flowStatus.paymentData?.media ?? null;
 
-    // Buscar la reserva por el token guardado en mp_preference_id
-    const { data } = await supabase
+    // Buscar la(s) reserva(s) cubiertas por este token. Normalmente es una sola
+    // (el flujo de siempre), pero un pago de deuda combinada (/pagar/[id]) puede
+    // cubrir varias a la vez — todas comparten el mismo mp_preference_id.
+    const { data: rows } = await supabase
       .from('bookings')
       .select('id, service_id, mp_payment_id, session_type, session_date, session_time, patient_name, amount, status')
-      .eq('mp_preference_id', token)
-      .maybeSingle();
+      .eq('mp_preference_id', token);
 
-    booking = data as typeof booking;
+    allBookings = rows ?? [];
+    booking = (allBookings[0] as typeof booking) ?? null;
 
-    // Confirmar en BD si aún no está confirmado (redundante con webhook, pero seguro)
-    if (flowStatus.status === 2 && booking && booking.status !== 'confirmed') {
+    // Confirmar en BD si aún no está confirmado (redundante con webhook, pero
+    // seguro) — is('paid_at', null) no aplica acá porque esta columna no se
+    // seleccionó arriba; usamos status por simplicidad, igual que antes.
+    if (flowStatus.status === 2 && allBookings.some((b: { status: string }) => b.status !== 'confirmed')) {
       await supabase
         .from('bookings')
-        .update({
-          status:        'confirmed',
-          mp_payment_id: String(flowStatus.flowOrder),
-        })
+        .update({ status: 'confirmed', mp_payment_id: String(flowStatus.flowOrder) })
         .eq('mp_preference_id', token);
     }
 
@@ -113,28 +115,31 @@ interface PurchaseData {
 }
 let purchase: PurchaseData | null = null;
 
-if (pageState === 'paid' && booking && !manual && !transferencia) {
-  const sessionType = String(booking.session_type ?? '');
-  let itemName = SESSION_LABELS[sessionType] ?? sessionType;
-  if (booking.service_id) {
-    const { data: svc } = await supabase
-      .from('services_catalog').select('name').eq('id', booking.service_id as string).maybeSingle();
-    if (svc?.name) itemName = svc.name as string;
-  }
-  const value = Number(booking.amount) || 0;
-  purchase = {
-    transaction_id: String(booking.mp_payment_id ?? booking.id ?? token),
-    value,
-    currency: 'CLP',
-    coupon:   '', // no hay sistema de cupones aún → sin descuento
-    items: [{
-      item_id:       String(booking.service_id ?? sessionType ?? 'sesion'),
+if (pageState === 'paid' && allBookings.length && !manual && !transferencia) {
+  const items = [];
+  for (const b of allBookings) {
+    const sessionType = String(b.session_type ?? '');
+    let itemName = SESSION_LABELS[sessionType] ?? sessionType;
+    if (b.service_id) {
+      const { data: svc } = await supabase
+        .from('services_catalog').select('name').eq('id', b.service_id as string).maybeSingle();
+      if (svc?.name) itemName = svc.name as string;
+    }
+    items.push({
+      item_id:       String(b.service_id ?? sessionType ?? 'sesion'),
       item_name:     itemName,
       item_category: sessionType.includes('online') ? 'online' : 'presencial',
-      price:         value,
+      price:         Number(b.amount) || 0,
       quantity:      1,
       discount:      0, // sin descuentos por ahora
-    }],
+    });
+  }
+  purchase = {
+    transaction_id: String(booking?.mp_payment_id ?? token),
+    value:          items.reduce((s, i) => s + i.price, 0),
+    currency: 'CLP',
+    coupon:   '', // no hay sistema de cupones aún → sin descuento
+    items,
   };
 }
 
@@ -160,10 +165,12 @@ const titles: Record<PageState, string> = {
 
           <div>
             <h1 class="font-heading font-semibold text-3xl md:text-4xl text-ink mb-2">
-              ¡Reserva confirmada!
+              {allBookings.length > 1 ? '¡Pago recibido!' : '¡Reserva confirmada!'}
             </h1>
             <p class="font-body text-stone font-light text-base">
-              {manual
+              {allBookings.length > 1
+                ? 'Gracias por regularizar tus sesiones pendientes.'
+                : manual
                 ? 'El pago se realizará en consulta. Te esperamos.'
                 : transferencia
                 ? 'Realiza la transferencia para confirmar tu sesión.'
@@ -171,7 +178,28 @@ const titles: Record<PageState, string> = {
             </p>
           </div>
 
-          {booking && (
+          {allBookings.length > 1 ? (
+            <div class="w-full bg-white border border-dust p-6 md:p-8 text-left space-y-3">
+              {allBookings.map((b) => (
+                <div class="flex justify-between items-baseline gap-4">
+                  <span class="font-body text-sm text-stone">
+                    {SESSION_LABELS[b.session_type as string] ?? b.session_type}
+                    {b.session_date !== '2099-12-31' && ` · ${formatDateEs(b.session_date as string)}`}
+                  </span>
+                  <span class="font-body text-sm text-ink font-medium text-right whitespace-nowrap">{formatCLP(b.amount as number)}</span>
+                </div>
+              ))}
+              <div class="border-t border-dust pt-3 flex justify-between items-baseline">
+                <span class="label text-stone">Total pagado</span>
+                <span class="font-heading font-semibold text-xl text-forest">
+                  {formatCLP(allBookings.reduce((s, b) => s + (Number(b.amount) || 0), 0))}
+                </span>
+              </div>
+              {paymentMedia && (
+                <p class="label text-stone/60 text-right">Vía {paymentMedia}</p>
+              )}
+            </div>
+          ) : booking && (
             <div class="w-full bg-white border border-dust p-6 md:p-8 text-left space-y-3">
               {[
                 ['Paciente',  booking.patient_name],
