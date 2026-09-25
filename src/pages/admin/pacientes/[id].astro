@@ -239,18 +239,28 @@ const formatCLP = (n: number) =>
                       {b.session_date === '2099-12-31' ? (
                         <>
                           <p style="font-weight:600;font-size:0.9rem;">Cobro manual</p>
-                          <p style="font-size:0.78rem;color:var(--stone);">Sin fecha de sesión · {SESSION_LABELS[b.session_type] ?? b.session_type}</p>
+                          <p style="font-size:0.78rem;color:var(--stone);">Sin fecha de sesión · {b.custom_title || (SESSION_LABELS[b.session_type] ?? b.session_type)}</p>
                         </>
                       ) : (
                         <>
                           <p style="font-weight:600;font-size:0.9rem;">{formatDate(b.session_date)}</p>
-                          <p style="font-size:0.78rem;color:var(--stone);">{b.session_time.slice(0,5)} · {SESSION_LABELS[b.session_type] ?? b.session_type}</p>
+                          <p style="font-size:0.78rem;color:var(--stone);">{b.session_time.slice(0,5)} · {b.custom_title || (SESSION_LABELS[b.session_type] ?? b.session_type)}</p>
                         </>
                       )}
                     </div>
+                    <button type="button" class="btn-rename-session" data-bid={b.id} data-title={b.custom_title ?? ''} title="Cambiar nombre de la sesión"
+                      style="background:none;border:none;cursor:pointer;color:var(--stone);padding:2px;">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                    </button>
                     <span class={`badge ${badgeClass}`}>{badgeLabel}</span>
                     {!isCancelled && <span class={`badge ${payBadgeClass}`}>{payBadgeLabel}</span>}
-                    <span style="font-size:0.82rem;color:var(--stone);">{formatCLP(b.amount)}</span>
+                    <span style="font-size:0.82rem;color:var(--stone);display:flex;align-items:center;gap:0.2rem;">
+                      {formatCLP(b.amount)}
+                      <button type="button" class="btn-edit-amount" data-bid={b.id} data-amount={b.amount} title="Editar monto"
+                        style="background:none;border:none;cursor:pointer;color:var(--stone);padding:2px;">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                      </button>
+                    </span>
                   </div>
                   <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
                     <span class="bol-status" data-bid={b.id} style="font-size:0.75rem;"></span>
@@ -299,6 +309,13 @@ const formatCLP = (n: number) =>
                         <button type="button" class="btn btn-outline btn-sm resend-mail" data-action="steps" data-bid={b.id}
                           title="Enviar el correo de pasos a seguir">✉ Pasos</button>
                       </>
+                    )}
+                    {!isCancelled && (
+                      <select class="chg-svc-select" data-bid={b.id} title="Cambiar el servicio agendado"
+                        style="font-size:0.75rem;padding:0.3rem 0.4rem;max-width:180px;">
+                        <option value="">Cambiar servicio…</option>
+                        {allServices.map((s: any) => <option value={s.id} selected={s.id === b.service_id}>{s.name}</option>)}
+                      </select>
                     )}
                     <button type="button" class="btn btn-outline btn-sm"
                       onclick={`toggleNota('nota-${i}')`}
@@ -709,6 +726,45 @@ const formatCLP = (n: number) =>
     `;
     document.body.appendChild(form);
     form.submit();
+  });
+
+  function submitBookingAction(fields) {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/api/admin/bookings';
+    form.innerHTML = Object.entries({ ...fields, redirect: `${window.location.pathname}?tab=sesiones` })
+      .map(([k, v]) => `<input type="hidden" name="${k}" value="${String(v).replace(/"/g, '&quot;')}">`)
+      .join('');
+    document.body.appendChild(form);
+    form.submit();
+  }
+
+  // ── Renombrar sesión / editar monto / cambiar servicio ─────────────────────
+  document.addEventListener('click', (e) => {
+    const renameBtn = e.target.closest('.btn-rename-session');
+    if (renameBtn) {
+      const title = prompt('Nombre de la sesión:', renameBtn.dataset.title || '');
+      if (title === null) return;
+      submitBookingAction({ action: 'rename_session', id: renameBtn.dataset.bid, title: title.trim() });
+      return;
+    }
+    const amountBtn = e.target.closest('.btn-edit-amount');
+    if (amountBtn) {
+      const input = prompt('Nuevo monto (CLP):', amountBtn.dataset.amount || '');
+      if (input === null) return;
+      const amount = parseInt(input.replace(/\D/g, ''));
+      if (isNaN(amount) || amount <= 0) { alert('Monto inválido.'); return; }
+      submitBookingAction({ action: 'update_amount', id: amountBtn.dataset.bid, amount });
+    }
+  });
+  document.addEventListener('change', (e) => {
+    const select = e.target.closest('.chg-svc-select');
+    if (!select || !select.value) return;
+    if (!confirm('¿Cambiar el servicio de esta sesión? El monto se actualizará al precio del nuevo servicio y se avisará al paciente por correo.')) {
+      select.selectedIndex = 0;
+      return;
+    }
+    submitBookingAction({ action: 'change_service', id: select.dataset.bid, service_id: select.value });
   });
 
   // ── Correos al paciente: pasos a seguir / solicitud de reseña ──────────────
