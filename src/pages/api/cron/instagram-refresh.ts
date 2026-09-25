@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
+import { logError } from '../../../lib/logger';
 
 export const prerender = false;
 
@@ -35,10 +36,10 @@ export const GET: APIRoute = async ({ request }) => {
       return json({ ok: true, expires_in: j.expires_in });
     }
 
-    console.error('[instagram-refresh]', j.error);
+    await logError('instagram/refresh-token', 'apigateway de Instagram respondió sin access_token', { response: JSON.stringify(j).slice(0, 800) });
     return json({ ok: false, error: j.error?.message ?? 'refresh_failed' });
   } catch (e) {
-    console.error('[instagram-refresh] exception:', e);
+    await logError('instagram/refresh-token', 'Excepción al renovar el token de Instagram', { error: String(e) });
     return json({ ok: false, error: 'exception' });
   }
 };
