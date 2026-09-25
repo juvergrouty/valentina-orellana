@@ -857,13 +857,30 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
           <span class="sp-amount" id="sp-amount"></span>
           <span class="sp-pay-badge" id="sp-pay-badge"></span>
         </div>
+        <!-- "Cobrar" — igual que Encuadrado: un botón que se despliega con WhatsApp
+             y correo, para mandarle AL PACIENTE el link combinado de todo lo
+             pendiente. Nunca abre la página de pago en esta pestaña. -->
+        <div id="sp-paylink-box" style="display:none;margin-top:0.6rem;position:relative;">
+          <button type="button" id="sp-cobrar-toggle" class="btn btn-dark btn-sm">💳 Cobrar ▾</button>
+          <div id="sp-cobrar-menu" style="display:none;position:absolute;top:100%;left:0;z-index:20;background:white;border:1px solid var(--dust);border-radius:var(--radius);box-shadow:0 4px 14px rgba(0,0,0,0.12);min-width:190px;margin-top:0.3rem;overflow:hidden;">
+            <a href="#" id="sp-paylink-wa" target="_blank" rel="noopener"
+              style="display:block;padding:0.6rem 0.9rem;font-size:0.82rem;color:var(--ink);text-decoration:none;">📱 Enviar por WhatsApp</a>
+            <button type="button" id="sp-paylink-mail"
+              style="display:block;width:100%;text-align:left;padding:0.6rem 0.9rem;font-size:0.82rem;background:none;border:none;cursor:pointer;color:var(--ink);">✉️ Enviar por correo</button>
+          </div>
+          <form method="POST" action="/api/admin/bookings" id="sp-paylink-mail-form" style="margin:0;display:none;">
+            <input type="hidden" name="action" value="send_debt_email">
+            <input type="hidden" name="patient_id" id="sp-paylink-mail-patient">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+          </form>
+        </div>
         <div id="sp-confirm-form" style="display:none;margin-top:0.6rem;">
           <form method="POST" action="/api/admin/bookings" style="margin:0;display:flex;flex-direction:column;gap:0.5rem;">
             <input type="hidden" name="action" value="mark_paid">
             <input type="hidden" name="id" id="sp-confirm-id">
             <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
             <div class="bp-field">
-              <label style="font-size:0.68rem;">Medio de pago</label>
+              <label style="font-size:0.68rem;">Ya pagó — ¿por qué medio? (fuera de Flow)</label>
               <select name="medio" id="sp-medio-pago">
                 <option value="Efectivo">Efectivo</option>
                 <option value="Transferencia">Transferencia</option>
@@ -894,24 +911,6 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
           <form method="POST" action="/api/admin/bookings" id="sp-unmark-paid-form" style="margin:0;display:none;">
             <input type="hidden" name="action" value="unmark_paid">
             <input type="hidden" name="id" id="sp-unmark-paid-id">
-            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
-          </form>
-        </div>
-        <div id="sp-paylink-box" style="display:none;margin-top:0.6rem;">
-          <p style="font-size:0.72rem;color:var(--stone);margin-bottom:0.4rem;">Cobrar — elige cómo enviarle el link de pago:</p>
-          <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
-            <a href="#" id="sp-paylink-wa" target="_blank" rel="noopener" class="sp-action-row" style="padding:0.3rem 0;">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
-              WhatsApp
-            </a>
-            <button type="button" id="sp-paylink-mail" class="sp-action-row" style="padding:0.3rem 0;">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
-              Email
-            </button>
-          </div>
-          <form method="POST" action="/api/admin/bookings" id="sp-paylink-mail-form" style="margin:0;display:none;">
-            <input type="hidden" name="action" value="send_debt_email">
-            <input type="hidden" name="patient_id" id="sp-paylink-mail-patient">
             <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
           </form>
         </div>
@@ -1940,6 +1939,7 @@ function openSessionDetail(b) {
   } else {
     paylinkBox.style.display = 'none';
   }
+  document.getElementById('sp-cobrar-menu').style.display = 'none';
 
   // Recordatorio automático (interruptor por reserva)
   const remEmail = document.getElementById('sp-rem-email');
@@ -2056,6 +2056,19 @@ async function saveReminderToggle(input) {
 }
 document.getElementById('sp-rem-email')?.addEventListener('change', (e) => saveReminderToggle(e.target));
 document.getElementById('sp-rem-review')?.addEventListener('change', (e) => saveReminderToggle(e.target));
+
+// ── Menú "Cobrar" (WhatsApp / correo) ─────────────────────────────────────────
+document.getElementById('sp-cobrar-toggle')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById('sp-cobrar-menu');
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+});
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('sp-cobrar-menu');
+  if (menu && menu.style.display !== 'none' && !e.target.closest('#sp-paylink-box')) {
+    menu.style.display = 'none';
+  }
+});
 
 // ── Anular deuda ────────────────────────────────────────────────────────────
 document.getElementById('sp-btn-void-debt')?.addEventListener('click', () => {
