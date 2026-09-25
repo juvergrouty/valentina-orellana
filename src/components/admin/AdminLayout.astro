@@ -465,14 +465,25 @@ tr:hover td { background: #fafafa; }
   font-weight: 500 !important;
   padding: 0.5rem 1rem !important;
   cursor: pointer;
-  transition: all .15s;
+  transition: transform .08s ease-out, box-shadow .08s ease-out, background .15s, border-color .15s, opacity .15s;
   text-decoration: none !important;
   border-radius: var(--enc-radius) !important;
   white-space: nowrap;
   line-height: 1 !important;
   letter-spacing: 0.01em;
   border: 1px solid transparent !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
 }
+/* Feedback táctil: el botón se hunde y oscurece AL INSTANTE al presionar,
+   antes de que la acción responda — para que el clic se sienta reconocido de
+   inmediato en vez de "plano". Se desactiva solo mientras está disabled
+   (ej. "Guardando…"), para no verse hundido a medio camino de un envío. */
+.btn:active:not(:disabled) {
+  transform: scale(0.96);
+  box-shadow: 0 0 0 rgba(0,0,0,0);
+  filter: brightness(0.92);
+}
+.btn:disabled { cursor: default; opacity: 0.7; }
 
 .btn.btn-dark, a.btn-dark, button.btn-dark {
   background: var(--enc-text-1) !important;
