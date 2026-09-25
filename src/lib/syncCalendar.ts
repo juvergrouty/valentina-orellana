@@ -5,7 +5,7 @@
  */
 
 import { supabase } from './supabase';
-import { refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime } from './googleCalendar';
+import { refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle } from './googleCalendar';
 import { logError } from './logger';
 
 const SESSION_LABELS: Record<string, string> = {
@@ -78,6 +78,21 @@ export async function rescheduleBookingInCalendar(bookingId: string, date: strin
     await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin);
   } catch (e) {
     await logError('calendar/reagendar', 'No se pudo actualizar el evento de Google Calendar', { bookingId, date, time, error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+/** Actualiza el título del evento en Google Calendar al renombrar la sesión o
+ *  cambiar su servicio — antes solo quedaba guardado en la BD, el evento real
+ *  en su Google Calendar (y el del paciente) se quedaba con el nombre viejo. */
+export async function retitleBookingInCalendar(bookingId: string, title: string): Promise<void> {
+  try {
+    const { data: booking } = await supabase.from('bookings').select('google_event_id').eq('id', bookingId).single();
+    if (!booking?.google_event_id) return;
+    const auth = await getValidAccessToken();
+    if (!auth) return;
+    await updateCalendarEventTitle(auth.token, auth.calendarId, booking.google_event_id, title);
+  } catch (e) {
+    await logError('calendar/renombrar', 'No se pudo actualizar el título del evento de Google Calendar', { bookingId, title, error: e instanceof Error ? e.message : String(e) });
   }
 }
 

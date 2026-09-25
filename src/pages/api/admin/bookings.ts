@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
-import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar } from '../../../lib/syncCalendar';
+import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar } from '../../../lib/syncCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { getTotalOwedByEmail, tagBookingsWithPaymentToken } from '../../../lib/debt';
@@ -254,8 +254,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const id    = form.get('id')?.toString();
     const title = form.get('title')?.toString()?.trim() ?? '';
     if (!id) return redirect(dest);
+    const { data: booking } = await supabase.from('bookings').select('patient_name, google_event_id').eq('id', id).maybeSingle();
     const { error } = await supabase.from('bookings').update({ custom_title: title || null }).eq('id', id);
     if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+    // Si el evento ya existe en Google Calendar, refleja el nombre nuevo ahí
+    // también — antes esto solo quedaba guardado en la base de datos.
+    if (title && booking?.google_event_id) {
+      try { await retitleBookingInCalendar(id, `${title} — ${booking.patient_name}`); } catch (e) { console.error('[rename_session] calendar:', e); }
+    }
     return redirect(dest);
   }
 
@@ -295,6 +301,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       .update({ service_id: serviceId, session_type: sessionType, amount })
       .eq('id', id);
     if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+
+    // Si el evento ya existe en Google Calendar, refleja el servicio nuevo ahí
+    // también. Si la sesión tenía un nombre personalizado (custom_title), se
+    // respeta ese en vez de pisarlo con el nombre del servicio.
+    if (booking.google_event_id) {
+      const calendarLabel = booking.custom_title || svc.name;
+      try { await retitleBookingInCalendar(id, `${calendarLabel} — ${booking.patient_name}`); } catch (e) { console.error('[change_service] calendar:', e); }
+    }
 
     if (booking.patient_email) {
       try {

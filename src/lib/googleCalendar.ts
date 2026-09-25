@@ -190,6 +190,31 @@ export async function updateCalendarEventTime(
   }
 }
 
+/** Actualiza el título/descripción de un evento existente (renombrar sesión,
+ *  cambiar servicio) — antes esto solo se guardaba en la BD, el evento real
+ *  en Google Calendar se quedaba con el título viejo para siempre. */
+export async function updateCalendarEventTitle(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  title: string,
+  description?: string,
+): Promise<void> {
+  const body: Record<string, unknown> = { summary: title };
+  if (description !== undefined) body.description = description;
+  const res = await fetch(
+    `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
+    {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Google Calendar update title failed (${res.status}): ${await res.text()}`);
+  }
+}
+
 /** Obtiene info del usuario conectado */
 export async function getGoogleUserInfo(accessToken: string) {
   const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
