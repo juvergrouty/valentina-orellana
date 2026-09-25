@@ -149,10 +149,14 @@ export async function deleteCalendarEvent(
   calendarId: string,
   eventId: string,
 ): Promise<void> {
-  await fetch(
+  const res = await fetch(
     `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
     { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } }
   );
+  // 410 (Gone) = ya estaba eliminado en Google Calendar — no es una falla real.
+  if (!res.ok && res.status !== 410) {
+    throw new Error(`Google Calendar delete event failed (${res.status}): ${await res.text()}`);
+  }
 }
 
 /** Actualiza fecha/hora de un evento existente */
@@ -170,7 +174,7 @@ export async function updateCalendarEventTime(
   const toISO = (d: Date) =>
     `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
 
-  await fetch(
+  const res = await fetch(
     `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
     {
       method: 'PATCH',
@@ -181,6 +185,9 @@ export async function updateCalendarEventTime(
       }),
     }
   );
+  if (!res.ok) {
+    throw new Error(`Google Calendar update event failed (${res.status}): ${await res.text()}`);
+  }
 }
 
 /** Obtiene info del usuario conectado */

@@ -2,7 +2,7 @@
 export const prerender = false;
 import Layout from '../../layouts/BaseLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { getPendingDebtByEmail } from '../../lib/debt';
+import { getTotalOwedByEmail } from '../../lib/debt';
 
 // Página pública (sin login) que el paciente abre desde el link que Valentina
 // le manda por WhatsApp/email. A diferencia de un link de pago con monto fijo,
@@ -14,7 +14,7 @@ const { id } = Astro.params;
 const { data: patient } = await supabase
   .from('patients').select('id, name, email').eq('id', id!).maybeSingle();
 
-const pending = patient?.email ? await getPendingDebtByEmail(patient.email) : [];
+const pending = patient?.email ? await getTotalOwedByEmail(patient.email) : [];
 const total = pending.reduce((s, b) => s + b.amount, 0);
 
 const SESSION_LABELS: Record<string, string> = {

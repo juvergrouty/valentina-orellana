@@ -7,6 +7,7 @@ import { upsertPatientFromBooking } from '../../lib/patients';
 import { ADMIN_EMAIL_FALLBACK } from '../../lib/email';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
 import { expireStaleBookings } from '../../lib/expireBooking';
+import { tagBookingsWithPaymentToken } from '../../lib/debt';
 
 export const prerender = false;
 
@@ -18,6 +19,7 @@ export const POST: APIRoute = async ({ request }) => {
     } catch (fatal) {
           const msg = fatal instanceof Error ? fatal.message : String(fatal);
           console.error('[bookings] Error fatal:', msg);
+          await logError('bookings/fatal', 'Excepción no controlada al crear una reserva — el paciente no pudo reservar', { error: msg });
           return json({ error: 'Error interno del servidor.', detail: msg }, 500);
     }
 };
@@ -105,7 +107,7 @@ async function handleBooking(request: Request) {
   // tocan acá — eso ya lo respeta expireStaleBookings(). Antes esto borraba la
   // fila en silencio; ahora usa la misma función "amable" que availability.ts y
   // el cron, que además avisa al paciente con un link para recuperar su hora.
-  try { await expireStaleBookings(); }
+  try { await expireStaleBookings(new URL(request.url).origin); }
   catch (e) { await logError('bookings/expirar', 'Falló la limpieza de reservas vencidas', { error: e instanceof Error ? e.message : String(e) }); }
 
   // ── Verificar disponibilidad ─────────────────────────────────────────────────
@@ -285,7 +287,11 @@ async function handleBooking(request: Request) {
   }
 
   // ── Crear orden de pago en Flow ──────────────────────────────────────────────
-  const siteUrl = import.meta.env.PUBLIC_SITE_URL?.replace(/\/$/, '') ?? 'http://localhost:4321';
+  // Se arma desde la propia petición (no desde PUBLIC_SITE_URL): esa variable de
+  // entorno está mal configurada en Vercel Production (apunta a *.vercel.app),
+  // igual que se encontró y corrigió en /admin/deudas y /api/pagar-deuda.
+  const reqUrl  = new URL(request.url);
+  const siteUrl = `${reqUrl.protocol}//${reqUrl.host}`;
 
   await logInfo('bookings', 'Creando orden Flow', { bookingId: booking.id, amount: finalPrice, email: patient_email.trim().toLowerCase() });
 
@@ -334,6 +340,9 @@ async function handleBooking(request: Request) {
       .from('bookings')
       .update({ mp_preference_id: flowOrder.token })
       .eq('id', booking.id);
+  try { await tagBookingsWithPaymentToken([booking.id], flowOrder.token); } catch (e) {
+    await logError('bookings/token-historial', 'No se pudo guardar el historial de token de pago (no bloquea la reserva)', { bookingId: booking.id, error: e instanceof Error ? e.message : String(e) });
+  }
 
   // La URL de pago es: flowOrder.url + '?token=' + flowOrder.token
   return json({

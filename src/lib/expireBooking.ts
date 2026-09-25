@@ -14,7 +14,7 @@ const EXPIRE_AFTER_MS = 30 * 60 * 1000;
 // siempre borraban la fila antes de que esta alcanzara a avisarle al paciente.
 // Ahora las 3 llaman a esta misma función: cualquiera que la encuentre primero
 // hace el aviso completo.
-export async function expireStaleBookings(): Promise<{ claimed: number }> {
+export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: number }> {
   const cutoff = new Date(Date.now() - EXPIRE_AFTER_MS).toISOString();
 
   // IMPORTANTE: nunca tocar reservas creadas por la propia admin (created_by_admin=true)
@@ -45,7 +45,12 @@ export async function expireStaleBookings(): Promise<{ claimed: number }> {
 
   const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
   const adminEmail = notifRow?.value || ADMIN_EMAIL_FALLBACK;
-  const siteUrl = (import.meta.env.PUBLIC_SITE_URL ?? 'https://www.valentinaorellana.cl').replace(/\/$/, '');
+  // Preferir la URL de la petición real que gatilló esta limpieza (siempre correcta);
+  // PUBLIC_SITE_URL solo queda como respaldo para el disparo desde el cron puro,
+  // que en la práctica casi nunca llega primero (ver comentario en expire-pending.ts).
+  // Esa misma variable de entorno está mal configurada en Vercel Production
+  // (apunta a *.vercel.app) — ver el mismo bug corregido en /admin/deudas.
+  const resolvedSiteUrl = (siteUrl ?? import.meta.env.PUBLIC_SITE_URL ?? 'https://www.valentinaorellana.cl').replace(/\/$/, '');
 
   let claimed = 0;
 
@@ -83,7 +88,7 @@ export async function expireStaleBookings(): Promise<{ claimed: number }> {
           patient_email: b.patient_email,
           session_date:  b.session_date,
           session_time:  (b.session_time ?? '00:00').slice(0, 5),
-          recoverUrl:    `${siteUrl}/recuperar?token=${token}`,
+          recoverUrl:    `${resolvedSiteUrl}/recuperar?token=${token}`,
         });
       } catch (e) { await logError('bookings/expirar', 'No se pudo avisar al paciente que su hora se liberó', { bookingId: b.id, error: e instanceof Error ? e.message : String(e) }); }
     }

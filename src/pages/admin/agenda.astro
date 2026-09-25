@@ -1890,11 +1890,15 @@ function openSessionDetail(b) {
     }
   }
 
-  // Link de pago (solo si está pendiente y ya se generó una orden Flow)
+  // Link de pago (solo si está pendiente y ya se generó una orden Flow). Si el
+  // paciente ya tiene ficha, se manda el link combinado /pagar/[id] — igual que
+  // Encuadrado, cobra TODO lo pendiente (esta sesión + cualquier otra deuda),
+  // no solo la sesión que se está mirando. Sin ficha, se cae al link individual
+  // de esta sesión (no hay id de paciente para armar el combinado).
   const paylinkBox = document.getElementById('sp-paylink-box');
   if (!sessionConfirmed && b.mp_preference_id) {
-    const payUrl = `${flowCheckoutBase}?token=${b.mp_preference_id}`;
-    const payMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te comparto el link de pago de tu sesión: ${payUrl}`;
+    const payUrl = b.patient_id ? `${window.location.origin}/pagar/${b.patient_id}` : `${flowCheckoutBase}?token=${b.mp_preference_id}`;
+    const payMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te comparto el link de pago: ${payUrl}`;
     const waPayBtn = document.getElementById('sp-paylink-wa');
     if (waPhone.length >= 11) {
       waPayBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(payMsg)}`;

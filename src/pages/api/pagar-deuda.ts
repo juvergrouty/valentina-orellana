@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
-import { getPendingDebtByEmail } from '../../lib/debt';
+import { getTotalOwedByEmail, tagBookingsWithPaymentToken } from '../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../lib/flow';
 import { logError } from '../../lib/logger';
 
@@ -28,7 +28,7 @@ export const POST: APIRoute = async ({ request }) => {
     // Se vuelve a consultar la deuda AHORA, no se confía en lo que la página
     // mostraba al cargar — evita cobrar de más o de menos si algo cambió entre
     // que el paciente abrió el link y presionó "Ir a pagar".
-    const pending = await getPendingDebtByEmail(patient.email);
+    const pending = await getTotalOwedByEmail(patient.email);
     if (!pending.length) {
       return Response.json({ error: 'Ya no tienes pagos pendientes. Si crees que esto es un error, escríbele a Valentina.' }, { status: 400 });
     }
@@ -71,6 +71,9 @@ export const POST: APIRoute = async ({ request }) => {
     if (tagErr) {
       await logError('pagar-deuda', 'Se creó la orden de Flow pero no se pudo asociar a las reservas — el pago no se podrá conciliar', { patientId, ids, token: order.token, error: tagErr.message });
       return Response.json({ error: 'Error al preparar el pago. Intenta de nuevo o contacta a Valentina.' }, { status: 500 });
+    }
+    try { await tagBookingsWithPaymentToken(ids, order.token); } catch (e) {
+      await logError('pagar-deuda', 'No se pudo guardar el historial de token de pago (no bloquea el pago)', { patientId, ids, error: e instanceof Error ? e.message : String(e) });
     }
 
     return Response.json({ ok: true, paymentUrl });

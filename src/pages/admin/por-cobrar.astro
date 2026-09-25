@@ -17,6 +17,16 @@ const { data: rows } = await supabase
 const { data: settingsRows } = await supabase.from('settings').select('key, value').eq('key', 'flow_env');
 const flowEnv = settingsRows?.[0]?.value;
 const flowCheckoutBase = flowEnv === 'production' ? 'https://www.flow.cl/app/web/pay.php' : 'https://sandbox.flow.cl/app/web/pay.php';
+const siteUrl = Astro.url.origin;
+
+// Igual que en /admin/deudas: si el paciente tiene ficha, el link a mandar es
+// el combinado /pagar/[id] (cobra TODO lo pendiente, no solo esta sesión —
+// así se comporta Encuadrado). Sin ficha, se cae al link individual de Flow.
+const { data: patientsRows } = await supabase.from('patients').select('id, email');
+const patientIdByEmail: Record<string, string> = {};
+(patientsRows ?? []).forEach((p: { id: string; email: string | null }) => {
+  if (p.email) patientIdByEmail[p.email.toLowerCase()] = p.id;
+});
 
 const SESSION_LABELS: Record<string, string> = {
   'online': 'Individual Online', 'presencial': 'Individual Presencial',
@@ -68,10 +78,15 @@ const grandTotal = pending.reduce((s, b) => s + (b.amount ?? 0), 0);
           {pending.map((b) => {
             const waPhone = (b.patient_phone ?? '').replace(/\D/g, '');
             const waNumber = waPhone.length === 9 ? '56' + waPhone : waPhone;
-            const payUrl = b.mp_preference_id ? `${flowCheckoutBase}?token=${b.mp_preference_id}` : null;
+            const patientId = b.patient_email ? patientIdByEmail[b.patient_email.toLowerCase()] : null;
+            const payUrl = patientId
+              ? `${siteUrl}/pagar/${patientId}`
+              : (b.mp_preference_id ? `${flowCheckoutBase}?token=${b.mp_preference_id}` : null);
             const firstName = b.patient_name.split(' ')[0];
             const waMsg = payUrl ? encodeURIComponent(
-              `Hola ${firstName}, te recuerdo el link de pago para tu sesión (${formatCLP(b.amount)}): ${payUrl}`
+              patientId
+                ? `Hola ${firstName}, te recuerdo el link de pago pendiente: ${payUrl}`
+                : `Hola ${firstName}, te recuerdo el link de pago para tu sesión (${formatCLP(b.amount)}): ${payUrl}`
             ) : '';
             const waUrl = payUrl && waNumber.length >= 11 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
             return (

@@ -14,7 +14,7 @@ export const GET: APIRoute = async ({ url }) => {
   // fire-and-forget) para que el estado quede consistente antes de calcular
   // disponibilidad; en la enorme mayoría de las cargas no hay ninguna fila
   // vencida, así que no agrega demora real.
-  try { await expireStaleBookings(); }
+  try { await expireStaleBookings(url.origin); }
   catch (e) { await logError('availability/expirar', 'Falló la limpieza de reservas vencidas', { error: e instanceof Error ? e.message : String(e) }); }
 
   const dateParam = url.searchParams.get('date');

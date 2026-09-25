@@ -213,6 +213,51 @@ export async function sendPaymentLinkEmail(opts: {
   return { sent: true };
 }
 
+// ─── Email al paciente: saldo pendiente de sesiones anteriores ──────────────
+// Se usa desde "Cobrar todo" en /admin/deudas cuando el paciente no tiene
+// teléfono para WhatsApp — igual que el mensaje de WhatsApp, enlaza a /pagar/[id]
+// (recalcula en vivo lo que debe al momento de abrirlo, no un monto congelado).
+export async function sendDebtReminderEmail(opts: {
+  patientName:  string;
+  patientEmail: string;
+  amount:       number;
+  sessionsCount: number;
+  payUrl:       string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+
+  const subject = `Saldo pendiente de tus sesiones — Ps. Valentina Orellana`;
+  const res = await client.emails.send({
+    from: FROM,
+    to:   opts.patientEmail,
+    subject,
+    html: `
+      <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Tienes un saldo pendiente</h1>
+        <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
+          Hola ${escapeHtml(opts.patientName)}, tienes un saldo pendiente de ${formatCLP(opts.amount)}
+          por ${opts.sessionsCount} sesión${opts.sessionsCount === 1 ? '' : 'es'} anterior${opts.sessionsCount === 1 ? '' : 'es'}.
+          Puedes revisar el detalle y pagarlo con el siguiente enlace seguro.
+        </p>
+        <a href="${opts.payUrl}"
+           style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;
+                  text-decoration:none;font-family:'Inter',sans-serif;font-size:0.78rem;
+                  letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
+          Ver y pagar mi saldo
+        </a>
+        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
+                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
+          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+        </p>
+      </div>
+    `,
+  });
+  await logEmail('email/saldo-pendiente', opts.patientEmail, subject, !res.error, res.error?.message);
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
+}
+
 // ─── Email al cliente: recordatorio de sesión ────────────────────────────────
 export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();

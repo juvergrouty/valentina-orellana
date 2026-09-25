@@ -4,6 +4,7 @@ import Layout from '../layouts/BaseLayout.astro';
 import { supabase } from '../lib/supabase';
 import { createPaymentOrder, FLOW_URLS } from '../lib/flow';
 import { hoursUntilSessionCL } from '../lib/dateUtils';
+import { tagBookingsWithPaymentToken } from '../lib/debt';
 
 // ── Recuperar una reserva liberada automáticamente por falta de pago ─────────
 // El paciente llega aquí desde el botón "Pagar y mantener mi hora" del correo
@@ -94,6 +95,7 @@ if (token) {
               });
 
               await supabase.from('bookings').update({ mp_preference_id: order.token }).eq('id', reactivated.id);
+              await tagBookingsWithPaymentToken([reactivated.id], order.token).catch(() => {});
               redirectUrl = `${order.url}?token=${order.token}`;
               outcome = 'ok';
             }

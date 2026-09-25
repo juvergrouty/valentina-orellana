@@ -25,6 +25,7 @@ import { upsertPatientFromBooking } from '../../../lib/patients';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { logError, logWarn } from '../../../lib/logger';
+import { tagBookingsWithPaymentToken } from '../../../lib/debt';
 
 export const prerender = false;
 
@@ -93,6 +94,21 @@ export const POST: APIRoute = async ({ request }) => {
           .eq('status', 'pending_payment');
         candidates = retry.data;
         selErr = retry.error;
+      }
+
+      // Fallback: mp_preference_id solo guarda el ÚLTIMO token de una reserva. Si
+      // se mandó un link individual y después uno combinado ("Cobrar todo"), el
+      // combinado sobrescribe mp_preference_id de esa reserva y el link viejo
+      // queda huérfano — si el paciente paga con ESE link viejo, no aparece acá.
+      // Se busca en el historial guardado en notes (ver tagBookingsWithPaymentToken)
+      // antes de darlo por "ya procesado" o "huérfano de verdad".
+      if (!selErr && (!candidates || !candidates.length)) {
+        const likeToken = token.replace(/[%_]/g, c => `\\${c}`);
+        const { data: historicos } = await supabase
+          .from('bookings').select('*')
+          .ilike('notes', `%PagoToken ${likeToken}%`)
+          .is('paid_at', null);
+        if (historicos && historicos.length) candidates = historicos;
       }
 
       if (selErr) {
@@ -180,9 +196,22 @@ export const POST: APIRoute = async ({ request }) => {
             await logError('flow/boleta-automatica', 'Excepción al emitir la boleta automática tras el pago', { bookingId: updatedRow.id, error: e instanceof Error ? e.message : String(e) });
           }
         }
+      } else {
+        // candidates vacío: puede ser (a) un reintento de Flow sobre un pago ya
+        // procesado (inofensivo), o (b) un pago real cuyo token quedó huérfano
+        // porque el mp_preference_id de esa reserva se sobrescribió después
+        // (ej.: se mandó un link individual, el paciente no pagó, luego se generó
+        // un link combinado nuevo con "Cobrar todo" para la misma reserva, y el
+        // paciente termina pagando con el link viejo que aún tenía guardado en un
+        // correo o WhatsApp). Se distingue viendo si este pago exacto ya quedó
+        // registrado; si no, se avisa para revisar manualmente en Flow — mejor
+        // que asumir en silencio que "no es nada".
+        const { data: yaRegistrado } = await supabase
+          .from('bookings').select('id').eq('mp_payment_id', String(status.flowOrder)).maybeSingle();
+        if (!yaRegistrado) {
+          await logWarn('flow/pago-huerfano', 'Flow confirmó un pago pero ninguna reserva coincide con ese token — puede ser un link de pago antiguo que ya fue reemplazado por uno nuevo. Revisar en Flow y conciliar manualmente.', { token, flowOrder: status.flowOrder, amount: status.amount, payer: status.payer });
+        }
       }
-      // candidates vacío: reintento de Flow sobre un pago ya procesado — no es
-      // un error, solo evita repetir correos/calendario/boleta.
 
     } else if (status.status === 3 || status.status === 4) {
       // ❌ Rechazado o anulado — cancelar SOLO si era una reserva nueva sin pagar

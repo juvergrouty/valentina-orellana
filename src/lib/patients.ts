@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { logError } from './logger';
 
 // Crea o actualiza la ficha del paciente en `patients` a partir de los datos
 // de una reserva. Se llama cada vez que una reserva pasa a `confirmed` —
@@ -36,5 +37,6 @@ export async function upsertPatientFromBooking(b: {
     }
   } catch (err) {
     console.error('[patients] upsertPatientFromBooking:', err);
+    await logError('patients/upsert', 'No se pudo crear/actualizar la ficha del paciente tras su reserva', { email, name, error: err instanceof Error ? err.message : String(err) });
   }
 }

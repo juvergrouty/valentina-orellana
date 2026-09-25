@@ -3,7 +3,8 @@ import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
 import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar } from '../../../lib/syncCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
-import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
+import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
+import { getTotalOwedByEmail, tagBookingsWithPaymentToken } from '../../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
@@ -126,6 +127,33 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       } catch (e) { console.error('[mark_paid] boleta:', e); }
     }
     return redirect(dest);
+  }
+
+  // ── Enviar el link de "Cobrar todo" al paciente por correo ───────────────────
+  // Respaldo de "Cobrar todo" en /admin/deudas cuando el paciente no tiene
+  // teléfono para WhatsApp. Antes ese botón simplemente abría /pagar/[id] en la
+  // pestaña de la propia admin — el link nunca llegaba al paciente.
+  if (action === 'send_debt_email') {
+    const patientId = form.get('patient_id')?.toString();
+    if (!patientId) return redirect(dest + '&error=missing_fields');
+
+    const { data: patient } = await supabase.from('patients').select('id, name, email').eq('id', patientId).maybeSingle();
+    if (!patient?.email) return redirect(dest + '&error=patient_no_email');
+
+    const debt = await getTotalOwedByEmail(patient.email);
+    if (!debt.length) return redirect(dest + '&error=no_debt');
+
+    const total = debt.reduce((s, b) => s + (b.amount ?? 0), 0);
+    const reqUrl  = new URL(request.url);
+    const siteUrl = `${reqUrl.protocol}//${reqUrl.host}`;
+    const payUrl  = `${siteUrl}/pagar/${patient.id}`;
+
+    const res = await sendDebtReminderEmail({
+      patientName: patient.name, patientEmail: patient.email,
+      amount: total, sessionsCount: debt.length, payUrl,
+    });
+    if (!res.sent) return redirect(dest + '&error=email_failed&detail=' + encodeURIComponent(res.reason ?? ''));
+    return redirect(dest + '&debt_email_sent=1');
   }
 
   // ── Anular deuda ─────────────────────────────────────────────────────────────
@@ -444,7 +472,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
           baseUrl,
         });
         const paymentUrl = `${order.url}?token=${order.token}`;
-        await supabase.from('bookings').update({ mp_preference_id: order.token }).eq('id', firstId);
+        // Todas las sesiones del pack comparten el mismo token de Flow (no solo la
+        // primera) — el webhook busca reservas por mp_preference_id, así que si
+        // el pack tiene 2+ sesiones, dejar el token solo en la primera hacía que
+        // el resto se quedara "pendiente de pago" para siempre tras un pago real
+        // (mismo patrón ya corregido para /pagar/[id], nunca aplicado acá).
+        await supabase.from('bookings').update({ mp_preference_id: order.token }).in('id', bookingIds);
+        try { await tagBookingsWithPaymentToken(bookingIds, order.token); } catch (e) {
+          await logWarn('bookings/token-historial', 'No se pudo guardar el historial de token de pago (no bloquea el link)', { bookingIds, error: e instanceof Error ? e.message : String(e) });
+        }
 
         // Enviar el link por correo al paciente
         try {
