@@ -32,15 +32,25 @@ const weekEndStr   = weekEnd.toISOString().split('T')[0];
 // reminder_email_enabled / patient_rut / mp_preference_id son columnas nuevas —
 // si aún no existen en la base, reintenta sin ellas para no romper la página.
 async function fetchBookings() {
-  const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, review_email_enabled, patient_rut, paid_at, payment_note, debt_voided, no_show';
-  const res = await supabase.from('bookings').select(cols)
+  // custom_title es la columna más nueva (migración 0003) — se prueba en su
+  // propio nivel de degradación para que, si aún no se aplicó esa migración,
+  // el resto de las columnas (ya en uso en producción) no se vean afectadas.
+  const colsWithTitle = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, review_email_enabled, patient_rut, paid_at, payment_note, debt_voided, no_show, custom_title';
+  const res = await supabase.from('bookings').select(colsWithTitle)
     .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
     .neq('status', 'cancelled').order('session_time');
   if (res.error?.code === '42703') {
-    const fallbackCols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id';
-    return supabase.from('bookings').select(fallbackCols)
+    const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, review_email_enabled, patient_rut, paid_at, payment_note, debt_voided, no_show';
+    const res2 = await supabase.from('bookings').select(cols)
       .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
       .neq('status', 'cancelled').order('session_time');
+    if (res2.error?.code === '42703') {
+      const fallbackCols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id';
+      return supabase.from('bookings').select(fallbackCols)
+        .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
+        .neq('status', 'cancelled').order('session_time');
+    }
+    return res2;
   }
   return res;
 }
@@ -213,6 +223,7 @@ function evClass(status: string, pm: string | null, paidAt: string | null | unde
   return base;
 }
 function svcLabel(b: BRow): string {
+  if (b.custom_title) return b.custom_title;
   if (b.service_id && svcMap[b.service_id]) return svcMap[b.service_id];
   const m: Record<string, string> = { 'online':'Individual Online','presencial':'Individual Presencial','pareja-online':'Pareja Online','pareja-presencial':'Pareja Presencial' };
   return m[b.session_type] ?? b.session_type;
@@ -437,6 +448,8 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
                   payment_note:   b.payment_note ?? '',
                   debt_voided:    b.debt_voided ?? false,
                   no_show:        b.no_show ?? false,
+                  custom_title:   b.custom_title ?? '',
+                  service_id:     b.service_id ?? '',
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}`}
               >
@@ -794,10 +807,22 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
        ════════════════════════════════════════════════════════════════════ -->
   <div class="side-panel" id="session-panel">
     <div class="sp-header">
-      <div style="flex:1;min-width:0;">
-        <div class="sp-service" id="sp-service">—</div>
-        <div class="sp-status" id="sp-status"></div>
+      <div style="flex:1;min-width:0;display:flex;align-items:center;gap:0.4rem;">
+        <div style="min-width:0;">
+          <div class="sp-service" id="sp-service">—</div>
+          <div class="sp-status" id="sp-status"></div>
+        </div>
+        <button type="button" id="sp-btn-rename" title="Cambiar nombre de la sesión"
+          style="background:none;border:none;cursor:pointer;color:var(--stone);padding:2px;flex-shrink:0;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </button>
       </div>
+      <form method="POST" action="/api/admin/bookings" id="sp-rename-form" style="margin:0;display:none;">
+        <input type="hidden" name="action" value="rename_session">
+        <input type="hidden" name="id" id="sp-rename-id">
+        <input type="hidden" name="title" id="sp-rename-title">
+        <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+      </form>
       <button class="sp-close-btn" id="sp-close">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -856,7 +881,17 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
         <div class="sp-amount-row">
           <span class="sp-amount" id="sp-amount"></span>
           <span class="sp-pay-badge" id="sp-pay-badge"></span>
+          <button type="button" id="sp-btn-edit-amount" title="Editar monto"
+            style="background:none;border:none;cursor:pointer;color:var(--stone);padding:2px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          </button>
         </div>
+        <form method="POST" action="/api/admin/bookings" id="sp-edit-amount-form" style="margin:0;display:none;">
+          <input type="hidden" name="action" value="update_amount">
+          <input type="hidden" name="id" id="sp-edit-amount-id">
+          <input type="hidden" name="amount" id="sp-edit-amount-value">
+          <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+        </form>
         <!-- "Cobrar" — igual que Encuadrado: un botón que se despliega con WhatsApp
              y correo, para mandarle AL PACIENTE el link combinado de todo lo
              pendiente. Nunca abre la página de pago en esta pestaña. -->
@@ -998,7 +1033,36 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
                 <input type="time" name="session_time" id="sp-rsc-time" required step="900">
               </div>
             </div>
+            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;cursor:pointer;">
+              <input type="checkbox" name="notify_patient" id="sp-rsc-notify">
+              Avisar al paciente por correo
+            </label>
             <button type="submit" class="sp-btn-confirm">Confirmar reagendamiento</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Cambiar servicio -->
+      <div class="sp-section">
+        <button class="sp-action-row" id="sp-toggle-svc">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+          Cambiar el servicio agendado
+        </button>
+        <div id="sp-svc-form" style="display:none;margin-top:0.75rem;">
+          <form method="POST" action="/api/admin/bookings" style="margin:0;display:flex;flex-direction:column;gap:0.6rem;">
+            <input type="hidden" name="action" value="change_service">
+            <input type="hidden" name="id" id="sp-svc-id">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+            <div class="bp-field">
+              <label style="font-size:0.68rem;">Nuevo servicio</label>
+              <select name="service_id" id="sp-svc-select" required>
+                {allServices.map((s: any) => <option value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <p style="font-size:0.72rem;color:var(--stone);margin:0;">
+              El monto se actualiza al precio del nuevo servicio (se puede ajustar después con "Editar monto") y se avisa al paciente por correo.
+            </p>
+            <button type="submit" class="sp-btn-confirm">Confirmar cambio de servicio</button>
           </form>
         </div>
       </div>
@@ -1982,7 +2046,18 @@ function openSessionDetail(b) {
   document.getElementById('sp-rsc-id').value   = b.id;
   document.getElementById('sp-rsc-date').value = b.session_date;
   document.getElementById('sp-rsc-time').value = t5;
+  document.getElementById('sp-rsc-notify').checked = false;
   document.getElementById('sp-rsc-form').style.display = 'none';
+
+  // Cambiar servicio pre-fill
+  document.getElementById('sp-svc-id').value = b.id;
+  const svcSelect = document.getElementById('sp-svc-select');
+  if (svcSelect && b.service_id) svcSelect.value = b.service_id;
+  document.getElementById('sp-svc-form').style.display = 'none';
+
+  // Renombrar / editar monto — guardan el id de la reserva actual
+  document.getElementById('sp-rename-id').value      = b.id;
+  document.getElementById('sp-edit-amount-id').value = b.id;
 
   // Cancel
   document.getElementById('sp-cancel-id').value = b.id;
@@ -2131,6 +2206,32 @@ document.getElementById('sp-btn-anular-boleta')?.addEventListener('click', async
 document.getElementById('sp-toggle-rsc')?.addEventListener('click', () => {
   const form = document.getElementById('sp-rsc-form');
   form.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+
+// ── Cambiar servicio toggle ────────────────────────────────────────────────────
+document.getElementById('sp-toggle-svc')?.addEventListener('click', () => {
+  const form = document.getElementById('sp-svc-form');
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+
+// ── Renombrar sesión ───────────────────────────────────────────────────────────
+document.getElementById('sp-btn-rename')?.addEventListener('click', () => {
+  const current = document.getElementById('sp-service').textContent.trim();
+  const title = prompt('Nombre de la sesión:', current === '—' ? '' : current);
+  if (title === null) return; // canceló
+  document.getElementById('sp-rename-title').value = title.trim();
+  document.getElementById('sp-rename-form').submit();
+});
+
+// ── Editar monto ───────────────────────────────────────────────────────────────
+document.getElementById('sp-btn-edit-amount')?.addEventListener('click', () => {
+  const currentTxt = document.getElementById('sp-amount').textContent.replace(/\D/g, '');
+  const input = prompt('Nuevo monto (CLP):', currentTxt || '');
+  if (input === null) return; // canceló
+  const amount = parseInt(input.replace(/\D/g, ''));
+  if (isNaN(amount) || amount <= 0) { alert('Monto inválido.'); return; }
+  document.getElementById('sp-edit-amount-value').value = String(amount);
+  document.getElementById('sp-edit-amount-form').submit();
 });
 
 // ── Emitir boleta ───────────────────────────────────────────────────────────

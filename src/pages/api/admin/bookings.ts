@@ -3,7 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
 import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar } from '../../../lib/syncCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
-import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
+import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { getTotalOwedByEmail, tagBookingsWithPaymentToken } from '../../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { upsertPatientFromBooking } from '../../../lib/patients';
@@ -207,10 +207,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   }
 
   // ── Reagendar reserva ───────────────────────────────────────────────────────
+  // notify_patient (opcional): si viene marcado, le avisa por correo la nueva
+  // fecha/hora — pedido explícito de Valentina para poder elegir caso a caso
+  // (no siempre corresponde avisar, ej. si ya se coordinó por WhatsApp).
   if (action === 'reschedule') {
-    const id           = form.get('id')?.toString();
-    const session_date = form.get('session_date')?.toString() ?? '';
-    const session_time = form.get('session_time')?.toString() ?? '';
+    const id            = form.get('id')?.toString();
+    const session_date  = form.get('session_date')?.toString() ?? '';
+    const session_time  = form.get('session_time')?.toString() ?? '';
+    const notifyPatient = form.get('notify_patient') === 'on';
 
     if (!id || !session_date || !session_time) return redirect(dest);
 
@@ -224,8 +228,84 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (conflict) return redirect(dest + '&error=conflict');
 
+    const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
     await supabase.from('bookings').update({ session_date, session_time }).eq('id', id);
     try { await rescheduleBookingInCalendar(id, session_date, session_time); } catch (e) { console.error('[reschedule] gcal:', e); }
+
+    if (notifyPatient && booking?.patient_email) {
+      let svcName: string | undefined;
+      if (booking.service_id) {
+        const { data: svc } = await supabase.from('services_catalog').select('name').eq('id', booking.service_id).maybeSingle();
+        svcName = svc?.name;
+      }
+      try {
+        await sendSessionUpdatedEmail({
+          patient_name: booking.patient_name, patient_email: booking.patient_email,
+          reason: 'Tu sesión fue reagendada', session_type: booking.session_type,
+          session_date, session_time, amount: booking.amount, service_name: svcName,
+        });
+      } catch (e) { console.error('[reschedule] email:', e); }
+    }
+    return redirect(dest);
+  }
+
+  // ── Renombrar sesión (nombre personalizado, igual que Encuadrado) ───────────
+  if (action === 'rename_session') {
+    const id    = form.get('id')?.toString();
+    const title = form.get('title')?.toString()?.trim() ?? '';
+    if (!id) return redirect(dest);
+    const { error } = await supabase.from('bookings').update({ custom_title: title || null }).eq('id', id);
+    if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+    return redirect(dest);
+  }
+
+  // ── Editar monto de una sesión ya agendada ──────────────────────────────────
+  if (action === 'update_amount') {
+    const id     = form.get('id')?.toString();
+    const amount = parseInt(form.get('amount')?.toString() ?? '');
+    if (!id || isNaN(amount) || amount <= 0) return redirect(dest + '&error=invalid_amount');
+    await supabase.from('bookings').update({ amount }).eq('id', id);
+    return redirect(dest);
+  }
+
+  // ── Cambiar el servicio agendado de una sesión ya creada ────────────────────
+  // Recalcula el monto al precio del nuevo servicio (se puede ajustar después
+  // con "Editar monto" si corresponde un valor distinto) y avisa al paciente
+  // por correo del cambio — pedido explícito de Valentina.
+  if (action === 'change_service') {
+    const id        = form.get('id')?.toString();
+    const serviceId = form.get('service_id')?.toString();
+    if (!id || !serviceId) return redirect(dest);
+
+    const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
+    if (!booking) return redirect(dest);
+    const { data: svc } = await supabase.from('services_catalog').select('*').eq('id', serviceId).single();
+    if (!svc) return redirect(dest + '&error=service_not_found');
+
+    // Mantiene la modalidad actual (online/presencial) si el nuevo servicio
+    // admite ambas; si el servicio es de una sola modalidad, usa esa.
+    const wasOnline   = booking.session_type.includes('online');
+    const svcModality = svc.modality === 'ambos' ? (wasOnline ? 'online' : 'presencial') : svc.modality;
+    const sessionType = svc.type === 'pareja' ? `pareja-${svcModality}` : svcModality;
+    const amount = svc.modality === 'ambos'
+      ? (svcModality === 'online' ? (svc.price_online ?? svc.price) : (svc.price_presencial ?? svc.price))
+      : svc.price;
+
+    const { error } = await supabase.from('bookings')
+      .update({ service_id: serviceId, session_type: sessionType, amount })
+      .eq('id', id);
+    if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+
+    if (booking.patient_email) {
+      try {
+        await sendSessionUpdatedEmail({
+          patient_name: booking.patient_name, patient_email: booking.patient_email,
+          reason: 'Se actualizó el servicio de tu sesión', session_type: sessionType,
+          session_date: booking.session_date, session_time: booking.session_time,
+          amount, service_name: svc.name,
+        });
+      } catch (e) { console.error('[change_service] email:', e); }
+    }
     return redirect(dest);
   }
 
