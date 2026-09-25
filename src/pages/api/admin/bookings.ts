@@ -134,14 +134,19 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   // teléfono para WhatsApp. Antes ese botón simplemente abría /pagar/[id] en la
   // pestaña de la propia admin — el link nunca llegaba al paciente.
   if (action === 'send_debt_email') {
+    // dest puede venir sin "?" propio (ej. "/admin/deudas") — a diferencia de
+    // otras acciones de este archivo, cuyo redirect siempre trae uno (ej.
+    // "/admin/agenda?w=0"). Se arma el separador según corresponda para no
+    // dejar una URL mal formada ("/admin/deudas&error=...").
+    const sep = (extra: string) => dest + (dest.includes('?') ? '&' : '?') + extra;
     const patientId = form.get('patient_id')?.toString();
-    if (!patientId) return redirect(dest + '&error=missing_fields');
+    if (!patientId) return redirect(sep('error=missing_fields'));
 
     const { data: patient } = await supabase.from('patients').select('id, name, email').eq('id', patientId).maybeSingle();
-    if (!patient?.email) return redirect(dest + '&error=patient_no_email');
+    if (!patient?.email) return redirect(sep('error=patient_no_email'));
 
     const debt = await getTotalOwedByEmail(patient.email);
-    if (!debt.length) return redirect(dest + '&error=no_debt');
+    if (!debt.length) return redirect(sep('error=no_debt'));
 
     const total = debt.reduce((s, b) => s + (b.amount ?? 0), 0);
     const reqUrl  = new URL(request.url);
@@ -152,8 +157,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       patientName: patient.name, patientEmail: patient.email,
       amount: total, sessionsCount: debt.length, payUrl,
     });
-    if (!res.sent) return redirect(dest + '&error=email_failed&detail=' + encodeURIComponent(res.reason ?? ''));
-    return redirect(dest + '&debt_email_sent=1');
+    if (!res.sent) return redirect(sep('error=email_failed&detail=' + encodeURIComponent(res.reason ?? '')));
+    return redirect(sep('debt_email_sent=1'));
   }
 
   // ── Anular deuda ─────────────────────────────────────────────────────────────

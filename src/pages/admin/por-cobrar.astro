@@ -41,6 +41,10 @@ function formatDate(iso: string) {
 
 const pending = rows ?? [];
 const grandTotal = pending.reduce((s, b) => s + (b.amount ?? 0), 0);
+
+const debtEmailSent = Astro.url.searchParams.get('debt_email_sent') === '1';
+const errorParam    = Astro.url.searchParams.get('error');
+const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
 ---
 
 <AdminLayout title="Por cobrar" current="/admin/finanzas">
@@ -57,6 +61,26 @@ const grandTotal = pending.reduce((s, b) => s + (b.amount ?? 0), 0);
     </div>
   </div>
 
+  {debtEmailSent && (
+    <div class="card" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ✓ Link de pago enviado por correo al paciente.
+    </div>
+  )}
+  {errorParam === 'patient_no_email' && (
+    <div class="card" style="background:#fef2f2;border-color:#fecaca;color:#dc2626;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ⚠ Este paciente no tiene correo guardado en su ficha — no se pudo enviar el link.
+    </div>
+  )}
+  {errorParam === 'no_debt' && (
+    <div class="card" style="background:#fef2f2;border-color:#fecaca;color:#dc2626;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ⚠ Este paciente ya no tiene nada pendiente (puede que se haya pagado justo ahora).
+    </div>
+  )}
+  {errorParam === 'email_failed' && (
+    <div class="card" style="background:#fef2f2;border-color:#fecaca;color:#dc2626;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ⚠ No se pudo enviar el correo{errorDetail ? `: ${errorDetail}` : '.'}
+    </div>
+  )}
   {!pending.length ? (
     <div class="card" style="text-align:center;padding:3rem;">
       <p style="color:var(--stone);font-size:0.9rem;">No hay links de pago pendientes. 🎉</p>
@@ -100,10 +124,28 @@ const grandTotal = pending.reduce((s, b) => s + (b.amount ?? 0), 0);
                 <td style="font-weight:600;font-size:0.88rem;white-space:nowrap;">{formatCLP(b.amount)}</td>
                 <td style="font-size:0.8rem;color:var(--stone);">{formatDate(b.created_at?.slice(0,10) ?? b.session_date)}</td>
                 <td style="white-space:nowrap;">
-                  {waUrl && (
-                    <a href={waUrl} target="_blank" class="btn btn-dark btn-sm" style="margin-right:0.4rem;">Reenviar por WhatsApp</a>
+                  {patientId ? (
+                    <div class="cobrar-dropdown" style="position:relative;display:inline-block;">
+                      <button type="button" class="btn btn-dark btn-sm cobrar-toggle">💳 Cobrar ▾</button>
+                      <div class="cobrar-menu" style="display:none;position:absolute;top:100%;left:0;z-index:20;background:white;border:1px solid var(--dust);border-radius:var(--radius);box-shadow:0 4px 14px rgba(0,0,0,0.12);min-width:190px;margin-top:0.3rem;overflow:hidden;text-align:left;">
+                        {waUrl ? (
+                          <a href={waUrl} target="_blank" class="cobrar-menu-item" style="display:block;padding:0.6rem 0.9rem;font-size:0.82rem;color:var(--ink);text-decoration:none;">📱 Enviar por WhatsApp</a>
+                        ) : (
+                          <span style="display:block;padding:0.6rem 0.9rem;font-size:0.82rem;color:var(--stone);">📱 Sin teléfono guardado</span>
+                        )}
+                        {b.patient_email ? (
+                          <button type="button" class="cobrar-menu-item btn-send-debt-email" data-patient={patientId}
+                            style="display:block;width:100%;text-align:left;padding:0.6rem 0.9rem;font-size:0.82rem;background:none;border:none;cursor:pointer;color:var(--ink);">✉️ Enviar por correo</button>
+                        ) : (
+                          <span style="display:block;padding:0.6rem 0.9rem;font-size:0.82rem;color:var(--stone);">✉️ Sin correo guardado</span>
+                        )}
+                      </div>
+                    </div>
+                  ) : waUrl ? (
+                    <a href={waUrl} target="_blank" class="btn btn-dark btn-sm">Reenviar por WhatsApp</a>
+                  ) : (
+                    <span style="font-size:0.75rem;color:var(--stone);">Sin link guardado</span>
                   )}
-                  {!payUrl && <span style="font-size:0.75rem;color:var(--stone);">Sin link guardado</span>}
                 </td>
               </tr>
             );
@@ -114,3 +156,35 @@ const grandTotal = pending.reduce((s, b) => s + (b.amount ?? 0), 0);
   )}
 
 </AdminLayout>
+
+<script>
+(function () {
+  document.addEventListener('click', (e) => {
+    // Menú "Cobrar" (WhatsApp / correo) — cerrar cualquier otro abierto primero
+    const cobrarToggle = e.target.closest('.cobrar-toggle');
+    document.querySelectorAll('.cobrar-menu').forEach((m) => {
+      if (!cobrarToggle || m.previousElementSibling !== cobrarToggle) m.style.display = 'none';
+    });
+    if (cobrarToggle) {
+      const menu = cobrarToggle.nextElementSibling;
+      menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+      return;
+    }
+
+    const sendDebtEmailBtn = e.target.closest('.btn-send-debt-email');
+    if (sendDebtEmailBtn) {
+      if (!confirm('¿Enviar el link de pago al correo del paciente?')) return;
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/api/admin/bookings';
+      form.innerHTML = `
+        <input type="hidden" name="action" value="send_debt_email">
+        <input type="hidden" name="patient_id" value="${sendDebtEmailBtn.dataset.patient}">
+        <input type="hidden" name="redirect" value="/admin/por-cobrar">
+      `;
+      document.body.appendChild(form);
+      form.submit();
+    }
+  });
+})();
+</script>

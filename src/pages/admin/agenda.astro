@@ -266,6 +266,18 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
       {errorParam === 'boleta_failed' && (
         <div class="cal-error-banner">⚠ El pago se registró, pero la boleta NO se emitió{errorDetail ? `: ${errorDetail}` : ''}. Emítela manualmente desde el calendario.</div>
       )}
+      {errorParam === 'patient_no_email' && (
+        <div class="cal-error-banner">⚠ Este paciente no tiene correo guardado en su ficha — no se pudo enviar el link.</div>
+      )}
+      {errorParam === 'no_debt' && (
+        <div class="cal-error-banner">⚠ Este paciente ya no tiene nada pendiente (puede que se haya pagado justo ahora).</div>
+      )}
+      {errorParam === 'email_failed' && (
+        <div class="cal-error-banner">⚠ No se pudo enviar el correo{errorDetail ? `: ${errorDetail}` : ''}.</div>
+      )}
+      {Astro.url.searchParams.get('debt_email_sent') === '1' && (
+        <div class="cal-error-banner" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;">✓ Link de pago enviado por correo al paciente.</div>
+      )}
       <div class="cal-nav-group">
         <a href="?w=0" class="cal-btn-today">Hoy</a>
         <div class="cal-arrows">
@@ -886,21 +898,22 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
           </form>
         </div>
         <div id="sp-paylink-box" style="display:none;margin-top:0.6rem;">
-          <p style="font-size:0.72rem;color:var(--stone);margin-bottom:0.4rem;">Link de pago pendiente:</p>
+          <p style="font-size:0.72rem;color:var(--stone);margin-bottom:0.4rem;">Link de pago pendiente — elige cómo enviarlo:</p>
           <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
             <a href="#" id="sp-paylink-wa" target="_blank" rel="noopener" class="sp-action-row" style="padding:0.3rem 0;">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
               WhatsApp
             </a>
-            <a href="#" id="sp-paylink-mail" class="sp-action-row" style="padding:0.3rem 0;">
+            <button type="button" id="sp-paylink-mail" class="sp-action-row" style="padding:0.3rem 0;">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
               Email
-            </a>
-            <button type="button" id="sp-paylink-copy" class="sp-action-row" style="padding:0.3rem 0;">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-              Copiar
             </button>
           </div>
+          <form method="POST" action="/api/admin/bookings" id="sp-paylink-mail-form" style="margin:0;display:none;">
+            <input type="hidden" name="action" value="send_debt_email">
+            <input type="hidden" name="patient_id" id="sp-paylink-mail-patient">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+          </form>
         </div>
       </div>
 
@@ -1906,21 +1919,21 @@ function openSessionDetail(b) {
     } else {
       waPayBtn.style.display = 'none';
     }
+    // El correo se manda de verdad desde el servidor (no un mailto: — eso solo
+    // abre un borrador que hay que enviar a mano). Requiere ficha del paciente
+    // (id) porque la acción recalcula ahí todo lo pendiente para incluirlo.
     const mailBtn = document.getElementById('sp-paylink-mail');
-    if (b.patient_email) {
-      mailBtn.href = `mailto:${b.patient_email}?subject=${encodeURIComponent('Link de pago — Ps. Valentina Orellana')}&body=${encodeURIComponent(payMsg)}`;
+    if (b.patient_id && b.patient_email) {
+      document.getElementById('sp-paylink-mail-patient').value = b.patient_id;
+      mailBtn.onclick = () => {
+        if (confirm('¿Enviar el link de pago al correo del paciente?')) {
+          document.getElementById('sp-paylink-mail-form').submit();
+        }
+      };
       mailBtn.style.display = '';
     } else {
       mailBtn.style.display = 'none';
     }
-    document.getElementById('sp-paylink-copy').onclick = () => {
-      navigator.clipboard.writeText(payUrl).then(() => {
-        const btn = document.getElementById('sp-paylink-copy');
-        const original = btn.innerHTML;
-        btn.textContent = '✓ Copiado';
-        setTimeout(() => { btn.innerHTML = original; }, 1500);
-      });
-    };
     paylinkBox.style.display = 'block';
   } else {
     paylinkBox.style.display = 'none';
