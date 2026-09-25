@@ -842,6 +842,10 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
             Copiar link
           </button>
+          <a href="#" id="sp-meet-wa" target="_blank" rel="noopener" class="sp-meet-btn" style="background:#25D366;color:white;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+            Enviar por WhatsApp
+          </a>
         </div>
       </div>
 
@@ -1010,6 +1014,10 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
         <div class="sp-datetime" id="sp-datetime"></div>
         <div class="sp-duration" id="sp-duration"></div>
         <div class="sp-location" id="sp-location" style="margin-top:4px;"></div>
+        <a href="#" id="sp-location-wa" target="_blank" rel="noopener" class="sp-meet-btn" style="display:none;background:#25D366;color:white;margin-top:0.4rem;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+          Enviar dirección por WhatsApp
+        </a>
       </div>
 
       <!-- Reagendar -->
@@ -1854,7 +1862,48 @@ document.querySelectorAll('.cal-event').forEach(el => {
   });
 });
 
+// Cualquier acción del panel de sesión (marcar pagado, cobrar, reagendar,
+// renombrar, etc.) recarga la página entera al enviarse — antes eso cerraba
+// el panel sin dar ninguna señal de si funcionó, y había que volver a buscar
+// y abrir la misma sesión para comprobarlo. Ahora: (1) el botón que se apretó
+// muestra "Guardando…" al instante, para que el clic se sienta reconocido, y
+// (2) el redirect lleva la sesión que estaba abierta, así la página vuelve a
+// abrir ese mismo panel ya actualizado — se ve el resultado sin buscar nada.
+document.getElementById('session-panel')?.addEventListener('submit', (e) => {
+  const form = e.target;
+  const redirectInput = form.querySelector('input[name="redirect"]');
+  if (redirectInput && window.__currentSessionBookingId) {
+    const sep = redirectInput.value.includes('?') ? '&' : '?';
+    redirectInput.value += `${sep}booking=${window.__currentSessionBookingId}`;
+  }
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.dataset.originalText = submitBtn.textContent;
+    submitBtn.textContent = 'Guardando…';
+    submitBtn.disabled = true;
+  }
+});
+
+// Al cargar la página, si venimos de una acción del panel (?booking=<id>),
+// reabrirlo automáticamente con los datos ya actualizados.
+{
+  const reopenId = new URLSearchParams(location.search).get('booking');
+  if (reopenId) {
+    const match = document.querySelector(`.cal-event[data-booking*="${reopenId}"]`);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match.dataset.booking || '{}');
+        if (parsed.id === reopenId) {
+          openSessionDetail(parsed);
+          match.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+      } catch {}
+    }
+  }
+}
+
 function openSessionDetail(b) {
+  window.__currentSessionBookingId = b.id;
   document.getElementById('sp-service').textContent = b.service_label || b.session_type;
 
   // sessionConfirmed: la CITA está agendada/confirmada (no cancelada, no en
@@ -1899,20 +1948,34 @@ function openSessionDetail(b) {
     infoDiv.appendChild(a);
   }
 
-  // Meet link (stored as "Meet: https://..." in notes)
+  // Meet link (stored as "Meet: https://..." in notes). Igual que Encuadrado:
+  // se abre siempre con ?authuser=<cuenta del negocio>, para que no dependa de
+  // cuál cuenta de Google esté activa por defecto en el navegador.
   const meetMatch = b.notes?.match(/Meet:\s*(https:\/\/\S+)/);
   const meetDiv  = document.getElementById('sp-meet-link');
   if (meetMatch) {
-    document.getElementById('sp-meet-href').href = meetMatch[1];
+    const meetUrl = meetMatch[1];
+    const meetUrlBusiness = `${meetUrl}${meetUrl.includes('?') ? '&' : '?'}authuser=vinculosquesostienen@gmail.com`;
+    document.getElementById('sp-meet-href').href = meetUrlBusiness;
     meetDiv.style.display = 'flex';
     document.getElementById('sp-meet-copy').onclick = () => {
-      navigator.clipboard.writeText(meetMatch[1]).then(() => {
+      navigator.clipboard.writeText(meetUrl).then(() => {
         const btn = document.getElementById('sp-meet-copy');
         const original = btn.innerHTML;
         btn.textContent = '✓ Copiado';
         setTimeout(() => { btn.innerHTML = original; }, 1500);
       });
     };
+    const meetWaBtn = document.getElementById('sp-meet-wa');
+    const meetWaDigits = (b.patient_phone || '').replace(/\D/g, '');
+    const meetWaPhone  = meetWaDigits.length === 9 ? '56' + meetWaDigits : meetWaDigits;
+    if (meetWaPhone.length >= 11) {
+      const meetMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te comparto el link de Google Meet para tu sesión: ${meetUrl}`;
+      meetWaBtn.href = `https://wa.me/${meetWaPhone}?text=${encodeURIComponent(meetMsg)}`;
+      meetWaBtn.style.display = '';
+    } else {
+      meetWaBtn.style.display = 'none';
+    }
   } else {
     meetDiv.style.display = 'none';
   }
@@ -2038,9 +2101,29 @@ function openSessionDetail(b) {
   document.getElementById('sp-duration').textContent = `${t5} – ${addMins(t5, dur)} · ${dur} min`;
 
   const isOnline = b.session_type?.includes('online');
+  // Dirección real de Configuración (antes decía "Las Condes" fijo, sin
+  // reflejar la dirección configurada — igual bug que ya se corrigió en el
+  // mensaje de WhatsApp de recordatorio, acá quedaba pendiente).
+  const locLabel = clinicAddress || 'En mi consulta';
   document.getElementById('sp-location').innerHTML = isOnline
     ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:3px"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Sesión online'
-    : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:3px"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>En mi consulta · Las Condes';
+    : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:3px"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>${locLabel}`;
+
+  // Enviar la dirección presencial por WhatsApp — mismo patrón que el link de Meet.
+  const locWaBtn = document.getElementById('sp-location-wa');
+  if (!isOnline && locLabel) {
+    const locWaDigits = (b.patient_phone || '').replace(/\D/g, '');
+    const locWaPhone  = locWaDigits.length === 9 ? '56' + locWaDigits : locWaDigits;
+    if (locWaPhone.length >= 11) {
+      const locMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te espero en: ${locLabel}`;
+      locWaBtn.href = `https://wa.me/${locWaPhone}?text=${encodeURIComponent(locMsg)}`;
+      locWaBtn.style.display = 'inline-flex';
+    } else {
+      locWaBtn.style.display = 'none';
+    }
+  } else {
+    locWaBtn.style.display = 'none';
+  }
 
   // Reagendar pre-fill
   document.getElementById('sp-rsc-id').value   = b.id;
