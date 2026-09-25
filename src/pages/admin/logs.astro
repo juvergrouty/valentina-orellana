@@ -16,6 +16,13 @@ if (Astro.request.method === 'POST') {
   return Astro.redirect('/admin/logs?cleared=1');
 }
 
+// Marca "revisado hasta acá" para que el aviso de errores nuevos (en
+// AdminLayout, visible en todo el admin) no vuelva a contar lo que ya vio.
+await supabase.from('settings').upsert(
+  { key: 'logs_last_seen_at', value: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { onConflict: 'key' },
+);
+
 let query = supabase
   .from('admin_logs')
   .select('*')

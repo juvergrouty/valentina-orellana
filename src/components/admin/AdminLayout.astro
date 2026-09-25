@@ -1,4 +1,6 @@
 ---
+import { supabase } from '../../lib/supabase';
+
 interface Props {
   title: string;
   current?: string;
@@ -7,6 +9,24 @@ interface Props {
 const { title, current, fullHeight = false } = Astro.props;
 
 const path = current ?? '';
+
+// Aviso de errores nuevos, visible en TODAS las páginas del admin — a pedido
+// explícito de Valentina (24 sep 2026): "queda visible en /admin/logs" no
+// sirve de nada si nadie va a mirarlo. Un correo tampoco: ya está saturada de
+// correos. Esto se compara contra la última vez que abrió /admin/logs
+// (guardado en settings) — si hay errores más nuevos que esa visita, se avisa
+// acá mismo, en cualquier página que abra, sin que tenga que acordarse de nada.
+let newErrorCount = 0;
+try {
+  const { data: setting } = await supabase.from('settings').select('value').eq('key', 'logs_last_seen_at').maybeSingle();
+  const lastSeen = setting?.value || '1970-01-01T00:00:00.000Z';
+  const { count } = await supabase
+    .from('admin_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('level', 'error')
+    .gt('created_at', lastSeen);
+  newErrorCount = count ?? 0;
+} catch { /* si falla esta consulta, no debe tumbar el resto del admin */ }
 
 const navMain = [
   { href: '/admin/agenda',         label: 'Calendario',     icon: 'calendar',   exact: true },
@@ -727,6 +747,12 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
 
   <!-- ── Main area ──────────────────────────────────────────────────────── -->
   <main class="enc-main">
+    {newErrorCount > 0 && (
+      <a href="/admin/logs?filtro=error"
+        style="display:flex;align-items:center;gap:0.6rem;background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.65rem 1.25rem;font-size:0.85rem;font-weight:600;text-decoration:none;">
+        ⚠ {newErrorCount} error{newErrorCount !== 1 ? 'es' : ''} nuevo{newErrorCount !== 1 ? 's' : ''} desde tu última revisión — clic para ver
+      </a>
+    )}
     {!fullHeight && (
       <div class="enc-topbar">
         <button class="mobile-toggle btn btn-outline btn-sm" id="mobile-menu-btn">
