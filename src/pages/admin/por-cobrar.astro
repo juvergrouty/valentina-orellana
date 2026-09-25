@@ -1,0 +1,101 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+// "Por cobrar" (distinto de "deuda", ver /admin/deudas): sesiones que TODAVÍA
+// no ocurren y cuyo link de pago (Flow) sigue sin pagarse. No es dinero que se
+// deba — es dinero que debería entrar cuando el paciente pague el link.
+const { data: rows } = await supabase
+  .from('bookings')
+  .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, mp_preference_id, created_at')
+  .eq('status', 'pending_payment')
+  .neq('session_date', '2099-12-31') // cobros manuales sin fecha se gestionan desde /admin/cobros
+  .gt('amount', 0)
+  .order('session_date', { ascending: true });
+
+const { data: settingsRows } = await supabase.from('settings').select('key, value').eq('key', 'flow_env');
+const flowEnv = settingsRows?.[0]?.value;
+const flowCheckoutBase = flowEnv === 'production' ? 'https://www.flow.cl/app/web/pay.php' : 'https://sandbox.flow.cl/app/web/pay.php';
+
+const SESSION_LABELS: Record<string, string> = {
+  'online': 'Individual Online', 'presencial': 'Individual Presencial',
+  'pareja-online': 'Pareja Online', 'pareja-presencial': 'Pareja Presencial',
+};
+
+const formatCLP = (n: number) =>
+  new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+function formatDate(iso: string) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+const pending = rows ?? [];
+const grandTotal = pending.reduce((s, b) => s + (b.amount ?? 0), 0);
+---
+
+<AdminLayout title="Por cobrar" current="/admin/finanzas">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+    <div>
+      <a href="/admin/finanzas" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Finanzas</a>
+      <h1 style="margin-top:0.5rem;">Por cobrar — links de pago pendientes</h1>
+      <p style="color:var(--stone);font-size:0.88rem;">Sesiones agendadas cuyo link de pago aún no se paga. No son deudas — nadie ha prestado el servicio todavía.</p>
+    </div>
+    <div style="text-align:right;">
+      <p class="label" style="color:#b45309;">Total pendiente</p>
+      <p style="font-size:1.4rem;font-weight:700;">{formatCLP(grandTotal)}</p>
+    </div>
+  </div>
+
+  {!pending.length ? (
+    <div class="card" style="text-align:center;padding:3rem;">
+      <p style="color:var(--stone);font-size:0.9rem;">No hay links de pago pendientes. 🎉</p>
+    </div>
+  ) : (
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table>
+        <thead>
+          <tr>
+            <th>Paciente</th>
+            <th>Sesión</th>
+            <th>Fecha</th>
+            <th>Monto</th>
+            <th>Link enviado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pending.map((b) => {
+            const waPhone = (b.patient_phone ?? '').replace(/\D/g, '');
+            const waNumber = waPhone.length === 9 ? '56' + waPhone : waPhone;
+            const payUrl = b.mp_preference_id ? `${flowCheckoutBase}?token=${b.mp_preference_id}` : null;
+            const firstName = b.patient_name.split(' ')[0];
+            const waMsg = payUrl ? encodeURIComponent(
+              `Hola ${firstName}, te recuerdo el link de pago para tu sesión (${formatCLP(b.amount)}): ${payUrl}`
+            ) : '';
+            const waUrl = payUrl && waNumber.length >= 11 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
+            return (
+              <tr>
+                <td>
+                  <p style="font-weight:600;font-size:0.88rem;">{b.patient_name}</p>
+                  {b.patient_email && <p style="font-size:0.75rem;color:var(--stone);">{b.patient_email}</p>}
+                </td>
+                <td style="font-size:0.84rem;">{SESSION_LABELS[b.session_type] ?? b.session_type}</td>
+                <td style="font-size:0.84rem;color:var(--stone);">{formatDate(b.session_date)}{b.session_time ? ` · ${b.session_time.slice(0,5)}` : ''}</td>
+                <td style="font-weight:600;font-size:0.88rem;white-space:nowrap;">{formatCLP(b.amount)}</td>
+                <td style="font-size:0.8rem;color:var(--stone);">{formatDate(b.created_at?.slice(0,10) ?? b.session_date)}</td>
+                <td style="white-space:nowrap;">
+                  {waUrl && (
+                    <a href={waUrl} target="_blank" class="btn btn-dark btn-sm" style="margin-right:0.4rem;">Reenviar por WhatsApp</a>
+                  )}
+                  {!payUrl && <span style="font-size:0.75rem;color:var(--stone);">Sin link guardado</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  )}
+
+</AdminLayout>

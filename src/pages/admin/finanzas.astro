@@ -32,6 +32,15 @@ const totalPorCobrar = bookings
   .filter(b => isConfirmed(b.status) && !b.paid_at && b.debt_voided !== true && b.amount)
   .reduce((sum, b) => sum + (b.amount ?? 0), 0);
 
+// ── Por cobrar — links de pago pendientes ───────────────────────────────────
+// A pedido de Valentina (24 sep 2026): distinto de "deuda" — acá la sesión
+// TODAVÍA no ocurrió y el paciente no ha pagado el link que se le mandó. No es
+// dinero que se le deba (nadie prestó el servicio todavía), es dinero que
+// debería entrar cuando pague — por eso va aparte, no sumado a "Deudas".
+const totalPorCobrarLink = bookings
+  .filter(b => b.status === 'pending_payment' && b.amount)
+  .reduce((sum, b) => sum + (b.amount ?? 0), 0);
+
 // ── Reservas del mes seleccionado ──────────────────────────────────────────
 const inMonth = bookings.filter(b => {
   const [y, m] = (b.session_date ?? '').split('-').map(Number);
@@ -96,6 +105,14 @@ const formatCLP = (n: number) =>
           <div class="fin-card-value">{formatCLP(totalPorCobrar)}</div>
           <div class="fin-card-foot">
             <a href="/admin/deudas" class="btn btn-outline btn-sm">Ir a cobrar →</a>
+          </div>
+        </div>
+
+        <div class="fin-card">
+          <div class="fin-card-label" style="color:#b45309;">Por cobrar · links de pago pendientes</div>
+          <div class="fin-card-value">{formatCLP(totalPorCobrarLink)}</div>
+          <div class="fin-card-foot">
+            <a href="/admin/por-cobrar" class="btn btn-outline btn-sm">Ver pendientes →</a>
           </div>
         </div>
       </div>
@@ -199,7 +216,8 @@ const formatCLP = (n: number) =>
 .fin-head h1 { font-size: 1.6rem; font-weight: 700; color: #111827; }
 .fin-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0.5rem 1.5rem 2rem; }
 
-.fin-top { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem; }
+.fin-top { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem; }
+@media (max-width: 1000px) { .fin-top { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 720px) { .fin-top { grid-template-columns: 1fr; } }
 .fin-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.25rem 1.5rem; }
 .fin-card-label { font-size: 0.85rem; color: #6b7280; margin-bottom: 0.5rem; }

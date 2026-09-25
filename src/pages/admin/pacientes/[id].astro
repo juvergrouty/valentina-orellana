@@ -213,7 +213,13 @@ const formatCLP = (n: number) =>
             const nota = notesByBooking[b.id] ?? notesByDate[b.session_date] ?? null;
             const badgeClass = b.status === 'confirmed' ? 'badge-confirmed' : b.status === 'cancelled' ? 'badge-cancelled' : 'badge-pending';
             const badgeLabel = b.status === 'confirmed' ? 'Confirmada' : b.status === 'cancelled' ? 'Cancelada' : 'Pendiente';
-            const boletaFolio = (b.notes?.match(/Boleta Folio (\d+)/) ?? [])[1] ?? null;
+            // Toma la ÚLTIMA línea "Boleta Folio N..." (por si se anuló y se
+            // volvió a emitir) — mismo criterio que ya usa el panel del
+            // calendario, para que ambas pantallas muestren lo mismo.
+            const boletaLines  = [...(b.notes ?? '').matchAll(/Boleta\s+Folio\s+(\d+)[^\n]*/gi)];
+            const lastBoleta   = boletaLines.length ? boletaLines[boletaLines.length - 1] : null;
+            const boletaFolio  = lastBoleta ? lastBoleta[1] : null;
+            const boletaAnulada = lastBoleta ? /ANULADA/i.test(lastBoleta[0]) : false;
             // Estado de pago real, separado del estado de la reserva (ver migración
             // 0001, sección 5): una reserva puede estar "Confirmada" sin haber sido
             // pagada todavía (ej. "Pago en consulta").
@@ -248,11 +254,28 @@ const formatCLP = (n: number) =>
                   </div>
                   <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
                     <span class="bol-status" data-bid={b.id} style="font-size:0.75rem;"></span>
-                    {boletaFolio ? (
+                    {boletaFolio && !boletaAnulada ? (
                       <>
                         <span class="badge badge-confirmed">✓ Boleta {boletaFolio}</span>
                         <button type="button" class="btn btn-outline btn-sm bol-pdf" data-bid={b.id}>PDF</button>
                         <button type="button" class="btn btn-outline btn-sm bol-email" data-bid={b.id}>Email</button>
+                        <select class="bol-causal" data-bid={b.id} style="font-size:0.75rem;padding:0.3rem 0.4rem;">
+                          <option value="error_digitacion">Error en la digitación</option>
+                          <option value="no_pago">No se efectuó el pago</option>
+                          <option value="no_prestacion">No se efectuó la prestación de servicios</option>
+                        </select>
+                        <button type="button" class="btn btn-outline btn-sm bol-anular" data-bid={b.id} style="color:#b45309;">
+                          Anular boleta
+                        </button>
+                      </>
+                    ) : boletaFolio && boletaAnulada ? (
+                      <>
+                        <span class="badge badge-cancelled">✕ Boleta {boletaFolio} anulada</span>
+                        {isPaid && (
+                          <button type="button" class="btn btn-outline btn-sm bol-emitir" data-bid={b.id} data-rut={patient.rut ?? ''}>
+                            Emitir nueva boleta
+                          </button>
+                        )}
                       </>
                     ) : isPaid ? (
                       <button type="button" class="btn btn-outline btn-sm bol-emitir" data-bid={b.id} data-rut={patient.rut ?? ''}>
@@ -592,6 +615,20 @@ const formatCLP = (n: number) =>
     const emitir = e.target.closest('.bol-emitir');
     const pdf    = e.target.closest('.bol-pdf');
     const email  = e.target.closest('.bol-email');
+    const anular = e.target.closest('.bol-anular');
+
+    if (anular) {
+      const bid = anular.dataset.bid;
+      const causalSel = document.querySelector(`.bol-causal[data-bid="${bid}"]`);
+      const causal = causalSel ? causalSel.value : 'error_digitacion';
+      if (!confirm('¿Anular esta boleta de honorarios? Se anula el documento en el SII — esta acción no se puede deshacer. Después podrás emitir una nueva si corresponde.')) return;
+      anular.disabled = true; bolStatus(bid, 'Anulando…', '#6b7280');
+      try {
+        const d = await bolPost({ action: 'anular', booking_id: bid, causal });
+        if (d.ok) { bolStatus(bid, `✕ Boleta anulada (Folio ${d.folio ?? ''})`, '#b45309'); setTimeout(() => location.reload(), 900); }
+        else { bolStatus(bid, '✕ ' + (d.error ?? 'No se pudo anular'), '#dc2626'); anular.disabled = false; }
+      } catch { bolStatus(bid, '✕ Error de conexión', '#dc2626'); anular.disabled = false; }
+    }
 
     if (emitir) {
       const bid = emitir.dataset.bid, rut = emitir.dataset.rut;
