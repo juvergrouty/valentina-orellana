@@ -282,7 +282,7 @@ const formatCLP = (n: number) =>
                         Emitir boleta
                       </button>
                     ) : null}
-                    {!isPaid && !isVoided && (
+                    {!isPaid && !isVoided && !isCancelled && (
                       <>
                         <button type="button" class="btn btn-outline btn-sm"
                           onclick={`toggleNota('pay-${i}')`}>💰 Marcar pagado</button>
@@ -290,7 +290,7 @@ const formatCLP = (n: number) =>
                           style="color:var(--stone);">Anular deuda</button>
                       </>
                     )}
-                    {b.session_date !== '2099-12-31' && b.patient_email && (
+                    {!isCancelled && b.session_date !== '2099-12-31' && b.patient_email && (
                       <>
                         <button type="button" class="btn btn-outline btn-sm resend-mail" data-action="confirmation" data-bid={b.id}
                           title="Reenviar el correo de confirmación de esta sesión">✉ Confirmación</button>
