@@ -138,12 +138,27 @@ try {
       const data = await res.json();
       // Evitar duplicar los eventos que ya son reservas del sitio
       const bookedGoogleIds = new Set(bookings.map((b: { google_event_id?: string }) => b.google_event_id).filter(Boolean));
+      // CORREGIDO: una reserva con "Enviar link de pago" (pending_payment) no
+      // tiene google_event_id todavía — el sitio recién sincroniza su propio
+      // evento cuando el pago se confirma (ver flow/confirm.ts). Si mientras
+      // tanto ya existe un evento de Google Calendar para esa misma fecha/hora
+      // (agendado aparte, sin tocar el calendario real de Valentina), el bloque
+      // gris se dibujaba encima de la tarjeta de color de la reserva real,
+      // tapándola por completo aunque la reserva sí estuviera ahí. Se agrega un
+      // segundo cruce por fecha+hora+nombre del paciente (sin ID) para no
+      // duplicar el bloque cuando ya hay una tarjeta real en ese mismo horario.
+      const bookingBySlot: Record<string, { patient_name: string }> = {};
+      bookings.forEach((b: { session_date: string; session_time: string; patient_name: string }) => {
+        bookingBySlot[`${b.session_date}|${(b.session_time ?? '').slice(0, 5)}`] = { patient_name: b.patient_name };
+      });
       for (const ev of (data.items ?? [])) {
         if (ev.id && bookedGoogleIds.has(ev.id)) continue;
         const sdt = ev.start?.dateTime;
         if (!sdt) continue; // omitir eventos de todo el día
         const date = sdt.slice(0, 10);
         const time = sdt.slice(11, 16);
+        const matchingBooking = bookingBySlot[`${date}|${time}`];
+        if (matchingBooking && (ev.summary ?? '').toLowerCase().includes(matchingBooking.patient_name.toLowerCase())) continue;
         let dur = 60;
         if (ev.end?.dateTime) {
           dur = Math.max(20, Math.round((new Date(ev.end.dateTime).getTime() - new Date(sdt).getTime()) / 60000));
