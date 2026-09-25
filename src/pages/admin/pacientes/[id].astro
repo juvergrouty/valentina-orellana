@@ -217,8 +217,12 @@ const formatCLP = (n: number) =>
             // Estado de pago real, separado del estado de la reserva (ver migración
             // 0001, sección 5): una reserva puede estar "Confirmada" sin haber sido
             // pagada todavía (ej. "Pago en consulta").
-            const isPaid   = !!b.paid_at;
-            const isVoided = !!b.debt_voided;
+            const isPaid     = !!b.paid_at;
+            const isVoided    = !!b.debt_voided;
+            // CORREGIDO: una reserva cancelada mostraba igual el badge "Por
+            // pagar" y los botones de cobro/boleta, como si todavía se le
+            // debiera esa sesión — una sesión cancelada no se cobra, punto.
+            const isCancelled = b.status === 'cancelled';
             const payBadgeClass = isVoided ? 'badge-cancelled' : isPaid ? 'badge-confirmed' : 'badge-pending';
             const payBadgeLabel = isVoided ? 'Deuda anulada' : isPaid ? (b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado') : 'Por pagar';
             return (
@@ -239,7 +243,7 @@ const formatCLP = (n: number) =>
                       )}
                     </div>
                     <span class={`badge ${badgeClass}`}>{badgeLabel}</span>
-                    <span class={`badge ${payBadgeClass}`}>{payBadgeLabel}</span>
+                    {!isCancelled && <span class={`badge ${payBadgeClass}`}>{payBadgeLabel}</span>}
                     <span style="font-size:0.82rem;color:var(--stone);">{formatCLP(b.amount)}</span>
                   </div>
                   <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
