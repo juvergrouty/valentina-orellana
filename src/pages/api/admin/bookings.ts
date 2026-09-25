@@ -249,6 +249,22 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     return redirect(dest);
   }
 
+  // ── Generar el link de Google Meet antes de que el paciente pague ───────────
+  // Antes, una sesión online solo conseguía su evento de Calendar/Meet al
+  // confirmarse el pago — si estaba pendiente de pago, no había Meet que
+  // mandar. syncBookingToCalendar ya es idempotente (si la reserva ya tiene
+  // google_event_id, no crea uno nuevo), así que si esto se genera ahora y
+  // después el paciente paga, se respeta el MISMO link — nunca se duplica.
+  if (action === 'generate_meet') {
+    const id = form.get('id')?.toString();
+    if (!id) return redirect(dest);
+    const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
+    if (booking && booking.session_type?.includes('online')) {
+      try { await syncBookingToCalendar(booking); } catch (e) { console.error('[generate_meet] sync:', e); }
+    }
+    return redirect(dest);
+  }
+
   // ── Renombrar sesión (nombre personalizado, igual que Encuadrado) ───────────
   if (action === 'rename_session') {
     const id    = form.get('id')?.toString();

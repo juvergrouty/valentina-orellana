@@ -855,6 +855,19 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
             Enviar por WhatsApp
           </a>
         </div>
+        <!-- Sesión online SIN Meet todavía (ej. pendiente de pago) — antes solo
+             se generaba al confirmarse el pago, sin dar forma de mandarlo antes. -->
+        <div id="sp-meet-generate" style="display:none;margin-top:0.5rem;">
+          <button type="button" id="sp-meet-generate-btn" class="sp-meet-btn" style="background:#eff6ff;color:#4f5ce8;border:1px solid #93c5fd;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            Generar link de Google Meet
+          </button>
+        </div>
+        <form method="POST" action="/api/admin/bookings" id="sp-meet-generate-form" style="margin:0;display:none;">
+          <input type="hidden" name="action" value="generate_meet">
+          <input type="hidden" name="id" id="sp-meet-generate-id">
+          <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+        </form>
       </div>
 
       <!-- Acciones -->
@@ -1971,6 +1984,8 @@ function openSessionDetail(b) {
   // cuál cuenta de Google esté activa por defecto en el navegador.
   const meetMatch = b.notes?.match(/Meet:\s*(https:\/\/\S+)/);
   const meetDiv  = document.getElementById('sp-meet-link');
+  const meetGenerateDiv = document.getElementById('sp-meet-generate');
+  const isOnlineSession = b.session_type?.includes('online');
   if (meetMatch) {
     const meetUrl = meetMatch[1];
     const meetUrlBusiness = `${meetUrl}${meetUrl.includes('?') ? '&' : '?'}authuser=vinculosquesostienen@gmail.com`;
@@ -1994,8 +2009,15 @@ function openSessionDetail(b) {
     } else {
       meetWaBtn.style.display = 'none';
     }
+    meetGenerateDiv.style.display = 'none';
   } else {
     meetDiv.style.display = 'none';
+    if (isOnlineSession) {
+      document.getElementById('sp-meet-generate-id').value = b.id;
+      meetGenerateDiv.style.display = 'block';
+    } else {
+      meetGenerateDiv.style.display = 'none';
+    }
   }
 
   // Marcar / quitar inasistencia
@@ -2333,6 +2355,10 @@ document.getElementById('sp-btn-edit-amount')?.addEventListener('click', () => {
   if (isNaN(amount) || amount <= 0) { alert('Monto inválido.'); return; }
   document.getElementById('sp-edit-amount-value').value = String(amount);
   document.getElementById('sp-edit-amount-form').submit();
+});
+
+document.getElementById('sp-meet-generate-btn')?.addEventListener('click', () => {
+  document.getElementById('sp-meet-generate-form').submit();
 });
 
 // ── Emitir boleta ───────────────────────────────────────────────────────────
