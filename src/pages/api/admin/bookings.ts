@@ -546,7 +546,18 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       return redirect(dest + '&error=unknown_no_booking');
     }
 
-    // ── Modo LINK DE PAGO: generar orden Flow y enviarla al paciente ──────────
+    // ── Modo LINK DE PAGO: página intermedia /pagar/[id] (misma que "Cobrar") ──
+    // Antes esta rama creaba su PROPIA orden de Flow y mandaba el link crudo de
+    // Flow (flow.cl/app/web/pay.php?token=...) directo al paciente — sin pasar
+    // por la página de la clínica que muestra el detalle antes de pagar, e
+    // inconsistente con "Cobrar"/"por cobrar", que sí usan /pagar/[id]. Esa
+    // orden además quedaba huérfana en Flow para siempre si el paciente
+    // terminaba pagando por el link que se genera al entrar a /pagar/[id]
+    // (pagar-deuda.ts crea su propia orden ahí) — de ahí las órdenes
+    // "Pendiente" duplicadas que se ven en el dashboard de Flow. Ahora no se
+    // crea ninguna orden acá: solo se asegura la ficha del paciente (para
+    // tener su id) y se manda el link a /pagar/[id], que crea la orden de
+    // Flow recién cuando el paciente aprieta "Ir a pagar".
     if (payment_mode === 'link') {
       if (!finalEmail) return redirect(dest + '&error=need_email');
       try {
@@ -555,30 +566,42 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         const fcfg: Record<string, string> = {};
         (flowRows ?? []).forEach((r: { key: string; value: string }) => { fcfg[r.key] = r.value; });
         if (fcfg['flow_enabled'] === 'false') return redirect(dest + '&error=flow_disabled');
-        const baseUrl = fcfg['flow_env'] === 'production' ? FLOW_URLS.production : FLOW_URLS.sandbox;
 
-        const firstId = bookingIds[0];
         const reqUrl  = new URL(request.url);
         const siteUrl = `${reqUrl.protocol}//${reqUrl.host}`;
 
-        const order = await createPaymentOrder({
-          subject:         svc.name,
-          amount:          totalPrice,
-          email:           finalEmail,
-          orderId:         firstId,
-          urlConfirmation: `${siteUrl}/api/flow/confirm`,
-          urlReturn:       `${siteUrl}/api/flow/return`,
-          baseUrl,
+        const patientId = await upsertPatientFromBooking({
+          patient_name: finalName, patient_email: finalEmail, patient_phone: finalPhone, rut: finalRut,
         });
-        const paymentUrl = `${order.url}?token=${order.token}`;
-        // Todas las sesiones del pack comparten el mismo token de Flow (no solo la
-        // primera) — el webhook busca reservas por mp_preference_id, así que si
-        // el pack tiene 2+ sesiones, dejar el token solo en la primera hacía que
-        // el resto se quedara "pendiente de pago" para siempre tras un pago real
-        // (mismo patrón ya corregido para /pagar/[id], nunca aplicado acá).
-        await supabase.from('bookings').update({ mp_preference_id: order.token }).in('id', bookingIds);
-        try { await tagBookingsWithPaymentToken(bookingIds, order.token); } catch (e) {
-          await logWarn('bookings/token-historial', 'No se pudo guardar el historial de token de pago (no bloquea el link)', { bookingIds, error: e instanceof Error ? e.message : String(e) });
+
+        let paymentUrl: string;
+        if (patientId) {
+          paymentUrl = `${siteUrl}/pagar/${patientId}`;
+        } else {
+          // Respaldo si por algún motivo no se pudo crear/encontrar la ficha del
+          // paciente: genera una orden de Flow puntual para esta reserva, como
+          // se hacía antes, para no dejar al paciente sin ninguna forma de pagar.
+          await logWarn('bookings/create-admin', 'No se pudo resolver la ficha del paciente para el link de pago — se usa una orden de Flow directa como respaldo', { email: finalEmail });
+          const baseUrl = fcfg['flow_env'] === 'production' ? FLOW_URLS.production : FLOW_URLS.sandbox;
+          const order = await createPaymentOrder({
+            subject:         svc.name,
+            amount:          totalPrice,
+            email:           finalEmail,
+            orderId:         bookingIds[0],
+            urlConfirmation: `${siteUrl}/api/flow/confirm`,
+            urlReturn:       `${siteUrl}/api/flow/return`,
+            baseUrl,
+          });
+          paymentUrl = `${order.url}?token=${order.token}`;
+          // Todas las sesiones del pack comparten el mismo token de Flow (no solo
+          // la primera) — el webhook busca reservas por mp_preference_id, así que
+          // si el pack tiene 2+ sesiones, dejar el token solo en la primera hacía
+          // que el resto se quedara "pendiente de pago" para siempre tras un pago
+          // real.
+          await supabase.from('bookings').update({ mp_preference_id: order.token }).in('id', bookingIds);
+          try { await tagBookingsWithPaymentToken(bookingIds, order.token); } catch (e) {
+            await logWarn('bookings/token-historial', 'No se pudo guardar el historial de token de pago (no bloquea el link)', { bookingIds, error: e instanceof Error ? e.message : String(e) });
+          }
         }
 
         // Enviar el link por correo al paciente

@@ -444,12 +444,13 @@ export async function sendReviewRequestEmail(opts: {
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Gracias por confiar en este proceso</h1>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.25rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(opts.patientName)}, espero que nuestras sesiones te hayan sido de ayuda.
-          Si te parece bien, me encantaría que dejaras una breve reseña en Google.
-          Tu experiencia le sirve a otras personas que buscan apoyo y están dando el primer paso.
+          Hola ${escapeHtml(opts.patientName)}, luego del proceso que has vivido en terapia, me encantaría poder
+          pedirte un favor: que pudieras evaluarme como psicóloga con una breve reseña en Google.
         </p>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
-          Solo te tomará un minuto. ¡Gracias de corazón!
+          Hazlo solo si te sientes cómodo/a — no hay ninguna obligación. Para mí sería de mucha ayuda,
+          y también le sirve a otras personas que están dando el primer paso en buscar apoyo.
+          ¡Gracias de corazón!
         </p>
         <a href="${opts.reviewUrl}"
            style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;
