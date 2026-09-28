@@ -721,6 +721,46 @@ export async function sendExpiredBookingAdminAlert(
   await logEmail('email/hora-liberada-admin', adminEmail, 'Hora liberada automáticamente', !res.error, res.error?.message);
 }
 
+// ─── Email al admin: paciente reagendó su sesión desde el sitio ─────────────
+// Antes /api/reschedule.ts (reagendamiento público) reusaba sendNotificationToAdmin,
+// que dice "Nueva reserva confirmada" — indistinguible de una reserva nueva de
+// verdad, aunque sea el mismo paciente moviendo la hora de una sesión ya pagada.
+export async function sendRescheduleAdminAlert(
+  data: {
+    patient_name: string; patient_email: string;
+    old_date: string; old_time: string;
+    new_date: string; new_time: string;
+  },
+  adminEmail: string,
+) {
+  const client = getResend();
+  if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
+
+  const res = await client.emails.send({
+    from:    FROM,
+    to:      adminEmail,
+    subject: `🔁 Sesión reagendada — ${data.patient_name} · ahora ${formatDate(data.new_date)} ${data.new_time}`,
+    html: `
+      <div style="font-family:'Inter',sans-serif;max-width:480px;margin:0 auto;padding:1.5rem;color:#1A1A18;background:#FAF7F4;">
+        <h2 style="font-size:1rem;font-weight:600;margin-bottom:1.25rem;border-bottom:2px solid #576352;padding-bottom:0.5rem;">
+          El paciente reagendó su sesión
+        </h2>
+        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+          <tr><td style="padding:0.35rem 0;color:#6B6860;width:40%;">Paciente</td>
+              <td style="padding:0.35rem 0;font-weight:500;">${escapeHtml(data.patient_name)}</td></tr>
+          <tr><td style="padding:0.35rem 0;color:#6B6860;">Email</td>
+              <td style="padding:0.35rem 0;">${escapeHtml(data.patient_email)}</td></tr>
+          <tr><td style="padding:0.35rem 0;color:#6B6860;">Antes</td>
+              <td style="padding:0.35rem 0;text-decoration:line-through;color:#9B968C;">${formatDate(data.old_date)} ${data.old_time}</td></tr>
+          <tr><td style="padding:0.35rem 0;color:#6B6860;">Ahora</td>
+              <td style="padding:0.35rem 0;font-weight:600;font-size:1rem;">${formatDate(data.new_date)} ${data.new_time}</td></tr>
+        </table>
+      </div>
+    `,
+  });
+  await logEmail('email/reagendo-admin', adminEmail, 'Paciente reagendó', !res.error, res.error?.message);
+}
+
 // ─── Email al admin: nueva reserva ───────────────────────────────────────────
 export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail: string, pendingPayment = false) {
   const client = getResend();

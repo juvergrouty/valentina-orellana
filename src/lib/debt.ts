@@ -10,6 +10,16 @@ export interface DebtBooking {
   session_date: string;
   session_time: string | null;
   amount: number;
+  notes?: string | null;
+}
+
+// Los "cobros manuales" (monto/descripción libre desde /admin/cobros) se guardan
+// con session_date='2099-12-31' como marcador de "no es una sesión con fecha" —
+// su descripción real vive en notes: "Cobro manual generado desde admin · <texto>".
+const MANUAL_CHARGE_PREFIX = 'Cobro manual generado desde admin · ';
+export function manualChargeLabel(notes: string | null | undefined): string | null {
+  const line = (notes ?? '').split('\n').find((l) => l.startsWith(MANUAL_CHARGE_PREFIX));
+  return line ? line.slice(MANUAL_CHARGE_PREFIX.length).trim() || null : null;
 }
 
 export async function getPendingDebtByEmail(email: string): Promise<DebtBooking[]> {
@@ -53,10 +63,15 @@ export async function getTotalOwedByEmail(email: string): Promise<DebtBooking[]>
     getPendingDebtByEmail(email),
     supabase
       .from('bookings')
-      .select('id, session_type, session_date, session_time, amount')
+      .select('id, session_type, session_date, session_time, amount, notes')
       .eq('patient_email', email.toLowerCase())
       .eq('status', 'pending_payment')
-      .neq('session_date', '2099-12-31') // cobro manual sin fecha, no es una sesión
+      // Antes se excluían acá los cobros manuales (session_date='2099-12-31'):
+      // no aparecían nunca en el link combinado /pagar/[id], así que ese cobro
+      // solo se podía pagar con el link crudo de Flow que /admin/cobros
+      // mandaba aparte — inconsistente con el resto ("Cobrar" siempre junta
+      // TODO lo pendiente). Ahora se incluyen; /pagar/[id] los muestra con su
+      // descripción real (ver manualChargeLabel) en vez de un tipo de sesión.
       .gt('amount', 0)
       .order('session_date', { ascending: true })
       .then(r => r.data ?? []),

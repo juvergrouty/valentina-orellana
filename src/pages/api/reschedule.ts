@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
-import { sendConfirmationToClient, sendNotificationToAdmin, ADMIN_EMAIL_FALLBACK } from '../../lib/email';
+import { sendSessionUpdatedEmail, sendRescheduleAdminAlert, ADMIN_EMAIL_FALLBACK } from '../../lib/email';
+import { rescheduleBookingInCalendar } from '../../lib/syncCalendar';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
 
 export const prerender = false;
@@ -67,27 +68,40 @@ export const POST: APIRoute = async ({ request }) => {
     .update({ session_date, session_time })
     .eq('id', bookingId);
 
+  // Mover el evento en Google Calendar (el de Valentina y el del paciente, con
+  // el mismo Meet si es online) — antes esto solo se actualizaba en la base de
+  // datos, y el evento real de calendario se quedaba con la fecha vieja.
+  try { await rescheduleBookingInCalendar(bookingId, session_date, session_time); }
+  catch (e) { console.error('[reschedule] gcal:', e); }
+
   // Leer settings para email admin
   const { data: settingsRows } = await supabase.from('settings').select('key, value');
   const cfg: Record<string, string> = {};
   (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { cfg[key] = value; });
   const adminEmail = cfg['notification_email'] || ADMIN_EMAIL_FALLBACK;
 
-  const emailData = {
-    patient_name:   booking.patient_name,
-    patient_email:  booking.patient_email,
-    patient_phone:  booking.patient_phone,
-    session_type:   booking.session_type,
-    session_date,
-    session_time,
-    amount:         booking.amount,
-    payment_method: booking.payment_method,
-  };
-
-  // Notificar por email (sin bloquear)
+  // Notificar por email (sin bloquear). Al paciente: su sesión ya con la hora
+  // nueva. A Valentina: aviso de que fue un REAGENDAMIENTO, no una reserva
+  // nueva — antes esto reusaba sendNotificationToAdmin, que decía "Nueva
+  // reserva confirmada" y era indistinguible de una reserva real nueva.
   Promise.all([
-    sendConfirmationToClient(emailData).catch(console.error),
-    sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
+    sendSessionUpdatedEmail({
+      patient_name:  booking.patient_name,
+      patient_email: booking.patient_email,
+      reason:        'Tu sesión fue reagendada',
+      session_type:  booking.session_type,
+      session_date,
+      session_time,
+      amount:        booking.amount,
+    }).catch(console.error),
+    sendRescheduleAdminAlert({
+      patient_name:  booking.patient_name,
+      patient_email: booking.patient_email,
+      old_date:      booking.session_date,
+      old_time:      booking.session_time,
+      new_date:      session_date,
+      new_time:      session_time,
+    }, adminEmail).catch(console.error),
   ]);
 
   return json({ success: true, session_date, session_time });

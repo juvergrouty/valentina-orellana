@@ -2,7 +2,7 @@
 export const prerender = false;
 import Layout from '../../layouts/BaseLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { getTotalOwedByEmail } from '../../lib/debt';
+import { getTotalOwedByEmail, manualChargeLabel } from '../../lib/debt';
 
 // Página pública (sin login) que el paciente abre desde el link que Valentina
 // le manda por WhatsApp/email. A diferencia de un link de pago con monto fijo,
@@ -53,7 +53,7 @@ const pendingJson = JSON.stringify({ patientId: patient?.id ?? null });
           {pending.map((b) => (
             <div class="flex items-center justify-between px-5 py-4">
               <div>
-                <p class="font-medium text-sm">{SESSION_LABELS[b.session_type] ?? b.session_type}</p>
+                <p class="font-medium text-sm">{manualChargeLabel(b.notes) ?? SESSION_LABELS[b.session_type] ?? b.session_type}</p>
                 {formatDate(b.session_date) && (
                   <p class="text-xs text-stone mt-0.5">{formatDate(b.session_date)}{b.session_time ? ` a las ${b.session_time.slice(0,5)}` : ''}</p>
                 )}

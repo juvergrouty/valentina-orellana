@@ -3,7 +3,7 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { SESSION_LABELS } from '../../data/services';
-import { nowCL, todayCL } from '../../lib/dateUtils';
+import { nowCL, todayCL, hoursUntilSessionCL } from '../../lib/dateUtils';
 
 // Reservas del día de hoy
 const today = todayCL();
@@ -20,7 +20,11 @@ const weekEnd = nowCL();
 weekEnd.setDate(weekEnd.getDate() + 7);
 const weekEndStr = weekEnd.toISOString().slice(0, 10);
 
-const { data: upcoming } = await supabase
+// Se pide de a poco más de 10 y se filtra después: una sesión de hoy que ya
+// terminó cumple session_date >= today (la columna solo tiene la fecha, no la
+// hora) y aparecía igual en "Próximas" aunque ya haya pasado — filtrar por
+// hora real evita eso sin dejar de mostrar 10 sesiones futuras cuando existen.
+const { data: upcomingRaw } = await supabase
   .from('bookings')
   .select('*')
   .eq('status', 'confirmed')
@@ -28,7 +32,14 @@ const { data: upcoming } = await supabase
   .lte('session_date', weekEndStr)
   .order('session_date')
   .order('session_time')
-  .limit(10);
+  .limit(40);
+
+const upcoming = (upcomingRaw ?? [])
+  .filter((b) => {
+    const durationHrs = (b.duration_min ?? 55) / 60;
+    return hoursUntilSessionCL(b.session_date, b.session_time) > -durationHrs;
+  })
+  .slice(0, 10);
 
 // Reservas pendientes de pago
 const { count: pendingCount } = await supabase

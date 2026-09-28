@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
-import { getTotalOwedByEmail, tagBookingsWithPaymentToken } from '../../lib/debt';
+import { getTotalOwedByEmail, tagBookingsWithPaymentToken, manualChargeLabel } from '../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../lib/flow';
 import { logError } from '../../lib/logger';
 
@@ -35,7 +35,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     const amount = pending.reduce((s, b) => s + b.amount, 0);
     const subject = pending.length === 1
-      ? `${SESSION_LABELS[pending[0].session_type] ?? pending[0].session_type} — Ps. Valentina Orellana`
+      ? `${manualChargeLabel(pending[0].notes) ?? SESSION_LABELS[pending[0].session_type] ?? pending[0].session_type} — Ps. Valentina Orellana`
       : `${pending.length} sesiones pendientes — Ps. Valentina Orellana`;
 
     const { data: settingsRows } = await supabase

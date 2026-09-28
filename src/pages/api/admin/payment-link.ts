@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { syncBookingToCalendar } from '../../../lib/syncCalendar';
+import { upsertPatientFromBooking } from '../../../lib/patients';
 
 export const prerender = false;
 
@@ -101,24 +102,33 @@ export const POST: APIRoute = async ({ request }) => {
     const reqUrl  = new URL(request.url);
     const siteUrl = `${reqUrl.protocol}//${reqUrl.host}`;
 
-    // Crear orden en Flow
-    const order = await createPaymentOrder({
-      subject:         description,
-      amount:          amountInt,
-      email:           email.trim().toLowerCase(),
-      orderId:         bookingId,
-      urlConfirmation: `${siteUrl}/api/flow/confirm`,
-      urlReturn:       `${siteUrl}/api/flow/return`,
-      baseUrl,
+    // Link de pago: la misma página intermedia /pagar/[id] que usa "Cobrar" en
+    // todos lados — antes acá se creaba una orden de Flow propia y se mandaba
+    // el link crudo de Flow por WhatsApp/copiar, distinto e inconsistente con
+    // el resto del sitio (y esa orden quedaba huérfana si el cobro se pagaba
+    // por otra vía). Ahora se asegura la ficha del paciente y no se crea
+    // ninguna orden hasta que el paciente aprieta "Ir a pagar" en esa página.
+    const patientId = await upsertPatientFromBooking({
+      patient_name: name.trim(), patient_email: email.trim().toLowerCase(), patient_phone: phone?.trim() ?? '',
     });
 
-    const paymentUrl = `${order.url}?token=${order.token}`;
-
-    // Guardar el token de Flow en mp_preference_id para que el webhook pueda encontrar esta reserva
-    await supabase
-      .from('bookings')
-      .update({ mp_preference_id: order.token })
-      .eq('id', bookingId);
+    let paymentUrl: string;
+    if (patientId) {
+      paymentUrl = `${siteUrl}/pagar/${patientId}`;
+    } else {
+      // Respaldo si no se pudo crear/encontrar la ficha del paciente: orden de Flow directa.
+      const order = await createPaymentOrder({
+        subject:         description,
+        amount:          amountInt,
+        email:           email.trim().toLowerCase(),
+        orderId:         bookingId,
+        urlConfirmation: `${siteUrl}/api/flow/confirm`,
+        urlReturn:       `${siteUrl}/api/flow/return`,
+        baseUrl,
+      });
+      paymentUrl = `${order.url}?token=${order.token}`;
+      await supabase.from('bookings').update({ mp_preference_id: order.token }).eq('id', bookingId);
+    }
 
     // Si es online con fecha/hora → crear evento en Google Calendar y obtener Meet link ahora
     let meetLink: string | undefined;
