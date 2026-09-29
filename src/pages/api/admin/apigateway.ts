@@ -1,11 +1,10 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { getAgwConfig, bheEmitidas, emitirBHE, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion } from '../../../lib/apigateway';
+import { getAgwConfig, bheEmitidas, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion, emitBoletaParaReserva, MARCA_PENDIENTE } from '../../../lib/apigateway';
 import type { BheCausal } from '../../../lib/apigateway';
 import { logError } from '../../../lib/logger';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { nowCL } from '../../../lib/dateUtils';
-import { upsertPatientFromBooking } from '../../../lib/patients';
 
 // YYYYMM del período en que se emitió/emitirá la boleta (según la fecha de la sesión)
 const periodoDeSesion = (sessionDate?: string | null) =>
@@ -16,13 +15,6 @@ function parseBoleta(notes: string | null): { folio: number | null; codigo: stri
   const f = notes?.match(/Boleta Folio (\d+)/i);
   const c = notes?.match(/Cod ([\w-]+)/i);
   return { folio: f ? parseInt(f[1]) : null, codigo: c ? c[1] : null };
-}
-
-// Normaliza RUT a formato "XXXXXXXX-X" (sin puntos, con guion antes del dígito verificador)
-function normalizeRut(rut: string): string {
-  const clean = rut.replace(/\./g, '').replace(/\s/g, '').replace(/-/g, '').trim();
-  if (clean.length < 2) return rut.trim();
-  return `${clean.slice(0, -1)}-${clean.slice(-1)}`;
 }
 
 export const prerender = false;
@@ -59,69 +51,20 @@ export const POST: APIRoute = async ({ request }) => {
     }
   }
 
-  // ── Emitir BHE para una reserva ───────────────────────────────────────────
+  // ── Emitir BHE para una reserva (y enviarla) ──────────────────────────────
+  // ENCONTRADO (29 sep 2026, boleta 222): este botón tenía su propia copia de
+  // la lógica de emisión que emitía ante el SII pero NUNCA enviaba la boleta
+  // por correo — ni al paciente ni a Valentina. Solo Flow y "Marcar como
+  // pagado" la enviaban. Ahora usa el mismo camino único que ellos
+  // (emitBoletaParaReserva), que guarda el RUT, emite y envía, y si el envío
+  // falla lo deja pendiente para que el cron lo reintente.
   if (action === 'emitir') {
     const bookingId = body.booking_id;
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
-
-    const { data: b } = await supabase
-      .from('bookings').select('patient_name, patient_email, amount, session_type, session_date, notes, service_id').eq('id', bookingId).single();
-    if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
-
-    // RUT: prioriza el ingresado en el formulario; si no, el de la ficha del paciente
-    const { data: p } = await supabase
-      .from('patients').select('rut, name, address').eq('email', (b.patient_email ?? '').toLowerCase()).maybeSingle();
-    const rutRaw = (body.rut ?? '').trim() || p?.rut || '';
-    if (!rutRaw) return json({ ok: false, error: 'Falta el RUT del paciente (requerido para la boleta).' }, 400);
-    const rut = normalizeRut(rutRaw);
-
-    // CORREGIDO: el RUT que se escribe acá se usaba solo para esta boleta y se
-    // perdía — nunca quedaba guardado en la ficha del paciente. Por eso la
-    // próxima vez (y sobre todo la boleta AUTOMÁTICA al pagar por Flow, que no
-    // pasa por este formulario) no lo encontraba en ningún lado, aunque
-    // Valentina "siempre lo pusiera" al emitir a mano. Ahora queda guardado.
-    if (!p?.rut || p.rut !== rut) {
-      try {
-        await upsertPatientFromBooking({ patient_name: b.patient_name, patient_email: b.patient_email, rut });
-      } catch (e) {
-        await logError('boleta/guardar-rut', 'No se pudo guardar el RUT en la ficha del paciente', { bookingId, error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-
-    if (!b.amount) return json({ ok: false, error: 'La reserva no tiene monto.' }, 400);
-
-    // Glosa: usa la del servicio si existe, si no un texto genérico
-    let glosa = 'Atención psicológica';
-    if (b.service_id) {
-      const { data: svc } = await supabase
-        .from('services_catalog').select('fonasa_description').eq('id', b.service_id).maybeSingle();
-      if (svc?.fonasa_description) glosa = svc.fonasa_description;
-    }
-
-    // FchEmis = fecha de la sesión (para que el reembolso en la isapre calce con el día de atención)
-    const fecha = fechaBoletaDesdeSesion(b.session_date);
-
-    try {
-      const result = await emitirBHE({
-        fecha,
-        receptor: { rut, razonSocial: p?.name ?? b.patient_name, direccion: p?.address ?? '' },
-        detalle:  [{ nombre: glosa, monto: b.amount }],
-      }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
-
-      const folio = result?.data?.Encabezado?.IdDoc?.Folio ?? null;
-
-      // Resolver el código de la boleta (necesario para PDF/email)
-      let codigo: string | null = null;
-      if (folio) {
-        try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeSesion(b.session_date), folio, cfg); } catch { /* opcional */ }
-        const nuevaNota = `${b.notes ? b.notes + '\n' : ''}Boleta Folio ${folio}${codigo ? ' · Cod ' + codigo : ''}`;
-        await supabase.from('bookings').update({ notes: nuevaNota }).eq('id', bookingId);
-      }
-
-      return json({ ok: true, folio, codigo, result });
-    } catch (e) {
-      return json({ ok: false, error: e instanceof Error ? e.message : 'Error al emitir' }, 502);
-    }
+    const r = await emitBoletaParaReserva(bookingId, { rutOverride: body.rut, enviarEmail: true });
+    if (!r.ok) return json({ ok: false, error: r.error ?? 'Error al emitir' }, 502);
+    if (r.alreadyEmitted) return json({ ok: false, error: `Esta sesión ya tiene la boleta Folio ${r.folio}. Usa "Enviar por email" para reenviarla.` }, 400);
+    return json({ ok: true, folio: r.folio, codigo: r.codigo, enviada: r.enviada, enviadaA: r.enviadaA, errorEnvio: r.errorEnvio });
   }
 
   // ── Enviar la boleta por email al paciente ────────────────────────────────
@@ -160,7 +103,8 @@ export const POST: APIRoute = async ({ request }) => {
     try {
       const result = await bheEmail(codigo, email, cfg);
       {
-        const marca = `${b.notes ? b.notes + '\n' : ''}BoletaEmailEnviada ${new Date().toISOString()} ${email}`;
+        const base = (b.notes ?? '').split('\n').filter(l => !l.startsWith(MARCA_PENDIENTE)).join('\n');
+        const marca = `${base ? base + '\n' : ''}BoletaEmailEnviada ${new Date().toISOString()} ${email}`;
         await supabase.from('bookings').update({ notes: marca }).eq('id', bookingId);
       }
       // Copia para Valentina — para que tenga registro de cada boleta enviada

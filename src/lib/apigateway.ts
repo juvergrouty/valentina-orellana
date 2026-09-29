@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import { sendBoletaEmail, ADMIN_EMAIL_FALLBACK } from './email';
 import { todayCL } from './dateUtils';
-import { logError } from './logger';
+import { logError, logWarn } from './logger';
 import { upsertPatientFromBooking } from './patients';
 
 /**
@@ -192,9 +192,147 @@ export async function bheEmail(codigo: string, email: string, cfg?: AgwConfig) {
 
 /** Lista emitidas del período y devuelve el `codigo` de una boleta por su folio (numero). */
 export async function codigoDeFolio(emisor: string, periodo: string, folio: number, cfg?: AgwConfig): Promise<string | null> {
-  const r = await bheEmitidas(emisor, periodo, 1, cfg) as { data?: { boletas?: Array<{ numero: number; codigo: string }> } };
-  const found = r?.data?.boletas?.find(b => b.numero === folio);
-  return found?.codigo ?? null;
+  // Antes solo miraba la página 1 del listado: si el mes ya tenía más boletas
+  // de las que caben en una página, el folio nuevo no aparecía y el correo no
+  // salía. Se recorren páginas hasta encontrarlo o hasta una página vacía.
+  for (let pagina = 1; pagina <= 5; pagina++) {
+    const r = await bheEmitidas(emisor, periodo, pagina, cfg) as { data?: { boletas?: Array<{ numero: number; codigo: string }> } };
+    const boletas = r?.data?.boletas ?? [];
+    const found = boletas.find(b => Number(b.numero) === folio);
+    if (found?.codigo) return found.codigo;
+    if (boletas.length === 0) break;
+  }
+  return null;
+}
+
+/**
+ * Igual que codigoDeFolio, pero reintenta: justo después de emitir, el SII a
+ * veces todavía no lista el folio nuevo. Antes, si no aparecía al primer
+ * intento, el correo de la boleta simplemente no se enviaba.
+ */
+async function codigoDeFolioConReintentos(emisor: string, periodo: string, folio: number, cfg: AgwConfig): Promise<string | null> {
+  const esperas = [0, 1500, 3000];
+  let ultimoError: unknown = null;
+  for (const ms of esperas) {
+    if (ms) await new Promise(r => setTimeout(r, ms));
+    try {
+      const c = await codigoDeFolio(emisor, periodo, folio, cfg);
+      if (c) return c;
+    } catch (e) { ultimoError = e; }
+  }
+  if (ultimoError) throw ultimoError;
+  return null;
+}
+
+// Marcas en bookings.notes que siguen el estado del envío de la boleta.
+// `BoletaPendienteEnvio` la deja una emisión cuyo correo no se pudo mandar; el
+// cron /api/cron/boletas-pendientes la reintenta hasta que salga.
+export const MARCA_PENDIENTE = 'BoletaPendienteEnvio';
+const quitarPendiente = (notes: string) =>
+  notes.split('\n').filter(l => !l.startsWith(MARCA_PENDIENTE)).join('\n');
+
+/**
+ * Boleta vigente de la reserva: la ÚLTIMA línea "Boleta Folio N..." de notes,
+ * salvo que esté ANULADA — mismo criterio que el panel del calendario y la
+ * ficha del paciente, para que servidor y pantallas digan siempre lo mismo.
+ */
+function folioVigente(notes: string | null): { folio: number; codigo: string | null } | null {
+  const lineas = [...(notes ?? '').matchAll(/Boleta\s+Folio\s+(\d+)[^\n]*/gi)];
+  const ultima = lineas.at(-1);
+  if (!ultima || /ANULADA/i.test(ultima[0])) return null;
+  return { folio: parseInt(ultima[1]), codigo: /Cod ([\w-]+)/i.exec(ultima[0])?.[1] ?? null };
+}
+
+/**
+ * Envía la boleta ya emitida de una reserva: al paciente (PDF adjunto desde
+ * nuestro correo; si no hay PDF, el correo de apigateway.cl) y copia a
+ * Valentina. Deja registro en notes: `BoletaEmailEnviada <iso> <email>` si
+ * salió, o `BoletaPendienteEnvio` si no, para que el cron la reintente.
+ * Único punto de envío tras emitir — lo usan Flow, "Marcar como pagado",
+ * "Emitir boleta" del panel y el cron de reintentos.
+ */
+export async function enviarBoletaDeReserva(bookingId: string): Promise<{ sent: boolean; email?: string; error?: string }> {
+  const cfg = await getAgwConfig();
+  if (!cfg) return { sent: false, error: 'API Gateway no configurado.' };
+
+  const { data: b } = await supabase
+    .from('bookings').select('patient_name, patient_email, session_date, notes').eq('id', bookingId).single();
+  if (!b) return { sent: false, error: 'Reserva no encontrada.' };
+
+  const marcarPendiente = async (error: string) => {
+    const { data: cur } = await supabase.from('bookings').select('notes').eq('id', bookingId).single();
+    const base = quitarPendiente(cur?.notes ?? '');
+    await supabase.from('bookings').update({ notes: `${base ? base + '\n' : ''}${MARCA_PENDIENTE} ${new Date().toISOString()}` }).eq('id', bookingId);
+    await logError('boleta/envio', `Boleta emitida pero NO enviada a ${b.patient_email ?? '(sin email)'} — se reintentará automáticamente`, { bookingId, error });
+    return { sent: false, error };
+  };
+
+  // Casos sin reintento posible: se saca la marca de pendiente para que el
+  // cron no insista para siempre.
+  const descartarPendiente = async () => {
+    if (b.notes?.includes(MARCA_PENDIENTE)) await supabase.from('bookings').update({ notes: quitarPendiente(b.notes) }).eq('id', bookingId);
+  };
+  const vigente = folioVigente(b.notes);
+  if (!vigente) {
+    await descartarPendiente();
+    return { sent: false, error: 'Esta sesión no tiene una boleta vigente (sin emitir o anulada).' };
+  }
+  const folio = vigente.folio;
+  if (!b.patient_email) {
+    // Sin email no hay a quién reintentar: se avisa una vez.
+    await descartarPendiente();
+    await logError('boleta/envio', 'Boleta emitida pero la reserva no tiene email del paciente — no se pudo enviar', { bookingId, folio });
+    return { sent: false, error: 'La reserva no tiene email del paciente.' };
+  }
+
+  let codigo = vigente.codigo;
+  if (!codigo) {
+    try {
+      codigo = await codigoDeFolioConReintentos(cfg.siiRut, periodoDeFecha(fechaBoletaDesdeSesion(b.session_date)), folio, cfg);
+    } catch (e) {
+      return marcarPendiente(`No se pudo resolver el código de la boleta: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (!codigo) return marcarPendiente(`El SII aún no lista el folio ${folio}.`);
+  }
+
+  let pdfBase64: string | null = null;
+  try { pdfBase64 = await bhePdf(codigo, cfg); } catch (e) {
+    await logWarn('boleta/pdf', 'No se pudo descargar el PDF; se usa el correo de apigateway.cl', { bookingId, folio, error: e instanceof Error ? e.message : String(e) });
+  }
+
+  // Envío al paciente — lo que cuenta como "enviada".
+  try {
+    if (pdfBase64) {
+      const r = await sendBoletaEmail({ to: b.patient_email, patientName: b.patient_name, folio, pdfBase64 });
+      if (!r.sent) throw new Error(r.reason ?? 'Resend rechazó el envío');
+    } else {
+      await bheEmail(codigo, b.patient_email, cfg);
+    }
+  } catch (e) {
+    return marcarPendiente(e instanceof Error ? e.message : String(e));
+  }
+
+  {
+    const { data: cur } = await supabase.from('bookings').select('notes').eq('id', bookingId).single();
+    let notes = quitarPendiente(cur?.notes ?? '');
+    notes = notes.replace(new RegExp(`(Boleta Folio ${folio})(?!\\d)(?! · Cod)`), `$1 · Cod ${codigo}`);
+    notes = `${notes ? notes + '\n' : ''}BoletaEmailEnviada ${new Date().toISOString()} ${b.patient_email}`;
+    await supabase.from('bookings').update({ notes }).eq('id', bookingId);
+  }
+
+  // Copia para Valentina — no afecta el resultado (el paciente ya la recibió).
+  try {
+    const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
+    const adminEmail = notifRow?.value || ADMIN_EMAIL_FALLBACK;
+    if (adminEmail.toLowerCase() !== b.patient_email.toLowerCase()) {
+      if (pdfBase64) await sendBoletaEmail({ to: adminEmail, patientName: b.patient_name, folio, pdfBase64 });
+      else await bheEmail(codigo, adminEmail, cfg);
+    }
+  } catch (e) {
+    await logError('boleta/copia-admin', 'Falló el envío de la copia de la boleta a Valentina', { bookingId, folio, error: e instanceof Error ? e.message : String(e) });
+  }
+
+  return { sent: true, email: b.patient_email };
 }
 
 // Causales oficiales del SII para anular una BHE (guía SII "Anular boletas de
@@ -252,7 +390,7 @@ export function fechaBoletaDesdeSesion(sessionDate?: string | null): string {
 export async function emitBoletaParaReserva(
   bookingId: string,
   opts: { rutOverride?: string; enviarEmail?: boolean } = {},
-): Promise<{ ok: boolean; folio?: number | null; codigo?: string | null; error?: string; alreadyEmitted?: boolean }> {
+): Promise<{ ok: boolean; folio?: number | null; codigo?: string | null; error?: string; alreadyEmitted?: boolean; enviada?: boolean; enviadaA?: string; errorEnvio?: string }> {
   const cfg = await getAgwConfig();
   if (!cfg) return { ok: false, error: 'API Gateway no configurado.' };
 
@@ -260,8 +398,9 @@ export async function emitBoletaParaReserva(
     .from('bookings').select('patient_name, patient_email, amount, session_type, session_date, notes, service_id').eq('id', bookingId).single();
   if (!b) return { ok: false, error: 'Reserva no encontrada.' };
 
-  const already = /Boleta Folio (\d+)/.exec(b.notes ?? '');
-  if (already) return { ok: true, folio: parseInt(already[1]), alreadyEmitted: true };
+  // Una boleta anulada no cuenta: se puede emitir una nueva para esa sesión.
+  const already = folioVigente(b.notes);
+  if (already) return { ok: true, folio: already.folio, alreadyEmitted: true };
 
   const { data: p } = await supabase
     .from('patients').select('rut, name, address').eq('email', (b.patient_email ?? '').toLowerCase()).maybeSingle();
@@ -277,9 +416,9 @@ export async function emitBoletaParaReserva(
   // vez (sobre todo la boleta automática, que no pasa por ningún formulario)
   // no lo encontraba en ningún lado. Ahora se guarda acá, una sola vez, para
   // que beneficie a todos los flujos que llaman esta función.
-  if (b.patient_email && (!p?.rut || p.rut !== rutRaw)) {
+  if (b.patient_email && (!p?.rut || p.rut !== normalizeRut(rutRaw))) {
     try {
-      await upsertPatientFromBooking({ patient_name: p?.name ?? b.patient_name, patient_email: b.patient_email, rut: rutRaw });
+      await upsertPatientFromBooking({ patient_name: p?.name ?? b.patient_name, patient_email: b.patient_email, rut: normalizeRut(rutRaw) });
     } catch (e) {
       await logError('boleta/guardar-rut', 'No se pudo guardar el RUT en la ficha del paciente', { bookingId, error: e instanceof Error ? e.message : String(e) });
     }
@@ -318,41 +457,29 @@ export async function emitBoletaParaReserva(
       return { ok: false, error: 'La emisión no devolvió folio (respuesta inesperada de apigateway.cl).' };
     }
 
-    let codigo: string | null = null;
-    try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeFecha(fecha), folio, cfg); } catch (e) {
-      // Antes este catch quedaba vacío: si fallaba (p.ej. el SII aún no
-      // propagaba el folio), el bloque de abajo (opts.enviarEmail && codigo)
-      // se saltaba entero en silencio — la boleta quedaba emitida pero SIN
-      // enviarse a nadie (ni paciente ni Valentina) y sin dejar rastro.
-      await logError('boleta/codigo', 'No se pudo resolver el código de la boleta ante el SII — no se enviará el correo automático de esta boleta', { bookingId, folio, error: e instanceof Error ? e.message : String(e) });
-    }
+    // Se guarda el folio de inmediato (aunque el envío falle después) para que
+    // nunca se vuelva a emitir una segunda boleta por la misma sesión. Si hay
+    // que enviarla, queda marcada como pendiente ANTES de intentarlo: si la
+    // función se corta a medio camino (timeout de Vercel), el cron la recoge.
     {
-      const nota = `${b.notes ? b.notes + '\n' : ''}Boleta Folio ${folio}${codigo ? ' · Cod ' + codigo : ''}`;
+      const pendiente = opts.enviarEmail ? `\n${MARCA_PENDIENTE} ${new Date().toISOString()}` : '';
+      const nota = `${b.notes ? b.notes + '\n' : ''}Boleta Folio ${folio}${pendiente}`;
       await supabase.from('bookings').update({ notes: nota }).eq('id', bookingId);
     }
-    if (opts.enviarEmail && codigo) {
-      try {
-        const pdfBase64 = await bhePdf(codigo, cfg);
-        if (pdfBase64) {
-          if (b.patient_email) {
-            await sendBoletaEmail({ to: b.patient_email, patientName: b.patient_name, folio, pdfBase64 });
-          }
-          // Copia para Valentina — para que tenga registro de cada boleta emitida
-          // sin tener que entrar al admin a revisarlas una por una. Si el setting
-          // no está configurado, se usa su correo real (nunca uno de terceros).
-          const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
-          await sendBoletaEmail({ to: notifRow?.value || ADMIN_EMAIL_FALLBACK, patientName: b.patient_name, folio, pdfBase64 });
-        } else if (b.patient_email) {
-          await bheEmail(codigo, b.patient_email, cfg); // fallback: email genérico de apigateway.cl
-        }
-      } catch (e) {
-        // No bloquear la emisión por un fallo de envío, pero que quede visible
-        // en /admin/logs — antes este catch vacío ocultaba por completo
-        // cualquier falla al enviar la boleta o su copia.
-        await logError('boleta/envio', 'Falló el envío de la boleta o su copia', { bookingId, folio, error: e instanceof Error ? e.message : String(e) });
+    // El envío (código SII con reintentos, PDF, paciente + copia a Valentina)
+    // vive en enviarBoletaDeReserva. Si falla, deja la reserva marcada como
+    // pendiente y el cron boletas-pendientes la reintenta — antes, cualquier
+    // falla en este tramo dejaba la boleta emitida y sin enviar para siempre.
+    let envio: { sent: boolean; email?: string; error?: string } = { sent: false };
+    if (opts.enviarEmail) {
+      try { envio = await enviarBoletaDeReserva(bookingId); } catch (e) {
+        envio = { sent: false, error: e instanceof Error ? e.message : String(e) };
+        await logError('boleta/envio', 'Excepción al enviar la boleta', { bookingId, folio, error: envio.error });
       }
     }
-    return { ok: true, folio, codigo };
+    const { data: after } = await supabase.from('bookings').select('notes').eq('id', bookingId).single();
+    const codigo = folioVigente(after?.notes ?? null)?.codigo ?? null;
+    return { ok: true, folio, codigo, enviada: envio.sent, enviadaA: envio.email, errorEnvio: envio.error };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error al emitir';
     // Centralizado aquí (no solo en el llamador) para que ningún caller que

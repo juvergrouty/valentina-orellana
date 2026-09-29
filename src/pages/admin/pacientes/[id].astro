@@ -654,7 +654,10 @@ const formatCLP = (n: number) =>
       emitir.disabled = true; bolStatus(bid, 'Emitiendo…', '#6b7280');
       try {
         const d = await bolPost({ action: 'emitir', booking_id: bid, rut });
-        if (d.ok) { bolStatus(bid, `✓ Emitida (Folio ${d.folio ?? ''})`, '#15803d'); setTimeout(() => location.reload(), 900); }
+        if (d.ok) {
+          if (d.enviada) { bolStatus(bid, `✓ Emitida (Folio ${d.folio ?? ''}) y enviada a ${d.enviadaA}`, '#15803d'); setTimeout(() => location.reload(), 2500); }
+          else { bolStatus(bid, `⚠ Emitida (Folio ${d.folio ?? ''}) pero el correo no salió: ${d.errorEnvio ?? 'error'}. Se reintentará solo.`, '#b45309'); }
+        }
         else { bolStatus(bid, '✕ ' + (d.error ?? 'Error'), '#dc2626'); emitir.disabled = false; }
       } catch { bolStatus(bid, '✕ Error de conexión', '#dc2626'); emitir.disabled = false; }
     }

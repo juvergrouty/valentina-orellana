@@ -2434,7 +2434,11 @@ document.getElementById('sp-btn-emitir')?.addEventListener('click', async () => 
     const data = await res.json();
     if (data.ok) {
       const folio = data.folio ? ` · Folio ${data.folio}` : '';
-      result.textContent = `✓ Boleta emitida${folio}`; result.style.color = '#15803d';
+      if (data.enviada) {
+        result.textContent = `✓ Boleta emitida${folio} y enviada a ${data.enviadaA}`; result.style.color = '#15803d';
+      } else {
+        result.textContent = `⚠ Boleta emitida${folio}, pero el correo no salió (${data.errorEnvio ?? 'error desconocido'}). Se reintentará solo; también puedes usar "Enviar por email".`; result.style.color = '#b45309';
+      }
       document.getElementById('sp-boleta-actions').style.display = 'flex';
       btn.style.display = 'none';
     } else {
