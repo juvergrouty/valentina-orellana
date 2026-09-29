@@ -59,7 +59,7 @@ export const articulos: Articulo[] = [
     bajada: 'Por qué dos personas pueden vivir lo mismo y quedar tan distintas.',
     categoria: 'Trauma',
     etiqueta: 'Trauma',
-    publicado: false,
+    publicado: true,
   },
 ];
 
