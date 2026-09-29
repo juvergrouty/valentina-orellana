@@ -35,7 +35,7 @@ export const articulos: Articulo[] = [
     bajada: 'Cuando sentimos que tenemos que ser otra persona para que nos quieran.',
     categoria: 'Autoestima',
     etiqueta: 'Autoestima',
-    publicado: false,
+    publicado: true,
   },
   {
     slug: 'puedo',
