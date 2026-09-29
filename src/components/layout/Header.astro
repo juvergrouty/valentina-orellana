@@ -3,6 +3,7 @@ const navLinks = [
   { href: '/servicios',  label: 'Servicios' },
   { href: '/sobre-mi',   label: 'Sobre mí' },
   { href: '/precios',    label: 'Preguntas' },
+  { href: '/blog',       label: 'Blog' },
   { href: '/contacto',   label: 'Contacto' },
 ];
 
@@ -14,19 +15,19 @@ const currentPath = Astro.url.pathname;
 
     <!-- Logo -->
     <a href="/" class="group flex items-baseline gap-2">
-      <span class="font-heading font-semibold text-2xl text-ink group-hover:text-forest transition-colors duration-300 leading-none">
+      <span class="font-heading font-semibold text-2xl text-ink group-hover:text-forest transition-colors duration-300 leading-none whitespace-nowrap">
         Ps. Valentina Orellana
       </span>
-      <span class="hidden sm:inline font-body text-base text-stone/60 font-light">| Psicóloga</span>
+      <span class="hidden sm:inline lg:hidden xl:inline font-body text-base text-stone/60 font-light whitespace-nowrap">| Psicóloga</span>
     </a>
 
     <!-- Nav desktop -->
-    <nav class="hidden lg:flex items-center gap-7">
+    <nav class="hidden lg:flex items-center gap-6 xl:gap-7">
       {navLinks.map(({ href, label }) => (
         <a
           href={href}
-          class={`font-body text-sm tracking-wide transition-colors duration-200
-            ${currentPath === href
+          class={`font-body text-sm tracking-wide whitespace-nowrap transition-colors duration-200
+            ${(currentPath === href || currentPath.startsWith(href + '/'))
               ? 'text-forest font-medium'
               : 'text-stone hover:text-ink'}`}
         >
@@ -37,7 +38,7 @@ const currentPath = Astro.url.pathname;
 
     <!-- CTA + hamburger -->
     <div class="flex items-center gap-4">
-      <a href="/agenda" class="hidden md:inline-flex btn-dark text-xs py-2.5 px-5">
+      <a href="/agenda" class="hidden md:inline-flex btn-dark text-xs py-2.5 px-5 whitespace-nowrap">
         Agendar sesión
       </a>
       <button
@@ -58,7 +59,7 @@ const currentPath = Astro.url.pathname;
         <a
           href={href}
           class={`font-body text-sm tracking-wide transition-colors
-            ${currentPath === href ? 'text-forest' : 'text-stone hover:text-ink'}`}
+            ${(currentPath === href || currentPath.startsWith(href + '/')) ? 'text-forest' : 'text-stone hover:text-ink'}`}
         >
           {label}
         </a>

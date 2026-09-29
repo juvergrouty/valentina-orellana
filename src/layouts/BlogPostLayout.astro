@@ -1,0 +1,116 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import { articulos } from '../data/blog';
+
+interface Props {
+  slug: string;
+  descripcion: string;
+  imagen: string;
+  imagenAlt: string;
+  imagenPosicion?: string;
+  creditoPortada: string;
+  minutos: number;
+  relacionados?: string[];
+}
+
+const { slug, descripcion, imagen, imagenAlt, imagenPosicion = 'center', creditoPortada, minutos, relacionados = [] } = Astro.props;
+const articulo = articulos.find((a) => a.slug === slug)!;
+const sigue = relacionados.map((s) => articulos.find((a) => a.slug === s)).filter(Boolean);
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Article',
+  headline: articulo.titulo,
+  description: descripcion,
+  image: new URL(imagen, Astro.site).href,
+  author: { '@type': 'Person', name: 'Valentina Orellana', jobTitle: 'Psicóloga clínica' },
+  publisher: { '@type': 'Organization', name: 'Ps. Valentina Orellana' },
+  mainEntityOfPage: new URL(`/blog/${slug}`, Astro.site).href,
+  inLanguage: 'es-CL',
+};
+---
+
+<BaseLayout title={articulo.titulo} description={descripcion} image={imagen}>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+  <div class="post">
+    <div class="hero">
+      <img src={imagen} alt={imagenAlt} style={`object-position:${imagenPosicion}`} />
+    </div>
+
+    <div class="head">
+      <a href="/blog" class="back">← Blog</a>
+      <span class="tag">{articulo.etiqueta}</span>
+      <h1>{articulo.titulo}</h1>
+      <p class="lead">{articulo.bajada}</p>
+      <div class="meta">Por Valentina Orellana, psicóloga clínica · {minutos} min de lectura</div>
+    </div>
+
+    <article class="body">
+      <slot />
+
+      {sigue.length > 0 && (
+        <div class="end">
+          <h3>Sigue leyendo</h3>
+          <div class="rel">
+            {sigue.map((a, i) => {
+              const clase = `rc ${i % 2 === 0 ? 'g' : 's'}`;
+              return a!.publicado
+                ? <a class={clase} href={`/blog/${a!.slug}`}><small>{a!.etiqueta}</small><span>{a!.titulo}</span></a>
+                : <div class={clase}><small>{a!.etiqueta} · Próximamente</small><span>{a!.titulo}</span></div>;
+            })}
+          </div>
+        </div>
+      )}
+
+      <p class="credit">Foto de portada: {creditoPortada} / Unsplash</p>
+    </article>
+  </div>
+</BaseLayout>
+
+<style>
+  .post { background: #FAF7F4; color: #2E332A; }
+  .hero { position: relative; height: 520px; overflow: hidden; }
+  .hero img { width: 100%; height: 100%; object-fit: cover; filter: saturate(.85); }
+  .hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(46,51,42,0) 40%, rgba(46,51,42,.55)); }
+  .head { max-width: 760px; margin: -150px auto 0; position: relative; z-index: 2; background: #FAF7F4; border-radius: 28px 28px 0 0; padding: 44px 44px 10px; }
+  .back { display: block; font-family: Inter, sans-serif; font-size: 14px; font-weight: 600; color: #576352; text-decoration: none; margin-bottom: 18px; }
+  .tag { display: inline-block; font-family: Inter, sans-serif; font-size: 13px; letter-spacing: 3px; text-transform: uppercase; font-weight: 700; color: #576352; background: #F1EBE3; padding: 7px 14px; border-radius: 999px; }
+  h1 { font-family: Domine, serif; font-weight: 700; font-size: 50px; line-height: 1.12; margin: 20px 0 14px; }
+  .lead { font-family: Domine, serif; font-weight: 500; font-size: 23px; line-height: 1.55; color: #6b6f64; margin: 0; }
+  .meta { font-family: Inter, sans-serif; font-size: 14px; color: #6b6f64; margin-top: 26px; }
+  .body { max-width: 760px; margin: 0 auto; padding: 10px 44px 60px; font-family: Inter, sans-serif; font-size: 19px; line-height: 1.8; }
+  .end { border-top: 1px solid #e6e0d8; margin-top: 56px; padding-top: 34px; }
+  .end h3 { font-family: Domine, serif; font-size: 24px; font-weight: 700; margin: 0 0 20px; }
+  .rel { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .rc { border-radius: 20px; padding: 26px; min-height: 170px; display: flex; flex-direction: column; justify-content: space-between; text-decoration: none; }
+  .rc small { font-size: 12px; letter-spacing: 3px; text-transform: uppercase; font-weight: 700; }
+  .rc span { font-family: Domine, serif; font-size: 22px; line-height: 1.3; font-weight: 600; }
+  .g { background: #576352; color: #fff; } .g small { color: #F5A623; }
+  .s { background: #F1EBE3; color: #2E332A; } .s small { color: #576352; }
+  .credit { text-align: center; font-size: 13px; color: #8b8a80; margin-top: 40px; }
+  @media (max-width: 700px) {
+    .hero { height: 320px; }
+    .head { margin-top: -80px; padding: 30px 22px 6px; }
+    h1 { font-size: 34px; }
+    .lead { font-size: 19px; }
+    .body { padding: 6px 22px 40px; font-size: 17.5px; }
+    .rel { grid-template-columns: 1fr; }
+  }
+</style>
+
+<style is:global>
+  .post .body p { margin: 0 0 22px; }
+  .post .body h2 { font-family: Domine, serif; font-weight: 700; font-size: 29px; line-height: 1.3; margin: 52px 0 14px; }
+  .post .body .first::first-letter { float: left; font-family: Domine, serif; font-size: 74px; line-height: .9; padding: 8px 12px 0 0; color: #576352; }
+  .post .body figure { margin: 44px -80px; }
+  .post .body figure img { width: 100%; height: 420px; object-fit: cover; border-radius: 22px; display: block; }
+  .post .body figcaption { font-size: 14px; color: #6b6f64; text-align: center; margin-top: 10px; }
+  .post .body .aside { background: #F1EBE3; border-radius: 20px; padding: 26px 30px; margin: 36px 0; font-size: 17.5px; line-height: 1.7; }
+  .post .body .quote { font-family: Domine, serif; font-size: 27px; line-height: 1.45; color: #576352; margin: 46px 0; padding: 0 10px; text-align: center; }
+  .post .body .quote::before { content: "“"; display: block; font-size: 70px; line-height: .6; color: #F5A623; }
+  @media (max-width: 700px) {
+    .post .body h2 { font-size: 24px; }
+    .post .body figure { margin: 34px 0; }
+    .post .body figure img { height: 260px; }
+    .post .body .quote { font-size: 22px; }
+  }
+</style>

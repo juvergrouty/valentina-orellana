@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { articulos } from '../data/blog';
 
 export const prerender = true;
 
@@ -12,6 +13,8 @@ const PAGES: { path: string; changefreq: string; priority: string }[] = [
   { path: 'contacto',    changefreq: 'monthly', priority: '0.6' },
   { path: 'condiciones', changefreq: 'yearly',  priority: '0.3' },
   { path: 'agenda',      changefreq: 'monthly', priority: '0.9' },
+  { path: 'blog',        changefreq: 'weekly',  priority: '0.7' },
+  ...articulos.filter(a => a.publicado).map(a => ({ path: `blog/${a.slug}`, changefreq: 'monthly', priority: '0.6' })),
   ];
 
 export const GET: APIRoute = ({ site }) => {

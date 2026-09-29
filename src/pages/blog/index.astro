@@ -1,0 +1,152 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { articulos, categorias } from '../../data/blog';
+
+// Colores de las tarjetas, en rotación para que no se vean todas iguales.
+const estilos = ['c-sand', 'c-white', 'c-dark', 'c-wheat', 'c-green'];
+const [destacado, ...resto] = articulos;
+---
+
+<BaseLayout
+  title="Blog"
+  description="Artículos sobre trauma, patrones que se repiten, vínculos y lo que cuesta cambiar. Escritos desde la consulta de la Ps. Valentina Orellana."
+>
+  <section class="blog pt-14 md:pt-20 pb-section bg-sand">
+    <div class="container-site">
+
+      <div class="max-w-3xl">
+        <p class="label text-forest mb-4">Blog</p>
+        <h1 class="font-heading font-semibold text-display text-ink mb-6">Para entender lo que te pasa</h1>
+        <p class="body-lead">Artículos sobre trauma, patrones que se repiten, vínculos y lo que cuesta cambiar. Escritos desde la consulta, para leer con calma.</p>
+      </div>
+
+      <div class="chips" role="group" aria-label="Filtrar por tema">
+        <button type="button" class="chip on" data-cat="todos">Todos</button>
+        {categorias.map((c) => <button type="button" class="chip" data-cat={c}>{c}</button>)}
+      </div>
+
+      <div class="grid-blog">
+        <a class="card big c-green" href={`/blog/${destacado.slug}`} data-cat={destacado.categoria}>
+          <div class="big-text">
+            <small>{destacado.etiqueta}</small>
+            <h2>{destacado.titulo}</h2>
+            <p>{destacado.bajada}</p>
+            <span class="go">Leer artículo →</span>
+          </div>
+          <svg class="swirl" viewBox="0 0 200 200" aria-hidden="true">
+            <path d="M100 20 C160 20 180 70 150 105 C120 140 60 130 55 95 C50 60 95 45 120 70 C145 95 125 150 80 165 C40 178 15 140 22 110" fill="none" stroke="#F5A623" stroke-width="4" stroke-linecap="round" />
+          </svg>
+        </a>
+
+        {resto.map((a, i) => {
+          const clase = `card ${estilos[i % estilos.length]}`;
+          const contenido = (
+            <>
+              {!a.publicado && <span class="soon">Próximamente</span>}
+              <div>
+                <small>{a.etiqueta}</small>
+                <h2>{a.titulo}</h2>
+              </div>
+              <p>{a.bajada}</p>
+            </>
+          );
+          return a.publicado
+            ? <a class={clase} href={`/blog/${a.slug}`} data-cat={a.categoria}>{contenido}</a>
+            : <div class={clase} data-cat={a.categoria}>{contenido}</div>;
+        })}
+      </div>
+
+      <!-- Franja de Instagram: se muestra solo si la API entrega publicaciones -->
+      <div id="blog-ig" class="ig" style="display:none;">
+        <div class="ig-head">
+          <div>
+            <p class="label text-forest mb-2">Desde Instagram</p>
+            <h2 class="font-heading font-semibold text-3xl text-ink">Lo último en @psicologa.valentinaorellana</h2>
+          </div>
+          <a href="https://www.instagram.com/psicologa.valentinaorellana/" target="_blank" rel="noopener" class="ig-link">Ver perfil →</a>
+        </div>
+        <div id="blog-ig-strip" class="strip"></div>
+      </div>
+
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; margin: 2.5rem 0 2.25rem; }
+  .chip { font-family: Inter, sans-serif; font-size: 15px; font-weight: 600; padding: 10px 18px; border-radius: 999px; border: 1.5px solid #d9d1c5; color: #2E332A; background: #fff; cursor: pointer; transition: all .2s; }
+  .chip.on { background: #2E332A; color: #fff; border-color: #2E332A; }
+
+  .grid-blog { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .card { position: relative; overflow: hidden; border-radius: 24px; padding: 30px 28px 26px; min-height: 270px; display: flex; flex-direction: column; justify-content: space-between; text-decoration: none; transition: transform .2s; }
+  a.card:hover { transform: translateY(-4px); }
+  .card small { font-family: Inter, sans-serif; font-size: 12px; letter-spacing: 3px; text-transform: uppercase; font-weight: 700; }
+  .card h2 { font-family: Domine, serif; font-size: 25px; line-height: 1.28; margin: 14px 0 10px; font-weight: 700; }
+  .card p { font-family: Inter, sans-serif; font-size: 15.5px; line-height: 1.55; margin: 0; opacity: .85; }
+  .card .go { font-family: Inter, sans-serif; font-size: 14px; font-weight: 700; margin-top: 26px; display: inline-block; }
+  .card.big { grid-column: span 2; min-height: 320px; justify-content: center; padding: 44px 42px; }
+  .card.big h2 { font-size: 34px; }
+  .big-text { max-width: 640px; position: relative; z-index: 1; }
+  .swirl { position: absolute; right: -60px; bottom: -60px; width: 360px; opacity: .18; }
+  .soon { position: absolute; top: 22px; right: 22px; font-family: Inter, sans-serif; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; padding: 5px 10px; border-radius: 999px; background: rgba(46, 51, 42, .08); }
+
+  .c-green { background: #576352; color: #fff; } .c-green small, .c-green .go { color: #F5A623; } .c-green .soon { background: rgba(255,255,255,.18); }
+  .c-sand  { background: #F1EBE3; color: #2E332A; } .c-sand small { color: #576352; }
+  .c-white { background: #fff; color: #2E332A; border: 1.5px solid #ece5db; } .c-white small { color: #576352; }
+  .c-dark  { background: #2E332A; color: #fff; } .c-dark small { color: #F5A623; } .c-dark .soon { background: rgba(255,255,255,.18); }
+  .c-wheat { background: #EBD9B4; color: #2E332A; } .c-wheat small { color: #3f4a3b; }
+
+  .ig { margin-top: 5rem; }
+  .ig-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 22px; }
+  .ig-link { font-family: Inter, sans-serif; font-size: 15px; font-weight: 700; color: #576352; text-decoration: none; white-space: nowrap; }
+  .strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+
+  @media (max-width: 900px) {
+    .grid-blog { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 620px) {
+    .grid-blog { grid-template-columns: 1fr; }
+    .card.big { grid-column: span 1; padding: 32px 26px; }
+    .card.big h2 { font-size: 28px; }
+    .ig-head { flex-direction: column; align-items: start; }
+    .strip { grid-template-columns: repeat(4, 72%); overflow-x: auto; scroll-snap-type: x mandatory; }
+  }
+</style>
+
+<style is:global>
+  .strip a { display: block; scroll-snap-align: start; }
+  .strip img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 18px; display: block; }
+</style>
+
+<script>
+  // Filtro por tema
+  const chips = document.querySelectorAll<HTMLButtonElement>('.chip');
+  const cards = document.querySelectorAll<HTMLElement>('.grid-blog [data-cat]');
+  chips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      chips.forEach((c) => c.classList.remove('on'));
+      chip.classList.add('on');
+      const cat = chip.dataset.cat;
+      cards.forEach((card) => {
+        card.style.display = cat === 'todos' || card.dataset.cat === cat ? '' : 'none';
+      });
+    });
+  });
+
+  // Últimas publicaciones de Instagram (reutiliza /api/instagram)
+  (async () => {
+    try {
+      const res = await fetch('/api/instagram');
+      const data = await res.json();
+      if (!data.items || !data.items.length) return;
+      const strip = document.getElementById('blog-ig-strip');
+      if (!strip) return;
+      strip.innerHTML = data.items.slice(0, 4).map((it: { permalink: string; image: string; caption?: string }) => `
+        <a href="${it.permalink}" target="_blank" rel="noopener">
+          <img src="${it.image}" alt="${(it.caption || 'Publicación de Instagram').replace(/"/g, '&quot;').slice(0, 80)}" loading="lazy" />
+        </a>`).join('');
+      const box = document.getElementById('blog-ig');
+      if (box) box.style.display = '';
+    } catch { /* sin feed, la franja queda oculta */ }
+  })();
+</script>
