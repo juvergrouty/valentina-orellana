@@ -43,7 +43,7 @@ export const articulos: Articulo[] = [
     bajada: 'La pregunta que muchos se hacen antes de necesitar, descansar o decir que no.',
     categoria: 'Vínculos',
     etiqueta: 'Vínculos',
-    publicado: false,
+    publicado: true,
   },
   {
     slug: 'tu-patron-te-protegio-de-algo',
