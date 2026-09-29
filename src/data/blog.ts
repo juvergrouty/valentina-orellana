@@ -27,7 +27,7 @@ export const articulos: Articulo[] = [
     bajada: 'Por qué entender tu historia no siempre alcanza.',
     categoria: 'Patrones',
     etiqueta: 'Patrones',
-    publicado: false,
+    publicado: true,
   },
   {
     slug: 'el-personaje-que-sacamos-a-pasear',
