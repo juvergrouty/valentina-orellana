@@ -51,7 +51,7 @@ export const articulos: Articulo[] = [
     bajada: 'Lo que quedaría expuesto si dejaras de funcionar así.',
     categoria: 'Patrones',
     etiqueta: 'Patrones',
-    publicado: false,
+    publicado: true,
   },
   {
     slug: 'no-es-lo-que-te-paso',
