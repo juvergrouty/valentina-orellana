@@ -98,7 +98,9 @@ const jsonLd = {
 </style>
 
 <style is:global>
-  .post .body p { margin: 0 0 22px; }
+  .post .body p { margin: 0 0 22px; text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+  .post .body .aside { text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+  .post .body p.credit { text-align: center; }
   .post .body h2 { font-family: Domine, serif; font-weight: 700; font-size: 29px; line-height: 1.3; margin: 52px 0 14px; }
   .post .body .first::first-letter { float: left; font-family: Domine, serif; font-size: 74px; line-height: .9; padding: 8px 12px 0 0; color: #576352; }
   .post .body figure { margin: 44px -80px; }
