@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { logError } from '../../../lib/logger';
+import { logError, logWarn } from '../../../lib/logger';
 
 export const prerender = false;
 
@@ -16,11 +16,15 @@ export const GET: APIRoute = async ({ request }) => {
     }
   }
 
+  // El token del panel tiene prioridad; si está vacío se usa el de Vercel.
+  // El token renovado siempre se guarda en el panel, así la variable de Vercel
+  // deja de ser necesaria después de la primera renovación.
   const { data } = await supabase
     .from('settings').select('value').eq('key', 'instagram_access_token').maybeSingle();
-  const token = data?.value;
+  const token = data?.value?.trim() || import.meta.env.INSTAGRAM_ACCESS_TOKEN;
 
   if (!token) {
+    await logWarn('instagram/refresh-token', 'No hay token de Instagram configurado (ni en el panel ni en Vercel)');
     return json({ ok: false, reason: 'no_token' });
   }
 

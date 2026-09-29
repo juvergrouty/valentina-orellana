@@ -398,26 +398,15 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
         Muestra las últimas publicaciones de Instagram en el inicio. Requiere una cuenta
         <strong>Creator o Business</strong> y un <strong>token de larga duración</strong> de la API de Instagram.
       </p>
-      {igTokenEnv ? (
-        <div style="background:var(--sand);border-radius:var(--radius);padding:0.9rem 1rem;">
-          <p style="font-size:0.82rem;color:#374151;">
-            <span style="color:var(--green);font-weight:700;">✓</span> Token configurado como variable de entorno
-            <code style="background:white;border:1px solid var(--dust);padding:0 5px;border-radius:3px;font-size:0.75rem;">INSTAGRAM_ACCESS_TOKEN</code> en Vercel.
-          </p>
-          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.4rem;">
-            El token de larga duración expira cada ~60 días. Cuando expire, genera uno nuevo en Meta y reemplaza la variable en Vercel (luego redeploy). El campo de abajo se ignora mientras la variable esté puesta.
-          </p>
-        </div>
-      ) : (
-        <div>
-          <label class="label" style="margin-bottom:0.4rem;display:block;">Token de acceso de Instagram</label>
-          <input type="password" name="instagram_access_token" value={settings['instagram_access_token'] ?? ''} placeholder="IGQ..." />
-          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.4rem;">
-            Genéralo en <a href="https://developers.facebook.com/" target="_blank" rel="noopener" style="color:var(--forest);">Meta for Developers</a>
-            (Instagram API con Login → token de larga duración). O configúralo como variable de entorno <code style="background:var(--warm);padding:0 4px;border-radius:3px;">INSTAGRAM_ACCESS_TOKEN</code> en Vercel. Si está vacío, la sección no aparece en el sitio.
-          </p>
-        </div>
-      )}
+      <div>
+        <label class="label" style="margin-bottom:0.4rem;display:block;">Token de acceso de Instagram</label>
+        <input type="password" name="instagram_access_token" value={settings['instagram_access_token'] ?? ''} placeholder="IGAA..." />
+        <p style="font-size:0.72rem;color:var(--stone);margin-top:0.4rem;">
+          Genéralo en <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener" style="color:var(--forest);">Meta for Developers</a>
+          (tu app → Instagram → Configuración de la API con inicio de sesión de Instagram → Generar token). El sitio lo renueva solo cada mes, así que no vuelve a vencer mientras quede guardado aquí.
+          {igTokenEnv && <> Este campo tiene prioridad sobre la variable <code style="background:var(--warm);padding:0 4px;border-radius:3px;">INSTAGRAM_ACCESS_TOKEN</code> de Vercel.</>}
+        </p>
+      </div>
     </div>
 
     <!-- API Gateway · Boletas de Honorarios -->
