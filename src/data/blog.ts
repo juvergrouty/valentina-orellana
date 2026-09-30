@@ -61,6 +61,14 @@ export const articulos: Articulo[] = [
     etiqueta: 'Trauma de infancia',
     publicado: true,
   },
+  {
+    slug: 'la-loza-de-las-visitas',
+    titulo: 'La loza de las visitas',
+    bajada: 'Por qué nos damos lo mínimo, postergamos lo importante y nos castigamos al máximo, y qué tiene que ver eso con sentirnos queridos solo por existir.',
+    categoria: 'Autoestima',
+    etiqueta: 'Autoestima',
+    publicado: true,
+  },
 ];
 
 export const categorias: Categoria[] = ['Patrones', 'Trauma', 'Vínculos', 'Autoestima', 'Hombres'];
