@@ -54,11 +54,11 @@ export const articulos: Articulo[] = [
     publicado: true,
   },
   {
-    slug: 'no-es-lo-que-te-paso',
-    titulo: 'No es lo que te pasó, es lo que te organizó',
-    bajada: 'Por qué una misma experiencia puede vivirse de forma totalmente distinta y dejar huellas diferentes en cada persona.',
+    slug: 'lo-que-te-paso-te-organizo',
+    titulo: 'Lo que te pasó te organizó',
+    bajada: 'Cómo las experiencias de la infancia forman nuestra manera de ver el mundo, y por qué eso puede reorganizarse.',
     categoria: 'Trauma',
-    etiqueta: 'Trauma',
+    etiqueta: 'Trauma de infancia',
     publicado: true,
   },
 ];
