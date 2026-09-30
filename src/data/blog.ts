@@ -56,7 +56,7 @@ export const articulos: Articulo[] = [
   {
     slug: 'no-es-lo-que-te-paso',
     titulo: 'No es lo que te pasó, es lo que te organizó',
-    bajada: 'Por qué dos personas pueden vivir lo mismo y quedar tan distintas.',
+    bajada: 'Por qué una misma experiencia puede vivirse de forma totalmente distinta y dejar huellas diferentes en cada persona.',
     categoria: 'Trauma',
     etiqueta: 'Trauma',
     publicado: true,
