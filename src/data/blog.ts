@@ -67,7 +67,7 @@ export const articulos: Articulo[] = [
     bajada: 'Por qué nos damos lo mínimo, postergamos lo importante y nos castigamos al máximo, y qué tiene que ver eso con sentirnos queridos solo por existir.',
     categoria: 'Autoestima',
     etiqueta: 'Autoestima',
-    publicado: true,
+    publicado: false,
   },
 ];
 
