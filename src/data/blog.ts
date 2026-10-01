@@ -14,6 +14,14 @@ export interface Articulo {
 
 export const articulos: Articulo[] = [
   {
+    slug: 'la-loza-de-las-visitas',
+    titulo: 'La loza de las visitas',
+    bajada: 'Por qué guardamos lo mejor para los demás, nos castigamos al fallar y qué cambia cuando nos sentimos queridos solo por existir.',
+    categoria: 'Autoestima',
+    etiqueta: 'Autoestima',
+    publicado: true,
+  },
+  {
     slug: 'el-hombre-que-puede-solo',
     titulo: 'El hombre que puede solo',
     bajada: 'Sobre la desconexión que funciona durante años, hasta que un día deja de funcionar.',
@@ -60,14 +68,6 @@ export const articulos: Articulo[] = [
     categoria: 'Trauma',
     etiqueta: 'Trauma de infancia',
     publicado: true,
-  },
-  {
-    slug: 'la-loza-de-las-visitas',
-    titulo: 'La loza de las visitas',
-    bajada: 'Por qué nos damos lo mínimo, postergamos lo importante y nos castigamos al máximo, y qué tiene que ver eso con sentirnos queridos solo por existir.',
-    categoria: 'Autoestima',
-    etiqueta: 'Autoestima',
-    publicado: false,
   },
 ];
 
