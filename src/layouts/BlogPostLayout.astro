@@ -9,11 +9,15 @@ interface Props {
   imagenAlt: string;
   imagenPosicion?: string;
   creditoPortada: string;
-  minutos: number;
+  minutos?: number;
   relacionados?: string[];
 }
 
-const { slug, descripcion, imagen, imagenAlt, imagenPosicion = 'center', creditoPortada, minutos, relacionados = [] } = Astro.props;
+const { slug, descripcion, imagen, imagenAlt, imagenPosicion = 'center', creditoPortada, relacionados = [] } = Astro.props;
+// Tiempo de lectura calculado desde el texto real (unas 200 palabras por minuto).
+const cuerpo = await Astro.slots.render('default');
+const palabras = cuerpo.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+const minutos = Math.max(1, Math.ceil(palabras / 200));
 const articulo = articulos.find((a) => a.slug === slug)!;
 const sigue = relacionados.map((s) => articulos.find((a) => a.slug === s)).filter(Boolean);
 const jsonLd = {
@@ -45,7 +49,7 @@ const jsonLd = {
     </div>
 
     <article class="body">
-      <slot />
+      <Fragment set:html={cuerpo} />
 
       {sigue.length > 0 && (
         <div class="end">
