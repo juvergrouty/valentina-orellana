@@ -254,7 +254,10 @@ async function handleBooking(request: Request) {
   };
 
   // ── Pago en consulta (manual) ─────────────────────────────────────────────────
-  const isManual = (body as Record<string, string>).payment_method === 'manual';
+  // Desactivado en la web (Valentina, 3 oct 2026): no se ofrece pago en
+  // consulta a pacientes que reservan en línea hasta tener cobro con tarjeta
+  // presencial (tap to pay). Este camino confirmaba la hora sin ningún pago.
+  const isManual = false && (body as Record<string, string>).payment_method === 'manual';
 
   if (isManual && manualEnabled) {
         // Confirmar directamente sin pasar por Flow

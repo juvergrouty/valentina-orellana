@@ -10,8 +10,12 @@ const formatCLP = (n: number) =>
 const { data: settingsRows } = await supabase.from('settings').select('key, value');
 const settings: Record<string, string> = {};
 (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
-const manualPaymentEnabled    = settings['manual_payment_enabled'] !== 'false';
-const transferPaymentEnabled  = settings['transfer_payment_enabled'] === 'true';
+// Pago en consulta y transferencia NO se ofrecen en la web (Valentina, 3 oct
+// 2026): pago en consulta hasta tener tap to pay; la transferencia queda como
+// excepción que ella coordina por WhatsApp. Ambos confirmaban la hora sin
+// ningún pago. Los ajustes de Configuración ya no los muestran aquí.
+const manualPaymentEnabled    = false && settings['manual_payment_enabled'] !== 'false';
+const transferPaymentEnabled  = false && settings['transfer_payment_enabled'] === 'true';
 const recaptchaSiteKey        = settings['recaptcha_site_key'] ?? '';
 
 // Pre-selección de grupo desde URL (ej: /agenda?grupo=individual)

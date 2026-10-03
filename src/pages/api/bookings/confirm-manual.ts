@@ -35,9 +35,11 @@ export const POST: APIRoute = async ({ request }) => {
   (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => {
     settings[key] = value;
   });
-  const allowedMethods = ['manual', 'transferencia'];
+  // Pago en consulta y transferencia desactivados en la web (3 oct 2026, ver
+  // agenda.astro): este endpoint público confirmaba la hora sin ningún pago.
+  const allowedMethods: string[] = [];
   if (!allowedMethods.includes(paymentMethod)) {
-    return json({ error: 'Método de pago no válido.' }, 400);
+    return json({ error: 'Este medio de pago no está disponible en línea. Paga con Flow o escríbeme por WhatsApp.' }, 400);
   }
   if (paymentMethod === 'manual' && settings['manual_payment_enabled'] === 'false') {
     return json({ error: 'El pago en consulta no está habilitado.' }, 403);
