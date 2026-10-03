@@ -39,7 +39,7 @@ try { boletaAlerts = await getBoletaAlerts(); } catch { /* no debe tumbar el adm
 // permanente pedido por Valentina (3 oct 2026). Se apaga solo cuando firman.
 let consentAlerts: ConsentAlert[] = [];
 try { consentAlerts = await getConsentAlerts(); } catch { /* no debe tumbar el admin */ }
-// Días cerrados (feriados/vacaciones) de las próximas 3 semanas, con las horas
+// Días cerrados (feriados/vacaciones) de las próximas 2 semanas, con las horas
 // que se pierden por modalidad (ver src/lib/blockedDayAlerts.ts).
 let blockedDayAlerts: BlockedDayAlert[] = [];
 try {
@@ -811,9 +811,9 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
             <li style="margin:0.15rem 0;">
               <strong style="text-transform:capitalize;">{a.label}</strong>{a.reason ? ` (${a.reason})` : ''}: pierdes{' '}
               {[
-                a.presencial.length ? `${horasTxt(a.presencial.length, 'presencial')} (${a.presencial.join(', ')})` : '',
-                a.online.length ? `${horasTxt(a.online.length, 'online')} (${a.online.join(', ')})` : '',
-              ].filter(Boolean).join(' y ') || 'ninguna hora'}.
+                a.presencial.length ? `${horasTxt(a.presencial.length, 'presencial')} (${a.presencial.join(', ')}) de ${a.serviciosPresencial.join(' y ')}` : '',
+                a.online.length ? `${horasTxt(a.online.length, 'online')} (${a.online.join(', ')}) de ${a.serviciosOnline.join(' y ')}` : '',
+              ].filter(Boolean).join('; y ') || 'ninguna hora'}.
               {a.agendadas > 0 && <strong> ⚠ Tienes {a.agendadas === 1 ? '1 sesión agendada' : `${a.agendadas} sesiones agendadas`} ese día: hay que moverla{a.agendadas === 1 ? '' : 's'}.</strong>}
             </li>
           ))}
