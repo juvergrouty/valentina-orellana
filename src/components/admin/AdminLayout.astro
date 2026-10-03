@@ -1,5 +1,6 @@
 ---
 import { supabase } from '../../lib/supabase';
+import { getBoletaAlerts, type BoletaAlert } from '../../lib/boletaAlerts';
 
 interface Props {
   title: string;
@@ -27,6 +28,12 @@ try {
     .gt('created_at', lastSeen);
   newErrorCount = count ?? 0;
 } catch { /* si falla esta consulta, no debe tumbar el resto del admin */ }
+
+// Boletas con error de emisión/envío (ver src/lib/boletaAlerts.ts): visible
+// hasta que el problema se resuelva, no hasta que se abra /admin/logs.
+let boletaAlerts: BoletaAlert[] = [];
+try { boletaAlerts = await getBoletaAlerts(); } catch { /* no debe tumbar el admin */ }
+const fmtSesion = (d: string | null) => d ? d.split('-').reverse().join('-') : '';
 
 const navMain = [
   { href: '/admin/agenda',         label: 'Calendario',     icon: 'calendar',   exact: true },
@@ -758,6 +765,19 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
 
   <!-- ── Main area ──────────────────────────────────────────────────────── -->
   <main class="enc-main">
+    {boletaAlerts.length > 0 && (
+      <div role="alert" style="background:#dc2626;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
+        <p style="font-weight:700;margin:0 0 0.35rem;">⚠ {boletaAlerts.length === 1 ? 'Hay 1 boleta con problemas' : `Hay ${boletaAlerts.length} boletas con problemas`}</p>
+        <ul style="margin:0;padding-left:1.1rem;">
+          {boletaAlerts.slice(0, 6).map(a => (
+            <li style="margin:0.15rem 0;">
+              <a href={a.href} style="color:#fff;text-decoration:underline;font-weight:600;">{a.patientName}{a.sessionDate ? ` · sesión ${fmtSesion(a.sessionDate)}` : ''}</a>: {a.message}
+            </li>
+          ))}
+        </ul>
+        {boletaAlerts.length > 6 && <p style="margin:0.35rem 0 0;">…y {boletaAlerts.length - 6} más en <a href="/admin/logs?filtro=error" style="color:#fff;text-decoration:underline;">Logs</a>.</p>}
+      </div>
+    )}
     {newErrorCount > 0 && (
       <a href="/admin/logs?filtro=error"
         style="display:flex;align-items:center;gap:0.6rem;background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.65rem 1.25rem;font-size:0.85rem;font-weight:600;text-decoration:none;">
