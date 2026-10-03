@@ -2,72 +2,101 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { nowCL } from '../../lib/dateUtils';
+import { nowCL, todayCL } from '../../lib/dateUtils';
+import { manualChargeLabel } from '../../lib/debt';
 
 const MONTHS_LONG = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const MONTHS_SHORT = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
 // Mes seleccionado (YYYY-MM), por defecto el actual
 const now      = nowCL();
 const curYM    = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 const selYM    = Astro.url.searchParams.get('mes') ?? curYM;
-const [selY, selM] = selYM.split('-').map(Number);
-const todayStr = now.toISOString().split('T')[0];
+const todayStr = todayCL();
+const SIN_FECHA = '2099-12-31'; // cobros manuales sin fecha de sesión
 
-// Todas las reservas no canceladas
+// Reservas que existen de verdad: sin canceladas ni vencidas (una reserva web
+// abandonada queda 'expired' y no es ni ingreso ni deuda).
 const { data: all } = await supabase
   .from('bookings')
-  .select('amount, status, payment_method, session_type, session_date, paid_at, debt_voided')
-  .neq('status', 'cancelled');
+  .select('id, patient_name, patient_email, amount, status, payment_method, payment_note, session_type, session_date, session_time, paid_at, debt_voided, custom_title, notes')
+  .not('status', 'in', '(cancelled,expired)');
 const bookings = all ?? [];
 
-const isConfirmed = (s: string) => s === 'confirmed';
+// REGLA (Valentina, 3 oct 2026): ingreso = solo lo que tiene fecha de pago
+// (paid_at). Antes contaba toda sesión 'confirmed', pagada o no, e incluía
+// deudas anuladas: la misma sesión salía como ingreso y como deuda.
+const pagada  = (b: any) => !!b.paid_at && b.debt_voided !== true;
+const anulada = (b: any) => b.debt_voided === true;
+const sinPagar = (b: any) => !b.paid_at && !anulada(b) && (b.amount ?? 0) > 0;
+const fechaChile = (iso: string) => nowCL(new Date(iso)).toISOString().slice(0, 10);
 
-// ── Total por cobrar histórico (deuda real pendiente) ───────────────────────
-// Misma definición usada en /admin/deudas y en el calendario (agenda.astro,
-// evClass): reserva CONFIRMADA sin paid_at y sin deuda anulada. Antes contaba
-// cualquier reserva no confirmada (incluidas pending_payment sin terminar de
-// pagar, que no son realmente "deuda") y no descontaba las deudas ya anuladas
-// — este número no coincidía con lo que se ve al hacer clic en "Ir a cobrar".
-const totalPorCobrar = bookings
-  .filter(b => isConfirmed(b.status) && !b.paid_at && b.debt_voided !== true && b.amount)
-  .reduce((sum, b) => sum + (b.amount ?? 0), 0);
-
-// ── Por cobrar — links de pago pendientes ───────────────────────────────────
-// A pedido de Valentina (24 sep 2026): distinto de "deuda" — acá la sesión
-// TODAVÍA no ocurrió y el paciente no ha pagado el link que se le mandó. No es
-// dinero que se le deba (nadie prestó el servicio todavía), es dinero que
-// debería entrar cuando pague — por eso va aparte, no sumado a "Deudas".
-const totalPorCobrarLink = bookings
-  .filter(b => b.status === 'pending_payment' && b.amount)
-  .reduce((sum, b) => sum + (b.amount ?? 0), 0);
-
-// ── Reservas del mes seleccionado ──────────────────────────────────────────
-const inMonth = bookings.filter(b => {
-  const [y, m] = (b.session_date ?? '').split('-').map(Number);
-  return y === selY && m === selM;
-});
-
-// Pagos confirmados del mes (ingresos)
-const pagosMes = inMonth.filter(b => isConfirmed(b.status));
+// ── Ingresos del mes: lo pagado, por el MES EN QUE SE PAGÓ ──────────────────
+const pagosMes = bookings.filter(b => pagada(b) && fechaChile(b.paid_at).slice(0, 7) === selYM);
 const ingresosMes = pagosMes.reduce((s, b) => s + (b.amount ?? 0), 0);
 
-// Desglose por método de pago
-const PM_LABEL: Record<string, string> = { manual: 'Pago en consulta', transferencia: 'Transferencia', flow: 'Flow (Webpay)' };
+// Medio de pago real (payment_note guarda cómo se pagó; payment_method es cómo se reservó)
+const medio = (b: any) => {
+  const n = String(b.payment_note ?? '').toLowerCase();
+  if (n.includes('flow')) return 'Flow (Webpay)';
+  if (n.includes('transfer')) return 'Transferencia';
+  if (n.includes('efectivo')) return 'Efectivo';
+  if (b.payment_note) return String(b.payment_note);
+  return ({ manual: 'Pago en consulta', transferencia: 'Transferencia', flow: 'Flow (Webpay)' } as Record<string, string>)[b.payment_method] ?? 'Otro';
+};
 const byMethod: Record<string, { count: number; total: number }> = {};
 pagosMes.forEach(b => {
-  const k = b.payment_method ?? 'otro';
+  const k = medio(b);
   (byMethod[k] ??= { count: 0, total: 0 });
   byMethod[k].count++;
   byMethod[k].total += b.amount ?? 0;
 });
 
-// Atenciones del mes por tipo de sesión
+// ── Lo que se adeuda (para cobrar): sesiones ya realizadas sin pagar ────────
+// Confirmadas, con fecha de hoy o anterior, sin pago y sin deuda anulada.
+// Los cobros manuales sin fecha (2099) pendientes también se deben.
+const deudas = bookings.filter(b => sinPagar(b) && (
+  (b.status === 'confirmed' && b.session_date !== SIN_FECHA && b.session_date <= todayStr) ||
+  (b.session_date === SIN_FECHA)
+));
+const totalAdeudado = deudas.reduce((s, b) => s + (b.amount ?? 0), 0);
+
+// ── Por cobrar: sesiones futuras agendadas que aún no se pagan ──────────────
+const porCobrar = bookings.filter(b => sinPagar(b) && b.session_date !== SIN_FECHA && b.session_date > todayStr);
+const totalPorCobrar = porCobrar.reduce((s, b) => s + (b.amount ?? 0), 0);
+
+// Quién debe y desde cuándo, agrupado por paciente (más antiguo primero)
+const { data: fichas } = await supabase.from('patients').select('id, email');
+const fichaDe = new Map((fichas ?? []).map((p: { id: string; email: string }) => [String(p.email ?? '').toLowerCase(), p.id]));
 const ST_LABEL: Record<string, string> = {
   'online': 'Individual Online', 'presencial': 'Individual Presencial',
   'pareja-online': 'Pareja Online', 'pareja-presencial': 'Pareja Presencial',
+  'individual': 'Individual', 'pareja': 'Pareja',
 };
+const etiqueta = (b: any) => b.custom_title || manualChargeLabel(b.notes) || ST_LABEL[b.session_type] || b.session_type || 'Sesión';
+const fmtFecha = (iso: string) => {
+  if (!iso || iso === SIN_FECHA) return 'sin fecha';
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${d} ${MONTHS_SHORT[m - 1]}${y !== now.getFullYear() ? ' ' + y : ''}`;
+};
+type Deudor = { nombre: string; email: string; fichaId?: string; total: number; desde: string; sesiones: any[] };
+const deudoresMap = new Map<string, Deudor>();
+for (const b of deudas) {
+  const key = String(b.patient_email ?? b.patient_name ?? '').toLowerCase();
+  const d = deudoresMap.get(key) ?? { nombre: b.patient_name ?? '(sin nombre)', email: b.patient_email ?? '', fichaId: fichaDe.get(String(b.patient_email ?? '').toLowerCase()), total: 0, desde: b.session_date, sesiones: [] };
+  d.total += b.amount ?? 0;
+  if (b.session_date < d.desde) d.desde = b.session_date;
+  d.sesiones.push(b);
+  deudoresMap.set(key, d);
+}
+const deudores = [...deudoresMap.values()].sort((a, b) => a.desde.localeCompare(b.desde));
+deudores.forEach(d => d.sesiones.sort((a: any, b: any) => a.session_date.localeCompare(b.session_date)));
+
+// ── Sesiones del mes seleccionado (por fecha de sesión) ─────────────────────
+const inMonth = bookings.filter(b => (b.session_date ?? '').slice(0, 7) === selYM && b.status === 'confirmed');
+const pendienteMes = inMonth.filter(sinPagar);
 const byType: Record<string, number> = {};
-inMonth.forEach(b => { const k = b.session_type ?? 'otro'; byType[k] = (byType[k] ?? 0) + 1; });
+inMonth.forEach(b => { const k = ST_LABEL[b.session_type] ?? b.session_type ?? 'otro'; byType[k] = (byType[k] ?? 0) + 1; });
 const totalAtenciones = inMonth.length;
 
 // Lista de meses para el selector (12 hacia atrás)
@@ -76,6 +105,7 @@ const monthOptions = Array.from({ length: 12 }, (_, i) => {
   const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   return { value: ym, label: `${MONTHS_LONG[d.getMonth()].charAt(0).toUpperCase() + MONTHS_LONG[d.getMonth()].slice(1)} ${d.getFullYear()}` };
 });
+const mesLabel = monthOptions.find(m => m.value === selYM)?.label ?? selYM;
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
@@ -93,28 +123,56 @@ const formatCLP = (n: number) =>
       <!-- Tarjetas superiores -->
       <div class="fin-top">
         <div class="fin-card">
-          <div class="fin-card-label">Ingresos confirmados · {monthOptions.find(m => m.value === selYM)?.label ?? selYM}</div>
+          <div class="fin-card-label">Ingresos pagados · {mesLabel}</div>
           <div class="fin-card-value">{formatCLP(ingresosMes)}</div>
           <div class="fin-card-foot">
-            <span class="fin-muted">{pagosMes.length} pago{pagosMes.length !== 1 ? 's' : ''} confirmado{pagosMes.length !== 1 ? 's' : ''}</span>
+            <span class="fin-muted">{pagosMes.length} pago{pagosMes.length !== 1 ? 's' : ''} recibido{pagosMes.length !== 1 ? 's' : ''} en el mes</span>
           </div>
         </div>
 
         <div class="fin-card fin-card-due">
-          <div class="fin-card-label" style="color:#dc2626;">Total por cobrar histórico</div>
-          <div class="fin-card-value">{formatCLP(totalPorCobrar)}</div>
+          <div class="fin-card-label" style="color:#dc2626;">Te deben (sesiones ya realizadas)</div>
+          <div class="fin-card-value">{formatCLP(totalAdeudado)}</div>
           <div class="fin-card-foot">
-            <a href="/admin/deudas" class="btn btn-outline btn-sm">Ir a cobrar →</a>
+            <span class="fin-muted">{deudores.length} paciente{deudores.length !== 1 ? 's' : ''} · </span>
+            <a href="#deudores" class="btn btn-outline btn-sm">Ver quiénes →</a>
           </div>
         </div>
 
         <div class="fin-card">
-          <div class="fin-card-label" style="color:#b45309;">Por cobrar · links de pago pendientes</div>
-          <div class="fin-card-value">{formatCLP(totalPorCobrarLink)}</div>
+          <div class="fin-card-label" style="color:#b45309;">Por cobrar · sesiones futuras sin pagar</div>
+          <div class="fin-card-value">{formatCLP(totalPorCobrar)}</div>
           <div class="fin-card-foot">
             <a href="/admin/por-cobrar" class="btn btn-outline btn-sm">Ver pendientes →</a>
           </div>
         </div>
+      </div>
+
+      <!-- Quién debe y desde cuándo -->
+      <div class="fin-section-head" id="deudores"><span>Quién te debe y desde cuándo</span></div>
+      <div class="fin-table-wrap" style="margin-bottom:1.5rem;">
+        {deudores.length === 0 ? (
+          <p class="fin-muted" style="padding:1.5rem;text-align:center;">Nadie te debe sesiones realizadas. 🎉</p>
+        ) : (
+          <table class="fin-table">
+            <thead><tr><th>Paciente</th><th>Debe desde</th><th>Sesiones sin pagar</th><th style="text-align:right;">Total</th><th></th></tr></thead>
+            <tbody>
+              {deudores.map(d => (
+                <tr>
+                  <td><strong>{d.nombre}</strong></td>
+                  <td class="fin-muted">{fmtFecha(d.desde)}</td>
+                  <td class="fin-muted">{d.sesiones.map((b: any) => `${fmtFecha(b.session_date)} (${etiqueta(b)})`).join(' · ')}</td>
+                  <td style="text-align:right;font-weight:600;color:#dc2626;">{formatCLP(d.total)}</td>
+                  <td style="text-align:right;">
+                    {d.fichaId
+                      ? <a href={`/admin/pacientes/${d.fichaId}?tab=sesiones`} class="btn btn-outline btn-sm">Cobrar →</a>
+                      : <a href="/admin/deudas" class="btn btn-outline btn-sm">Cobrar →</a>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <!-- Resumen del mes -->
@@ -138,13 +196,13 @@ const formatCLP = (n: number) =>
       <div class="fin-grid" id="tab-pagos">
         <div class="fin-panel">
           <div class="fin-panel-value" style="color:#4f5ce8;">{formatCLP(ingresosMes)}</div>
-          <p class="fin-panel-note">Ingresos confirmados del mes</p>
+          <p class="fin-panel-note">Ingresos pagados en el mes, por medio de pago</p>
           <div class="fin-breakdown">
             {Object.keys(byMethod).length === 0 ? (
-              <p class="fin-muted" style="padding:0.5rem 0;">Sin pagos confirmados este mes.</p>
+              <p class="fin-muted" style="padding:0.5rem 0;">Sin pagos recibidos este mes.</p>
             ) : Object.entries(byMethod).map(([k, v]) => (
               <div class="fin-break-row">
-                <span>{PM_LABEL[k] ?? k} <span class="fin-muted">· {v.count}</span></span>
+                <span>{k} <span class="fin-muted">· {v.count}</span></span>
                 <strong>{formatCLP(v.total)}</strong>
               </div>
             ))}
@@ -152,11 +210,11 @@ const formatCLP = (n: number) =>
         </div>
 
         <div class="fin-panel">
-          <div class="fin-panel-label">Pendiente de cobro este mes</div>
+          <div class="fin-panel-label">Sesiones del mes sin pagar</div>
           <div class="fin-panel-value">
-            {formatCLP(inMonth.filter(b => !isConfirmed(b.status)).reduce((s, b) => s + (b.amount ?? 0), 0))}
+            {formatCLP(pendienteMes.reduce((s, b) => s + (b.amount ?? 0), 0))}
           </div>
-          <p class="fin-panel-note">{inMonth.filter(b => !isConfirmed(b.status)).length} reserva(s) sin pago confirmado</p>
+          <p class="fin-panel-note">{pendienteMes.length} sesión(es) del mes sin pago</p>
         </div>
       </div>
 
@@ -164,13 +222,13 @@ const formatCLP = (n: number) =>
       <div class="fin-grid" id="tab-atenciones" style="display:none;">
         <div class="fin-panel">
           <div class="fin-panel-value">{totalAtenciones}</div>
-          <p class="fin-panel-note">Atenciones agendadas del mes</p>
+          <p class="fin-panel-note">Sesiones agendadas del mes</p>
           <div class="fin-breakdown">
             {totalAtenciones === 0 ? (
-              <p class="fin-muted" style="padding:0.5rem 0;">Sin atenciones este mes.</p>
+              <p class="fin-muted" style="padding:0.5rem 0;">Sin sesiones este mes.</p>
             ) : Object.entries(byType).map(([k, n]) => (
               <div class="fin-break-row">
-                <span>{ST_LABEL[k] ?? k}</span>
+                <span>{k}</span>
                 <strong>{n}</strong>
               </div>
             ))}
@@ -178,23 +236,24 @@ const formatCLP = (n: number) =>
         </div>
       </div>
 
-      <!-- Detalle de transacciones -->
-      <div class="fin-section-head" style="margin-top:1.5rem;"><span>Detalle de transacciones</span></div>
+      <!-- Detalle -->
+      <div class="fin-section-head" style="margin-top:1.5rem;"><span>Sesiones del mes</span></div>
       <div class="fin-table-wrap">
         {inMonth.length === 0 ? (
-          <p class="fin-muted" style="padding:1.5rem;text-align:center;">Sin transacciones este mes.</p>
+          <p class="fin-muted" style="padding:1.5rem;text-align:center;">Sin sesiones este mes.</p>
         ) : (
           <table class="fin-table">
-            <thead><tr><th>Fecha</th><th>Tipo</th><th>Método</th><th>Estado</th><th style="text-align:right;">Monto</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Paciente</th><th>Tipo</th><th>Medio</th><th>Estado</th><th style="text-align:right;">Monto</th></tr></thead>
             <tbody>
               {inMonth.sort((a, b) => (b.session_date ?? '').localeCompare(a.session_date ?? '')).map(b => (
                 <tr>
-                  <td class="fin-muted">{b.session_date}</td>
-                  <td>{ST_LABEL[b.session_type] ?? b.session_type}</td>
-                  <td class="fin-muted">{PM_LABEL[b.payment_method] ?? b.payment_method ?? '—'}</td>
+                  <td class="fin-muted">{fmtFecha(b.session_date)}</td>
+                  <td>{b.patient_name}</td>
+                  <td>{etiqueta(b)}</td>
+                  <td class="fin-muted">{pagada(b) ? medio(b) : '—'}</td>
                   <td>
-                    <span class={`fin-badge ${isConfirmed(b.status) ? 'ok' : 'due'}`}>
-                      {isConfirmed(b.status) ? 'Pagado' : 'Por pagar'}
+                    <span class={`fin-badge ${pagada(b) ? 'ok' : anulada(b) ? 'void' : 'due'}`}>
+                      {pagada(b) ? 'Pagado' : anulada(b) ? 'Deuda anulada' : 'Por pagar'}
                     </span>
                   </td>
                   <td style="text-align:right;font-weight:600;">{formatCLP(b.amount ?? 0)}</td>
@@ -250,6 +309,8 @@ const formatCLP = (n: number) =>
 .fin-badge { display: inline-flex; padding: 2px 9px; border-radius: 99px; font-size: 0.72rem; font-weight: 600; }
 .fin-badge.ok  { background: #f0fdf4; color: #15803d; }
 .fin-badge.due { background: #fef2f2; color: #dc2626; }
+.fin-badge.void { background: #f3f4f6; color: #6b7280; }
+.fin-table-wrap { overflow-x: auto; }
 </style>
 
 <script>
