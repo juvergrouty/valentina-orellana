@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { sendSessionUpdatedEmail, sendRescheduleAdminAlert, ADMIN_EMAIL_FALLBACK } from '../../lib/email';
 import { rescheduleBookingInCalendar } from '../../lib/syncCalendar';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
+import { quitarLineasNotas } from '../../lib/apigateway';
 
 export const prerender = false;
 
@@ -16,6 +17,9 @@ export const POST: APIRoute = async ({ request }) => {
   if (!bookingId || !email || !session_date || !session_time) {
     return json({ error: 'Faltan campos obligatorios.' }, 400);
   }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(session_date) || !/^\d{2}:\d{2}$/.test(session_time.slice(0, 5))) {
+    return json({ error: 'Fecha u hora inválida.' }, 400);
+  }
 
   // Verificar que la reserva existe y el email coincide
   const { data: booking } = await supabase
@@ -28,6 +32,28 @@ export const POST: APIRoute = async ({ request }) => {
 
   if (!booking) {
     return json({ error: 'Reserva no encontrada o no tienes permiso para modificarla.' }, 404);
+  }
+
+  // Política: la paciente puede reagendar sola solo hasta 24 horas antes de su
+  // sesión ACTUAL (antes solo se revisaba la hora nueva, así que se podía mover
+  // una sesión que empezaba en 1 hora). Valentina reagenda siempre desde el panel.
+  if (hoursUntilSessionCL(booking.session_date, booking.session_time) < 24) {
+    return json({ error: 'Faltan menos de 24 horas para tu sesión, así que ya no se puede reagendar en línea. Escríbeme por WhatsApp y lo vemos.' }, 400);
+  }
+
+  // La hora nueva tiene que estar disponible para el servicio de esta sesión
+  // (mismo cálculo que ve la paciente en la agenda: horario del servicio,
+  // bloqueos, descanso entre sesiones y reservas existentes).
+  try {
+    const q = new URLSearchParams({ date: session_date });
+    if (booking.service_id) q.set('service_id', booking.service_id);
+    if (booking.duration_min) q.set('duration', String(booking.duration_min));
+    const av = await fetch(new URL(`/api/availability?${q}`, request.url), { signal: AbortSignal.timeout(10000) }).then(r => r.json());
+    if (!Array.isArray(av.slots) || !av.slots.includes(session_time.slice(0, 5))) {
+      return json({ error: 'Ese horario no está disponible. Por favor elige otro.' }, 409);
+    }
+  } catch {
+    return json({ error: 'No se pudo comprobar la disponibilidad. Intenta de nuevo.' }, 503);
   }
 
   // Verificar que el nuevo horario esté disponible
@@ -62,16 +88,22 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ error: 'El reagendamiento debe realizarse con al menos 24 horas de anticipación.' }, 400);
   }
 
-  // Actualizar la reserva
-  await supabase
+  // Actualizar la reserva. Si no se guarda, no se avisa a nadie (antes decía
+  // "¡Sesión reagendada!" y mandaba los correos aunque el cambio fallara).
+  const { error: updErr } = await supabase
     .from('bookings')
     .update({ session_date, session_time })
     .eq('id', bookingId);
+  if (updErr) {
+    return json({ error: updErr.code === '23505' ? 'Ese horario ya no está disponible. Por favor elige otro.' : 'No se pudo guardar el cambio. Intenta de nuevo.' }, updErr.code === '23505' ? 409 : 500);
+  }
+  // Nueva fecha: se borran las marcas de recordatorio para que llegue uno nuevo.
+  await quitarLineasNotas(bookingId, ['RecordatorioEnviado', 'RecordatorioWhatsAppEnviado']);
 
   // Mover el evento en Google Calendar (el de Valentina y el del paciente, con
   // el mismo Meet si es online) — antes esto solo se actualizaba en la base de
   // datos, y el evento real de calendario se quedaba con la fecha vieja.
-  try { await rescheduleBookingInCalendar(bookingId, session_date, session_time); }
+  try { await rescheduleBookingInCalendar(bookingId, session_date, session_time, booking.duration_min ?? undefined); }
   catch (e) { console.error('[reschedule] gcal:', e); }
 
   // Leer settings para email admin
@@ -84,7 +116,8 @@ export const POST: APIRoute = async ({ request }) => {
   // nueva. A Valentina: aviso de que fue un REAGENDAMIENTO, no una reserva
   // nueva — antes esto reusaba sendNotificationToAdmin, que decía "Nueva
   // reserva confirmada" y era indistinguible de una reserva real nueva.
-  Promise.all([
+  // AWAIT: en una función serverless, sin esperar, los correos pueden no salir.
+  await Promise.all([
     sendSessionUpdatedEmail({
       patient_name:  booking.patient_name,
       patient_email: booking.patient_email,

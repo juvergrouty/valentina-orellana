@@ -6,6 +6,7 @@ import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { getTotalOwedByEmail, tagBookingsWithPaymentToken } from '../../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
+import { quitarLineasNotas } from '../../../lib/apigateway';
 import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { logWarn } from '../../../lib/logger';
@@ -238,8 +239,12 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (conflict) return redirect(dest + '&error=conflict');
 
     const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
-    await supabase.from('bookings').update({ session_date, session_time }).eq('id', id);
-    try { await rescheduleBookingInCalendar(id, session_date, session_time); } catch (e) { console.error('[reschedule] gcal:', e); }
+    const { error: updErr } = await supabase.from('bookings').update({ session_date, session_time }).eq('id', id);
+    // Si no se guardó, no se toca el calendario ni se avisa a la paciente.
+    if (updErr) return redirect(dest + '&error=insert_failed&detail=' + encodeURIComponent(updErr.message.slice(0, 200)));
+    // Nueva fecha: se borran las marcas de recordatorio para que le llegue uno para la fecha nueva.
+    await quitarLineasNotas(id, ['RecordatorioEnviado', 'RecordatorioWhatsAppEnviado']);
+    try { await rescheduleBookingInCalendar(id, session_date, session_time, booking?.duration_min ?? undefined); } catch (e) { console.error('[reschedule] gcal:', e); }
 
     if (notifyPatient && booking?.patient_email) {
       let svcName: string | undefined;

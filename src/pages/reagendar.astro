@@ -10,7 +10,7 @@ let booking: Record<string, string | number> | null = null;
 if (bookingId) {
   const { data } = await supabase
     .from('bookings')
-    .select('id, patient_name, session_type, session_date, session_time, status, patient_email')
+    .select('id, patient_name, session_type, session_date, session_time, status, service_id, duration_min')
     .eq('id', bookingId)
     .eq('status', 'confirmed')
     .single();
@@ -159,7 +159,7 @@ const SESSION_LABELS: Record<string, string> = {
   .slot-selected { @apply bg-ink text-sand border-ink; }
 </style>
 
-<script define:vars={{ bookingId, bookingEmail: booking?.patient_email ?? '' }}>
+<script define:vars={{ bookingId, serviceId: booking?.service_id ?? '', durationMin: booking?.duration_min ?? '' }}>
   const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const $ = id => document.getElementById(id);
 
@@ -259,7 +259,11 @@ const SESSION_LABELS: Record<string, string> = {
     let slots = loadedSlots[iso];
     if (!slots) {
       try {
-        const res  = await fetch(`/api/availability?date=${iso}`);
+        // Solo las horas del servicio de esta sesión (antes pedía todas las de todos
+        // los servicios mezcladas, ~120 por día y repetidas).
+        const svcQ = serviceId ? `&service_id=${encodeURIComponent(serviceId)}` : '';
+        const durQ = durationMin ? `&duration=${durationMin}` : '';
+        const res  = await fetch(`/api/availability?date=${iso}${svcQ}${durQ}`);
         const data = await res.json();
         slots = data.slots ?? [];
         loadedSlots[iso] = slots;
