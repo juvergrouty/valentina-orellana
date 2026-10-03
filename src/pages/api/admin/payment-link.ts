@@ -142,7 +142,7 @@ export const POST: APIRoute = async ({ request }) => {
         patient_name:  name.trim(),
         patient_email: email.trim().toLowerCase(),
         amount:        amountInt,
-      }).catch(() => ({ success: false as const }));
+      }, { unpaid: true }).catch(() => ({ success: false as const }));
 
       if ('meetLink' in calResult && calResult.meetLink) {
         meetLink = calResult.meetLink;

@@ -65,7 +65,13 @@ export interface CalendarEventInput {
   attendeeEmail?: string;
   isOnline:     boolean;
   calendarId?:  string;   // default 'primary'
+  unpaid?:      boolean;  // reserva aún sin pagar: prefijo + color rojo (ver UNPAID_PREFIX)
 }
+
+/** Marca visual de una reserva que bloquea la hora pero todavía no está pagada. */
+export const UNPAID_PREFIX   = 'Por pagar · ';
+export const UNPAID_COLOR_ID = '11'; // rojo ("Tomate") en Google Calendar
+export const PAID_COLOR_ID   = '10'; // verde ("Albahaca") en Google Calendar
 
 /** Crea un evento en Google Calendar. Retorna el evento creado (con Meet link si isOnline) */
 export async function createCalendarEvent(
@@ -82,11 +88,13 @@ export async function createCalendarEvent(
   };
 
   const body: any = {
-    summary:     event.title,
+    summary:     event.unpaid ? UNPAID_PREFIX + event.title : event.title,
     description: event.description ?? '',
     start: { dateTime: toISO(startDate), timeZone: TIMEZONE },
     end:   { dateTime: toISO(endDate),   timeZone: TIMEZONE },
   };
+
+  if (event.unpaid) body.colorId = UNPAID_COLOR_ID;
 
   if (event.attendeeEmail) {
     body.attendees = [{ email: event.attendeeEmail }];
@@ -213,6 +221,46 @@ export async function updateCalendarEventTitle(
   if (!res.ok) {
     throw new Error(`Google Calendar update title failed (${res.status}): ${await res.text()}`);
   }
+}
+
+/** Pasa un evento a "pagado" (quita el prefijo y lo pone en verde; si se indica el
+ *  correo del paciente y aún no es invitado, lo invita) o de vuelta a "por
+ *  pagar". Solo hace la llamada de escritura si algo realmente cambia. */
+export async function setCalendarEventPaidState(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  paid: boolean,
+  attendeeEmail?: string,
+): Promise<void> {
+  const base = `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`;
+  const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+  const getRes = await fetch(base, { headers });
+  if (getRes.status === 404 || getRes.status === 410) return; // el evento ya no existe
+  if (!getRes.ok) throw new Error(`Google Calendar get event failed (${getRes.status}): ${await getRes.text()}`);
+  const ev = await getRes.json();
+  const summary: string = ev.summary ?? '';
+  const hasPrefix = summary.startsWith(UNPAID_PREFIX);
+
+  const body: Record<string, unknown> = {};
+  let invite = false;
+  if (paid) {
+    if (hasPrefix) body.summary = summary.slice(UNPAID_PREFIX.length);
+    if (ev.colorId !== PAID_COLOR_ID) body.colorId = PAID_COLOR_ID;
+    if (attendeeEmail && !(ev.attendees ?? []).some((a: any) => a.email?.toLowerCase() === attendeeEmail.toLowerCase())) {
+      body.attendees = [...(ev.attendees ?? []), { email: attendeeEmail }];
+      invite = true;
+    }
+  } else {
+    if (!hasPrefix) body.summary = UNPAID_PREFIX + summary;
+    if (ev.colorId !== UNPAID_COLOR_ID) body.colorId = UNPAID_COLOR_ID;
+  }
+  if (Object.keys(body).length === 0) return;
+
+  const res = await fetch(`${base}?sendUpdates=${invite ? 'all' : 'none'}`, {
+    method: 'PATCH', headers, body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Google Calendar update paid state failed (${res.status}): ${await res.text()}`);
 }
 
 /** Obtiene info del usuario conectado */

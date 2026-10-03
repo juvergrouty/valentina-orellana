@@ -5,7 +5,7 @@
  */
 
 import { supabase } from './supabase';
-import { refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle } from './googleCalendar';
+import { refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle, setCalendarEventPaidState, UNPAID_PREFIX } from './googleCalendar';
 import { logError } from './logger';
 
 const SESSION_LABELS: Record<string, string> = {
@@ -86,17 +86,19 @@ export async function rescheduleBookingInCalendar(bookingId: string, date: strin
  *  en su Google Calendar (y el del paciente) se quedaba con el nombre viejo. */
 export async function retitleBookingInCalendar(bookingId: string, title: string): Promise<void> {
   try {
-    const { data: booking } = await supabase.from('bookings').select('google_event_id').eq('id', bookingId).single();
+    const { data: booking } = await supabase.from('bookings').select('google_event_id, status').eq('id', bookingId).single();
     if (!booking?.google_event_id) return;
     const auth = await getValidAccessToken();
     if (!auth) return;
-    await updateCalendarEventTitle(auth.token, auth.calendarId, booking.google_event_id, title);
+    // Una reserva todavía pendiente de pago conserva su marca "Por pagar" al renombrarla
+    const finalTitle = booking.status === 'pending_payment' && !title.startsWith(UNPAID_PREFIX) ? UNPAID_PREFIX + title : title;
+    await updateCalendarEventTitle(auth.token, auth.calendarId, booking.google_event_id, finalTitle);
   } catch (e) {
     await logError('calendar/renombrar', 'No se pudo actualizar el título del evento de Google Calendar', { bookingId, title, error: e instanceof Error ? e.message : String(e) });
   }
 }
 
-export async function syncBookingToCalendar(booking: BookingForCalendar, opts: { invite?: boolean } = {}): Promise<{
+export async function syncBookingToCalendar(booking: BookingForCalendar, opts: { unpaid?: boolean } = {}): Promise<{
   success: boolean;
   meetLink?: string;
   eventLink?: string;
@@ -159,9 +161,11 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
       date:          booking.session_date,
       startTime:     booking.session_time.slice(0, 5),
       durationMin,
-      // invite:false → reserva aún sin pagar: el evento queda en el calendario de
-      // Valentina sin mandarle invitación de Google al paciente.
-      attendeeEmail: opts.invite === false ? undefined : (booking.patient_email || undefined),
+      // unpaid → reserva aún sin pagar: el evento bloquea la hora pero queda con
+      // prefijo "Por pagar" + color rojo, y sin invitación de Google al
+      // paciente (se le invita recién cuando paga: ver markBookingPaidInCalendar).
+      attendeeEmail: opts.unpaid ? undefined : (booking.patient_email || undefined),
+      unpaid:        opts.unpaid === true,
       isOnline,
       calendarId:    cfg['google_calendar_id'] ?? 'primary',
     });
@@ -182,5 +186,20 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
     console.error('[syncCalendar] Error:', msg);
     await logError('calendar/crear', 'No se pudo crear el evento de Google Calendar', { bookingId: booking.id, error: msg });
     return { success: false, error: msg };
+  }
+}
+
+/** Cambia el evento de la reserva a "pagado" (quita "Por pagar" y lo pone en verde, e
+ *  invita al paciente) o de vuelta a "por pagar" (al anular un pago). Mejor
+ *  esfuerzo: si falla, queda en /admin/logs y no interrumpe el flujo. */
+export async function markBookingPaidInCalendar(bookingId: string, paid: boolean): Promise<void> {
+  try {
+    const { data: booking } = await supabase.from('bookings').select('google_event_id, patient_email').eq('id', bookingId).single();
+    if (!booking?.google_event_id) return;
+    const auth = await getValidAccessToken();
+    if (!auth) return;
+    await setCalendarEventPaidState(auth.token, auth.calendarId, booking.google_event_id, paid, paid ? (booking.patient_email || undefined) : undefined);
+  } catch (e) {
+    await logError('calendar/estado-pago', 'No se pudo actualizar el estado de pago del evento de Google Calendar', { bookingId, paid, error: e instanceof Error ? e.message : String(e) });
   }
 }

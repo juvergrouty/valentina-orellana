@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
-import { syncBookingToCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar } from '../../../lib/syncCalendar';
+import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar } from '../../../lib/syncCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { getTotalOwedByEmail, tagBookingsWithPaymentToken } from '../../../lib/debt';
@@ -117,6 +117,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       return redirect(dest + '&error=insert_failed&detail=' + encodeURIComponent(error.message.slice(0, 200)));
     }
 
+    // El evento de Google Calendar deja de verse como "Por pagar"
+    try { await markBookingPaidInCalendar(id, true); } catch (e) { console.error('[mark_paid] calendar:', e); }
+
     if (emitir) {
       try {
         const boletaRes = await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true });
@@ -182,6 +185,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       .update({ paid_at: null, payment_note: null })
       .eq('id', id);
     if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+    try { await markBookingPaidInCalendar(id, false); } catch (e) { console.error('[unmark_paid] calendar:', e); }
     return redirect(dest);
   }
 
@@ -670,7 +674,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         for (const bid of bookingIds) {
           try {
             const { data: b } = await supabase.from('bookings').select('*').eq('id', bid).single();
-            if (b) await syncBookingToCalendar(b, { invite: false });
+            if (b) await syncBookingToCalendar(b, { unpaid: true });
           } catch (e) { console.error('[create-admin] sync (link):', e); }
         }
 

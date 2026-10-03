@@ -4,7 +4,7 @@ import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 
 export const prerender = false;
 
-// Crea el evento de Google Calendar de una reserva que sigue sin pagar
+// Crea el evento de Google Calendar de una reserva de la admin que sigue sin pagar
 // (pending_payment) y todavía no lo tiene — por ejemplo las agendadas con link
 // de pago antes de que ese camino creara el evento. Va SIN invitación al
 // paciente. Es idempotente: syncBookingToCalendar no crea otro si la reserva ya
@@ -16,11 +16,13 @@ export const POST: APIRoute = async ({ request }) => {
 
   const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
   if (!booking) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
-  if (booking.status !== 'pending_payment' || booking.session_date === '2099-12-31') {
+  // Solo reservas creadas por la propia admin. Las que agenda el paciente solo
+  // por el sitio NO bloquean Google Calendar hasta que pagan (flow/confirm.ts).
+  if (booking.created_by_admin !== true || booking.status !== 'pending_payment' || booking.session_date === '2099-12-31') {
     return json({ ok: true, skipped: true });
   }
 
-  const result = await syncBookingToCalendar(booking, { invite: false });
+  const result = await syncBookingToCalendar(booking, { unpaid: true });
   if (!result.success) return json({ ok: false, error: result.error ?? 'No se pudo crear el evento.' }, 502);
   return json({ ok: true });
 };

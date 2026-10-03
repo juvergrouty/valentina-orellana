@@ -20,7 +20,7 @@ import type { APIRoute } from 'astro';
 import { getPaymentStatus } from '../../../lib/flow';
 import { supabase } from '../../../lib/supabase';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
-import { syncBookingToCalendar } from '../../../lib/syncCalendar';
+import { syncBookingToCalendar, markBookingPaidInCalendar } from '../../../lib/syncCalendar';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
@@ -168,7 +168,9 @@ export const POST: APIRoute = async ({ request }) => {
             await Promise.all([
               sendConfirmationToClient(emailData).catch(console.error),
               sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
-              syncBookingToCalendar(updatedRow).catch(console.error),
+              // Crea el evento si no existía; si ya existía (reserva con link de pago),
+              // lo pasa de "Por pagar" a pagado e invita al paciente.
+              syncBookingToCalendar(updatedRow).then(() => markBookingPaidInCalendar(updatedRow.id, true)).catch(console.error),
               upsertPatientFromBooking({ ...emailData, rut: updatedRow.patient_rut }).catch(console.error),
             ]);
           }

@@ -19,7 +19,7 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ ok: false, error: 'No es una sesión online.' }, 400);
   }
 
-  const result = await syncBookingToCalendar(booking);
+  const result = await syncBookingToCalendar(booking, { unpaid: booking.status === 'pending_payment' });
   if (!result.success) return json({ ok: false, error: result.error ?? 'No se pudo generar el link.' }, 502);
 
   // Si ya existía (idempotente) pero notes no traía "Meet:" por algún motivo
