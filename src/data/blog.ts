@@ -22,6 +22,14 @@ export const articulos: Articulo[] = [
     publicado: true,
   },
   {
+    slug: 'ya-no-nos-amamos',
+    titulo: '¿Ya no nos amamos?',
+    bajada: 'Cuando una pareja se desconecta, la distancia suele armarse con todo lo que no se dice.',
+    categoria: 'Vínculos',
+    etiqueta: 'Pareja',
+    publicado: true,
+  },
+  {
     slug: 'el-hombre-que-puede-solo',
     titulo: 'El hombre que puede solo',
     bajada: 'Sobre la desconexión que funciona durante años, hasta que un día deja de funcionar.',
