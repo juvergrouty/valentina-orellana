@@ -1,6 +1,7 @@
 ---
 import { supabase } from '../../lib/supabase';
 import { getBoletaAlerts, type BoletaAlert } from '../../lib/boletaAlerts';
+import { getConsentAlerts, type ConsentAlert } from '../../lib/consent';
 
 interface Props {
   title: string;
@@ -33,6 +34,10 @@ try {
 // hasta que el problema se resuelva, no hasta que se abra /admin/logs.
 let boletaAlerts: BoletaAlert[] = [];
 try { boletaAlerts = await getBoletaAlerts(); } catch { /* no debe tumbar el admin */ }
+// Pacientes activos sin consentimiento de datos firmado (Ley 21.719): aviso
+// permanente pedido por Valentina (3 oct 2026). Se apaga solo cuando firman.
+let consentAlerts: ConsentAlert[] = [];
+try { consentAlerts = await getConsentAlerts(); } catch { /* no debe tumbar el admin */ }
 const fmtSesion = (d: string | null) => d ? d.split('-').reverse().join('-') : '';
 
 const navMain = [
@@ -776,6 +781,17 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
           ))}
         </ul>
         {boletaAlerts.length > 6 && <p style="margin:0.35rem 0 0;">…y {boletaAlerts.length - 6} más en <a href="/admin/logs?filtro=error" style="color:#fff;text-decoration:underline;">Logs</a>.</p>}
+      </div>
+    )}
+    {consentAlerts.length > 0 && (
+      <div role="alert" style="background:#b45309;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
+        <p style="font-weight:700;margin:0 0 0.35rem;">⚠ {consentAlerts.length === 1 ? '1 paciente activo no ha firmado el consentimiento de datos' : `${consentAlerts.length} pacientes activos no han firmado el consentimiento de datos`}</p>
+        <p style="margin:0;">
+          {consentAlerts.slice(0, 12).map((a, i) => (
+            <>{i > 0 && ' · '}<a href={`/admin/pacientes/${a.patientId}`} style="color:#fff;text-decoration:underline;font-weight:600;">{a.name}</a>{a.sentAt ? ' (enviado, sin firmar)' : ''}</>
+          ))}
+          {consentAlerts.length > 12 && ` · …y ${consentAlerts.length - 12} más`}
+        </p>
       </div>
     )}
     {newErrorCount > 0 && (

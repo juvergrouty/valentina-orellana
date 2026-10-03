@@ -1,0 +1,129 @@
+---
+export const prerender = false;
+import Layout from '../../layouts/BaseLayout.astro';
+import { supabase } from '../../lib/supabase';
+import { consentSections, CONSENT_OPTIONS, consentContactEmail } from '../../lib/consent';
+
+// Página pública (sin login) que el paciente abre desde el link que Valentina
+// le manda por WhatsApp o correo. El token es aleatorio e irrepetible: es lo
+// único que da acceso a este consentimiento.
+const { token } = Astro.params;
+
+const { data: consent } = await supabase.from('consents')
+  .select('id, patient_id, signed_at, signer_name, accept_recording, accept_case_review, revoked_at')
+  .eq('token', token!).maybeSingle();
+
+const { data: patient } = consent?.patient_id
+  ? await supabase.from('patients').select('name, rut').eq('id', consent.patient_id).maybeSingle()
+  : { data: null };
+
+const contactEmail = await consentContactEmail();
+const sections = consentSections(contactEmail);
+const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+---
+
+<Layout title="Consentimiento informado" description="Consentimiento informado para el tratamiento de datos personales y de salud." noindex>
+  <section class="max-w-2xl mx-auto px-5 py-16 md:py-24">
+    {!consent || !patient ? (
+      <div class="text-center">
+        <p class="font-heading text-2xl mb-3">Link no válido</p>
+        <p class="text-stone">Este link no es correcto. Escríbele a Valentina para que te mande uno nuevo.</p>
+      </div>
+    ) : consent.signed_at ? (
+      <div class="text-center">
+        <p class="font-heading text-2xl mb-3">Consentimiento firmado ✓</p>
+        <p class="text-stone mb-6">Firmado por {consent.signer_name} el {fmt(consent.signed_at)}<br />Te llegó una copia a tu correo.</p>
+        <ul class="text-sm text-stone text-left inline-block space-y-1">
+          <li>✓ Tratamiento de datos para tu atención</li>
+          <li>{consent.accept_recording ? '✓' : '✕'} Grabación de sesiones para notas clínicas</li>
+          <li>{consent.accept_case_review ? '✓' : '✕'} Revisión anónima de casos con otros psicólogos</li>
+        </ul>
+        {consent.revoked_at && <p class="text-sm text-red-600 mt-6">Este consentimiento fue retirado el {fmt(consent.revoked_at)}.</p>}
+        <p class="text-xs text-stone mt-8">Para cambiar o retirar tu consentimiento, escribe a {contactEmail}.</p>
+      </div>
+    ) : (
+      <>
+        <p class="label text-stone mb-1">Hola {patient.name.split(' ')[0]}</p>
+        <h1 class="font-heading text-2xl md:text-3xl mb-2">Consentimiento informado</h1>
+        <p class="text-stone text-sm mb-10">Para el tratamiento de tus datos personales y de salud en la terapia con Ps. Valentina Orellana, según la Ley 21.719 de protección de datos personales.</p>
+
+        <div class="space-y-7 mb-10">
+          {sections.map(s => (
+            <div>
+              <h2 class="font-heading text-lg mb-2">{s.titulo}</h2>
+              {s.parrafos.map(p => <p class="text-sm text-stone leading-relaxed mb-2">{p}</p>)}
+            </div>
+          ))}
+        </div>
+
+        <form id="consent-form" class="border border-dust rounded-lg p-5 md:p-6 space-y-5 bg-white">
+          <h2 class="font-heading text-lg">Autorizaciones</h2>
+          {CONSENT_OPTIONS.map(o => (
+            <label class="flex gap-3 items-start cursor-pointer">
+              <input type="checkbox" name={o.key} class="mt-1 w-4 h-4 shrink-0" required={o.obligatoria} />
+              <span>
+                <span class="block text-sm font-medium">{o.titulo}</span>
+                <span class="block text-sm text-stone leading-relaxed">{o.texto}</span>
+              </span>
+            </label>
+          ))}
+
+          <div class="grid md:grid-cols-2 gap-4 pt-2">
+            <div>
+              <label class="label text-stone block mb-2" for="signer_name">Nombre completo *</label>
+              <input id="signer_name" name="signer_name" type="text" required value={patient.name} class="w-full border border-dust rounded px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="label text-stone block mb-2" for="signer_rut">RUT *</label>
+              <input id="signer_rut" name="signer_rut" type="text" required value={patient.rut ?? ''} placeholder="12345678-9" autocomplete="off" class="w-full border border-dust rounded px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <p class="text-xs text-stone">Al apretar "Firmar" declaro que leí este documento y que firmo electrónicamente. Se guardará la fecha, la hora y el dispositivo desde donde firmo, y me llegará una copia por correo.</p>
+
+          <button type="submit" id="btn-firmar" class="btn-dark w-full justify-center text-center">Firmar</button>
+          <p id="consent-error" class="hidden text-sm text-red-600 text-center"></p>
+        </form>
+      </>
+    )}
+  </section>
+</Layout>
+
+<script define:vars={{ token }}>
+(function () {
+  const form = document.getElementById('consent-form');
+  if (!form) return;
+  const btn = document.getElementById('btn-firmar');
+  const errEl = document.getElementById('consent-error');
+  const showErr = (t) => { errEl.textContent = t; errEl.classList.remove('hidden'); };
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.classList.add('hidden');
+    const rut = form.signer_rut.value.replace(/\./g, '').replace(/\s/g, '');
+    if (!/^\d{7,8}-[\dkK]$/.test(rut)) return showErr('Escribe tu RUT con guion, por ejemplo 12345678-9.');
+    btn.disabled = true;
+    btn.textContent = 'Firmando…';
+    try {
+      const res = await fetch('/api/consentimiento', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token,
+          signer_name: form.signer_name.value.trim(),
+          signer_rut: rut,
+          accept_treatment: form.accept_treatment.checked,
+          accept_recording: form.accept_recording.checked,
+          accept_case_review: form.accept_case_review.checked,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.ok) throw new Error(d.error ?? 'No se pudo firmar. Intenta de nuevo.');
+      window.location.reload();
+    } catch (err) {
+      showErr(err instanceof Error && err.message !== 'Failed to fetch' ? err.message : 'Error de conexión. Intenta de nuevo.');
+      btn.disabled = false;
+      btn.textContent = 'Firmar';
+    }
+  });
+})();
+</script>

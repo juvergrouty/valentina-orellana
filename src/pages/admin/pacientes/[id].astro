@@ -3,6 +3,7 @@ export const prerender = false;
 import AdminLayout from '../../../components/admin/AdminLayout.astro';
 import { supabase } from '../../../lib/supabase';
 import { nowCL } from '../../../lib/dateUtils';
+import { vigente, type ConsentRow } from '../../../lib/consent';
 
 const { id } = Astro.params;
 
@@ -28,6 +29,14 @@ if (patient?.email) {
 }
 
 if (!patient) return Astro.redirect('/admin/pacientes');
+
+// Consentimiento de datos (Ley 21.719): el vigente, o el último envío pendiente.
+const { data: consentRows } = await supabase.from('consents').select('*')
+  .eq('patient_id', id!).order('created_at', { ascending: false });
+const consentimiento = vigente((consentRows ?? []) as ConsentRow[]);
+const ultimoRetiro = (consentRows ?? []).find((c: any) => c.revoked_at) as ConsentRow | undefined;
+const envioPendiente = (consentRows ?? []).find((c: any) => !c.signed_at && c.sent_at) as ConsentRow | undefined;
+const fmtCL = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 const tab  = Astro.url.searchParams.get('tab') ?? 'info';
 const saved = Astro.url.searchParams.get('saved') === '1';
@@ -119,6 +128,42 @@ const formatCLP = (n: number) =>
       </form>
     </div>
   </div>
+
+  <!-- Consentimiento de datos (Ley 21.719) -->
+  {consentimiento ? (
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;border-left:4px solid var(--enc-green-dark);">
+      <div style="font-size:0.85rem;">
+        <p style="font-weight:600;color:var(--enc-green-dark);">✓ Consentimiento de datos firmado</p>
+        <p style="color:var(--stone);font-size:0.78rem;margin-top:0.2rem;">
+          {consentimiento.signer_name} · RUT {consentimiento.signer_rut} · {fmtCL(consentimiento.signed_at!)} · versión {consentimiento.version}
+        </p>
+        <p style="font-size:0.78rem;margin-top:0.35rem;">
+          Grabación de sesiones: <strong style={`color:${consentimiento.accept_recording ? 'var(--enc-green-dark)' : 'var(--red)'}`}>{consentimiento.accept_recording ? 'Sí autoriza' : 'NO autoriza — no grabar'}</strong>
+          &nbsp;·&nbsp; Revisión anónima con psicólogos: <strong style={`color:${consentimiento.accept_case_review ? 'var(--enc-green-dark)' : 'var(--red)'}`}>{consentimiento.accept_case_review ? 'Sí autoriza' : 'NO autoriza'}</strong>
+        </p>
+      </div>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <a href={`/consentimiento/${consentimiento.token}`} target="_blank" class="btn btn-outline btn-sm">Ver firmado</a>
+        <button type="button" class="btn btn-outline btn-sm consent-btn" data-consent-action="revoke">Registrar retiro</button>
+      </div>
+    </div>
+  ) : (
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;border-left:4px solid #b45309;background:#fffbeb;">
+      <div style="font-size:0.85rem;">
+        <p style="font-weight:600;color:#b45309;">⚠ Falta el consentimiento de datos (Ley 21.719)</p>
+        <p style="color:var(--stone);font-size:0.78rem;margin-top:0.2rem;">
+          {envioPendiente ? `Enviado por ${envioPendiente.sent_via === 'email' ? 'correo' : 'WhatsApp'} el ${fmtCL(envioPendiente.sent_at!)} — aún sin firmar.` : 'Todavía no se le ha enviado.'}
+          {ultimoRetiro && ` Retiró su consentimiento anterior el ${fmtCL(ultimoRetiro.revoked_at!)}${ultimoRetiro.revoked_note ? ` (${ultimoRetiro.revoked_note})` : ''}.`}
+        </p>
+      </div>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+        <button type="button" class="btn btn-dark btn-sm consent-btn" data-consent-action="whatsapp" disabled={!patient.phone} title={patient.phone ? '' : 'Falta el teléfono en la ficha'}>Enviar por WhatsApp</button>
+        <button type="button" class="btn btn-outline btn-sm consent-btn" data-consent-action="email" disabled={!patient.email} title={patient.email ? '' : 'Falta el correo en la ficha'}>Enviar por correo</button>
+        <button type="button" class="btn btn-outline btn-sm consent-btn" data-consent-action="link">Copiar link</button>
+      </div>
+    </div>
+  )}
+  <p id="consent-status" data-patient-id={patient.id} style="font-size:0.78rem;margin:-1rem 0 1rem;"></p>
 
   <!-- Tabs -->
   <div class="patient-tabs" style="display:flex;gap:0;border-bottom:2px solid var(--dust);margin-bottom:1.75rem;">
@@ -768,6 +813,52 @@ const formatCLP = (n: number) =>
       return;
     }
     submitBookingAction({ action: 'change_service', id: select.dataset.bid, service_id: select.value });
+  });
+
+  // ── Consentimiento de datos: enviar (WhatsApp / correo / link) o registrar retiro ──
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.consent-btn');
+    if (!btn) return;
+    const action = btn.dataset.consentAction;
+    const status = document.getElementById('consent-status');
+    const setStatus = (t, c) => { if (status) { status.textContent = t; status.style.color = c; } };
+    const body = { action, patient_id: status?.dataset.patientId };
+
+    if (action === 'email' && !confirm('¿Enviar el consentimiento por correo al paciente?')) return;
+    if (action === 'revoke') {
+      const note = prompt('El paciente retiró su consentimiento. Nota opcional (cómo y cuándo lo pidió):');
+      if (note === null) return;
+      body.note = note;
+    }
+    // La ventana de WhatsApp se abre antes del fetch: si se abre después, el
+    // navegador la bloquea como popup.
+    const waWin = action === 'whatsapp' ? window.open('about:blank', '_blank') : null;
+    btn.disabled = true;
+    setStatus('Procesando…', '#6b7280');
+    try {
+      const res = await fetch('/api/admin/consent', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error ?? 'No se pudo completar.');
+      if (action === 'whatsapp') {
+        if (waWin) waWin.location.href = d.waUrl; else window.open(d.waUrl, '_blank');
+        setStatus('✓ WhatsApp abierto con el mensaje listo — solo apreta enviar.', '#15803d');
+      } else if (action === 'email') {
+        setStatus('✓ Correo enviado.', '#15803d');
+        setTimeout(() => location.reload(), 1200);
+      } else if (action === 'link') {
+        try { await navigator.clipboard.writeText(d.url); setStatus('✓ Link copiado: ' + d.url, '#15803d'); }
+        catch { prompt('Copia este link:', d.url); setStatus('', ''); }
+      } else {
+        location.reload();
+      }
+    } catch (err) {
+      if (waWin) waWin.close();
+      setStatus('✕ ' + (err instanceof Error ? err.message : 'Error de conexión'), '#dc2626');
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   // ── Correos al paciente: pasos a seguir / solicitud de reseña ──────────────

@@ -883,3 +883,73 @@ export async function sendContactFormEmail(data: {
   if (res.error) return { sent: false, reason: res.error.message };
   return { sent: true };
 }
+
+// ─── Consentimiento informado (Ley 21.719) ──────────────────────────────────
+// Link para firmar: solo sale cuando Valentina aprieta "Enviar por correo" en
+// la ficha (nunca automático).
+export async function sendConsentLinkEmail(opts: {
+  patientName:  string;
+  patientEmail: string;
+  url:          string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+  const subject = 'Consentimiento informado para tu terapia';
+  const res = await client.emails.send({
+    from: FROM,
+    to:   opts.patientEmail,
+    subject,
+    html: `
+      <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Consentimiento informado</h1>
+        <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
+          Hola ${escapeHtml(opts.patientName.split(' ')[0])}, te comparto el consentimiento para el tratamiento de tus datos
+          en la terapia, que pide la nueva ley de protección de datos personales. Toma unos 2 minutos:
+          lo lees, marcas lo que autorizas y firmas con tu nombre y RUT.
+        </p>
+        <a href="${opts.url}"
+           style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;
+                  text-decoration:none;font-family:'Inter',sans-serif;font-size:0.78rem;
+                  letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
+          Leer y firmar
+        </a>
+        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
+                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
+          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+        </p>
+      </div>
+    `,
+  });
+  await logEmail('email/consentimiento', opts.patientEmail, subject, !res.error, res.error?.message);
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
+}
+
+// Copia del consentimiento firmado: al paciente (su respaldo) y a Valentina.
+export async function sendConsentSignedCopy(opts: {
+  to:         string[];
+  signerName: string;
+  signerRut:  string;
+  signedAt:   string;   // ya formateada
+  plainText:  string;
+  marcadas:   string[];
+}): Promise<void> {
+  const client = getResend();
+  if (!client || !opts.to.length) return;
+  const subject = `Consentimiento firmado — ${opts.signerName}`;
+  const res = await client.emails.send({
+    from: FROM,
+    to:   opts.to,
+    subject,
+    html: `
+      <div style="font-family:'Inter',sans-serif;max-width:600px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;font-size:0.85rem;line-height:1.6;">
+        <p style="margin-bottom:1rem;">Copia del consentimiento firmado electrónicamente por <strong>${escapeHtml(opts.signerName)}</strong>
+          (RUT ${escapeHtml(opts.signerRut)}) el ${escapeHtml(opts.signedAt)}.</p>
+        <p style="margin-bottom:0.25rem;"><strong>Autorizaciones marcadas:</strong></p>
+        <ul style="margin:0 0 1.25rem 1.1rem;">${opts.marcadas.map(m => `<li>${escapeHtml(m)}</li>`).join('')}</ul>
+        <pre style="white-space:pre-wrap;font-family:inherit;color:#6B6860;border-top:1px solid #DDD8CF;padding-top:1rem;">${escapeHtml(opts.plainText)}</pre>
+      </div>
+    `,
+  });
+  await logEmail('email/consentimiento-copia', opts.to.join(', '), subject, !res.error, res.error?.message);
+}

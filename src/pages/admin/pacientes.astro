@@ -3,6 +3,7 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { todayCL } from '../../lib/dateUtils';
+import { getConsentAlerts } from '../../lib/consent';
 
 const q      = Astro.url.searchParams.get('q') ?? '';
 const filtro = Astro.url.searchParams.get('filtro') ?? 'todos';
@@ -50,6 +51,9 @@ const statByEmail: Record<string, Stat> = {};
   // paciente (que sí usaba la definición correcta) mostraba distinto.
   if (b.status === 'confirmed' && !b.paid_at && b.debt_voided !== true && b.amount) s.due += b.amount;
 });
+
+// Pacientes activos sin consentimiento de datos firmado (Ley 21.719).
+const sinConsentimiento = new Set((await getConsentAlerts().catch(() => [])).map(a => a.patientId));
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const MONTHS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
@@ -147,6 +151,7 @@ const TABS = [
                   <td>
                     <span class="pac-name">{p.name}</span>
                     {p.rut && <span class="pac-rut">{p.rut}</span>}
+                    {sinConsentimiento.has(p.id) && <span class="pac-rut" style="color:#b45309;font-weight:600;">⚠ Sin consentimiento</span>}
                   </td>
                   <td class="pac-muted">{fmtDate(st.last) || '—'}</td>
                   <td class="pac-muted">{fmtDate(st.next) || '—'}</td>
