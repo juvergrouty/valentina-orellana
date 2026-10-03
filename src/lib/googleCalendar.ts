@@ -66,6 +66,7 @@ export interface CalendarEventInput {
   isOnline:     boolean;
   calendarId?:  string;   // default 'primary'
   unpaid?:      boolean;  // reserva aún sin pagar: prefijo + color rojo (ver UNPAID_PREFIX)
+  paid?:        boolean;  // reserva ya pagada: color verde
 }
 
 /** Marca visual de una reserva que bloquea la hora pero todavía no está pagada. */
@@ -94,7 +95,8 @@ export async function createCalendarEvent(
     end:   { dateTime: toISO(endDate),   timeZone: TIMEZONE },
   };
 
-  if (event.unpaid) body.colorId = UNPAID_COLOR_ID;
+  if (event.unpaid)    body.colorId = UNPAID_COLOR_ID;
+  else if (event.paid) body.colorId = PAID_COLOR_ID;
 
   if (event.attendeeEmail) {
     body.attendees = [{ email: event.attendeeEmail }];

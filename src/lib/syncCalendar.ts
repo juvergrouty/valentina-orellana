@@ -98,7 +98,7 @@ export async function retitleBookingInCalendar(bookingId: string, title: string)
   }
 }
 
-export async function syncBookingToCalendar(booking: BookingForCalendar, opts: { unpaid?: boolean } = {}): Promise<{
+export async function syncBookingToCalendar(booking: BookingForCalendar, opts: { unpaid?: boolean; invite?: boolean } = {}): Promise<{
   success: boolean;
   meetLink?: string;
   eventLink?: string;
@@ -146,6 +146,19 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
 
     const isOnline = booking.session_type.includes('online');
 
+    // ¿Pagada o por pagar? Si quien llama no lo fuerza, se lee de la reserva
+    // (paid_at). Si esa columna aún no existe, queda el comportamiento antiguo
+    // (evento sin color).
+    let unpaid = opts.unpaid;
+    let paid   = false;
+    if (unpaid === undefined) {
+      const pr = await supabase.from('bookings').select('paid_at, debt_voided').eq('id', booking.id).single();
+      if (!pr.error && pr.data) {
+        paid   = !!pr.data.paid_at;
+        unpaid = !paid && pr.data.debt_voided !== true;
+      }
+    }
+
     // Leer duración de settings
     const { data: durRows } = await supabase.from('settings').select('key, value')
       .in('key', ['session_duration_min']);
@@ -161,11 +174,12 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
       date:          booking.session_date,
       startTime:     booking.session_time.slice(0, 5),
       durationMin,
-      // unpaid → reserva aún sin pagar: el evento bloquea la hora pero queda con
-      // prefijo "Por pagar" + color rojo, y sin invitación de Google al
-      // paciente (se le invita recién cuando paga: ver markBookingPaidInCalendar).
-      attendeeEmail: opts.unpaid ? undefined : (booking.patient_email || undefined),
-      unpaid:        opts.unpaid === true,
+      // unpaid → reserva aún sin pagar: prefijo "Por pagar" + color rojo; paid →
+      // verde. invite:false → sin invitación de Google al paciente (reservas con
+      // link de pago: se le invita recién cuando paga, ver markBookingPaidInCalendar).
+      attendeeEmail: opts.invite === false ? undefined : (booking.patient_email || undefined),
+      unpaid:        unpaid === true,
+      paid,
       isOnline,
       calendarId:    cfg['google_calendar_id'] ?? 'primary',
     });

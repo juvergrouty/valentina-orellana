@@ -674,7 +674,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         for (const bid of bookingIds) {
           try {
             const { data: b } = await supabase.from('bookings').select('*').eq('id', bid).single();
-            if (b) await syncBookingToCalendar(b, { unpaid: true });
+            if (b) await syncBookingToCalendar(b, { unpaid: true, invite: false });
           } catch (e) { console.error('[create-admin] sync (link):', e); }
         }
 

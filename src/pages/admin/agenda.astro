@@ -219,7 +219,11 @@ function evClass(status: string, pm: string | null, paidAt: string | null | unde
   // Confirmada pero sin pago real registrado (paid_at) y sin haber sido
   // anulada la deuda — se marca en rojo para que salte a la vista en el
   // calendario, sin depender de cruzar Encuadrado ni ningún sistema externo.
-  if (status === 'confirmed' && !paidAt && debtVoided !== true) base += ' ev-unpaid';
+  // El pago manda sobre el color del servicio: sin pagar → rojo, pagada → verde
+  // (igual que el evento en Google Calendar). El servicio se sigue distinguiendo
+  // por la franja de color del costado.
+  if ((status === 'confirmed' || status === 'pending_payment') && !paidAt && debtVoided !== true) base += ' ev-pay-red';
+  else if (paidAt) base += ' ev-pay-green';
   return base;
 }
 function svcLabel(b: BRow): string {
@@ -1204,7 +1208,9 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
 /* Confirmada sin pago real registrado — outline en vez de background/border
    para que el aviso se vea también en modo "Colores por servicio" (que
    sobreescribe background y border-left con !important, ver .colors-on). */
-.ev-unpaid    { outline: 2px solid #dc2626; outline-offset: -2px; }
+/* Estado de pago (manda sobre el color del servicio): rojo = por pagar, verde = pagada */
+.ev-pay-red   { background: #fee2e2; border: 1px solid #dc2626; color: #991b1b; }
+.ev-pay-green { background: #dcfce7; border: 1px solid #16a34a; color: #166534; }
 .cal-gcal-event {
   position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px;
   overflow: hidden; z-index: 1; pointer-events: none;
@@ -1406,6 +1412,8 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
 
 /* ── Colores por servicio + filtro de eventos ───────────────────────────── */
 .cal-scroll.colors-on .cal-event { background: var(--svcbg) !important; border-left: 4px solid var(--svcbd) !important; }
+.cal-scroll.colors-on .cal-event.ev-pay-red   { background: #fee2e2 !important; }
+.cal-scroll.colors-on .cal-event.ev-pay-green { background: #dcfce7 !important; }
 .cal-scroll.colors-on .cal-event,
 .cal-scroll.colors-on .cal-event .ev-time { color: #1f2937 !important; }
 .cal-event.svc-hidden { display: none !important; }

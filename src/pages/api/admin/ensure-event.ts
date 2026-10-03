@@ -22,7 +22,7 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ ok: true, skipped: true });
   }
 
-  const result = await syncBookingToCalendar(booking, { unpaid: true });
+  const result = await syncBookingToCalendar(booking, { unpaid: true, invite: false });
   if (!result.success) return json({ ok: false, error: result.error ?? 'No se pudo crear el evento.' }, 502);
   return json({ ok: true });
 };
