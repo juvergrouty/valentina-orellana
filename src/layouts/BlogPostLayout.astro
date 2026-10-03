@@ -9,11 +9,12 @@ interface Props {
   imagenAlt: string;
   imagenPosicion?: string;
   creditoPortada: string;
+  fuentePortada?: string;
   minutos?: number;
   relacionados?: string[];
 }
 
-const { slug, descripcion, imagen, imagenAlt, imagenPosicion = 'center', creditoPortada, relacionados = [] } = Astro.props;
+const { slug, descripcion, imagen, imagenAlt, imagenPosicion = 'center', creditoPortada, fuentePortada = 'Unsplash', relacionados = [] } = Astro.props;
 // Tiempo de lectura calculado desde el texto real (unas 200 palabras por minuto).
 const cuerpo = await Astro.slots.render('default');
 const palabras = cuerpo.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
@@ -65,7 +66,7 @@ const jsonLd = {
         </div>
       )}
 
-      <p class="credit">Foto de portada: {creditoPortada} / Unsplash</p>
+      <p class="credit">Foto de portada: {creditoPortada} / {fuentePortada}</p>
     </article>
   </div>
 </BaseLayout>
