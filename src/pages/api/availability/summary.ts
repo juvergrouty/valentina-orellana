@@ -22,13 +22,24 @@ export const GET: APIRoute = async ({ url }) => {
   }
 
   const today = todayCL();
-  const [{ data: slotsData }, { data: blk }] = await Promise.all([
+  const [{ data: slotsData }, { data: blk }, { data: dayBlocks }] = await Promise.all([
     fetchWeekdays(),
     supabase.from('blocked_dates').select('date').gte('date', today),
+    // Bloqueos de día completo hechos con "Bloquear hora" (tabla blocked_slots)
+    supabase.from('blocked_slots').select('date_from, date_to, time_from, time_to, all_day').gte('date_to', today),
   ]);
 
   const weekdays = Array.from(new Set((slotsData ?? []).map((s: { day_of_week: number }) => s.day_of_week)));
   const blocked  = (blk ?? []).map((b: { date: string }) => b.date);
+  for (const b of (dayBlocks ?? []) as { date_from: string; date_to: string; time_from: string | null; time_to: string | null; all_day: boolean | null }[]) {
+    if (!(b.all_day || !b.time_from || !b.time_to)) continue; // con horario: lo resuelve /api/availability
+    const [y, m, d] = (b.date_from > today ? b.date_from : today).split('-').map(Number);
+    for (let i = 0; i < 366; i++) {
+      const iso = new Date(Date.UTC(y, m - 1, d + i)).toISOString().slice(0, 10);
+      if (iso > b.date_to) break;
+      blocked.push(iso);
+    }
+  }
 
   return new Response(JSON.stringify({ weekdays, blocked }), {
     status: 200,

@@ -109,6 +109,22 @@ export const GET: APIRoute = async ({ url }) => {
     fetchServiceCfg(),
   ]);
 
+  // Bloqueos de horas ("Bloquear hora" en el calendario del panel, tabla
+  // blocked_slots). Antes se guardaban pero nadie los leía: la hora seguía
+  // disponible. Un bloqueo de día completo cierra el día; uno con horario
+  // quita las horas que se cruzan con ese rango. Si la consulta falla, no se
+  // bloquea nada (se registra el error).
+  const { data: slotBlocks, error: slotBlocksErr } = await supabase.from('blocked_slots')
+    .select('time_from, time_to, all_day')
+    .lte('date_from', dateParam).gte('date_to', dateParam);
+  if (slotBlocksErr) await logError('availability/bloqueos', 'No se pudieron leer los bloqueos de horas', { error: slotBlocksErr.message });
+  const toMin = (t: string) => { const [h, m] = t.slice(0, 5).split(':').map(Number); return h * 60 + m; };
+  const blockRanges = (slotBlocks ?? []).map((b: { time_from: string | null; time_to: string | null; all_day: boolean | null }) =>
+    (b.all_day || !b.time_from || !b.time_to) ? { from: 0, to: 24 * 60 } : { from: toMin(b.time_from), to: toMin(b.time_to) });
+  if (blockRanges.some(r => r.from === 0 && r.to === 24 * 60)) {
+    return new Response(JSON.stringify({ slots: [], blocked: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
   // Límite "días visibles hacia el futuro" del servicio
   const svcWindow = (svcCfg as { booking_window_days?: number } | null)?.booking_window_days;
   if (serviceId && Number.isFinite(svcWindow)) {
@@ -154,6 +170,10 @@ export const GET: APIRoute = async ({ url }) => {
       const slotMin = h * 60 + m;
 
       if (isToday && slotMin <= nowMin) return false;
+
+      // La sesión (con su duración) no puede cruzarse con un bloqueo de horas.
+      const slotEnd = slotMin + (effDuration ?? 50);
+      if (blockRanges.some(r => slotMin < r.to && slotEnd > r.from)) return false;
 
       for (const { startMin: bMin, duration: bDur } of bookedSessions) {
         // Este slot cae dentro de la ventana de una reserva existente
