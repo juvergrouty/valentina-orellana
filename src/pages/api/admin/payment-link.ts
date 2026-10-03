@@ -91,6 +91,11 @@ export const POST: APIRoute = async ({ request }) => {
       status:         'pending_payment',
       payment_method: 'flow',
       amount:         amountInt,
+      // Cobro creado por Valentina: nunca se libera solo a los 30 min (eso es
+      // solo para reservas web abandonadas, ver expireBooking.ts). Sin esto,
+      // el cobro caducaba, le llegaba a la paciente "tu reserva expiró" y el
+      // link /pagar decía que no debía nada.
+      created_by_admin: true,
     });
 
     if (bookingErr) {
