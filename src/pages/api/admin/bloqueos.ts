@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
+import { crearEventoCierre, borrarEventoCierre } from '../../../lib/feriados';
 
 export const prerender = false;
 
@@ -52,7 +53,12 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const id    = form.get('id')?.toString();
     const table = form.get('table')?.toString() ?? 'blocked_dates';
     if (id) {
+      // Si era un día cerrado, quitar también su anotación en Google Calendar.
+      const { data: row } = table === 'blocked_dates'
+        ? await supabase.from('blocked_dates').select('date').eq('id', id).maybeSingle()
+        : { data: null };
       await supabase.from(table as 'blocked_dates' | 'blocked_slots').delete().eq('id', id);
+      if (row?.date) await borrarEventoCierre(row.date);
     }
     return redirect(dest);
   }
@@ -62,7 +68,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const date   = form.get('date')?.toString();
     const reason = form.get('reason')?.toString() || null;
     if (date) {
-      await supabase.from('blocked_dates').upsert({ date, reason }, { onConflict: 'date' });
+      const { error } = await supabase.from('blocked_dates').upsert({ date, reason }, { onConflict: 'date' });
+      // El día cerrado queda anotado también en Google Calendar.
+      if (!error) await crearEventoCierre(date, reason ? `Cerrado · ${reason}` : 'Cerrado');
     }
     return redirect(dest);
   }

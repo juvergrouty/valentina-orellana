@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { refreshGoogleReviewsCache } from '../../../lib/googleReviews';
 import { logError } from '../../../lib/logger';
+import { cerrarFeriadosConfirmados } from '../../../lib/feriados';
 
 export const prerender = false;
 
@@ -12,6 +13,11 @@ export const GET: APIRoute = async ({ request }) => {
     const auth = request.headers.get('authorization');
     if (!secret || auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
   }
+  // Aprovecha esta tarea diaria para cerrar los feriados confirmados que se
+  // acercan (ver src/lib/feriados.ts). Independiente de las reseñas.
+  try { await cerrarFeriadosConfirmados(); }
+  catch (e) { await logError('feriados/cerrar', 'Falló el cierre automático de feriados', { error: e instanceof Error ? e.message : String(e) }); }
+
   const result = await refreshGoogleReviewsCache();
   // "Falta el Place ID/API key" es un estado de configuración pendiente, no una
   // falla operativa — no vale la pena alertar por eso todos los días. Cualquier
