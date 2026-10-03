@@ -17,6 +17,7 @@ export const RESPONSABLE = {
   nombre: 'Valentina Orellana',
   profesion: 'Psicóloga',
   rut: '16.768.831-4',
+  registro: '360070',
 };
 
 export interface ConsentSection { titulo: string; parrafos: string[] }
@@ -26,7 +27,7 @@ export function consentSections(contactEmail: string): ConsentSection[] {
     {
       titulo: 'Quién trata tus datos',
       parrafos: [
-        `${RESPONSABLE.nombre}, ${RESPONSABLE.profesion}, RUT ${RESPONSABLE.rut}, es la responsable de tus datos. Puedes escribirle por cualquier tema de tus datos a ${contactEmail}.`,
+        `${RESPONSABLE.nombre}, ${RESPONSABLE.profesion}, RUT ${RESPONSABLE.rut}, N° de registro ${RESPONSABLE.registro} de la Superintendencia de Salud, es la responsable de tus datos. Puedes escribirle por cualquier tema de tus datos a ${contactEmail}.`,
       ],
     },
     {
