@@ -98,6 +98,8 @@ export const POST: APIRoute = async ({ request }) => {
       clinicAddress: cfg['clinic_address'] ?? '',
     });
     if (!res.sent) return json({ ok: false, error: res.reason ?? 'No se pudo enviar el correo.' }, 500);
+    // Queda registrado como enviado: si aún no pagó su primera sesión, ya no sale el automático.
+    await supabase.from('patients').update({ steps_sent_at: new Date().toISOString() }).ilike('email', email);
     return json({ ok: true });
   }
 

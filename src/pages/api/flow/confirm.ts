@@ -21,7 +21,7 @@ import { getPaymentStatus } from '../../../lib/flow';
 import { supabase } from '../../../lib/supabase';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
 import { syncBookingToCalendar, markBookingPaidInCalendar } from '../../../lib/syncCalendar';
-import { upsertPatientFromBooking } from '../../../lib/patients';
+import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { logError, logWarn } from '../../../lib/logger';
@@ -197,6 +197,15 @@ export const POST: APIRoute = async ({ request }) => {
             console.error('[Flow webhook] boleta automática:', e);
             await logError('flow/boleta-automatica', 'Excepción al emitir la boleta automática tras el pago', { bookingId: updatedRow.id, error: e instanceof Error ? e.message : String(e) });
           }
+        }
+
+        // "Pasos a seguir" automático si este es el primer pago del paciente
+        // (una vez por paciente, aunque el pago cubra varias reservas).
+        const paidIds = (updated ?? []).map((r: { id: string }) => r.id);
+        const porEmail = new Map<string, any>();
+        for (const r of updated ?? []) if (r.patient_email) porEmail.set(String(r.patient_email).toLowerCase(), r);
+        for (const r of porEmail.values()) {
+          await sendStepsOnFirstPayment({ patient_name: r.patient_name, patient_email: r.patient_email, patient_phone: r.patient_phone, rut: r.patient_rut }, paidIds);
         }
       } else {
         // candidates vacío: puede ser (a) un reintento de Flow sobre un pago ya

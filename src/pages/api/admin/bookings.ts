@@ -6,7 +6,7 @@ import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { getTotalOwedByEmail, tagBookingsWithPaymentToken } from '../../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
-import { upsertPatientFromBooking } from '../../../lib/patients';
+import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { logWarn } from '../../../lib/logger';
 
@@ -119,6 +119,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     // El evento de Google Calendar deja de verse como "Por pagar"
     try { await markBookingPaidInCalendar(id, true); } catch (e) { console.error('[mark_paid] calendar:', e); }
+
+    // "Pasos a seguir" automático si es el primer pago del paciente.
+    const { data: pagada } = await supabase.from('bookings')
+      .select('patient_name, patient_email, patient_phone, patient_rut').eq('id', id).maybeSingle();
+    if (pagada) await sendStepsOnFirstPayment({ ...pagada, rut: pagada.patient_rut }, [id]);
 
     if (emitir) {
       try {

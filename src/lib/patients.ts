@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { logError } from './logger';
+import { sendStepsEmail } from './email';
 
 // Crea o actualiza la ficha del paciente en `patients` a partir de los datos
 // de una reserva. Se llama cada vez que una reserva pasa a `confirmed` —
@@ -44,5 +45,44 @@ export async function upsertPatientFromBooking(b: {
     console.error('[patients] upsertPatientFromBooking:', err);
     await logError('patients/upsert', 'No se pudo crear/actualizar la ficha del paciente tras su reserva', { email, name, error: err instanceof Error ? err.message : String(err) });
     return null;
+  }
+}
+
+// "Pasos a seguir": se envía solo una vez por paciente, automático cuando paga
+// su primera sesión (pedido de Valentina, 3 oct 2026). Después solo sale si
+// ella lo reenvía con el botón de la ficha. `paidBookingIds` son las reservas
+// recién pagadas en este evento: si el paciente ya tenía otra pagada antes, no
+// es su primer pago y no se envía.
+export async function sendStepsOnFirstPayment(b: {
+  patient_name?: string | null;
+  patient_email?: string | null;
+  patient_phone?: string | null;
+  rut?: string | null;
+}, paidBookingIds: string[]): Promise<void> {
+  const email = b.patient_email?.trim().toLowerCase();
+  if (!email) return;
+  try {
+    const { data: previos } = await supabase.from('bookings').select('id')
+      .ilike('patient_email', email).not('paid_at', 'is', null);
+    if ((previos ?? []).some(p => !paidBookingIds.includes(p.id))) return;
+
+    const patientId = await upsertPatientFromBooking(b);
+    if (!patientId) return;
+
+    // Marcar antes de enviar (con guardia `is null`) evita un doble envío si
+    // Flow reintenta el webhook al mismo tiempo.
+    const { data: marcado } = await supabase.from('patients')
+      .update({ steps_sent_at: new Date().toISOString() })
+      .eq('id', patientId).is('steps_sent_at', null).select('id, name').maybeSingle();
+    if (!marcado) return;
+
+    const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
+    const res = await sendStepsEmail({ patientName: marcado.name, patientEmail: email, clinicAddress: addr?.value ?? '' });
+    if (!res.sent) {
+      await supabase.from('patients').update({ steps_sent_at: null }).eq('id', patientId);
+      await logError('email/pasos-automatico', `No se pudo enviar "Pasos a seguir" a ${email} tras su primer pago`, { email, error: res.reason });
+    }
+  } catch (err) {
+    await logError('email/pasos-automatico', 'Error al enviar "Pasos a seguir" tras el primer pago', { email, error: err instanceof Error ? err.message : String(err) });
   }
 }
