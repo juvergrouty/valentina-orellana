@@ -15,7 +15,7 @@ export const CONSENT_VERSION = '2026-10-v1';
 
 export const RESPONSABLE = {
   nombre: 'Valentina Orellana',
-  profesion: 'Psicóloga Clínica',
+  profesion: 'Psicóloga',
   rut: '16.768.831-4',
 };
 
