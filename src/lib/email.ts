@@ -587,6 +587,10 @@ export async function sendStepsEmail(opts: {
             <li style="margin-bottom:0.6rem;">
               Para <strong>reagendar</strong>, avísame con al menos <strong>24 horas de anticipación</strong>.
             </li>
+            <li style="margin-bottom:0.6rem;">
+              Los <strong>valores de las sesiones</strong> pueden reajustarse hasta dos veces al año.
+              Si estás en proceso, te aviso con al menos <strong>30 días de anticipación</strong>.
+            </li>
           </ul>
         </div>
 
