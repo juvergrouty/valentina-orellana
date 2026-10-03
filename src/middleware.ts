@@ -5,10 +5,12 @@ const COOKIE = 'vo_admin_token';
 export const onRequest = defineMiddleware((context, next) => {
   const { pathname } = context.url;
 
-  // Rutas públicas dentro de /api/admin: login y el callback de Google OAuth
-  // (el callback llega redirigido desde Google, sin la cookie de sesión; su
-  //  seguridad la da el código de autorización, no la cookie)
-  const PUBLIC_ADMIN_API = ['/api/admin/login', '/api/admin/google/callback'];
+  // Única ruta pública dentro de /api/admin: el login. El callback de Google
+  // OAuth YA NO es público (3 oct 2026): cualquiera podía conectar su propia
+  // cuenta de Google y recibir las sesiones de las pacientes en su calendario.
+  // La cookie de sesión (SameSite=lax) sí viaja en el redirect de vuelta de
+  // Google, así que exigirla no rompe la conexión de Valentina.
+  const PUBLIC_ADMIN_API = ['/api/admin/login'];
 
   // Proteger rutas /admin/* y /api/admin/* (excepto las públicas)
   const isAdminPage = pathname.startsWith('/admin') && pathname !== '/admin/login';

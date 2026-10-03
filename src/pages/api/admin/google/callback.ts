@@ -4,9 +4,18 @@ import { supabase } from '../../../../lib/supabase';
 
 export const prerender = false;
 
-export const GET: APIRoute = async ({ url }) => {
+export const GET: APIRoute = async ({ url, cookies }) => {
   const code  = url.searchParams.get('code');
   const error = url.searchParams.get('error');
+
+  // Solo se acepta la vuelta de una conexión iniciada desde este panel (la
+  // sesión de admin la exige el middleware).
+  const state    = url.searchParams.get('state');
+  const expected = cookies.get('vo_google_state')?.value;
+  cookies.delete('vo_google_state', { path: '/api/admin/google' });
+  if (!state || !expected || state !== expected) {
+    return new Response(null, { status: 302, headers: { Location: '/admin/configuracion?google=error' } });
+  }
 
   if (error || !code) {
     return new Response(null, {
