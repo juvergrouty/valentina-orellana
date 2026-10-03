@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { sendReviewRequestEmail, sendStepsEmail, sendConfirmationToClient, sendReminderEmail, stepsWhatsappText } from '../../../lib/email';
 import { reviewRequestUrl } from '../../../lib/googleReviews';
+import { stepsPageUrl } from '../../../lib/stepsPage';
 
 export const prerender = false;
 
@@ -12,7 +13,7 @@ function json(data: unknown, status = 200) {
 // POST /api/admin/send-email
 // Acciones: 'review_request' (reseña), 'steps' (pasos a seguir),
 //           'confirmation' y 'reminder' (por sesión, vía booking_id).
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, url }) => {
   let body: Record<string, string>;
   try { body = await request.json(); }
   catch { return json({ ok: false, error: 'Body inválido.' }, 400); }
@@ -86,8 +87,7 @@ export const POST: APIRoute = async ({ request }) => {
     const digits = (b.patient_phone ?? '').replace(/\D/g, '');
     const phone  = digits.length === 9 ? '56' + digits : digits;
     if (phone.length < 11) return json({ ok: false, error: 'El paciente no tiene un teléfono válido.' }, 400);
-    const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
-    const text = stepsWhatsappText(b.patient_name ?? '', addr?.value ?? '');
+    const text = stepsWhatsappText(b.patient_name ?? '', await stepsPageUrl(url.origin));
     if (b.patient_email) {
       await supabase.from('patients').update({ steps_sent_at: new Date().toISOString() }).ilike('email', b.patient_email.trim());
     }
