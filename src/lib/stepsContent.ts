@@ -14,6 +14,11 @@ export function stepsItems(clinicAddress?: string | null): StepItem[] {
       texto: 'Te llega un correo con la fecha, la hora y la modalidad de tu reserva. Revisa también tu carpeta de spam o promociones.',
     },
     {
+      icon: 'lock',
+      titulo: 'Consentimiento informado',
+      texto: 'Te llegará un link para firmar el consentimiento informado de tratamiento de datos, que responde a la Ley 21.719 de protección de datos personales. Es fundamental firmarlo para poder atenderte.',
+    },
+    {
       icon: 'video',
       titulo: 'Si tu sesión es online',
       texto: 'Se realiza por Google Meet. El enlace te llega en la invitación de tu calendario; solo tienes que entrar a la hora de la sesión desde un lugar tranquilo y privado.',

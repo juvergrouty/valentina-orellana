@@ -535,8 +535,8 @@ export function stepsWhatsappText(patientName: string, url: string): string {
 export function stepsEmailHtml(opts: { patientName: string; clinicAddress?: string }): string {
   const SITE = 'https://www.valentinaorellana.cl';
   const pasos = stepsItems(opts.clinicAddress);
-  const card = (p: { titulo: string; texto: string }, n: number) => `
-    <td valign="top" width="50%" class="col" style="background:#FFFFFF;padding:28px 26px;border:1px solid #DDD8CF;">
+  const card = (p: { titulo: string; texto: string }, n: number, full = false) => `
+    <td valign="top" ${full ? 'colspan="2" width="100%"' : 'width="50%"'} class="col" style="background:#FFFFFF;padding:28px 26px;border:1px solid #DDD8CF;">
       <p style="margin:0 0 14px;font-family:'Inter',Arial,sans-serif;font-size:11px;letter-spacing:0.2em;color:#A8906C;font-weight:600;">${String(n).padStart(2, '0')}</p>
       <p style="margin:0 0 12px;font-family:'Domine',Georgia,serif;font-size:19px;line-height:1.3;color:#1A1A18;font-weight:400;">${escapeHtml(p.titulo)}</p>
       <div style="width:40px;height:2px;background:#C9CEC6;margin:0 0 14px;line-height:2px;font-size:0;">&nbsp;</div>
@@ -544,7 +544,9 @@ export function stepsEmailHtml(opts: { patientName: string; clinicAddress?: stri
     </td>`;
   const filas: string[] = [];
   for (let i = 0; i < pasos.length; i += 2) {
-    filas.push(`<tr>${card(pasos[i], i + 1)}${pasos[i + 1] ? card(pasos[i + 1], i + 2) : '<td class="col"></td>'}</tr>`);
+    filas.push(pasos[i + 1]
+      ? `<tr>${card(pasos[i], i + 1)}${card(pasos[i + 1], i + 2)}</tr>`
+      : `<tr>${card(pasos[i], i + 1, true)}</tr>`);
   }
 
   return `<!doctype html>

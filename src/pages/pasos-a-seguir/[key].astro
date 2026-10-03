@@ -40,7 +40,7 @@ const pasos = stepsItems(clinicAddress);
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-px bg-dust">
         {pasos.map((p, i) => (
-          <div class="bg-white p-8 md:p-10">
+          <div class={`bg-white p-8 md:p-10${i === pasos.length - 1 && pasos.length % 2 ? ' sm:col-span-2' : ''}`}>
             <div class="flex items-center gap-4 mb-5">
               <span class="label text-gold">{String(i + 1).padStart(2, '0')}</span>
               <span class="text-stone"><Icon name={p.icon} size={24} /></span>
