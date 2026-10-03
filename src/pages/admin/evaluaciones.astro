@@ -2,6 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { getCachedReviews } from '../../lib/googleReviews';
 
 // Config desde settings: Place ID + API key de Google
 const { data: settingsRows } = await supabase
@@ -23,29 +24,23 @@ interface GReview {
   profile_photo_url?: string;
 }
 
-let reviews: GReview[] = [];
-let placeRating: number | null = null;
-let placeTotal: number | null = null;
-let fetchError: string | null = null;
+// Lee las reseñas ya guardadas (las refresca el cron diario o el botón
+// "Actualizar reseñas"); abrir esta página no le consulta a Google.
 const configured = Boolean(placeId && apiKey);
-
-if (configured) {
-  try {
-    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=rating,user_ratings_total,reviews&reviews_sort=newest&language=es&key=${apiKey}`;
-    const res  = await fetch(url);
-    const json = await res.json();
-    if (json.status === 'OK') {
-      reviews     = json.result?.reviews ?? [];
-      placeRating = json.result?.rating ?? null;
-      placeTotal  = json.result?.user_ratings_total ?? null;
-    } else {
-      fetchError = `Google respondió: ${json.status}${json.error_message ? ' — ' + json.error_message : ''}`;
-    }
-  } catch (e) {
-    fetchError = 'No se pudo conectar con Google Places.';
-    console.error('[evaluaciones]', e);
-  }
-}
+const cache = configured ? await getCachedReviews() : null;
+const reviews: GReview[] = (cache?.reviews ?? []).map(r => ({
+  author_name: r.author,
+  rating: r.rating,
+  text: r.text,
+  relative_time_description: r.relative ?? '',
+  time: r.time,
+  profile_photo_url: r.photo,
+}));
+const placeRating: number | null = cache?.rating ?? null;
+const placeTotal: number | null = cache?.total ?? null;
+const fetchError: string | null = configured && !cache
+  ? 'Todavía no hay reseñas guardadas. Pulsa "Actualizar reseñas" para traerlas desde Google.'
+  : null;
 
 const MONTHS = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 function fmtDate(unixSec: number) {
