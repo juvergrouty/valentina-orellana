@@ -150,7 +150,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
 
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>
     `,
@@ -206,7 +206,7 @@ export async function sendSessionUpdatedEmail(data: {
         </a>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>
     `,
@@ -262,7 +262,7 @@ export async function sendPaymentLinkEmail(opts: {
         </p>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>
     `,
@@ -307,7 +307,7 @@ export async function sendDebtReminderEmail(opts: {
         </a>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>
     `,
@@ -352,7 +352,7 @@ export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent:
         </a>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>
     `,
@@ -418,7 +418,7 @@ export async function sendPendingExpiredEmail(data: {
         </a>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>
     `,
@@ -461,7 +461,7 @@ export async function sendReviewRequestEmail(opts: {
         </a>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>
     `,
@@ -512,7 +512,7 @@ export async function sendEvaluationEmail(opts: {
         ${formBlock}
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>
     `,
@@ -638,7 +638,7 @@ export async function sendBoletaEmail(opts: {
         </p>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>`,
     attachments: [{ filename: `boleta-${opts.folio ?? 'honorarios'}.pdf`, content: opts.pdfBase64 }],
@@ -669,7 +669,7 @@ export async function sendBulkEmail(
         <div style="font-size:0.92rem;line-height:1.7;color:#1A1A18;">${bodyHtml}</div>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>`;
     try {
@@ -916,7 +916,7 @@ export async function sendConsentLinkEmail(opts: {
         </a>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>
     `,
