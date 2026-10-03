@@ -36,6 +36,8 @@ const { data: consentRows } = await supabase.from('consents').select('*')
 const consentimiento = vigente((consentRows ?? []) as ConsentRow[]);
 const ultimoRetiro = (consentRows ?? []).find((c: any) => c.revoked_at) as ConsentRow | undefined;
 const envioPendiente = (consentRows ?? []).find((c: any) => !c.signed_at && c.sent_at) as ConsentRow | undefined;
+const firmadosHist = (consentRows ?? []).filter((c: any) => c.signed_at)
+  .sort((a: any, b: any) => b.signed_at.localeCompare(a.signed_at));
 const fmtCL = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 const tab  = Astro.url.searchParams.get('tab') ?? 'info';
@@ -143,7 +145,7 @@ const formatCLP = (n: number) =>
         </p>
       </div>
       <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-        <a href={`/consentimiento/${consentimiento.token}`} target="_blank" class="btn btn-outline btn-sm">Ver firmado</a>
+        <a href={`/admin/pacientes/${patient.id}/consentimiento/${consentimiento.id}`} target="_blank" class="btn btn-outline btn-sm">Ver constancia / PDF</a>
         <button type="button" class="btn btn-outline btn-sm consent-btn" data-consent-action="revoke">Registrar retiro</button>
       </div>
     </div>
@@ -162,6 +164,19 @@ const formatCLP = (n: number) =>
         <button type="button" class="btn btn-outline btn-sm consent-btn" data-consent-action="link">Copiar link</button>
       </div>
     </div>
+  )}
+  {firmadosHist.length > 0 && (
+    <details style="margin:-0.75rem 0 1.5rem;font-size:0.78rem;color:var(--stone);">
+      <summary style="cursor:pointer;">Historial de consentimientos firmados ({firmadosHist.length})</summary>
+      <ul style="margin:0.4rem 0 0 1.1rem;">
+        {firmadosHist.map((c: any) => (
+          <li style="margin:0.2rem 0;">
+            {fmtCL(c.signed_at)} · {c.signer_name} · versión {c.version} · {c.revoked_at ? `retirado el ${fmtCL(c.revoked_at)}` : 'vigente'} ·{' '}
+            <a href={`/admin/pacientes/${patient.id}/consentimiento/${c.id}`} target="_blank" style="color:var(--enc-blue-dark);">ver constancia</a>
+          </li>
+        ))}
+      </ul>
+    </details>
   )}
   <p id="consent-status" data-patient-id={patient.id} style="font-size:0.78rem;margin:-1rem 0 1rem;"></p>
 

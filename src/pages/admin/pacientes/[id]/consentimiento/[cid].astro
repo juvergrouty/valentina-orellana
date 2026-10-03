@@ -1,0 +1,85 @@
+---
+export const prerender = false;
+import { supabase } from '../../../../../lib/supabase';
+import { CONSENT_OPTIONS, sha256 } from '../../../../../lib/consent';
+
+// Constancia completa de un consentimiento firmado, para imprimir o guardar en
+// PDF si alguna vez se pide legalmente (la carga de probar el consentimiento
+// es de la responsable, Ley 21.719 art. 12). Muestra el texto EXACTO que el
+// paciente aceptó (text_snapshot) y verifica que no haya sido alterado
+// comparándolo con el hash guardado al firmar.
+const { id, cid } = Astro.params;
+
+const [{ data: c }, { data: patient }] = await Promise.all([
+  supabase.from('consents').select('*').eq('id', cid!).eq('patient_id', id!).maybeSingle(),
+  supabase.from('patients').select('name').eq('id', id!).maybeSingle(),
+]);
+if (!c || !c.signed_at || !patient) return Astro.redirect(`/admin/pacientes/${id}`);
+
+const integro = !!c.text_snapshot && sha256(c.text_snapshot) === c.text_sha256;
+const fmt = (iso: string | null) => iso
+  ? new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' (hora de Chile)'
+  : '—';
+const ENVIO: Record<string, string> = { whatsapp: 'WhatsApp', email: 'correo electrónico', link: 'link directo' };
+---
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Consentimiento · {c.signer_name} · {c.signed_at.slice(0, 10)}</title>
+  <style>
+    body { font-family: -apple-system, 'Inter', sans-serif; color: #111827; background: #fff; max-width: 760px; margin: 0 auto; padding: 2rem 1.25rem; font-size: 13px; line-height: 1.55; }
+    h1 { font-size: 1.3rem; margin: 0 0 0.25rem; }
+    h2 { font-size: 0.95rem; margin: 1.75rem 0 0.5rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.25rem; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 0.3rem 0; vertical-align: top; border-bottom: 1px solid #f3f4f6; }
+    td:first-child { color: #6b7280; width: 38%; padding-right: 1rem; }
+    pre { white-space: pre-wrap; font-family: inherit; background: #f9fafb; border: 1px solid #e5e7eb; padding: 1rem; margin: 0; }
+    .muted { color: #6b7280; }
+    .ok { color: #15803d; font-weight: 600; } .bad { color: #dc2626; font-weight: 600; }
+    .bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+    .bar a, .bar button { font: inherit; padding: 0.45rem 0.9rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #111827; text-decoration: none; cursor: pointer; }
+    .bar button { background: #111827; color: #fff; border-color: #111827; }
+    @media print { .bar { display: none; } body { padding: 0; } }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <a href={`/admin/pacientes/${id}`}>← Volver a la ficha</a>
+    <button type="button" onclick="window.print()">Imprimir / Guardar PDF</button>
+  </div>
+
+  <h1>Constancia de consentimiento informado</h1>
+  <p class="muted">Tratamiento de datos personales y de salud · Ley 21.719 · Firma electrónica simple (Ley 19.799)</p>
+
+  <h2>Firma</h2>
+  <table>
+    <tr><td>Paciente (ficha)</td><td>{patient.name}</td></tr>
+    <tr><td>Firmado por</td><td>{c.signer_name}</td></tr>
+    <tr><td>RUT</td><td>{c.signer_rut}</td></tr>
+    <tr><td>Correo del paciente</td><td>{c.signer_email ?? '—'}</td></tr>
+    <tr><td>Fecha y hora de firma</td><td>{fmt(c.signed_at)}</td></tr>
+    <tr><td>Enviado por</td><td>{c.sent_via ? `${ENVIO[c.sent_via] ?? c.sent_via}, el ${fmt(c.sent_at)}` : '—'}</td></tr>
+    <tr><td>Versión del texto</td><td>{c.version}</td></tr>
+    <tr><td>Dirección IP</td><td>{c.ip ?? '—'}</td></tr>
+    <tr><td>Dispositivo / navegador</td><td>{c.user_agent ?? '—'}</td></tr>
+    <tr><td>Código de integridad (SHA-256)</td><td style="word-break:break-all;">{c.text_sha256}</td></tr>
+    <tr><td>Verificación del texto</td><td class={integro ? 'ok' : 'bad'}>{integro ? 'Íntegro: el texto coincide exactamente con el firmado' : 'NO coincide con el código guardado al firmar'}</td></tr>
+    <tr><td>Estado</td><td class={c.revoked_at ? 'bad' : 'ok'}>{c.revoked_at ? `Retirado el ${fmt(c.revoked_at)}${c.revoked_note ? ` — ${c.revoked_note}` : ''}` : 'Vigente'}</td></tr>
+  </table>
+
+  <h2>Autorizaciones</h2>
+  <table>
+    {CONSENT_OPTIONS.map(o => (
+      <tr><td>{o.titulo}</td><td class={c[o.key] ? 'ok' : 'bad'}>{c[o.key] ? 'Sí autoriza' : 'No autoriza'}</td></tr>
+    ))}
+  </table>
+
+  <h2>Texto exacto aceptado por el paciente</h2>
+  <pre>{c.text_snapshot}</pre>
+
+  <p class="muted" style="margin-top:1.5rem;">Constancia generada el {fmt(new Date().toISOString())} desde el registro de consentimientos de Ps. Valentina Orellana.</p>
+</body>
+</html>
