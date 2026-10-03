@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
+import { agregarLineaNotas } from '../../../lib/apigateway';
 import { supabase } from '../../../lib/supabase';
-import { sendReminderEmail, emailTypeEnabled } from '../../../lib/email';
+import { sendReminderEmail, emailTypeEnabled, diaRelativo } from '../../../lib/email';
 import { sendWhatsappText, sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { nowCL, hoursUntilSessionCL } from '../../../lib/dateUtils';
 
@@ -119,7 +120,7 @@ export const GET: APIRoute = async ({ request }) => {
       if (res.sent) {
         sent++;
         liveNotes = `${liveNotes ? liveNotes + '\n' : ''}${MARKER} ${today}`;
-        await supabase.from('bookings').update({ notes: liveNotes }).eq('id', b.id);
+        await agregarLineaNotas(b.id, `${MARKER} ${today}`);
       } else {
         failed++;
       }
@@ -139,11 +140,11 @@ export const GET: APIRoute = async ({ request }) => {
 
       const res = templateName
         ? await sendWhatsappTemplate(b.patient_phone, templateName, templateLang, [firstName, time])
-        : await sendWhatsappText(b.patient_phone, `Hola ${b.patient_name ?? ''}, te recordamos tu hora de hoy a las ${time} hrs. — Valentina Orellana`);
+        : await sendWhatsappText(b.patient_phone, `Hola ${firstName}, te recuerdo tu hora de ${diaRelativo(b.session_date)} a las ${time} hrs. — Valentina Orellana`);
       if (res.sent) {
         waSent++;
         liveNotes = `${liveNotes ? liveNotes + '\n' : ''}${WA_MARKER} ${today}`;
-        await supabase.from('bookings').update({ notes: liveNotes }).eq('id', b.id);
+        await agregarLineaNotas(b.id, `${WA_MARKER} ${today}`);
       } else {
         // No se marca como enviado: reintenta en el próximo ciclo (cada 5 min)
         // hasta que se cumpla la ventana o el envío funcione (p.ej. una vez

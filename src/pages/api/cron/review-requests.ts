@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { agregarLineaNotas } from '../../../lib/apigateway';
 import { supabase } from '../../../lib/supabase';
 import { sendReviewRequestEmail, sendEvaluationEmail } from '../../../lib/email';
 import { reviewRequestUrl } from '../../../lib/googleReviews';
@@ -110,7 +111,7 @@ export const GET: APIRoute = async ({ request }) => {
       if (res.sent) {
         sent++;
         liveNotes = `${liveNotes ? liveNotes + '\n' : ''}${MARKER} ${today}`;
-        await supabase.from('bookings').update({ notes: liveNotes }).eq('id', b.id);
+        await agregarLineaNotas(b.id, `${MARKER} ${today}`);
       } else {
         failed++;
         console.error('[cron review-requests] no enviado:', b.id, res.reason);
@@ -131,7 +132,7 @@ export const GET: APIRoute = async ({ request }) => {
       if (res.sent) {
         evalSent++;
         liveNotes = `${liveNotes ? liveNotes + '\n' : ''}${EVAL_MARKER} ${today}`;
-        await supabase.from('bookings').update({ notes: liveNotes }).eq('id', b.id);
+        await agregarLineaNotas(b.id, `${EVAL_MARKER} ${today}`);
       } else {
         evalFailed++;
         console.error('[cron review-requests] evaluación no enviada:', b.id, res.reason);

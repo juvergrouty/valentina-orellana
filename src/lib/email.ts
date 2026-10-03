@@ -2,6 +2,7 @@ import { Resend } from 'resend';
 import { supabase } from './supabase';
 import { logEmail, logError } from './logger';
 import { stepsItems, STEPS_INTRO } from './stepsContent';
+import { todayCL } from './dateUtils';
 
 // Inicialización perezosa — no falla si la key no está configurada
 let _resend: Resend | null = null;
@@ -317,6 +318,20 @@ export async function sendDebtReminderEmail(opts: {
   return { sent: true };
 }
 
+/** "hoy", "mañana" o "el martes 14 de octubre", respecto de hoy en Chile. */
+export function diaRelativo(sessionDate: string): string {
+  const hoy = todayCL();
+  const [y, m, d] = hoy.split('-').map(Number);
+  const manana = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  if (sessionDate === hoy) return 'hoy';
+  if (sessionDate === manana) return 'mañana';
+  const [sy, sm, sd] = sessionDate.split('-').map(Number);
+  const f = new Date(Date.UTC(sy, sm - 1, sd));
+  const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  return `el ${DIAS[f.getUTCDay()]} ${sd} de ${MESES[sm - 1]}`;
+}
+
 // ─── Email al cliente: recordatorio de sesión ────────────────────────────────
 export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
@@ -324,7 +339,10 @@ export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent:
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
   const isOnline = (data.session_type ?? '').includes('online');
-  const subject = `Recordatorio: tu sesión es hoy — Ps. Valentina Orellana`;
+  // "hoy" / "mañana" / la fecha, según el día real de la sesión (hora de Chile).
+  // Antes decía siempre "hoy", aunque el recordatorio sale hasta 24 h antes.
+  const dia = diaRelativo(data.session_date);
+  const subject = `Recordatorio: tu sesión es ${dia} — Ps. Valentina Orellana`;
 
   const res = await client.emails.send({
     from: FROM,
@@ -334,7 +352,7 @@ export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent:
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Te espero pronto 🌿</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(data.patient_name)}, te recuerdo tu sesión de hoy.
+          Hola ${escapeHtml(data.patient_name)}, te recuerdo tu sesión de ${dia}.
         </p>
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.88rem;line-height:1.8;">
           <p style="margin:0;"><strong>${sessionLabel}</strong></p>
