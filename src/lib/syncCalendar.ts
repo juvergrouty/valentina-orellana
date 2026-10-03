@@ -96,7 +96,7 @@ export async function retitleBookingInCalendar(bookingId: string, title: string)
   }
 }
 
-export async function syncBookingToCalendar(booking: BookingForCalendar): Promise<{
+export async function syncBookingToCalendar(booking: BookingForCalendar, opts: { invite?: boolean } = {}): Promise<{
   success: boolean;
   meetLink?: string;
   eventLink?: string;
@@ -159,7 +159,9 @@ export async function syncBookingToCalendar(booking: BookingForCalendar): Promis
       date:          booking.session_date,
       startTime:     booking.session_time.slice(0, 5),
       durationMin,
-      attendeeEmail: booking.patient_email || undefined,
+      // invite:false → reserva aún sin pagar: el evento queda en el calendario de
+      // Valentina sin mandarle invitación de Google al paciente.
+      attendeeEmail: opts.invite === false ? undefined : (booking.patient_email || undefined),
       isOnline,
       calendarId:    cfg['google_calendar_id'] ?? 'primary',
     });

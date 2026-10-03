@@ -665,6 +665,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
           try { await sendNotificationToAdmin(emailData, notifEmail, true); } catch (e) { console.error('[create-admin] notif (link):', e); }
         }
 
+        // Evento en Google Calendar desde ya (sin invitar al paciente hasta que pague).
+        // Si la reserva expira sin pago, expireBooking lo borra.
+        for (const bid of bookingIds) {
+          try {
+            const { data: b } = await supabase.from('bookings').select('*').eq('id', bid).single();
+            if (b) await syncBookingToCalendar(b, { invite: false });
+          } catch (e) { console.error('[create-admin] sync (link):', e); }
+        }
+
         // Redirigir mostrando el link (el banner de "compartir por WhatsApp" solo
         // se muestra si el envío automático no se hizo, para no duplicar el mensaje)
         return redirect(dest + `&payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}&pl_wa_sent=${waSent ? '1' : '0'}`);

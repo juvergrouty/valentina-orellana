@@ -444,6 +444,7 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
                   reminder_email_enabled: b.reminder_email_enabled !== false,
                   review_email_enabled:   b.review_email_enabled === true,
                   created_pending:        b.status === 'pending_payment',
+                  has_event:              !!b.google_event_id,
                   paid_at:        b.paid_at ?? null,
                   payment_note:   b.payment_note ?? '',
                   debt_voided:    b.debt_voided ?? false,
@@ -2160,6 +2161,15 @@ function openSessionDetail(b) {
 
   // Cancel
   document.getElementById('sp-cancel-id').value = b.id;
+
+  // Reserva sin pagar y sin evento en Google Calendar (agendada con link de pago
+  // antes de que ese camino lo creara): se crea ahora, en segundo plano y sin
+  // invitar al paciente. El panel no espera ni cambia nada si falla.
+  if (b.created_pending && !b.has_event && b.session_date !== '2099-12-31') {
+    fetch('/api/admin/ensure-event', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.id }),
+    }).catch(() => {});
+  }
 
   // Boleta de honorarios
   currentBookingId = b.id;
