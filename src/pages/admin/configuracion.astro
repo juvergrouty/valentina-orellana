@@ -46,6 +46,7 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
   {googleStatus === 'error'        && <div class="alert-error">Error al conectar con Google. Intenta nuevamente.</div>}
 
   <form method="POST" action="/api/admin/settings" style="display:flex;flex-direction:column;gap:1.5rem;max-width:520px;">
+    <input type="hidden" name="_bool_form" value="1" />
     <input type="hidden" name="redirect" value="/admin/configuracion?saved=1" />
 
     <!-- Pagos -->

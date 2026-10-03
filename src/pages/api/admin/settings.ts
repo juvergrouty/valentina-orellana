@@ -23,13 +23,19 @@ export const POST: APIRoute = async ({ request }) => {
   const updates: Record<string, string> = {};
 
   for (const [key, value] of form.entries()) {
-    if (key === 'redirect') continue;
+    if (key === 'redirect' || key === '_bool_form') continue;
     updates[key] = String(value);
   }
 
-  // Checkboxes desmarcados no se envían — guardar 'false' explícitamente
-  for (const boolKey of BOOLEAN_KEYS) {
-    if (!(boolKey in updates)) updates[boolKey] = 'false';
+  // Checkboxes desmarcados no se envían — guardar 'false' explícitamente.
+  // SOLO si el envío viene del formulario que contiene esas casillas
+  // (Configuración, marca oculta _bool_form). Otros formularios que guardan
+  // settings (ej. "Descanso entre citas" en Horarios) no traen las casillas, y
+  // antes eso apagaba Flow, pago en consulta, transferencia y los correos.
+  if (form.get('_bool_form') === '1') {
+    for (const boolKey of BOOLEAN_KEYS) {
+      if (!(boolKey in updates)) updates[boolKey] = 'false';
+    }
   }
 
   // Obtener qué claves ya existen
