@@ -1,6 +1,7 @@
 import { Resend } from 'resend';
 import { supabase } from './supabase';
 import { logEmail, logError } from './logger';
+import { stepsItems, STEPS_INTRO } from './stepsContent';
 
 // Inicialización perezosa — no falla si la key no está configurada
 let _resend: Resend | null = null;
@@ -527,6 +528,68 @@ export function stepsWhatsappText(patientName: string, url: string): string {
 }
 
 // ─── Email al cliente: pasos a seguir / qué esperar ──────────────────────────
+// Mismo contenido (src/lib/stepsContent.ts) y misma imagen que la página
+// oculta /pasos-a-seguir/<clave>: foto de cabecera, tarjetas numeradas y botón
+// de WhatsApp. HTML de tablas con estilos en línea para que se vea igual en
+// Gmail, Outlook y el celular.
+export function stepsEmailHtml(opts: { patientName: string; clinicAddress?: string }): string {
+  const SITE = 'https://www.valentinaorellana.cl';
+  const pasos = stepsItems(opts.clinicAddress);
+  const card = (p: { titulo: string; texto: string }, n: number) => `
+    <td valign="top" width="50%" class="col" style="background:#FFFFFF;padding:28px 26px;border:1px solid #DDD8CF;">
+      <p style="margin:0 0 14px;font-family:'Inter',Arial,sans-serif;font-size:11px;letter-spacing:0.2em;color:#A8906C;font-weight:600;">${String(n).padStart(2, '0')}</p>
+      <p style="margin:0 0 12px;font-family:'Domine',Georgia,serif;font-size:19px;line-height:1.3;color:#1A1A18;font-weight:400;">${escapeHtml(p.titulo)}</p>
+      <div style="width:40px;height:2px;background:#C9CEC6;margin:0 0 14px;line-height:2px;font-size:0;">&nbsp;</div>
+      <p style="margin:0;font-family:'Inter',Arial,sans-serif;font-size:14px;line-height:1.7;color:#6B6860;font-weight:300;">${escapeHtml(p.texto)}</p>
+    </td>`;
+  const filas: string[] = [];
+  for (let i = 0; i < pasos.length; i += 2) {
+    filas.push(`<tr>${card(pasos[i], i + 1)}${pasos[i + 1] ? card(pasos[i + 1], i + 2) : '<td class="col"></td>'}</tr>`);
+  }
+
+  return `<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  @media (max-width:600px){ .col{display:block!important;width:100%!important;box-sizing:border-box;} .pad{padding-left:20px!important;padding-right:20px!important;} .hero-title{font-size:30px!important;} }
+</style></head>
+<body style="margin:0;padding:0;background:#FAF7F4;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FAF7F4;">
+  <tr><td align="center">
+    <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;">
+      <tr><td class="pad" style="background:#F5F1EC;padding:22px 32px;border-bottom:1px solid #DDD8CF;font-family:'Domine',Georgia,serif;font-size:20px;color:#1A1A18;">Ps. Valentina Orellana</td></tr>
+      <tr><td style="padding:0;line-height:0;font-size:0;">
+        <img src="${SITE}/images/hero-paginas.jpg" width="640" alt="" style="display:block;width:100%;max-width:640px;height:auto;max-height:230px;object-fit:cover;object-position:50% 25%;border:0;">
+      </td></tr>
+      <tr><td class="pad" bgcolor="#2E2E2B" style="background:#2E2E2B;padding:28px 32px 32px;">
+        <p style="margin:0 0 12px;font-family:'Inter',Arial,sans-serif;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;color:#C9C4BB;">Bienvenida/o a tu proceso</p>
+        <div style="width:40px;height:2px;background:#8A877F;margin:0 0 16px;line-height:2px;font-size:0;">&nbsp;</div>
+        <p class="hero-title" style="margin:0;font-family:'Domine',Georgia,serif;font-size:36px;line-height:1.1;color:#FFFFFF;">Pasos a seguir</p>
+      </td></tr>
+      <tr><td class="pad" style="padding:40px 32px 28px;">
+        <p style="margin:0 0 10px;font-family:'Inter',Arial,sans-serif;font-size:15px;line-height:1.7;color:#1A1A18;">Hola ${escapeHtml(opts.patientName.split(' ')[0])},</p>
+        <p style="margin:0;font-family:'Inter',Arial,sans-serif;font-size:15px;line-height:1.7;color:#6B6860;font-weight:300;">${escapeHtml(STEPS_INTRO)}</p>
+      </td></tr>
+      <tr><td class="pad" style="padding:0 32px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${filas.join('')}</table>
+      </td></tr>
+      <tr><td class="pad" align="center" style="padding:44px 32px 16px;">
+        <p style="margin:0 0 8px;font-family:'Domine',Georgia,serif;font-size:22px;color:#1A1A18;">¿Te quedó alguna duda?</p>
+        <p style="margin:0 0 24px;font-family:'Inter',Arial,sans-serif;font-size:14px;color:#6B6860;">Escríbeme y lo vemos antes de tu sesión.</p>
+        <a href="https://wa.me/56972735696" style="display:inline-block;background:#576352;color:#FFFFFF;padding:14px 32px;text-decoration:none;font-family:'Inter',Arial,sans-serif;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;border-radius:4px;">Escribir por WhatsApp</a>
+      </td></tr>
+      <tr><td class="pad" align="center" style="padding:20px 32px 40px;">
+        <p style="margin:0;font-family:'Inter',Arial,sans-serif;font-size:12px;color:#6B6860;">Revisa también las <a href="${SITE}/condiciones" style="color:#6B6860;">condiciones del servicio y la política de privacidad</a>.</p>
+      </td></tr>
+      <tr><td class="pad" style="background:#1A1A18;padding:28px 32px;">
+        <p style="margin:0 0 4px;font-family:'Domine',Georgia,serif;font-size:17px;color:#FAF7F4;">Valentina Orellana</p>
+        <p style="margin:0;font-family:'Inter',Arial,sans-serif;font-size:12px;color:rgba(250,247,244,0.5);">Psicóloga · Reg. Superintendencia de Salud N° 360070 · Santiago, Chile</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+}
+
 export async function sendStepsEmail(opts: {
   patientName:   string;
   patientEmail:  string;
@@ -534,84 +597,11 @@ export async function sendStepsEmail(opts: {
 }): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
-
-  const addressLine = opts.clinicAddress?.trim()
-    ? `la dirección de la consulta es <strong>${opts.clinicAddress.trim()}</strong>`
-    : `te confirmaré la dirección exacta de la consulta por WhatsApp`;
-
   const res = await client.emails.send({
     from: FROM,
     to:   opts.patientEmail,
     subject: 'Pasos a seguir para tu proceso — Ps. Valentina Orellana',
-    html: `
-      <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
-        <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Bienvenida/o a tu proceso</h1>
-        <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(opts.patientName)}, aquí tienes todo lo que necesitas saber para que estés tranquila/o.
-          Estos son los pasos y lo que recibirás por correo.
-        </p>
-
-        <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.86rem;line-height:1.7;color:#1A1A18;">
-          <p style="font-weight:600;margin:0 0 0.85rem;text-transform:uppercase;letter-spacing:0.06em;font-size:0.78rem;color:#576352;">
-            📩 Correos que recibirás
-          </p>
-          <ul style="margin:0;padding-left:1.1rem;color:#6B6860;">
-            <li style="margin-bottom:0.6rem;">
-              <strong>Boleta de honorarios electrónica (SII):</strong> después de cada sesión te llegará por correo
-              tu boleta emitida ante el Servicio de Impuestos Internos. Guárdala.
-            </li>
-            <li style="margin-bottom:0.6rem;">
-              <strong>Confirmación de tu sesión:</strong> con la fecha, hora y modalidad de tu reserva.
-            </li>
-            <li style="margin-bottom:0.6rem;">
-              <strong>Si tu sesión es online:</strong> recibirás el <strong>enlace de Google Meet</strong>
-              en la invitación de tu calendario.
-            </li>
-          </ul>
-        </div>
-
-        <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.86rem;line-height:1.7;color:#1A1A18;">
-          <p style="font-weight:600;margin:0 0 0.85rem;text-transform:uppercase;letter-spacing:0.06em;font-size:0.78rem;color:#576352;">
-            📍 Dirección y modalidad
-          </p>
-          <p style="margin:0;color:#6B6860;">
-            Si tu sesión es <strong>presencial</strong>, ${addressLine}.
-            Si es <strong>online</strong>, la sesión se realiza por <strong>Google Meet</strong> con el enlace que te llegará.
-          </p>
-        </div>
-
-        <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.86rem;line-height:1.7;color:#1A1A18;">
-          <p style="font-weight:600;margin:0 0 0.85rem;text-transform:uppercase;letter-spacing:0.06em;font-size:0.78rem;color:#576352;">
-            💳 Reembolso y reagendamiento
-          </p>
-          <ul style="margin:0;padding-left:1.1rem;color:#6B6860;">
-            <li style="margin-bottom:0.6rem;">
-              La <strong>boleta emitida te permite reembolsar</strong> el costo del servicio en tu prestador de salud
-              o en tu seguro de salud, si corresponde.
-            </li>
-            <li style="margin-bottom:0.6rem;">
-              Para <strong>reagendar</strong>, avísame con al menos <strong>24 horas de anticipación</strong>.
-            </li>
-            <li style="margin-bottom:0.6rem;">
-              Los <strong>valores de las sesiones</strong> pueden reajustarse hasta dos veces al año.
-              Si estás en proceso, te aviso con al menos <strong>30 días de anticipación</strong>.
-            </li>
-          </ul>
-        </div>
-
-        <a href="https://wa.me/56972735696"
-           style="display:inline-block;background:#576352;color:white;padding:0.75rem 1.5rem;
-                  text-decoration:none;font-family:'Inter',sans-serif;font-size:0.75rem;
-                  letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
-          Escribir por WhatsApp
-        </a>
-
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga Clínica · Santiago, Chile
-        </p>
-      </div>
-    `,
+    html: stepsEmailHtml(opts),
   });
   await logEmail('email/pasos', opts.patientEmail, 'Pasos a seguir', !res.error, res.error?.message);
   if (res.error) return { sent: false, reason: res.error.message };

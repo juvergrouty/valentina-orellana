@@ -5,10 +5,11 @@ import PageHero   from '../../components/sections/PageHero.astro';
 import Icon       from '../../components/ui/Icon.astro';
 import { supabase } from '../../lib/supabase';
 import { getStepsPageKey } from '../../lib/stepsPage';
+import { stepsItems, STEPS_INTRO } from '../../lib/stepsContent';
 
 // Página que Valentina manda por WhatsApp desde el panel del calendario
-// ("Pasos a seguir" → WhatsApp). Mismo contenido que el correo de pasos a
-// seguir (src/lib/email.ts::sendStepsEmail): si cambia uno, cambiar el otro.
+// ("Pasos a seguir" → WhatsApp). El contenido sale de src/lib/stepsContent.ts,
+// igual que el correo de pasos a seguir.
 // Genérica a propósito: sin nombre ni datos del paciente en la URL.
 // Oculta (pedido de Valentina): solo se ve con la clave secreta del link que
 // ella manda; sin la clave correcta responde "página no encontrada". Tampoco
@@ -19,40 +20,7 @@ if (Astro.params.key !== await getStepsPageKey()) {
 const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
 const clinicAddress = addr?.value?.trim() ?? '';
 
-const pasos = [
-  {
-    icon: 'calendar',
-    titulo: 'Confirmación de tu sesión',
-    texto: 'Te llega un correo con la fecha, la hora y la modalidad de tu reserva. Revisa también tu carpeta de spam o promociones.',
-  },
-  {
-    icon: 'video',
-    titulo: 'Si tu sesión es online',
-    texto: 'Se realiza por Google Meet. El enlace te llega en la invitación de tu calendario; solo tienes que entrar a la hora de la sesión desde un lugar tranquilo y privado.',
-  },
-  {
-    icon: 'map-pin',
-    titulo: 'Si tu sesión es presencial',
-    texto: clinicAddress
-      ? `La dirección de la consulta es ${clinicAddress}. Te recomiendo llegar unos minutos antes.`
-      : 'Te confirmo la dirección exacta de la consulta por WhatsApp antes de tu primera sesión.',
-  },
-  {
-    icon: 'shield',
-    titulo: 'Boleta y reembolso',
-    texto: 'Después de cada sesión te llega por correo tu boleta de honorarios electrónica emitida ante el SII. Guárdala: con ella puedes pedir el reembolso en tu prestador o seguro de salud, si corresponde.',
-  },
-  {
-    icon: 'clock',
-    titulo: 'Si necesitas reagendar',
-    texto: 'Avísame con al menos 24 horas de anticipación. Con menos aviso puede no ser posible y la sesión se considera realizada.',
-  },
-  {
-    icon: 'check',
-    titulo: 'Valores de las sesiones',
-    texto: 'Los valores pueden reajustarse hasta dos veces al año. Si estás en proceso, te aviso con al menos 30 días de anticipación.',
-  },
-];
+const pasos = stepsItems(clinicAddress);
 ---
 
 <BaseLayout
@@ -67,8 +35,7 @@ const pasos = [
     <div class="container-site max-w-4xl">
 
       <p class="font-body text-base text-stone leading-relaxed max-w-2xl mb-12">
-        Aquí tienes todo lo que necesitas saber para empezar tranquila/o: qué vas a recibir,
-        cómo son las sesiones y qué hacer si necesitas cambiar algo.
+        {STEPS_INTRO}
       </p>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-px bg-dust">
