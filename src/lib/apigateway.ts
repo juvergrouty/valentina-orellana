@@ -232,11 +232,24 @@ const quitarPendiente = (notes: string) =>
   notes.split('\n').filter(l => !l.startsWith(MARCA_PENDIENTE)).join('\n');
 
 /**
+ * Traduce los errores del SII que llegan vía API Gateway a algo entendible.
+ * Cuando el SII pide volver a autenticar o no muestra la página esperada
+ * (Timeout en wait_for_selector), no es un problema de la boleta ni del sitio:
+ * el portal del SII no está atendiendo el acceso automático en ese momento.
+ */
+export function mensajeErrorSii(error: string): string {
+  if (/volver a autenticar|wait_for_selector|Timeout \d+ms/i.test(error)) {
+    return 'El SII no está respondiendo en este momento (pide volver a iniciar sesión o no carga su página).';
+  }
+  return error;
+}
+
+/**
  * Boleta vigente de la reserva: la ÚLTIMA línea "Boleta Folio N..." de notes,
  * salvo que esté ANULADA — mismo criterio que el panel del calendario y la
  * ficha del paciente, para que servidor y pantallas digan siempre lo mismo.
  */
-function folioVigente(notes: string | null): { folio: number; codigo: string | null } | null {
+export function folioVigente(notes: string | null): { folio: number; codigo: string | null } | null {
   const lineas = [...(notes ?? '').matchAll(/Boleta\s+Folio\s+(\d+)[^\n]*/gi)];
   const ultima = lineas.at(-1);
   if (!ultima || /ANULADA/i.test(ultima[0])) return null;
@@ -251,7 +264,7 @@ function folioVigente(notes: string | null): { folio: number; codigo: string | n
  * Único punto de envío tras emitir — lo usan Flow, "Marcar como pagado",
  * "Emitir boleta" del panel y el cron de reintentos.
  */
-export async function enviarBoletaDeReserva(bookingId: string): Promise<{ sent: boolean; email?: string; error?: string }> {
+export async function enviarBoletaDeReserva(bookingId: string): Promise<{ sent: boolean; email?: string; error?: string; pendiente?: boolean }> {
   const cfg = await getAgwConfig();
   if (!cfg) return { sent: false, error: 'API Gateway no configurado.' };
 
@@ -264,7 +277,7 @@ export async function enviarBoletaDeReserva(bookingId: string): Promise<{ sent: 
     const base = quitarPendiente(cur?.notes ?? '');
     await supabase.from('bookings').update({ notes: `${base ? base + '\n' : ''}${MARCA_PENDIENTE} ${new Date().toISOString()}` }).eq('id', bookingId);
     await logError('boleta/envio', `Boleta emitida pero NO enviada a ${b.patient_email ?? '(sin email)'} — se reintentará automáticamente`, { bookingId, error });
-    return { sent: false, error };
+    return { sent: false, error, pendiente: true };
   };
 
   // Casos sin reintento posible: se saca la marca de pendiente para que el

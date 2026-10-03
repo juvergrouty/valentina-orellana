@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { getAgwConfig, bheEmitidas, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion, emitBoletaParaReserva, MARCA_PENDIENTE } from '../../../lib/apigateway';
+import { getAgwConfig, bheEmitidas, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion, emitBoletaParaReserva, enviarBoletaDeReserva, folioVigente, mensajeErrorSii, MARCA_PENDIENTE } from '../../../lib/apigateway';
 import type { BheCausal } from '../../../lib/apigateway';
 import { logError } from '../../../lib/logger';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
@@ -10,11 +10,13 @@ import { nowCL } from '../../../lib/dateUtils';
 const periodoDeSesion = (sessionDate?: string | null) =>
   fechaBoletaDesdeSesion(sessionDate).slice(0, 7).replace('-', '');
 
-// Extrae "Boleta Folio N · Cod XXX" de las notas de una reserva
+// Boleta VIGENTE de la reserva (la última "Boleta Folio N", salvo anulada).
+// Antes tomaba la PRIMERA línea de notes: si una boleta se anuló y se emitió
+// otra, PDF/email apuntaban a la anulada y "Anular" respondía "ya estaba
+// anulada" sin dejar anular la nueva.
 function parseBoleta(notes: string | null): { folio: number | null; codigo: string | null } {
-  const f = notes?.match(/Boleta Folio (\d+)/i);
-  const c = notes?.match(/Cod ([\w-]+)/i);
-  return { folio: f ? parseInt(f[1]) : null, codigo: c ? c[1] : null };
+  const v = folioVigente(notes);
+  return { folio: v?.folio ?? null, codigo: v?.codigo ?? null };
 }
 
 export const prerender = false;
@@ -79,13 +81,6 @@ export const POST: APIRoute = async ({ request }) => {
     const email = (body.email ?? '').trim() || (b.patient_email ?? '');
     if (!email) return json({ ok: false, error: 'Falta el email de destino.' }, 400);
 
-    let { folio, codigo } = parseBoleta(b.notes);
-    if (!folio) return json({ ok: false, error: 'Esta sesión aún no tiene boleta emitida.' }, 400);
-    if (!codigo) {
-      try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeSesion(b.session_date), folio, cfg); } catch { /* */ }
-    }
-    if (!codigo) return json({ ok: false, error: 'No se pudo resolver el código de la boleta (folio ' + folio + ').' }, 502);
-
     // Resguardo contra envíos duplicados (p.ej. doble clic, o un reintento del
     // navegador): si esta misma boleta ya se envió a este mismo correo hace
     // menos de 2 minutos, no se reenvía — se avisa que ya se mandó. El botón
@@ -99,6 +94,24 @@ export const POST: APIRoute = async ({ request }) => {
         return json({ ok: true, email, skipped: 'ya_enviada_hace_poco' });
       }
     }
+
+    // Al correo del paciente: mismo camino que el envío automático (PDF desde
+    // nuestro correo, copia a Valentina, y si el SII falla queda en cola y el
+    // cron la reintenta). Antes este botón usaba solo el envío por correo del
+    // SII, que falla cada vez que el portal del SII no responde.
+    if (email.toLowerCase() === (b.patient_email ?? '').toLowerCase()) {
+      const r = await enviarBoletaDeReserva(bookingId);
+      if (r.sent) return json({ ok: true, email: r.email });
+      const msg = mensajeErrorSii(r.error ?? 'No se pudo enviar');
+      return json({ ok: false, error: r.pendiente ? `${msg} Quedó en cola: se enviará sola apenas el SII responda.` : msg }, 502);
+    }
+
+    let { folio, codigo } = parseBoleta(b.notes);
+    if (!folio) return json({ ok: false, error: 'Esta sesión no tiene una boleta vigente.' }, 400);
+    if (!codigo) {
+      try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeSesion(b.session_date), folio, cfg); } catch { /* */ }
+    }
+    if (!codigo) return json({ ok: false, error: 'No se pudo resolver el código de la boleta (folio ' + folio + ').' }, 502);
 
     try {
       const result = await bheEmail(codigo, email, cfg);
@@ -121,7 +134,7 @@ export const POST: APIRoute = async ({ request }) => {
       }
       return json({ ok: true, email, result });
     } catch (e) {
-      return json({ ok: false, error: e instanceof Error ? e.message : 'Error al enviar' }, 502);
+      return json({ ok: false, error: mensajeErrorSii(e instanceof Error ? e.message : 'Error al enviar') }, 502);
     }
   }
 
@@ -146,7 +159,7 @@ export const POST: APIRoute = async ({ request }) => {
       if (!pdf) return json({ ok: false, error: 'La API no devolvió el PDF.' }, 502);
       return json({ ok: true, folio, pdf });
     } catch (e) {
-      return json({ ok: false, error: e instanceof Error ? e.message : 'Error al obtener PDF' }, 502);
+      return json({ ok: false, error: mensajeErrorSii(e instanceof Error ? e.message : 'Error al obtener PDF') }, 502);
     }
   }
 
@@ -163,10 +176,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
 
     const { folio } = parseBoleta(b.notes);
-    if (!folio) return json({ ok: false, error: 'Esta sesión no tiene una boleta emitida.' }, 400);
-    if (/Boleta Folio \d+.*ANULADA/is.test(b.notes ?? '')) {
-      return json({ ok: false, error: 'Esa boleta ya estaba anulada.' }, 400);
-    }
+    if (!folio) return json({ ok: false, error: 'Esta sesión no tiene una boleta vigente (sin emitir o ya anulada).' }, 400);
     const validCausales: BheCausal[] = ['no_pago', 'no_prestacion', 'error_digitacion'];
     const causal: BheCausal = validCausales.includes(body.causal as BheCausal)
       ? (body.causal as BheCausal)
@@ -174,14 +184,15 @@ export const POST: APIRoute = async ({ request }) => {
 
     try {
       await bheAnular(cfg.siiRut, folio, causal, cfg);
-      const nuevaNota = (b.notes ?? '').replace(
-        new RegExp(`(Boleta Folio ${folio}[^\\n]*)`, 'i'),
-        '$1 · ANULADA'
-      );
+      // Marca la línea vigente (la última de ese folio), no la primera.
+      const lineas = (b.notes ?? '').split('\n');
+      const idx = lineas.map(l => new RegExp(`Boleta\\s+Folio\\s+${folio}(?!\\d)`, 'i').test(l)).lastIndexOf(true);
+      if (idx >= 0) lineas[idx] = `${lineas[idx]} · ANULADA`;
+      const nuevaNota = lineas.join('\n');
       await supabase.from('bookings').update({ notes: nuevaNota }).eq('id', bookingId);
       return json({ ok: true, folio });
     } catch (e) {
-      return json({ ok: false, error: e instanceof Error ? e.message : 'Error al anular' }, 502);
+      return json({ ok: false, error: mensajeErrorSii(e instanceof Error ? e.message : 'Error al anular') }, 502);
     }
   }
 
