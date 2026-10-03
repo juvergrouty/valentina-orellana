@@ -6,7 +6,7 @@ import PageHero   from '../components/sections/PageHero.astro';
 
 <BaseLayout
   title="Condiciones del servicio"
-  description="Condiciones de atención psicológica con Ps. Valentina Orellana: política de reagendamiento, pagos y confirmación de reservas."
+  description="Condiciones de atención psicológica con Ps. Valentina Orellana: pagos, reagendamiento, confidencialidad y política de privacidad de datos."
 >
 
   <PageHero label="Información importante" title="Condiciones del servicio" />
@@ -61,6 +61,82 @@ import PageHero   from '../components/sections/PageHero.astro';
             Tu información personal y datos de salud son tratados con total confidencialidad,
             conforme a la ética profesional y la normativa vigente en Chile.
           </p>
+        </div>
+
+        <!-- Política de privacidad (Ley 21.719, art. 14 ter) -->
+        <div id="privacidad" class="scroll-mt-24">
+          <p class="label text-stone mb-4">05 · Privacidad</p>
+          <div class="divider mb-6"></div>
+          <h2 class="font-heading font-light text-2xl text-ink mb-2">Política de privacidad y tratamiento de datos</h2>
+          <p class="font-body text-xs text-stone mb-6">Versión 1 · vigente desde el 3 de octubre de 2026</p>
+
+          <h3 class="font-body text-sm font-semibold text-ink mt-6 mb-2">Responsable</h3>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">Valentina Orellana, Psicóloga Clínica, RUT 16.768.831-4, es la responsable del tratamiento de tus datos. Para cualquier solicitud sobre tus datos puedes escribir a <a href="mailto:vinculosquesostienen@gmail.com" class="underline">vinculosquesostienen@gmail.com</a> o por WhatsApp al +56 9 7273 5696.</p>
+
+          <h3 class="font-body text-sm font-semibold text-ink mt-6 mb-2">Qué datos se tratan y de dónde vienen</h3>
+          <ul class="font-body text-sm text-stone leading-relaxed list-disc pl-5 space-y-1 mb-3">
+            <li><strong>Pacientes:</strong> nombre, RUT, correo, teléfono y, si los entregas, fecha de nacimiento, dirección y contacto de emergencia. También los datos de salud que surgen de la terapia: motivo de consulta, notas clínicas y evolución. Los datos de salud son <strong>datos sensibles</strong>.</li>
+            <li><strong>Pagos:</strong> monto, fecha y estado de cada sesión, y las boletas emitidas. Los datos de tu tarjeta los recibe solo la plataforma de pago; nunca llegan a la psicóloga.</li>
+            <li><strong>Visitantes del sitio:</strong> los datos que escribes en los formularios de reserva o contacto, y datos de navegación (páginas vistas, dispositivo, origen de la visita) que se usan para medir y mejorar el sitio.</li>
+          </ul>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">Todos estos datos los entregas tú directamente, al reservar, al pagar o en las sesiones.</p>
+
+          <h3 class="font-body text-sm font-semibold text-ink mt-6 mb-2">Para qué se usan y con qué base legal</h3>
+          <ul class="font-body text-sm text-stone leading-relaxed list-disc pl-5 space-y-1 mb-3">
+            <li>Atención psicológica y ficha clínica: con tu <strong>consentimiento expreso</strong>, que firmas aparte, y por la obligación legal de llevar ficha clínica (Ley 20.584).</li>
+            <li>Agendar, recordar y reagendar sesiones, y cobrarlas: para cumplir el servicio que contratas.</li>
+            <li>Emitir boletas de honorarios ante el SII: por obligación legal tributaria.</li>
+            <li>Medir el funcionamiento del sitio y sus anuncios: por interés legítimo, solo con datos de navegación, nunca con datos de salud.</li>
+          </ul>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">Tus datos no se venden, no se ceden para publicidad de terceros y no se toman decisiones automatizadas ni se hacen perfiles sobre ti.</p>
+
+          <h3 class="font-body text-sm font-semibold text-ink mt-6 mb-2">Usos que requieren tu autorización aparte</h3>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">Solo con tu autorización expresa y por escrito, que puedes negar o retirar sin que cambie tu atención:</p>
+          <ul class="font-body text-sm text-stone leading-relaxed list-disc pl-5 space-y-1 mb-3">
+            <li><strong>Grabación de sesiones:</strong> el audio se usa solo para transcribirlo como notas clínicas de tu ficha.</li>
+            <li><strong>Revisión anónima de casos:</strong> análisis de tu caso con otros psicólogos en un espacio comunitario de casos complejos, sin tu nombre, RUT ni ningún dato que permita reconocerte, y con todos los participantes bajo secreto profesional.</li>
+          </ul>
+
+          <h3 class="font-body text-sm font-semibold text-ink mt-6 mb-2">Quién más puede acceder</h3>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">Solo la psicóloga. Para que la consulta funcione se usan estos servicios, que actúan por encargo, solo para ese fin y con obligación de confidencialidad:</p>
+          <ul class="font-body text-sm text-stone leading-relaxed list-disc pl-5 space-y-1 mb-3">
+            <li>Encuadrado: plataforma clínica donde se transcriben y guardan las notas de sesión.</li>
+            <li>Supabase y Vercel: base de datos y alojamiento de este sitio.</li>
+            <li>Google: calendario, videollamadas y medición del sitio.</li>
+            <li>Resend: envío de correos.</li>
+            <li>Meta: WhatsApp y medición de anuncios (sin datos de salud).</li>
+            <li>Flow: pago en línea.</li>
+            <li>API Gateway y SII: emisión de boletas de honorarios.</li>
+          </ul>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">Fuera de esto, tus datos solo se entregan ante una orden judicial o en los demás casos que la ley obliga.</p>
+
+          <h3 class="font-body text-sm font-semibold text-ink mt-6 mb-2">Transferencia internacional</h3>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">Varios de estos servicios guardan o procesan información en servidores fuera de Chile, principalmente en Estados Unidos, país que a la fecha no ha sido declarado con nivel adecuado de protección por la autoridad chilena. Por eso solo se usan proveedores que se obligan por contrato a mantener la información segura y confidencial y a usarla solo por encargo.</p>
+
+          <h3 class="font-body text-sm font-semibold text-ink mt-6 mb-2">Cuánto tiempo se guardan</h3>
+          <ul class="font-body text-sm text-stone leading-relaxed list-disc pl-5 space-y-1 mb-3">
+            <li><strong>Ficha clínica:</strong> al menos 15 años desde la última anotación, aunque hayas terminado la terapia (Ley 20.584 y Decreto 41 de 2012). Después se elimina o se anonimiza.</li>
+            <li><strong>Pagos y boletas:</strong> el plazo que exige la ley tributaria.</li>
+            <li><strong>Formularios de contacto de personas que no llegan a atenderse:</strong> hasta resolver la consulta.</li>
+          </ul>
+
+          <h3 class="font-body text-sm font-semibold text-ink mt-6 mb-2">Cómo se protegen</h3>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">La ficha solo es accesible con clave de la psicóloga. Toda la información viaja cifrada (HTTPS). Los proveedores están obligados a mantenerla segura y confidencial. Ante una brecha de seguridad que te afecte, se te avisará y se informará a la autoridad según la ley.</p>
+
+          <h3 class="font-body text-sm font-semibold text-ink mt-6 mb-2">Tus derechos</h3>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">Puedes pedir en cualquier momento, gratis, escribiendo al correo o WhatsApp de arriba:</p>
+          <ul class="font-body text-sm text-stone leading-relaxed list-disc pl-5 space-y-1 mb-3">
+            <li><strong>Acceso:</strong> saber qué datos tuyos se tienen y recibir copia.</li>
+            <li><strong>Rectificación:</strong> corregir datos inexactos.</li>
+            <li><strong>Supresión:</strong> eliminar tus datos, salvo los que la ley obliga a conservar (como la ficha clínica durante el plazo legal).</li>
+            <li><strong>Oposición y bloqueo:</strong> oponerte a un uso o pedir que se suspenda.</li>
+            <li><strong>Portabilidad:</strong> recibir tus datos en un formato que puedas llevar a otro profesional.</li>
+            <li><strong>Retirar tu consentimiento</strong> sin dar razones. El retiro no afecta lo que ya se hizo antes.</li>
+          </ul>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">Si consideras que tus derechos no fueron respetados, puedes reclamar ante la Agencia de Protección de Datos Personales.</p>
+
+          <h3 class="font-body text-sm font-semibold text-ink mt-6 mb-2">Cambios a esta política</h3>
+          <p class="font-body text-sm text-stone leading-relaxed mb-3">Si esta política cambia, se publicará aquí con nueva versión y fecha.</p>
         </div>
 
       </div>

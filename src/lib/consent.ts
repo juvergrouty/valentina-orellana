@@ -39,7 +39,7 @@ export function consentSections(contactEmail: string): ConsentSection[] {
     {
       titulo: 'Quién más puede verlos',
       parrafos: [
-        'Nadie fuera de la psicóloga, salvo los servicios tecnológicos que hacen funcionar la consulta y que solo pueden usar tus datos para eso: almacenamiento de la ficha y del sitio web, correo, calendario y videollamada, pago en línea y emisión de boletas ante el SII. Algunos de estos servicios guardan la información en servidores fuera de Chile (principalmente en Estados Unidos), bajo contratos que los obligan a mantenerla segura y confidencial.',
+        'Nadie fuera de la psicóloga, salvo los servicios tecnológicos que hacen funcionar la consulta y que solo pueden usar tus datos para eso: Encuadrado (plataforma clínica donde se transcriben y guardan las notas de sesión), almacenamiento de la ficha y del sitio web, correo, calendario y videollamada, pago en línea y emisión de boletas ante el SII. Algunos de estos servicios guardan la información en servidores fuera de Chile (principalmente en Estados Unidos), bajo contratos que los obligan a mantenerla segura y confidencial.',
         'La ley obliga a entregar información solo ante una orden judicial o en los demás casos que la ley establece.',
       ],
     },
@@ -72,7 +72,7 @@ export const CONSENT_OPTIONS: ConsentOption[] = [
   {
     key: 'accept_recording',
     titulo: '2. Grabación de sesiones (opcional)',
-    texto: 'Autorizo que se grabe el audio de mis sesiones con el único fin de transcribirlo como notas clínicas de mi ficha. La grabación no se comparte con nadie y se elimina una vez transcrita. Puedo pedir que una sesión en particular no se grabe.',
+    texto: 'Autorizo que se grabe el audio de mis sesiones con el único fin de transcribirlo como notas clínicas de mi ficha, usando la plataforma clínica Encuadrado. La grabación y su transcripción forman parte de mi ficha, con la misma confidencialidad, y no se comparten con nadie. Puedo pedir que una sesión en particular no se grabe.',
     obligatoria: false,
   },
   {

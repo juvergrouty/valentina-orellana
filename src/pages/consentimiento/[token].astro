@@ -45,7 +45,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
       <>
         <p class="label text-stone mb-1">Hola {patient.name.split(' ')[0]}</p>
         <h1 class="font-heading text-2xl md:text-3xl mb-2">Consentimiento informado</h1>
-        <p class="text-stone text-sm mb-10">Para el tratamiento de tus datos personales y de salud en la terapia con Ps. Valentina Orellana, según la Ley 21.719 de protección de datos personales.</p>
+        <p class="text-stone text-sm mb-10">Para el tratamiento de tus datos personales y de salud en la terapia con Ps. Valentina Orellana, según la Ley 21.719 de protección de datos personales. Puedes leer la <a href="/condiciones#privacidad" target="_blank" class="underline">política de privacidad completa</a>.</p>
 
         <div class="space-y-7 mb-10">
           {sections.map(s => (
