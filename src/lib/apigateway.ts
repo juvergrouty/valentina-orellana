@@ -228,6 +228,63 @@ async function codigoDeFolioConReintentos(emisor: string, periodo: string, folio
 // `BoletaPendienteEnvio` la deja una emisión cuyo correo no se pudo mandar; el
 // cron /api/cron/boletas-pendientes la reintenta hasta que salga.
 export const MARCA_PENDIENTE = 'BoletaPendienteEnvio';
+// `BoletaEmitiendo <iso>`: candado mientras se emite (evita dos boletas por la
+// misma sesión si se aprieta dos veces o coinciden Flow y el panel). Si queda
+// puesto más de EMISION_CANDADO_MS, la emisión se interrumpió a medio camino y
+// NO se reintenta sola: no se sabe si el SII alcanzó a emitirla.
+export const MARCA_EMITIENDO = 'BoletaEmitiendo';
+// `BoletaPendienteEmision <iso>`: la emisión de una sesión PAGADA falló porque
+// el SII no respondió antes de emitir (sesión caída / pide autenticarse). El
+// cron boletas-pendientes la reintenta sola.
+export const MARCA_PENDIENTE_EMISION = 'BoletaPendienteEmision';
+export const EMISION_CANDADO_MS = 10 * 60 * 1000;
+
+/** Errores en que el SII/API Gateway rechazó ANTES de emitir: es seguro reintentar. */
+export function errorReintentableSii(error: string): boolean {
+  return /\b401\b|autentic|ECONNREFUSED|ENOTFOUND|\b50[234]\b/i.test(error);
+}
+
+const sinLineas = (notes: string, prefijo: string) =>
+  notes.split('\n').filter(l => !l.startsWith(prefijo)).join('\n');
+
+/**
+ * Cambia bookings.notes de forma atómica (compara y cambia): si otra operación
+ * modificó las notas entremedio, vuelve a leer y reintenta. `fn` devuelve las
+ * notas nuevas, o null para no cambiar nada.
+ */
+/** Agrega una línea a bookings.notes sin pisar lo que otra operación haya
+ *  escrito entremedio (antes los crons reescribían las notas con una copia
+ *  leída al inicio y podían borrar un folio de boleta recién guardado). */
+export async function agregarLineaNotas(bookingId: string, linea: string): Promise<boolean> {
+  const r = await cambiarNotas(bookingId, (n) => `${n ? n + '\n' : ''}${linea}`);
+  if (!r.ok) await logError('notas/agregar', 'No se pudo guardar una marca en la sesión', { bookingId, linea, error: r.error });
+  return r.ok;
+}
+
+/** Quita de bookings.notes las líneas que empiezan con alguno de los prefijos
+ *  (ej. marcas de recordatorio al reagendar), sin pisar otros cambios. */
+export async function quitarLineasNotas(bookingId: string, prefijos: string[]): Promise<boolean> {
+  const r = await cambiarNotas(bookingId, (n) => {
+    const nuevo = n.split('\n').filter(l => !prefijos.some(p => l.startsWith(p))).join('\n');
+    return nuevo === n ? null : nuevo;
+  });
+  return r.ok || !!r.aborted;
+}
+
+async function cambiarNotas(bookingId: string, fn: (notes: string) => string | null): Promise<{ ok: boolean; aborted?: boolean; error?: string }> {
+  for (let i = 0; i < 4; i++) {
+    const { data: cur, error } = await supabase.from('bookings').select('notes').eq('id', bookingId).single();
+    if (error) return { ok: false, error: error.message };
+    const old: string | null = cur?.notes ?? null;
+    const nuevo = fn(old ?? '');
+    if (nuevo === null) return { ok: false, aborted: true };
+    const base = supabase.from('bookings').update({ notes: nuevo }).eq('id', bookingId);
+    const { data: upd, error: uerr } = await (old === null ? base.is('notes', null) : base.eq('notes', old)).select('id');
+    if (uerr) return { ok: false, error: uerr.message };
+    if (upd?.length) return { ok: true };
+  }
+  return { ok: false, error: 'Las notas de la sesión cambiaron varias veces seguidas.' };
+}
 const quitarPendiente = (notes: string) =>
   notes.split('\n').filter(l => !l.startsWith(MARCA_PENDIENTE)).join('\n');
 
@@ -402,13 +459,15 @@ export function fechaBoletaDesdeSesion(sessionDate?: string | null): string {
  */
 export async function emitBoletaParaReserva(
   bookingId: string,
-  opts: { rutOverride?: string; enviarEmail?: boolean } = {},
+  // forzar: Valentina revisó en el SII que una emisión interrumpida NO quedó
+  // emitida y pide emitir de nuevo (solo libera un candado viejo, nunca uno en curso).
+  opts: { rutOverride?: string; enviarEmail?: boolean; forzar?: boolean } = {},
 ): Promise<{ ok: boolean; folio?: number | null; codigo?: string | null; error?: string; alreadyEmitted?: boolean; enviada?: boolean; enviadaA?: string; errorEnvio?: string }> {
   const cfg = await getAgwConfig();
   if (!cfg) return { ok: false, error: 'API Gateway no configurado.' };
 
   const { data: b } = await supabase
-    .from('bookings').select('patient_name, patient_email, amount, session_type, session_date, notes, service_id').eq('id', bookingId).single();
+    .from('bookings').select('patient_name, patient_email, amount, session_type, session_date, notes, service_id, paid_at').eq('id', bookingId).single();
   if (!b) return { ok: false, error: 'Reserva no encontrada.' };
 
   // Una boleta anulada no cuenta: se puede emitir una nueva para esa sesión.
@@ -447,6 +506,33 @@ export async function emitBoletaParaReserva(
   // FchEmis = fecha de la sesión (para que el reembolso calce con el día de atención)
   const fecha = fechaBoletaDesdeSesion(b.session_date);
 
+  // Candado: solo UNA emisión a la vez por sesión. Antes, dos llamadas
+  // simultáneas (doble clic, o Flow y el panel al mismo tiempo) veían la
+  // sesión sin folio y las dos emitían.
+  const marcaEmitiendo = new RegExp(`${MARCA_EMITIENDO} (\\S+)`);
+  const candado = await cambiarNotas(bookingId, (n) => {
+    if (folioVigente(n)) return null;
+    let base = n;
+    const previo = marcaEmitiendo.exec(n);
+    if (previo) {
+      const viejo = Date.now() - Date.parse(previo[1]) > EMISION_CANDADO_MS;
+      if (!(opts.forzar && viejo)) return null;
+      base = sinLineas(n, MARCA_EMITIENDO);
+    }
+    return `${base ? base + '\n' : ''}${MARCA_EMITIENDO} ${new Date().toISOString()}`;
+  });
+  if (!candado.ok) {
+    const { data: fresh } = await supabase.from('bookings').select('notes').eq('id', bookingId).single();
+    const v = folioVigente(fresh?.notes ?? null);
+    if (v) return { ok: true, folio: v.folio, alreadyEmitted: true };
+    const t = Date.parse(marcaEmitiendo.exec(fresh?.notes ?? '')?.[1] ?? '');
+    if (!isNaN(t) && Date.now() - t > EMISION_CANDADO_MS) {
+      return { ok: false, error: 'Una emisión anterior de esta boleta se interrumpió. Revisa en el SII si quedó emitida antes de volver a emitirla.' };
+    }
+    if (!isNaN(t)) return { ok: false, error: 'La boleta de esta sesión se está emitiendo en este momento.' };
+    return { ok: false, error: candado.error ?? 'No se pudo preparar la emisión.' };
+  }
+
   try {
     const result = await emitirBHE({
       fecha,
@@ -466,8 +552,10 @@ export async function emitBoletaParaReserva(
     // en los logs. Ahora una respuesta sin folio se trata como el error real
     // que es, con el cuerpo de la respuesta guardado para poder diagnosticarlo.
     if (!folio) {
-      await logError('boleta/emision', 'apigateway.cl respondió sin folio — la boleta probablemente no se generó', { bookingId, response: JSON.stringify(result ?? null).slice(0, 800) });
-      return { ok: false, error: 'La emisión no devolvió folio (respuesta inesperada de apigateway.cl).' };
+      // El candado queda puesto: no se sabe si el SII la emitió, así que no se
+      // reintenta sola (evita una boleta doble). El aviso del panel pide revisar.
+      await logError('boleta/emision', 'apigateway.cl respondió sin folio — revisa en el SII si la boleta quedó emitida', { bookingId, response: JSON.stringify(result ?? null).slice(0, 800) });
+      return { ok: false, error: 'La emisión no devolvió folio (respuesta inesperada de apigateway.cl). Revisa en el SII si quedó emitida.' };
     }
 
     // Se guarda el folio de inmediato (aunque el envío falle después) para que
@@ -476,8 +564,16 @@ export async function emitBoletaParaReserva(
     // función se corta a medio camino (timeout de Vercel), el cron la recoge.
     {
       const pendiente = opts.enviarEmail ? `\n${MARCA_PENDIENTE} ${new Date().toISOString()}` : '';
-      const nota = `${b.notes ? b.notes + '\n' : ''}Boleta Folio ${folio}${pendiente}`;
-      await supabase.from('bookings').update({ notes: nota }).eq('id', bookingId);
+      const guardado = await cambiarNotas(bookingId, (n) => {
+        const base = sinLineas(sinLineas(n, MARCA_EMITIENDO), MARCA_PENDIENTE_EMISION);
+        return `${base ? base + '\n' : ''}Boleta Folio ${folio}${pendiente}`;
+      });
+      if (!guardado.ok) {
+        // El candado queda puesto, así que no se emitirá otra; el aviso del
+        // panel muestra la sesión para anotar el folio a mano.
+        await logError('boleta/folio-no-guardado', `Boleta Folio ${folio} EMITIDA en el SII pero no quedó registrada en la sesión. No la emitas de nuevo.`, { bookingId, folio, error: guardado.error });
+        return { ok: true, folio, errorEnvio: `La boleta Folio ${folio} se emitió pero no quedó registrada en la sesión.` };
+      }
     }
     // El envío (código SII con reintentos, PDF, paciente + copia a Valentina)
     // vive en enviarBoletaDeReserva. Si falla, deja la reserva marcada como
@@ -495,9 +591,23 @@ export async function emitBoletaParaReserva(
     return { ok: true, folio, codigo, enviada: envio.sent, enviadaA: envio.email, errorEnvio: envio.error };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Error al emitir';
+    // Si el SII rechazó ANTES de emitir (sesión caída, pide autenticarse), se
+    // suelta el candado y, si la sesión está pagada, queda en cola para que el
+    // cron la reintente sola. Con cualquier otro error no se sabe si el SII
+    // alcanzó a emitirla: el candado queda puesto y el aviso pide revisar.
+    const reintentable = errorReintentableSii(msg);
+    if (reintentable) {
+      await cambiarNotas(bookingId, (n) => {
+        let x = sinLineas(n, MARCA_EMITIENDO);
+        if (b.paid_at && !x.includes(MARCA_PENDIENTE_EMISION)) x = `${x ? x + '\n' : ''}${MARCA_PENDIENTE_EMISION} ${new Date().toISOString()}`;
+        return x;
+      });
+    }
     // Centralizado aquí (no solo en el llamador) para que ningún caller que
     // olvide revisar `.ok` deje una boleta fallida sin registro visible.
-    await logError('boleta/emision', 'Falló la emisión de la boleta ante el SII', { bookingId, error: msg });
+    await logError('boleta/emision', reintentable && b.paid_at
+      ? 'El SII no respondió al emitir la boleta — se reintentará automáticamente'
+      : 'Falló la emisión de la boleta ante el SII', { bookingId, error: msg });
     return { ok: false, error: msg };
   }
 }

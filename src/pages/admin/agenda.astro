@@ -2497,11 +2497,17 @@ document.getElementById('sp-btn-emitir')?.addEventListener('click', async () => 
   btn.disabled = true;
   result.textContent = 'Emitiendo…'; result.style.color = '#6b7280';
   try {
-    const res = await fetch('/api/admin/apigateway', {
+    const emitirPost = (forzar) => fetch('/api/admin/apigateway', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'emitir', booking_id: currentBookingId, rut }),
-    });
-    const data = await res.json();
+      body: JSON.stringify({ action: 'emitir', booking_id: currentBookingId, rut, forzar }),
+    }).then(r => r.json());
+    let data = await emitirPost(false);
+    // Emisión anterior interrumpida: solo se vuelve a emitir si Valentina
+    // confirma que revisó en el SII y no quedó emitida (evita boleta doble).
+    if (!data.ok && /se interrumpió/.test(data.error ?? '') &&
+        confirm('Una emisión anterior de esta boleta se interrumpió.\n\n¿Revisaste en el SII y la boleta NO está emitida? Aceptar emite una boleta nueva.')) {
+      data = await emitirPost(true);
+    }
     if (data.ok) {
       const folio = data.folio ? ` · Folio ${data.folio}` : '';
       if (data.enviada) {

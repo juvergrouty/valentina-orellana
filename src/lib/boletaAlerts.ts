@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { folioVigente, mensajeErrorSii, MARCA_PENDIENTE } from './apigateway';
+import { folioVigente, mensajeErrorSii, MARCA_PENDIENTE, MARCA_PENDIENTE_EMISION, MARCA_EMITIENDO, EMISION_CANDADO_MS } from './apigateway';
 
 // Aviso rojo de boletas en todas las páginas del admin — a pedido de
 // Valentina (3 oct 2026): si el envío o la emisión automática de una boleta
@@ -39,7 +39,8 @@ export async function getBoletaAlerts(): Promise<BoletaAlert[]> {
       .gt('created_at', desde)
       .order('created_at', { ascending: false })
       .limit(200),
-    supabase.from('bookings').select('id').ilike('notes', `%${MARCA_PENDIENTE}%`).limit(50),
+    supabase.from('bookings').select('id')
+      .or(`notes.ilike.%${MARCA_PENDIENTE}%,notes.ilike.%${MARCA_PENDIENTE_EMISION}%,notes.ilike.%${MARCA_EMITIENDO}%`).limit(50),
   ]);
 
   // Último fallo registrado por reserva (los logs vienen del más nuevo al más viejo).
@@ -70,7 +71,17 @@ export async function getBoletaAlerts(): Promise<BoletaAlert[]> {
     const f = fallo.get(b.id);
     let message: string | null = null;
 
-    if (b.notes?.includes(MARCA_PENDIENTE) && vigente) {
+    const emitiendo = new RegExp(`${MARCA_EMITIENDO} (\\S+)`).exec(b.notes ?? '');
+    const pendEm = new RegExp(`${MARCA_PENDIENTE_EMISION} (\\S+)`).exec(b.notes ?? '');
+
+    if (!vigente && emitiendo && Date.now() - Date.parse(emitiendo[1]) > EMISION_CANDADO_MS) {
+      message = 'La emisión de la boleta se interrumpió. Revisa en el SII si quedó emitida: si no, emítela desde el calendario (te pedirá confirmar).';
+    } else if (!vigente && pendEm) {
+      const dias = (Date.now() - Date.parse(pendEm[1])) / 86400000;
+      message = dias > 7
+        ? `Boleta NO emitida: el SII no respondió durante 7 días. Emítela a mano desde el calendario.`
+        : `Boleta pendiente: el SII no respondió${f ? ` (${mensajeErrorSii(f.error)})` : ''}. Se reintenta sola automáticamente.`;
+    } else if (b.notes?.includes(MARCA_PENDIENTE) && vigente) {
       message = `Boleta Folio ${vigente.folio} emitida pero NO enviada al paciente${f ? `: ${mensajeErrorSii(f.error)}` : '.'} Se reintenta sola.`;
     } else if (f?.tipo === 'emision' && !vigente) {
       message = `Boleta NO emitida: ${mensajeErrorSii(f.error)}`;

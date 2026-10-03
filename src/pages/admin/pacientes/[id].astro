@@ -713,7 +713,13 @@ const formatCLP = (n: number) =>
       if (!confirm('¿Emitir la boleta de honorarios? Genera un documento tributario real en el SII.')) return;
       emitir.disabled = true; bolStatus(bid, 'Emitiendo…', '#6b7280');
       try {
-        const d = await bolPost({ action: 'emitir', booking_id: bid, rut });
+        let d = await bolPost({ action: 'emitir', booking_id: bid, rut });
+        // Emisión anterior interrumpida: solo se reemite si Valentina confirma
+        // que revisó en el SII y no quedó emitida (evita boleta doble).
+        if (!d.ok && /se interrumpió/.test(d.error ?? '') &&
+            confirm('Una emisión anterior de esta boleta se interrumpió.\n\n¿Revisaste en el SII y la boleta NO está emitida? Aceptar emite una boleta nueva.')) {
+          d = await bolPost({ action: 'emitir', booking_id: bid, rut, forzar: true });
+        }
         if (d.ok) {
           if (d.enviada) { bolStatus(bid, `✓ Emitida (Folio ${d.folio ?? ''}) y enviada a ${d.enviadaA}`, '#15803d'); setTimeout(() => location.reload(), 2500); }
           else { bolStatus(bid, `⚠ Emitida (Folio ${d.folio ?? ''}) pero el correo no salió: ${d.errorEnvio ?? 'error'}. Se reintentará solo.`, '#b45309'); }
