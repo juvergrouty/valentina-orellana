@@ -87,15 +87,12 @@ if (manual || transferencia) {
     allBookings = rows ?? [];
     booking = (allBookings[0] as typeof booking) ?? null;
 
-    // Confirmar en BD si aún no está confirmado (redundante con webhook, pero
-    // seguro) — is('paid_at', null) no aplica acá porque esta columna no se
-    // seleccionó arriba; usamos status por simplicidad, igual que antes.
-    if (flowStatus.status === 2 && allBookings.some((b: { status: string }) => b.status !== 'confirmed')) {
-      await supabase
-        .from('bookings')
-        .update({ status: 'confirmed', mp_payment_id: String(flowStatus.flowOrder) })
-        .eq('mp_preference_id', token);
-    }
+    // Esta página SOLO muestra el resultado; no escribe en la base. Antes
+    // marcaba la reserva como 'confirmed' por su cuenta, y cuando llegaba el
+    // aviso de pago de Flow (webhook) ya no la veía como reserva nueva y se
+    // saltaba el correo de confirmación, el aviso a Valentina y el evento de
+    // Google Calendar. Todo eso lo hace /api/flow/confirm, que Flow reintenta
+    // hasta recibir respuesta.
 
   } catch (err) {
     console.error('[confirmacion] Error consultando Flow:', err);

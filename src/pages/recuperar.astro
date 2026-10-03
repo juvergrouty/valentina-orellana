@@ -2,7 +2,7 @@
 export const prerender = false;
 import Layout from '../layouts/BaseLayout.astro';
 import { supabase } from '../lib/supabase';
-import { createPaymentOrder, FLOW_URLS } from '../lib/flow';
+import { createPaymentOrder, FLOW_URLS, PUBLIC_PAY_TIMEOUT_SECONDS } from '../lib/flow';
 import { hoursUntilSessionCL } from '../lib/dateUtils';
 import { tagBookingsWithPaymentToken } from '../lib/debt';
 
@@ -92,6 +92,7 @@ if (token) {
                 urlConfirmation: `${siteUrl}/api/flow/confirm`,
                 urlReturn:       `${siteUrl}/api/flow/return`,
                 baseUrl,
+                timeoutSeconds:  PUBLIC_PAY_TIMEOUT_SECONDS,
               });
 
               await supabase.from('bookings').update({ mp_preference_id: order.token }).eq('id', reactivated.id);

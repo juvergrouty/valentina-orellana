@@ -111,12 +111,40 @@ export const POST: APIRoute = async ({ request }) => {
         if (historicos && historicos.length) candidates = historicos;
       }
 
+      // Pago tardío de una reserva que ya se había liberado ('expired', pasó
+      // el plazo para pagar): se recupera con el flujo completo de reserva
+      // nueva solo si la hora sigue libre. Si otra persona ya la tomó, no se
+      // toca (chocaría con su reserva) y queda un error visible en el panel
+      // para reembolsar o reagendar. Con el vencimiento del link de Flow
+      // (PUBLIC_PAY_TIMEOUT_SECONDS) esto debería ser muy raro.
+      if (!selErr && candidates?.length) {
+        for (const c of candidates.filter((x: { status: string }) => x.status === 'expired')) {
+          const { data: ocupada } = await supabase
+            .from('bookings').select('id')
+            .eq('session_date', c.session_date)
+            .eq('session_time', c.session_time)
+            .neq('id', c.id)
+            .not('status', 'in', '(cancelled,expired)')
+            .limit(1);
+          if (ocupada?.length) {
+            candidates = candidates.filter((x: { id: string }) => x.id !== c.id);
+            await logError('flow/pago-hora-ocupada',
+              `Pago recibido de ${c.patient_name} (${c.patient_email}) por la sesión del ${c.session_date} a las ${String(c.session_time).slice(0, 5)}, pero esa hora ya se había liberado y la tomó otra persona. Hay que reembolsar o reagendar.`,
+              { bookingId: c.id, token, flowOrder: status.flowOrder, amount: status.amount });
+          } else if (c.google_event_id) {
+            // El evento se borró al liberarse la hora: se limpia para que se cree uno nuevo.
+            await supabase.from('bookings').update({ google_event_id: null }).eq('id', c.id);
+            c.google_event_id = null;
+          }
+        }
+      }
+
       if (selErr) {
         console.error('[Flow webhook] Error buscando reservas:', selErr);
         await logError('flow/confirmar-reserva', 'Pago recibido pero no se pudo buscar la(s) reserva(s) a marcar', { token, flowOrder: status.flowOrder, error: selErr.message });
       } else if (candidates && candidates.length) {
         const ids = candidates.map((c: { id: string }) => c.id);
-        const wasNew = new Set(candidates.filter((c: { status: string }) => c.status === 'pending_payment').map((c: { id: string }) => c.id));
+        const wasNew = new Set(candidates.filter((c: { status: string }) => c.status === 'pending_payment' || c.status === 'expired').map((c: { id: string }) => c.id));
 
         let { data: updated, error } = await supabase
           .from('bookings')

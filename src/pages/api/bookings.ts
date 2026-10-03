@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
-import { createPaymentOrder } from '../../lib/flow';
+import { createPaymentOrder, PUBLIC_PAY_TIMEOUT_SECONDS } from '../../lib/flow';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
 import { logInfo, logWarn, logError } from '../../lib/logger';
 import { upsertPatientFromBooking } from '../../lib/patients';
@@ -305,6 +305,7 @@ async function handleBooking(request: Request) {
                   urlConfirmation: `${siteUrl}/api/flow/confirm`,
                   urlReturn:       `${siteUrl}/api/flow/return`,
                   baseUrl:         flowBaseUrl,
+                  timeoutSeconds:  PUBLIC_PAY_TIMEOUT_SECONDS,
           });
     } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);

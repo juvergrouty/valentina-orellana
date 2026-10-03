@@ -83,6 +83,11 @@ export interface FlowStatus {
  * Crea una orden de pago en Flow.
  * El usuario debe ser redirigido a: `${order.url}?token=${order.token}`
  */
+// Plazo para pagar una reserva pública: 25 min. La reserva se libera a los 30
+// (expireBooking.ts), así que el link vence antes y queda margen para que
+// llegue el aviso de pago de Flow.
+export const PUBLIC_PAY_TIMEOUT_SECONDS = 25 * 60;
+
 export async function createPaymentOrder(opts: {
   subject:          string;
   amount:           number;
@@ -91,6 +96,11 @@ export async function createPaymentOrder(opts: {
   urlConfirmation:  string;
   urlReturn:        string;
   baseUrl?:         string;  // sobreescribe FLOW_BASE_URL (desde settings de admin)
+  // Segundos para que la orden venza. Sin esto, Flow deja el link pagable para
+  // siempre. Se usa en las reservas públicas: la hora se libera a los 30 min,
+  // así que el link debe vencer antes (si no, un pago tardío revive una hora
+  // ya liberada, o ya tomada por otra persona).
+  timeoutSeconds?:  number;
 }): Promise<FlowOrder> {
   const base      = opts.baseUrl ?? FLOW_BASE_URL;
   const isSandbox = base === FLOW_URLS.sandbox;
@@ -106,6 +116,7 @@ export async function createPaymentOrder(opts: {
     urlReturn:       opts.urlReturn,
     commerceOrder:   opts.orderId,
   };
+  if (opts.timeoutSeconds) params.timeout = opts.timeoutSeconds;
 
   const res = await fetch(`${base}/payment/create`, {
     method:  'POST',
