@@ -886,6 +886,17 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
           Recordar sesión por WhatsApp
         </a>
+        <div id="sp-steps-box" style="position:relative;">
+          <button type="button" id="sp-steps-toggle" class="sp-action-row" style="width:100%;text-align:left;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+            Pasos a seguir ▾
+          </button>
+          <div id="sp-steps-menu" style="display:none;position:absolute;top:100%;left:0;z-index:20;background:white;border:1px solid var(--dust);border-radius:var(--radius);box-shadow:0 4px 14px rgba(0,0,0,0.12);min-width:190px;overflow:hidden;">
+            <button type="button" class="sp-steps-send" data-via="whatsapp" style="display:block;width:100%;text-align:left;padding:0.6rem 0.9rem;font-size:0.82rem;background:none;border:none;cursor:pointer;color:var(--ink);">Enviar por WhatsApp</button>
+            <button type="button" class="sp-steps-send" data-via="email" style="display:block;width:100%;text-align:left;padding:0.6rem 0.9rem;font-size:0.82rem;background:none;border:none;cursor:pointer;color:var(--ink);">Enviar por correo</button>
+          </div>
+          <p id="sp-steps-msg" style="display:none;font-size:0.72rem;margin:0.2rem 0 0.4rem;"></p>
+        </div>
         {reviewUrl && (
           <a href="#" id="sp-btn-review-wa" target="_blank" rel="noopener" class="sp-action-row">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
@@ -2181,6 +2192,8 @@ function openSessionDetail(b) {
 
   // Boleta de honorarios
   currentBookingId = b.id;
+  const stepsMsg = document.getElementById('sp-steps-msg');
+  if (stepsMsg) stepsMsg.style.display = 'none';
   const boletaRut = document.getElementById('sp-boleta-rut');
   if (boletaRut) boletaRut.value = b.patient_rut || '';
   document.getElementById('sp-boleta-form').style.display = 'none';
@@ -2248,6 +2261,45 @@ async function saveReminderToggle(input) {
 }
 document.getElementById('sp-rem-email')?.addEventListener('change', (e) => saveReminderToggle(e.target));
 document.getElementById('sp-rem-review')?.addEventListener('change', (e) => saveReminderToggle(e.target));
+
+// ── Menú "Pasos a seguir" (WhatsApp / correo) ─────────────────────────────────
+document.getElementById('sp-steps-toggle')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById('sp-steps-menu');
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+});
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('sp-steps-menu');
+  if (menu && menu.style.display !== 'none' && !e.target.closest('#sp-steps-box')) menu.style.display = 'none';
+});
+document.querySelectorAll('.sp-steps-send').forEach(btn => btn.addEventListener('click', async () => {
+  const via = btn.dataset.via;
+  const msg = document.getElementById('sp-steps-msg');
+  const show = (t, c) => { msg.textContent = t; msg.style.color = c; msg.style.display = 'block'; };
+  document.getElementById('sp-steps-menu').style.display = 'none';
+  if (!currentBookingId) return;
+  if (via === 'email' && !confirm('¿Enviar "Pasos a seguir" por correo al paciente?')) return;
+  // La ventana de WhatsApp se abre antes del fetch para que el navegador no la bloquee.
+  const waWin = via === 'whatsapp' ? window.open('about:blank', '_blank') : null;
+  show('Enviando…', '#6b7280');
+  try {
+    const res = await fetch('/api/admin/send-email', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: via === 'whatsapp' ? 'steps_whatsapp' : 'steps', booking_id: currentBookingId }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'No se pudo enviar.');
+    if (via === 'whatsapp') {
+      if (waWin) waWin.location.href = d.waUrl; else window.open(d.waUrl, '_blank');
+      show('✓ WhatsApp abierto con el mensaje listo — solo apreta enviar.', '#15803d');
+    } else {
+      show('✓ Correo enviado.', '#15803d');
+    }
+  } catch (err) {
+    if (waWin) waWin.close();
+    show('✕ ' + (err instanceof Error ? err.message : 'Error de conexión'), '#dc2626');
+  }
+}));
 
 // ── Menú "Cobrar" (WhatsApp / correo) ─────────────────────────────────────────
 document.getElementById('sp-cobrar-toggle')?.addEventListener('click', (e) => {

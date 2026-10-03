@@ -521,6 +521,31 @@ export async function sendEvaluationEmail(opts: {
   return { sent: true };
 }
 
+// ─── WhatsApp: pasos a seguir (mismo contenido que el correo, en texto) ──────
+export function stepsWhatsappText(patientName: string, clinicAddress?: string): string {
+  const dir = clinicAddress?.trim()
+    ? `la dirección de la consulta es ${clinicAddress.trim()}`
+    : 'te confirmaré la dirección exacta de la consulta por aquí';
+  return [
+    `Hola ${patientName.split(' ')[0]} 🌿 Te comparto los pasos a seguir para tu proceso:`,
+    '',
+    '📩 *Correos que recibirás*',
+    '• Boleta de honorarios electrónica (SII) después de cada sesión. Guárdala.',
+    '• Confirmación de tu sesión, con fecha, hora y modalidad.',
+    '• Si tu sesión es online, el enlace de Google Meet en la invitación de tu calendario.',
+    '',
+    '📍 *Dirección y modalidad*',
+    `Si tu sesión es presencial, ${dir}. Si es online, es por Google Meet con el enlace que te llegará.`,
+    '',
+    '💳 *Reembolso y reagendamiento*',
+    '• La boleta te permite reembolsar la sesión en tu prestador o seguro de salud, si corresponde.',
+    '• Para reagendar, avísame con al menos 24 horas de anticipación.',
+    '• Los valores de las sesiones pueden reajustarse hasta dos veces al año. Si estás en proceso, te aviso con al menos 30 días de anticipación.',
+    '',
+    'Cualquier duda me escribes. Valentina',
+  ].join('\n');
+}
+
 // ─── Email al cliente: pasos a seguir / qué esperar ──────────────────────────
 export async function sendStepsEmail(opts: {
   patientName:   string;

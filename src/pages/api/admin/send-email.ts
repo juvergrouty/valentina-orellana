@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { sendReviewRequestEmail, sendStepsEmail, sendConfirmationToClient, sendReminderEmail } from '../../../lib/email';
+import { sendReviewRequestEmail, sendStepsEmail, sendConfirmationToClient, sendReminderEmail, stepsWhatsappText } from '../../../lib/email';
 import { reviewRequestUrl } from '../../../lib/googleReviews';
 
 export const prerender = false;
@@ -74,6 +74,24 @@ export const POST: APIRoute = async ({ request }) => {
     const { data: b } = await supabase
       .from('bookings').select('patient_name, patient_email').eq('id', bookingId).maybeSingle();
     if (b) { name = b.patient_name ?? name; email = (b.patient_email ?? '').toLowerCase(); }
+  }
+
+  // ── Pasos a seguir por WhatsApp (panel del calendario): devuelve el link de
+  // wa.me con el texto listo y lo deja registrado como enviado en la ficha.
+  if (action === 'steps_whatsapp') {
+    if (!bookingId) return json({ ok: false, error: 'Falta la sesión (booking_id).' }, 400);
+    const { data: b } = await supabase.from('bookings')
+      .select('patient_name, patient_email, patient_phone').eq('id', bookingId).maybeSingle();
+    if (!b) return json({ ok: false, error: 'Sesión no encontrada.' }, 404);
+    const digits = (b.patient_phone ?? '').replace(/\D/g, '');
+    const phone  = digits.length === 9 ? '56' + digits : digits;
+    if (phone.length < 11) return json({ ok: false, error: 'El paciente no tiene un teléfono válido.' }, 400);
+    const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
+    const text = stepsWhatsappText(b.patient_name ?? '', addr?.value ?? '');
+    if (b.patient_email) {
+      await supabase.from('patients').update({ steps_sent_at: new Date().toISOString() }).ilike('email', b.patient_email.trim());
+    }
+    return json({ ok: true, waUrl: `https://wa.me/${phone}?text=${encodeURIComponent(text)}` });
   }
 
   if (!email) return json({ ok: false, error: 'El paciente no tiene correo registrado.' }, 400);
