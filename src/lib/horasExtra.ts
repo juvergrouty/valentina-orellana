@@ -9,7 +9,9 @@ import { todayCL } from './dateUtils';
 // bloqueado (feriado, vacaciones) sigue cerrado aunque tenga horas extra.
 
 export type ModalidadExtra = 'presencial' | 'online' | 'ambos';
-export interface HoraExtra { id: string; fecha: string; hora: string; modalidad: ModalidadExtra }
+// servicioId: si viene, la hora es solo para ese servicio; si no, para todos los
+// servicios de esa modalidad.
+export interface HoraExtra { id: string; fecha: string; hora: string; modalidad: ModalidadExtra; servicioId?: string }
 
 const KEY = 'horas_extra';
 
@@ -32,10 +34,12 @@ async function guardar(lista: HoraExtra[]): Promise<boolean> {
   return !error;
 }
 
-export async function agregarHoraExtra(fecha: string, hora: string, modalidad: ModalidadExtra): Promise<boolean> {
+export async function agregarHoraExtra(fecha: string, hora: string, modalidad: ModalidadExtra, servicioId?: string): Promise<boolean> {
   const lista = await leerHorasExtra();
-  if (lista.some(h => h.fecha === fecha && h.hora === hora && (h.modalidad === modalidad || h.modalidad === 'ambos'))) return true;
-  lista.push({ id: crypto.randomUUID(), fecha, hora, modalidad });
+  const repetida = lista.some(h => h.fecha === fecha && h.hora === hora &&
+    (servicioId ? h.servicioId === servicioId : (!h.servicioId && (h.modalidad === modalidad || h.modalidad === 'ambos'))));
+  if (repetida) return true;
+  lista.push({ id: crypto.randomUUID(), fecha, hora, modalidad, ...(servicioId ? { servicioId } : {}) });
   return guardar(lista);
 }
 
@@ -44,8 +48,9 @@ export async function quitarHoraExtra(id: string): Promise<boolean> {
   return guardar(lista.filter(h => h.id !== id));
 }
 
-/** ¿La hora extra aplica a un servicio de esta modalidad? */
-export function aplicaA(h: HoraExtra, modalidadServicio: string | null | undefined): boolean {
+/** ¿La hora extra aplica a este servicio (por servicio o por su modalidad)? */
+export function aplicaA(h: HoraExtra, modalidadServicio: string | null | undefined, serviceId?: string | null): boolean {
+  if (h.servicioId) return h.servicioId === serviceId; // hora solo para un servicio
   if (!modalidadServicio || modalidadServicio === 'ambos' || h.modalidad === 'ambos') return true;
   return h.modalidad === modalidadServicio;
 }

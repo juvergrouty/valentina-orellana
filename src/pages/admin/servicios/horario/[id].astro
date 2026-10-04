@@ -2,6 +2,8 @@
 export const prerender = false;
 import AdminLayout from '../../../../components/admin/AdminLayout.astro';
 import { supabase } from '../../../../lib/supabase';
+import { leerHorasExtra } from '../../../../lib/horasExtra';
+import { todayCL } from '../../../../lib/dateUtils';
 
 const { id } = Astro.params;
 
@@ -49,6 +51,15 @@ const config = {
 };
 
 const saved = Astro.url.searchParams.get('saved') === '1';
+const savedParam = Astro.url.searchParams.get('saved');
+const errorParam = Astro.url.searchParams.get('error');
+
+// Horas abiertas SOLO para una fecha en este servicio (no se repiten cada semana).
+const hoyCL = todayCL();
+const extrasServicio = (await leerHorasExtra()).filter(h => h.servicioId === service.id && h.fecha >= hoyCL);
+const DIAS_C = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const fechaC = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return `${DIAS_C[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d}/${m}`; };
+const volverAqui = `/admin/servicios/horario/${service.id}`;
 ---
 
 <AdminLayout title={`Horario · ${service.name}`} current="/admin/servicios">
@@ -134,6 +145,48 @@ const saved = Astro.url.searchParams.get('saved') === '1';
         <table id="hgrid" class="hgrid" style="border-collapse:collapse;width:100%;min-width:640px;user-select:none;-webkit-user-select:none;"></table>
       </div>
     </div>
+  </div>
+
+  <!-- ── Hora en una fecha específica (solo ese día, solo este servicio) ── -->
+  <div class="card" id="horas-extra" style="margin-top:1.5rem;padding:1.1rem;max-width:560px;">
+    <p class="label" style="margin-bottom:0.35rem;">Abrir hora en una fecha específica</p>
+    <p style="font-size:0.75rem;color:var(--stone);margin-bottom:0.9rem;line-height:1.5;">Solo para <strong>{service.name}</strong> y solo ese día: no se repite las semanas siguientes. No cambia el horario semanal de arriba.</p>
+    {(savedParam === 'extra' || savedParam === 'extra-quitada') && (
+      <div class="alert-success" style="margin-bottom:0.75rem;">{savedParam === 'extra' ? '✓ Hora abierta. Ya aparece en la agenda web ese día.' : '✓ Hora quitada.'}</div>
+    )}
+    {errorParam?.startsWith('extra') && (
+      <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.6rem 0.9rem;margin-bottom:0.75rem;font-size:0.8rem;">
+        {errorParam === 'extra-fecha' ? 'Elige una fecha de hoy en adelante.' : errorParam === 'extra-hora' ? 'Elige una hora válida.' : 'No se pudo guardar la hora. Intenta de nuevo.'}
+      </div>
+    )}
+    <form method="POST" action="/api/admin/horas-extra" style="display:flex;gap:0.6rem;flex-wrap:wrap;align-items:flex-end;">
+      <input type="hidden" name="action" value="agregar" />
+      <input type="hidden" name="destino" value={`svc:${service.id}`} />
+      <input type="hidden" name="volver" value={volverAqui} />
+      <div style="flex:1;min-width:150px;">
+        <label class="label" style="display:block;margin-bottom:0.3rem;font-size:0.72rem;">Fecha</label>
+        <input type="date" name="fecha" required min={hoyCL} style="width:100%;font-size:0.82rem;padding:0.45rem;" />
+      </div>
+      <div style="width:120px;">
+        <label class="label" style="display:block;margin-bottom:0.3rem;font-size:0.72rem;">Hora</label>
+        <input type="time" name="hora" required step="60" style="width:100%;font-size:0.82rem;padding:0.45rem;" />
+      </div>
+      <button type="submit" class="btn btn-dark btn-sm">Abrir hora</button>
+    </form>
+    {extrasServicio.length > 0 && (
+      <div style="margin-top:1rem;border-top:1px solid var(--warm);padding-top:0.75rem;display:flex;flex-direction:column;gap:0.4rem;">
+        <p class="label" style="font-size:0.68rem;">Próximas horas en fechas específicas</p>
+        {extrasServicio.map(h => (
+          <form method="POST" action="/api/admin/horas-extra" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
+            <input type="hidden" name="action" value="quitar" />
+            <input type="hidden" name="id" value={h.id} />
+            <input type="hidden" name="volver" value={volverAqui} />
+            <span style="font-size:0.82rem;"><strong style="text-transform:capitalize;">{fechaC(h.fecha)}</strong> · {h.hora}</span>
+            <button type="submit" class="btn btn-outline btn-sm">Quitar</button>
+          </form>
+        ))}
+      </div>
+    )}
   </div>
 
   <script id="hgrid-config" type="application/json" set:html={JSON.stringify(config)}></script>

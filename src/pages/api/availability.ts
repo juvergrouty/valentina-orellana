@@ -144,7 +144,7 @@ export const GET: APIRoute = async ({ url }) => {
   if (serviceId) {
     try {
       const svcModalidad = (svcCfg as { modality?: string } | null)?.modality;
-      const extras = (await leerHorasExtra()).filter(h => h.fecha === dateParam && aplicaA(h, svcModalidad));
+      const extras = (await leerHorasExtra()).filter(h => h.fecha === dateParam && aplicaA(h, svcModalidad, serviceId));
       for (const h of extras) {
         if (!slotsDelDia.some(s => s.start_time.slice(0, 5) === h.hora)) slotsDelDia = [...slotsDelDia, { start_time: `${h.hora}:00` }];
       }

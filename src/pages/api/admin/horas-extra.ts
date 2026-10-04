@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { agregarHoraExtra, quitarHoraExtra, type ModalidadExtra } from '../../../lib/horasExtra';
 import { todayCL } from '../../../lib/dateUtils';
+import { supabase } from '../../../lib/supabase';
 
 export const prerender = false;
 
@@ -9,23 +10,37 @@ export const prerender = false;
 export const POST: APIRoute = async ({ request, redirect }) => {
   const form   = await request.formData();
   const action = form.get('action')?.toString();
-  const dest   = '/admin/horarios';
+  // Vuelve a la página desde donde se envió (Feriados o el horario de un servicio).
+  const volver = form.get('volver')?.toString() ?? '';
+  const dest   = /^\/admin\/[\w\-/]*(\?[\w=&-]*)?$/.test(volver) ? volver : '/admin/horarios';
+  const sep    = dest.includes('?') ? '&' : '?';
 
   if (action === 'quitar') {
     const id = form.get('id')?.toString() ?? '';
     if (id) await quitarHoraExtra(id);
-    return redirect(`${dest}?saved=extra-quitada#horas-extra`);
+    return redirect(`${dest}${sep}saved=extra-quitada#horas-extra`);
   }
 
   if (action === 'agregar') {
     const fecha = form.get('fecha')?.toString() ?? '';
     const hora  = (form.get('hora')?.toString() ?? '').slice(0, 5);
-    const mod   = form.get('modalidad')?.toString() as ModalidadExtra;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || fecha < todayCL()) return redirect(`${dest}?error=extra-fecha#horas-extra`);
-    if (!/^\d{2}:\d{2}$/.test(hora)) return redirect(`${dest}?error=extra-hora#horas-extra`);
-    if (!['presencial', 'online', 'ambos'].includes(mod)) return redirect(`${dest}?error=extra-modalidad#horas-extra`);
-    const ok = await agregarHoraExtra(fecha, hora, mod);
-    return redirect(`${dest}?${ok ? 'saved=extra' : 'error=extra-guardar'}#horas-extra`);
+    // "destino": 'mod:presencial' | 'mod:online' | 'mod:ambos' | 'svc:<id del servicio>'
+    const destino = form.get('destino')?.toString() ?? `mod:${form.get('modalidad')?.toString() ?? ''}`;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || fecha < todayCL()) return redirect(`${dest}${sep}error=extra-fecha#horas-extra`);
+    if (!/^\d{2}:\d{2}$/.test(hora)) return redirect(`${dest}${sep}error=extra-hora#horas-extra`);
+    let mod: ModalidadExtra;
+    let servicioId: string | undefined;
+    if (destino.startsWith('svc:')) {
+      servicioId = destino.slice(4);
+      const { data: svc } = await supabase.from('services_catalog').select('id, modality').eq('id', servicioId).maybeSingle();
+      if (!svc) return redirect(`${dest}${sep}error=extra-modalidad#horas-extra`);
+      mod = (['presencial', 'online'].includes(svc.modality) ? svc.modality : 'ambos') as ModalidadExtra;
+    } else {
+      mod = destino.slice(4) as ModalidadExtra;
+      if (!['presencial', 'online', 'ambos'].includes(mod)) return redirect(`${dest}${sep}error=extra-modalidad#horas-extra`);
+    }
+    const ok = await agregarHoraExtra(fecha, hora, mod, servicioId);
+    return redirect(`${dest}${sep}${ok ? 'saved=extra' : 'error=extra-guardar'}#horas-extra`);
   }
 
   return redirect(dest);
