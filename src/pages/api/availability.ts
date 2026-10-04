@@ -4,6 +4,8 @@ import { nowCL } from '../../lib/dateUtils';
 import { expireStaleBookings } from '../../lib/expireBooking';
 import { logError } from '../../lib/logger';
 import { leerHorasExtra, aplicaA } from '../../lib/horasExtra';
+import { getValidAccessToken } from '../../lib/syncCalendar';
+import { busyIntervals } from '../../lib/googleCalendar';
 
 export const prerender = false;
 
@@ -122,6 +124,31 @@ export const GET: APIRoute = async ({ url }) => {
   const toMin = (t: string) => { const [h, m] = t.slice(0, 5).split(':').map(Number); return h * 60 + m; };
   const blockRanges = (slotBlocks ?? []).map((b: { time_from: string | null; time_to: string | null; all_day: boolean | null }) =>
     (b.all_day || !b.time_from || !b.time_to) ? { from: 0, to: 24 * 60 } : { from: toMin(b.time_from), to: toMin(b.time_to) });
+  // Eventos del Google Calendar de Valentina (Valentina, 4 oct 2026): si tiene
+  // algo agendado en Google, ninguna paciente puede reservar en esa hora (ella
+  // sí puede, desde el panel). Se consulta la API FreeBusy para este día. Si
+  // Google no responde, no se bloquea nada (se registra el error) para no
+  // dejar la agenda vacía por una falla externa.
+  let busyRanges: { from: number; to: number }[] = [];
+  try {
+    const auth = await getValidAccessToken();
+    if (auth) {
+      const [yy, mm, dd] = dateParam.split('-').map(Number);
+      // Ventana amplia en UTC que cubre el día completo en Chile (UTC-3 / UTC-4).
+      const timeMin = new Date(Date.UTC(yy, mm - 1, dd, 2, 0)).toISOString();
+      const timeMax = new Date(Date.UTC(yy, mm - 1, dd + 1, 6, 0)).toISOString();
+      const inicioDia = new Date(yy, mm - 1, dd).getTime(); // misma convención "hora de pared" que nowCL
+      for (const b of await busyIntervals(auth.token, auth.calendarId, timeMin, timeMax)) {
+        const from = Math.max(0, (nowCL(new Date(b.start)).getTime() - inicioDia) / 60000);
+        const to   = Math.min(24 * 60, (nowCL(new Date(b.end)).getTime() - inicioDia) / 60000);
+        if (to > from) busyRanges.push({ from, to });
+      }
+    }
+  } catch (e) {
+    await logError('availability/google', 'No se pudieron leer los horarios ocupados de Google Calendar (se muestran las horas igual)', { date: dateParam, error: e instanceof Error ? e.message : String(e) });
+    busyRanges = [];
+  }
+
   if (blockRanges.some(r => r.from === 0 && r.to === 24 * 60)) {
     return new Response(JSON.stringify({ slots: [], blocked: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
@@ -191,6 +218,8 @@ export const GET: APIRoute = async ({ url }) => {
       // La sesión (con su duración) no puede cruzarse con un bloqueo de horas.
       const slotEnd = slotMin + (effDuration ?? 50);
       if (blockRanges.some(r => slotMin < r.to && slotEnd > r.from)) return false;
+      // Ni con un evento del Google Calendar de Valentina.
+      if (busyRanges.some(r => slotMin < r.to && slotEnd > r.from)) return false;
 
       for (const { startMin: bMin, duration: bDur } of bookedSessions) {
         // Este slot cae dentro de la ventana de una reserva existente

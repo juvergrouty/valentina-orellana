@@ -300,3 +300,22 @@ export async function quitarPrefijoSiHayInvitados(accessToken: string, calendarI
   });
   return res.ok;
 }
+
+/** Intervalos ocupados del calendario (eventos que marcan "ocupado") entre dos
+ *  instantes, vía la API FreeBusy. Devuelve [{ start, end }] en ISO. */
+export async function busyIntervals(
+  accessToken: string,
+  calendarId: string,
+  timeMin: string,
+  timeMax: string,
+): Promise<Array<{ start: string; end: string }>> {
+  const res = await fetch(`${CALENDAR_API}/freeBusy`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ timeMin, timeMax, items: [{ id: calendarId }] }),
+    signal: AbortSignal.timeout(4000),
+  });
+  if (!res.ok) throw new Error(`Google Calendar freeBusy failed (${res.status}): ${await res.text()}`);
+  const data = await res.json() as { calendars?: Record<string, { busy?: Array<{ start: string; end: string }> }> };
+  return data.calendars?.[calendarId]?.busy ?? [];
+}
