@@ -343,9 +343,14 @@ const { data: catalogServices } = await supabase
           </div>
           <div id="payment-error" class="hidden w-full">
             <p class="font-body text-sm text-red-500 mb-5" id="payment-error-msg"></p>
-            <a href="https://wa.me/56972735696" target="_blank" rel="noopener noreferrer" class="btn-outline text-[10px] py-3 px-6">
-              Coordinar por WhatsApp
-            </a>
+            <div class="flex flex-col items-center gap-3">
+              <button type="button" id="payment-back" class="btn-dark text-[10px] py-3 px-6">
+                Elegir otra hora
+              </button>
+              <a href="https://wa.me/56972735696" target="_blank" rel="noopener noreferrer" class="btn-outline text-[10px] py-3 px-6">
+                Coordinar por WhatsApp
+              </a>
+            </div>
           </div>
         </div>
       </div>
@@ -1020,9 +1025,15 @@ const { data: catalogServices } = await supabase
           emailInput?.select();
           return; // finally re-habilitará el botón
         }
-        const msg = data.error ?? 'Error desconocido';
-        const detail = data.detail ? ` — ${data.detail}` : '';
-        throw new Error(msg + detail);
+        // La hora se ocupó mientras completaba sus datos: se recargan los
+        // horarios para que vea los que siguen libres.
+        if (res.status === 409) {
+          state.loadedSlots = {};
+          throw new Error('Esa hora se acaba de ocupar. Elige otra hora, por favor.');
+        }
+        // El detalle técnico queda en la consola, no a la vista de la paciente.
+        if (data.detail) console.error('[agenda] reserva:', data.detail);
+        throw new Error(data.error ?? 'No se pudo preparar tu reserva. Intenta de nuevo o escríbeme por WhatsApp.');
       }
 
       // Guardar el bookingId para usarlo en "Pagar en consulta"
@@ -1043,12 +1054,23 @@ const { data: catalogServices } = await supabase
 
     } catch (err) {
       hide('payment-loading');
+      hide('payment-ready');
       show('payment-error');
       $('payment-error-msg').textContent = err.message ?? 'Ocurrió un error. Por favor contáctanos por WhatsApp.';
     } finally {
       btn.textContent = 'Continuar al pago';
       btn.disabled = false;
     }
+  });
+
+  // ─── Volver a elegir hora (si la hora se ocupó o algo falló en el paso 4) ──
+  document.getElementById('payment-back')?.addEventListener('click', () => {
+    state.loadedSlots = {};
+    state.selectedTime = null;
+    hide('payment-error');
+    show('payment-loading');
+    goToStep(2);
+    if (state.selectedDate && typeof selectDate === 'function') selectDate(state.selectedDate);
   });
 
   // ─── Pago en consulta ─────────────────────────────────────────────────────
