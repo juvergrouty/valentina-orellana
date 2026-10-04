@@ -40,11 +40,11 @@ const cards = (dbServices ?? []).map(s => ({
       </div>
       <!-- Flechas de navegación -->
       <div class="hidden md:flex gap-2 flex-shrink-0">
-        <button id="svc-prev"
+        <button id="svc-prev" aria-label="Servicio anterior"
           class="w-10 h-10 rounded-full border border-dust flex items-center justify-center text-stone hover:border-ink hover:text-ink transition-all duration-200">
           ‹
         </button>
-        <button id="svc-next"
+        <button id="svc-next" aria-label="Servicio siguiente"
           class="w-10 h-10 rounded-full border border-dust flex items-center justify-center text-stone hover:border-ink hover:text-ink transition-all duration-200">
           ›
         </button>
@@ -146,7 +146,7 @@ const cards = (dbServices ?? []).map(s => ({
   cards.forEach((_, i) => {
     const dot = document.createElement('button');
     dot.setAttribute('aria-label', `Ir al servicio ${i+1}`);
-    dot.style.cssText = `width:7px;height:7px;border-radius:50%;border:none;cursor:pointer;transition:all .2s;background:${i===0?'var(--forest)':'var(--dust)'}`;
+    dot.style.cssText = `width:7px;height:7px;border-radius:50%;border:none;cursor:pointer;transition:all .2s;background:${i===0?'#576352':'#DDD8CF'}`;
     dot.addEventListener('click', () => track.scrollTo({ left: i * cardW(), behavior: 'smooth' }));
     dots?.appendChild(dot);
   });
@@ -155,7 +155,7 @@ const cards = (dbServices ?? []).map(s => ({
   track.addEventListener('scroll', () => {
     const idx = Math.round(track.scrollLeft / cardW());
     dots?.querySelectorAll('button').forEach((d, i) => {
-      (d as HTMLElement).style.background = i === idx ? 'var(--forest)' : 'var(--dust)';
+      (d as HTMLElement).style.background = i === idx ? '#576352' : '#DDD8CF';
       (d as HTMLElement).style.transform  = i === idx ? 'scale(1.3)' : 'scale(1)';
     });
     if (prev) (prev as HTMLButtonElement).style.opacity = track.scrollLeft < 10 ? '0.3' : '1';

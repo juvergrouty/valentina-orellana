@@ -29,6 +29,7 @@ const year = new Date().getFullYear();
             ['/servicios', 'Servicios'],
             ['/precios', 'Preguntas frecuentes'],
             ['/opiniones', 'Opiniones'],
+            ['/blog', 'Blog'],
             ['/contacto', 'Contacto'],
             ['/agenda', 'Reservar sesión'],
             ['/condiciones', 'Condiciones'],
@@ -72,7 +73,8 @@ const year = new Date().getFullYear();
       </div>
     </div>
 
-    <div class="flex flex-col md:flex-row items-center justify-between gap-3 pt-8 text-xs text-sand/30">
+    <!-- pb-20 en celular: el botón flotante "Agendar sesión" no tapa esta línea -->
+    <div class="flex flex-col md:flex-row items-center justify-between gap-3 pt-8 pb-20 md:pb-0 text-xs text-sand/30">
       <p>© {year} Ps. Valentina Orellana. Todos los derechos reservados.</p>
       <p>Diseño por <a href="https://grouty.cl" class="hover:text-sand/60 transition-colors">Grouty</a></p>
     </div>

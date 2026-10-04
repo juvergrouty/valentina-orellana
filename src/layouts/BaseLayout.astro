@@ -8,6 +8,7 @@ interface Props {
   description?: string;
   image?: string;
   noindex?: boolean;
+  ogType?: 'website' | 'article';
 }
 
 const {
@@ -15,6 +16,7 @@ const {
   description = 'Psicóloga Valentina Orellana — Psicología de adultos, terapia de pareja y trauma en Santiago, Chile. Atención online y presencial.',
   image = '/images/og-default.jpg',
   noindex = false,
+  ogType = 'website',
 } = Astro.props;
 
 const canonicalPath = Astro.url.pathname !== '/' ? Astro.url.pathname.replace(/\/$/, '') : '/';
@@ -65,10 +67,10 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:image" content={ogImage} />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
+    {image === '/images/og-default.jpg' && <meta property="og:image:width" content="1200" />}
+    {image === '/images/og-default.jpg' && <meta property="og:image:height" content="630" />}
     <meta property="og:url" content={canonicalURL} />
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
     <meta property="og:site_name" content="Ps. Valentina Orellana" />
     <meta property="og:locale" content="es_CL" />
     <meta name="twitter:card" content="summary_large_image" />

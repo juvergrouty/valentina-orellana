@@ -2,6 +2,9 @@
 import BaseLayout   from '../layouts/BaseLayout.astro';
 import PageHero     from '../components/sections/PageHero.astro';
 import Testimonials from '../components/sections/Testimonials.astro';
+// Se arma en cada visita (como la portada): si no, las reseñas de Google
+// quedaban congeladas en las del último deploy.
+export const prerender = false;
 ---
 
 <BaseLayout title="Opiniones" description="Lo que dicen los pacientes de Ps. Valentina Orellana.">

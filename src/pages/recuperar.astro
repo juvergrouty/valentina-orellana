@@ -150,7 +150,7 @@ if (outcome === 'ok' && redirectUrl) {
   <div style="max-width:520px;margin:9rem auto 5rem;padding:0 1.5rem;font-family:'Inter',sans-serif;text-align:center;">
     {outcome === 'confirm' && (
       <>
-        <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">Tu hora sigue disponible</h1>
+        <h1 style="font-family:'Domine',serif;font-size:1.5rem;font-weight:500;">Tu hora sigue disponible</h1>
         <p style="color:#6B6860;line-height:1.6;margin:1rem 0 2rem;">
           Puedes mantener tu sesión del <strong style="color:#2C2B28;">{cuando}</strong>. Al continuar te llevo a pagar con Flow.
         </p>
@@ -166,7 +166,7 @@ if (outcome === 'ok' && redirectUrl) {
     )}
     {outcome === 'not_found' && (
       <>
-        <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">No encontramos esa reserva</h1>
+        <h1 style="font-family:'Domine',serif;font-size:1.5rem;font-weight:500;">No encontramos esa reserva</h1>
         <p style="color:#6B6860;line-height:1.6;margin:1rem 0 2rem;">
           El enlace no es válido o ya fue utilizado. Si quieres agendar, elige un horario disponible.
         </p>
@@ -174,7 +174,7 @@ if (outcome === 'ok' && redirectUrl) {
     )}
     {outcome === 'too_late' && (
       <>
-        <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">Ese horario ya no está disponible</h1>
+        <h1 style="font-family:'Domine',serif;font-size:1.5rem;font-weight:500;">Ese horario ya no está disponible</h1>
         <p style="color:#6B6860;line-height:1.6;margin:1rem 0 2rem;">
           Quedan menos de 4 horas para esa sesión, así que ya no es posible pagarla online para mantenerla.
           Por favor agenda un nuevo horario.
@@ -183,7 +183,7 @@ if (outcome === 'ok' && redirectUrl) {
     )}
     {outcome === 'taken' && (
       <>
-        <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">Horario no disponible</h1>
+        <h1 style="font-family:'Domine',serif;font-size:1.5rem;font-weight:500;">Horario no disponible</h1>
         <p style="color:#6B6860;line-height:1.6;margin:1rem 0 2rem;">
           Alguien más tomó ese horario mientras tanto. Elige un nuevo horario para el mismo servicio a continuación.
         </p>
@@ -191,7 +191,7 @@ if (outcome === 'ok' && redirectUrl) {
     )}
     {outcome === 'flow_error' && (
       <>
-        <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">No pudimos iniciar el pago</h1>
+        <h1 style="font-family:'Domine',serif;font-size:1.5rem;font-weight:500;">No pudimos iniciar el pago</h1>
         <p style="color:#6B6860;line-height:1.6;margin:1rem 0 2rem;">
           Ocurrió un problema al conectar con el sistema de pago. Por favor escríbeme por WhatsApp para coordinar
           tu sesión directamente.

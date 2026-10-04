@@ -34,11 +34,11 @@ const jsonLd = {
 };
 ---
 
-<BaseLayout title={articulo.titulo} description={descripcion} image={imagen}>
+<BaseLayout title={articulo.titulo} description={descripcion} image={imagen} ogType="article">
   <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
   <div class="post">
     <div class="hero">
-      <img src={imagen} alt={imagenAlt} style={`object-position:${imagenPosicion}`} />
+      <img src={imagen} alt={imagenAlt} fetchpriority="high" style={`object-position:${imagenPosicion}`} />
     </div>
 
     <div class="head">

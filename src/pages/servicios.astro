@@ -19,7 +19,7 @@ const fallback = [
     name: 'Psicología de Adultos',
     description: 'Acompañamiento terapéutico individual para el manejo de ansiedad, depresión, estrés, duelo y bienestar emocional en general.',
     type: 'individual', modality: 'ambos', location: null,
-    duration_min: 50, price: 45000,
+    duration_min: 50, price: 60000,
     image_url: '/images/servicio-adultos.jpg', sort_order: 0,
   },
   {
@@ -27,15 +27,15 @@ const fallback = [
     name: 'Terapia de Pareja',
     description: 'Espacio de escucha y trabajo conjunto para mejorar la comunicación, resolver conflictos y fortalecer el vínculo.',
     type: 'pareja', modality: 'ambos', location: null,
-    duration_min: 60, price: 60000,
+    duration_min: 50, price: 75000,
     image_url: '/images/servicio-pareja.jpg', sort_order: 1,
   },
   {
     id: 'trauma',
-    name: 'Trauma y PSA',
+    name: 'Trauma y PAS',
     description: 'Tratamiento especializado para personas que han vivido experiencias traumáticas o que se reconocen como Personas Altamente Sensibles (PAS).',
     type: 'individual', modality: 'ambos', location: null,
-    duration_min: 50, price: 45000,
+    duration_min: 50, price: 60000,
     image_url: '/images/servicio-trauma.jpg', sort_order: 2,
   },
   {
@@ -43,7 +43,7 @@ const fallback = [
     name: 'Parentalidad y Apego',
     description: 'Orientación para padres y madres que buscan fortalecer el vínculo con sus hijos y desarrollar una crianza consciente.',
     type: 'individual', modality: 'ambos', location: null,
-    duration_min: 50, price: 45000,
+    duration_min: 50, price: 60000,
     image_url: '/images/servicio-parentalidad.jpg', sort_order: 3,
   },
 ];
@@ -86,7 +86,7 @@ const modalityLabel = (m: string) =>
 
             <!-- Contenido sobre la imagen -->
             <div class="relative z-10 p-8 md:p-10">
-              <p class="label text-white/50 mb-3">0{i + 1}</p>
+              <p class="label text-white/50 mb-3">{String(i + 1).padStart(2, '0')}</p>
               <h2 class="font-heading font-light text-3xl md:text-4xl text-white leading-tight mb-3">
                 {service.name}
               </h2>

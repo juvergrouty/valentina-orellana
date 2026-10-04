@@ -43,8 +43,10 @@ const currentPath = Astro.url.pathname;
       </a>
       <button
         id="menu-toggle"
-        class="lg:hidden flex flex-col gap-1.5 p-1"
+        class="lg:hidden flex flex-col gap-1.5 p-3 -m-2"
         aria-label="Abrir menú"
+        aria-controls="mobile-menu"
+        aria-expanded="false"
       >
         <span class="w-5 h-px bg-ink block transition-all duration-300" id="bar1"></span>
         <span class="w-5 h-px bg-ink block transition-all duration-300" id="bar2"></span>
@@ -101,6 +103,8 @@ const currentPath = Astro.url.pathname;
   toggle?.addEventListener('click', () => {
     open = !open;
     menu?.classList.toggle('hidden', !open);
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? 'Cerrar menú' : 'Abrir menú');
     if (bar1 && bar2) {
       bar1.style.transform = open ? 'rotate(45deg) translate(3px, 3px)' : '';
       bar2.style.transform = open ? 'rotate(-45deg) translate(3px, -3px)' : '';

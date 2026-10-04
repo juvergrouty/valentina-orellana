@@ -52,7 +52,7 @@ export const services: Service[] = [
   },
   {
     id: 'trauma',
-    title: 'Trauma y PSA',
+    title: 'Trauma y PAS',
     description:
       'Tratamiento especializado para personas que han vivido experiencias traumáticas o que se reconocen como Personas Altamente Sensibles (PAS).',
     duration: '50 min',
@@ -107,7 +107,7 @@ export const pricingPlans: PricingPlan[] = [
     title: 'Pareja Online',
     price: 75000,
     currency: 'CLP',
-    duration: '60 minutos',
+    duration: '50 minutos',
     modality: 'Videollamada (Zoom / Meet)',
     features: [
       'Sesión para ambos',
@@ -121,7 +121,7 @@ export const pricingPlans: PricingPlan[] = [
     title: 'Pareja Presencial',
     price: 75000,
     currency: 'CLP',
-    duration: '60 minutos',
+    duration: '50 minutos',
     modality: 'Las Condes',
     features: [
       'Sesión para ambos',
