@@ -7,25 +7,28 @@ const rating  = cache?.rating ?? 5.0;
 const total   = cache?.total ?? null;
 ---
 
-<section class="relative overflow-hidden bg-sand min-h-[680px] sm:min-h-0">
+<!-- La sección crece con el texto y la foto la cubre de fondo (cover). Antes,
+     desde 640px la sección medía lo que mide la foto y el texto, superpuesto
+     con position:absolute, se cortaba arriba y abajo en notebooks y tablets. -->
+<section class="relative overflow-hidden bg-sand min-h-[680px] sm:min-h-[600px] lg:min-h-[680px] flex items-start sm:items-center">
 
-  <!-- Imagen hero: en mobile absolute+cover para llenar min-h, en sm+ fluye con tamaño natural -->
   <img
     src="/images/hero-home.webp"
     alt=""
     aria-hidden="true"
-    class="absolute inset-0 w-full h-full object-cover object-[80%_20%] block sm:static sm:inset-auto sm:h-auto sm:object-[unset]"
+    fetchpriority="high"
+    class="absolute inset-0 w-full h-full object-cover object-[80%_20%] sm:object-[100%_center] lg:object-[75%_center] block"
     width="1920"
     height="900"
   />
 
   <!-- Degradado: cubre todo el ancho en mobile (texto sobre imagen), solo lado izq en desktop -->
-  <div class="absolute inset-y-0 left-0 w-full sm:w-[55%] bg-gradient-to-r from-sand/95 via-sand/85 to-sand/50 sm:via-sand/70 sm:to-transparent"></div>
+  <div class="absolute inset-y-0 left-0 w-full sm:w-[75%] lg:w-[55%] bg-gradient-to-r from-sand/95 via-sand/85 to-sand/50 sm:via-sand/80 sm:to-transparent lg:via-sand/70"></div>
 
-  <!-- Texto superpuesto -->
-  <div class="absolute inset-0 flex items-start pt-14 sm:pt-0 sm:items-center">
+  <!-- Texto (en el flujo normal: define la altura de la sección) -->
+  <div class="relative z-10 w-full pt-14 pb-12 sm:py-16">
     <div class="container-site w-full">
-      <div class="max-w-lg">
+      <div class="max-w-lg sm:max-w-md lg:max-w-lg">
 
         <p class="label text-stone mb-6">Psicóloga · Santiago, Chile</p>
 
