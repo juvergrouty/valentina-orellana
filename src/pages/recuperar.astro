@@ -177,7 +177,7 @@ if (outcome === 'ok' && redirectUrl) {
         <h1 style="font-family:'Domine',serif;font-size:1.5rem;font-weight:500;">Ese horario ya no está disponible</h1>
         <p style="color:#6B6860;line-height:1.6;margin:1rem 0 2rem;">
           Quedan menos de 4 horas para esa sesión, así que ya no es posible pagarla online para mantenerla.
-          Por favor agenda un nuevo horario.
+          Por favor agenda un nuevo horario: tus datos ya quedan completos.
         </p>
       </>
     )}
@@ -185,7 +185,7 @@ if (outcome === 'ok' && redirectUrl) {
       <>
         <h1 style="font-family:'Domine',serif;font-size:1.5rem;font-weight:500;">Horario no disponible</h1>
         <p style="color:#6B6860;line-height:1.6;margin:1rem 0 2rem;">
-          Alguien más tomó ese horario mientras tanto. Elige un nuevo horario para el mismo servicio a continuación.
+          Alguien más tomó ese horario mientras tanto. Elige un nuevo horario para el mismo servicio: tus datos ya quedan completos, no tienes que escribirlos de nuevo.
         </p>
       </>
     )}
@@ -212,3 +212,10 @@ if (outcome === 'ok' && redirectUrl) {
     </a>
   </div>
 </Layout>
+
+<script define:vars={{ tokenRecuperar: (outcome === 'taken' || outcome === 'too_late') ? token : '' }}>
+  // Para precargar sus datos en la agenda (ver /api/recuperar-datos). Se
+  // guarda en el navegador y no en el link, para que el código del correo no
+  // quede en registros ni en la analítica de la agenda.
+  if (tokenRecuperar) { try { sessionStorage.setItem('vo_recuperar', tokenRecuperar); } catch {} }
+</script>

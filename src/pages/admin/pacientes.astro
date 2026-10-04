@@ -188,12 +188,6 @@ const TABS = [
                             <input type="hidden" name="redirect" value={`/admin/pacientes?filtro=${filtro}`} />
                             <button type="submit" class="pac-menu-item">{p.active ? 'Dar de baja' : 'Dar de alta'}</button>
                           </form>
-                          <form method="POST" action="/api/admin/patients" onsubmit="return confirm('¿Eliminar este paciente? Esta acción no se puede deshacer.')" style="margin:0;">
-                            <input type="hidden" name="action" value="delete" />
-                            <input type="hidden" name="id" value={p.id} />
-                            <input type="hidden" name="redirect" value={`/admin/pacientes?filtro=${filtro}`} />
-                            <button type="submit" class="pac-menu-item pac-menu-danger">Eliminar</button>
-                          </form>
                         </div>
                       </div>
                     </div>

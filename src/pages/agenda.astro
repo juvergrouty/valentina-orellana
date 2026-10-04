@@ -979,6 +979,8 @@ const { data: catalogServices } = await supabase
       opt.textContent = m;
       select.appendChild(opt);
     });
+    // Datos recuperados del correo "tu hora se liberó": se repite su motivo.
+    if (datosRecuperados?.motivo && opciones.includes(datosRecuperados.motivo)) select.value = datosRecuperados.motivo;
   }
 
   function buildBookingSummary() {
@@ -1248,6 +1250,45 @@ const { data: catalogServices } = await supabase
     if (sin) { $('patient_rut').value = ''; $('patient_rut').nextElementSibling?.classList.add('hidden'); }
     $('doc-extranjero').classList.toggle('hidden', !sin);
   });
+
+  // ─── Datos de una reserva que se liberó por falta de pago ─────────────────
+  // Si la paciente viene del correo "tu hora se liberó" (/recuperar) y esa
+  // hora ya no estaba, elige otra del mismo servicio con sus datos ya
+  // escritos (Valentina, 4 oct 2026). El código del correo quedó guardado en
+  // este navegador (no en el link) y se usa una sola vez.
+  var datosRecuperados = null;
+  (async () => {
+    let tokenRec = '';
+    try { tokenRec = sessionStorage.getItem('vo_recuperar') || ''; sessionStorage.removeItem('vo_recuperar'); } catch {}
+    if (!tokenRec) return;
+    try {
+      const res = await fetch('/api/recuperar-datos', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tokenRec }),
+      });
+      const d = await res.json();
+      if (!d.ok) return;
+      datosRecuperados = d.datos;
+      const poner = (id, v) => { const el = $(id); if (el && v) el.value = v; };
+      poner('patient_name', d.datos.nombre);
+      poner('patient_email', d.datos.correo);
+      poner('patient_phone', d.datos.telefono);
+      $('patient_phone')?.dispatchEvent(new Event('input'));
+      poner('patient_address', d.datos.direccion);
+      poner('patient_comuna', d.datos.comuna);
+      poner('emergency_name', d.datos.emergNombre);
+      poner('emergency_phone', d.datos.emergTelefono);
+      if (d.datos.sinRut) {
+        if (!$('sin_rut').checked) $('sin_rut').click();
+        poner('doc_tipo', d.datos.docTipo);
+        poner('doc_numero', d.datos.docNumero);
+        poner('doc_pais', d.datos.docPais);
+      } else {
+        poner('patient_rut', d.datos.rut);
+      }
+      const sel = $('motivo_consulta');
+      if (sel && d.datos.motivo && [...sel.options].some(o => o.value === d.datos.motivo)) sel.value = d.datos.motivo;
+    } catch { /* si falla, la paciente escribe sus datos como siempre */ }
+  })();
 
   // ─── Init ─────────────────────────────────────────────────────────────────
   updateStepIndicators(1);

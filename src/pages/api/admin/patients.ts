@@ -93,10 +93,13 @@ export const POST: APIRoute = async ({ request }) => {
     await supabase.from('patients').update({ active: !active }).eq('id', id);
   }
 
-  // ── Eliminar paciente ───────────────────────────────────────────────────────
+  // ── "Eliminar" paciente = dar de baja, nunca borrar ─────────────────────────
+  // La ficha clínica se debe conservar 15 años (Valentina, 4 oct 2026): antes
+  // esto borraba la ficha para siempre. Ahora queda inactiva y se puede volver
+  // a dar de alta.
   if (action === 'delete') {
     const id = form.get('id') as string;
-    if (id) await supabase.from('patients').delete().eq('id', id);
+    if (id) await supabase.from('patients').update({ active: false }).eq('id', id);
   }
 
   // ── Agregar nota de sesión ──────────────────────────────────────────────────
