@@ -710,7 +710,7 @@ export async function sendBulkEmail(
     if (!r.email) { skipped++; continue; }
     const html = `
       <div style="font-family:'Inter',sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
-        <p style="font-size:0.9rem;color:#6B6860;margin-bottom:1.5rem;">Hola ${r.name},</p>
+        <p style="font-size:0.9rem;color:#6B6860;margin-bottom:1.5rem;">Hola ${escapeHtml(r.name)},</p>
         <div style="font-size:0.92rem;line-height:1.7;color:#1A1A18;">${bodyHtml}</div>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">

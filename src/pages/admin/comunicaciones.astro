@@ -38,6 +38,12 @@ function fmt(iso: string) {
         {failedParam && failedParam !== '0' && ` (${failedParam} fallaron)`}
       </div>
     )}
+    {errorParam === 'none_selected' && (
+      <div class="alert-error" style="margin:1rem 1.5rem 0;">⚠ No se envió nada: elige al menos un paciente en "Selección manual".</div>
+    )}
+    {errorParam === 'target' && (
+      <div class="alert-error" style="margin:1rem 1.5rem 0;">⚠ No se envió nada: destinatarios no válidos.</div>
+    )}
     {errorParam === 'missing' && (
       <div class="alert-error" style="margin:1rem 1.5rem 0;">⚠ Faltan el asunto o el contenido del correo.</div>
     )}
@@ -211,11 +217,18 @@ function fmt(iso: string) {
 
   // Recolectar emails seleccionados al enviar
   const form = document.querySelector('.com-form');
-  form?.addEventListener('submit', () => {
+  form?.addEventListener('submit', (e) => {
+    let total = document.querySelectorAll('.com-sel-cb').length;
     if (target.value === 'seleccion') {
       const emails = Array.from(document.querySelectorAll('.com-sel-cb'))
         .filter(cb => cb.checked).map(cb => cb.value);
       document.getElementById('com-selected').value = emails.join(',');
+      total = emails.length;
+      if (!total) { e.preventDefault(); alert('Elige al menos un paciente en "Selección manual".'); return; }
     }
+    // Confirmación con la cantidad exacta, y sin doble envío.
+    if (!confirm(`¿Enviar este correo a ${total} paciente${total === 1 ? '' : 's'}?`)) { e.preventDefault(); return; }
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
   });
 </script>

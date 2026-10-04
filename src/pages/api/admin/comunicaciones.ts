@@ -17,19 +17,22 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (!subject || !body) return redirect(dest + '?error=missing');
 
-    // Resolver destinatarios
-    let query = supabase.from('patients').select('name, email');
-    if (target === 'activos') query = query.eq('active', true);
-    const { data: patients } = await query;
+    // Solo dos destinos válidos. Antes, "Selección manual" sin marcar a nadie
+    // (o cualquier otro valor) mandaba el correo a TODA la base de pacientes,
+    // incluidos archivados y de prueba.
+    if (target !== 'activos' && target !== 'seleccion') return redirect(dest + '?error=target');
+    const elegidos = new Set(selRaw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+    if (target === 'seleccion' && !elegidos.size) return redirect(dest + '?error=none_selected');
 
+    // Resolver destinatarios: siempre entre pacientes activos con correo.
+    const { data: patients } = await supabase.from('patients').select('name, email').eq('active', true);
     let recipients = (patients ?? []).filter(p => p.email);
-    if (target === 'seleccion' && selRaw) {
-      const emails = new Set(selRaw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
-      recipients = recipients.filter(p => emails.has((p.email ?? '').toLowerCase()));
-    }
+    if (target === 'seleccion') recipients = recipients.filter(p => elegidos.has((p.email ?? '').toLowerCase()));
+    if (!recipients.length) return redirect(dest + '?error=none_selected');
 
-    // Convertir saltos de línea a <br>
-    const bodyHtml = body.replace(/\n/g, '<br>');
+    // El texto se escapa (un "<" ya no rompe el correo) y los saltos de línea pasan a <br>.
+    const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const bodyHtml = esc(body).replace(/\n/g, '<br>');
 
     const result = await sendBulkEmail(
       recipients.map(r => ({ name: r.name, email: r.email as string })),
