@@ -23,8 +23,9 @@ const patientList = (patients ?? []).filter(p => p.email);
 
 const MONTHS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 function fmt(iso: string) {
-  const d = new Date(iso);
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  // Fecha en hora de Chile (el servidor corre en UTC).
+  const [y, m, d] = new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Santiago' }).split('-').map(Number);
+  return `${d} ${MONTHS[m - 1]} ${y}`;
 }
 ---
 

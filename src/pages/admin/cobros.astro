@@ -47,7 +47,7 @@ const formatCLP = (n: number) =>
 
 const formatDate = (iso: string) => {
   const d = new Date(iso);
-  return d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
 // Serializar datos para el script

@@ -33,7 +33,7 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
     ) : connected ? (
       <div style="background:#f0fdf4;border:1px solid #86efac;padding:1.25rem;border-radius:6px;">
         <p style="font-size:0.9rem;color:#166534;font-weight:600;margin-bottom:0.5rem;">✓ WhatsApp conectado</p>
-        <p style="font-size:0.8rem;color:#166534;">Conectado el {new Date(cfg['whatsapp_connected_at']).toLocaleString('es-CL')}</p>
+        <p style="font-size:0.8rem;color:#166534;">Conectado el {new Date(cfg['whatsapp_connected_at']).toLocaleString('es-CL', { timeZone: 'America/Santiago' })}</p>
         <button id="btn-reconnect" class="btn btn-outline btn-sm" style="margin-top:1rem;">Volver a conectar</button>
       </div>
     ) : (

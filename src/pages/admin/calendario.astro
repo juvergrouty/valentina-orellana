@@ -53,12 +53,12 @@ function formatEventDate(ev: any) {
   const dt = ev.start?.dateTime ?? ev.start?.date;
   if (!dt) return '';
   const d = new Date(dt);
-  return d.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' });
+  return d.toLocaleDateString('es-CL', { timeZone: 'America/Santiago', weekday: 'short', day: 'numeric', month: 'short' });
 }
 function formatEventTime(ev: any) {
   if (!ev.start?.dateTime) return 'Todo el día';
   const d = new Date(ev.start.dateTime);
-  return d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit' });
 }
 function isFromSystem(ev: any) {
   return ev.description?.includes('Ps. Valentina Orellana');
