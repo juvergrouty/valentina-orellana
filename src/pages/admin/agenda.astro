@@ -2406,21 +2406,32 @@ document.getElementById('sp-btn-edit-amount')?.addEventListener('click', () => {
 // Genera el link de Meet la primera vez que se necesita (si aún no existe) y
 // lo cachea — así "Ingresar", "Copiar" y "Enviar por WhatsApp" siempre usan el
 // MISMO link, sin importar cuál se haya usado primero.
-async function ensureMeetLink() {
-  if (window.__currentMeetUrl) return window.__currentMeetUrl;
-  const id = window.__currentMeetBookingId;
+// Antes el link se guardaba en una sola variable global: si se apretaba
+// "Ingresar" en una sesión y se abría otra antes de que respondiera, el link
+// de la primera quedaba asignado a la segunda y "Enviar por WhatsApp" se lo
+// mandaba a la paciente equivocada. Ahora se guarda por reserva, y cada botón
+// toma los datos de SU sesión antes de esperar.
+const meetPorReserva = {};
+const meetEnCurso = {};
+async function ensureMeetLink(id = window.__currentMeetBookingId) {
   if (!id) return null;
-  try {
-    const res = await fetch('/api/admin/generate-meet', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (data.ok && data.meetLink) {
-      window.__currentMeetUrl = data.meetLink;
-      return data.meetLink;
-    }
-  } catch {}
-  return null;
+  if (id === window.__currentMeetBookingId && window.__currentMeetUrl) return window.__currentMeetUrl;
+  if (meetPorReserva[id]) return meetPorReserva[id];
+  if (!meetEnCurso[id]) {
+    meetEnCurso[id] = (async () => {
+      try {
+        const res = await fetch('/api/admin/generate-meet', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.ok && data.meetLink) { meetPorReserva[id] = data.meetLink; return data.meetLink; }
+      } catch {}
+      return null;
+    })().finally(() => { delete meetEnCurso[id]; });
+  }
+  const link = await meetEnCurso[id];
+  if (link && id === window.__currentMeetBookingId) window.__currentMeetUrl = link;
+  return link;
 }
 
 document.getElementById('sp-meet-href')?.addEventListener('click', async (e) => {
@@ -2428,7 +2439,7 @@ document.getElementById('sp-meet-href')?.addEventListener('click', async (e) => 
   const label = document.getElementById('sp-meet-href-label');
   const original = label.textContent;
   label.textContent = 'Generando…';
-  const link = await ensureMeetLink();
+  const link = await ensureMeetLink(window.__currentMeetBookingId);
   label.textContent = original;
   if (!link) { alert('No se pudo generar el link de Meet. Intenta de nuevo.'); return; }
   const business = `${link}${link.includes('?') ? '&' : '?'}authuser=vinculosquesostienen@gmail.com`;
@@ -2449,7 +2460,7 @@ document.getElementById('sp-meet-copy')?.addEventListener('click', async () => {
   const btn = document.getElementById('sp-meet-copy');
   const original = btn.textContent;
   btn.textContent = 'Generando…';
-  const link = await ensureMeetLink();
+  const link = await ensureMeetLink(window.__currentMeetBookingId);
   if (!link) { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = original; }, 1500); return; }
   navigator.clipboard.writeText(link).then(() => {
     btn.textContent = '✓ Copiado';
@@ -2459,11 +2470,14 @@ document.getElementById('sp-meet-copy')?.addEventListener('click', async () => {
 
 document.getElementById('sp-meet-wa')?.addEventListener('click', async (e) => {
   e.preventDefault();
-  const link = await ensureMeetLink();
-  if (!link) { alert('No se pudo generar el link de Meet. Intenta de nuevo.'); return; }
+  // Datos de ESTA sesión, tomados antes de esperar el link.
+  const id = window.__currentMeetBookingId;
   const phone = window.__currentMeetWaPhone;
+  const nombre = window.__currentMeetPatientFirstName;
   if (!phone) { alert('El paciente no tiene un teléfono válido guardado.'); return; }
-  const msg = `Hola ${window.__currentMeetPatientFirstName} 👋 Te comparto el link de Google Meet para tu sesión: ${link}`;
+  const link = await ensureMeetLink(id);
+  if (!link) { alert('No se pudo generar el link de Meet. Intenta de nuevo.'); return; }
+  const msg = `Hola ${nombre} 👋 Te comparto el link de Google Meet para tu sesión: ${link}`;
   window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
 });
 
