@@ -20,6 +20,14 @@ if (!service) return Astro.redirect('/admin/servicios');
 const duration   = (service as { duration_min?: number }).duration_min ?? 50;
 const breakMin   = (service as { break_min?: number }).break_min ?? 10;
 const frecuencia = (service as { slot_interval_min?: number }).slot_interval_min ?? (duration + breakMin);
+// Opciones de los selectores: siempre incluyen el valor guardado. Antes, si el
+// valor no estaba en la lista (ej. 55 min, o una frecuencia de 65), el
+// selector mostraba otro valor y al guardar se cambiaba sin avisar.
+const conActual = (lista: number[], actual: number) =>
+  [...new Set([...lista, actual])].filter(n => Number.isFinite(n)).sort((a, b) => a - b);
+const opcionesDuracion   = conActual([30,40,45,50,60,75,80,90,120], duration);
+const opcionesDescanso   = conActual([0,5,10,15,20,30], breakMin);
+const opcionesFrecuencia = conActual([30,40,45,50,60,75,80,90,120], frecuencia);
 const windowDays = (service as { booking_window_days?: number }).booking_window_days ?? 60;
 
 // Otros servicios (para "copiar horario de")
@@ -76,14 +84,14 @@ const saved = Astro.url.searchParams.get('saved') === '1';
       <div style="margin-bottom:1rem;">
         <label class="label" style="display:block;margin-bottom:0.3rem;font-size:0.72rem;">Duración</label>
         <select id="cfg-duration" style="width:100%;font-size:0.82rem;padding:0.45rem;">
-          {[30,40,45,50,60,75,80,90,120].map(v => <option value={v} selected={v===duration}>{v} minutos</option>)}
+          {opcionesDuracion.map(v => <option value={v} selected={v===duration}>{v} minutos</option>)}
         </select>
       </div>
 
       <div style="margin-bottom:1rem;">
         <label class="label" style="display:block;margin-bottom:0.3rem;font-size:0.72rem;">Descanso entre sesiones</label>
         <select id="cfg-break" style="width:100%;font-size:0.82rem;padding:0.45rem;">
-          {[0,5,10,15,20,30].map(v => <option value={v} selected={v===breakMin}>{v} minutos</option>)}
+          {opcionesDescanso.map(v => <option value={v} selected={v===breakMin}>{v} minutos</option>)}
         </select>
       </div>
 
@@ -97,7 +105,7 @@ const saved = Astro.url.searchParams.get('saved') === '1';
         <p class="label" style="margin-bottom:0.5rem;font-size:0.68rem;">Reglas avanzadas</p>
         <label class="label" style="display:block;margin-bottom:0.3rem;font-size:0.72rem;">Frecuencia de atención</label>
         <select id="cfg-freq" style="width:100%;font-size:0.82rem;padding:0.45rem;">
-          {[30,40,45,50,60,75,80,90,120].map(v => <option value={v} selected={v===frecuencia}>{v} minutos</option>)}
+          {opcionesFrecuencia.map(v => <option value={v} selected={v===frecuencia}>{v} minutos</option>)}
         </select>
         <p style="font-size:0.66rem;color:var(--stone);margin-top:0.25rem;">Cada cuánto empieza un cupo. Normalmente = duración + descanso.</p>
       </div>
