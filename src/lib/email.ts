@@ -132,8 +132,8 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
             Condiciones del servicio
           </p>
           <ul style="font-family:'Inter',sans-serif;font-size:0.82rem;color:#6B6860;line-height:1.7;margin:0;padding-left:1.1rem;">
-            <li>Para <strong>reagendar</strong> avísame con al menos <strong>24 horas de anticipación</strong>.</li>
-            <li>Las sesiones <strong>no se reembolsan</strong> por cancelación una vez confirmado el pago.</li>
+            <li>Las sesiones no se cancelan: solo puedes <strong>reagendar tu hora</strong> avisando con al menos <strong>24 horas de anticipación</strong>.</li>
+            <li>Si soy yo quien debe cancelar, reagendamos tu sesión sin costo.</li>
             <li>Tu reserva está confirmada porque el <strong>pago fue procesado</strong>. Sin pago, el horario queda libre.</li>
           </ul>
           <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#9B9485;margin-top:0.75rem;">
