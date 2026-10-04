@@ -4,6 +4,7 @@ import { sendSessionUpdatedEmail, sendRescheduleAdminAlert, ADMIN_EMAIL_FALLBACK
 import { rescheduleBookingInCalendar } from '../../lib/syncCalendar';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
 import { quitarLineasNotas } from '../../lib/apigateway';
+import { claveReagendarValida, REAGENDAR_TEXTO } from '../../lib/rescheduleLink';
 
 export const prerender = false;
 
@@ -12,9 +13,11 @@ export const POST: APIRoute = async ({ request }) => {
   try { body = await request.json(); }
   catch { return json({ error: 'Body inválido.' }, 400); }
 
-  const { bookingId, email, session_date, session_time } = body;
+  const { bookingId, email, session_date, session_time, k } = body;
+  // Con el link personal del correo (clave firmada) no hace falta el correo.
+  const conClave = claveReagendarValida(bookingId, k);
 
-  if (!bookingId || !email || !session_date || !session_time) {
+  if (!bookingId || (!email && !conClave) || !session_date || !session_time) {
     return json({ error: 'Faltan campos obligatorios.' }, 400);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(session_date) || !/^\d{2}:\d{2}$/.test(session_time.slice(0, 5))) {
@@ -22,13 +25,9 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   // Verificar que la reserva existe y el email coincide
-  const { data: booking } = await supabase
-    .from('bookings')
-    .select('*')
-    .eq('id', bookingId)
-    .eq('patient_email', email.trim().toLowerCase())
-    .eq('status', 'confirmed')
-    .single();
+  let bq = supabase.from('bookings').select('*').eq('id', bookingId).eq('status', 'confirmed');
+  if (!conClave) bq = bq.eq('patient_email', String(email).trim().toLowerCase());
+  const { data: booking } = await bq.single();
 
   if (!booking) {
     return json({ error: 'Reserva no encontrada o no tienes permiso para modificarla.' }, 404);
@@ -38,7 +37,7 @@ export const POST: APIRoute = async ({ request }) => {
   // sesión ACTUAL (antes solo se revisaba la hora nueva, así que se podía mover
   // una sesión que empezaba en 1 hora). Valentina reagenda siempre desde el panel.
   if (hoursUntilSessionCL(booking.session_date, booking.session_time) < 24) {
-    return json({ error: 'Faltan menos de 24 horas para tu sesión, así que ya no se puede reagendar en línea. Escríbeme por WhatsApp y lo vemos.' }, 400);
+    return json({ error: `Este enlace caducó. ${REAGENDAR_TEXTO} Escríbeme por WhatsApp y lo vemos.` }, 400);
   }
 
   // La hora nueva tiene que estar disponible para el servicio de esta sesión

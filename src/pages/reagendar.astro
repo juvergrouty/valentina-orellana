@@ -2,6 +2,7 @@
 export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { supabase } from '../lib/supabase';
+import { claveReagendarValida, sePuedeReagendar, REAGENDAR_TEXTO } from '../lib/rescheduleLink';
 
 const bookingId = Astro.url.searchParams.get('id') ?? '';
 
@@ -16,6 +17,11 @@ if (bookingId) {
     .single();
   booking = data;
 }
+const clave = Astro.url.searchParams.get('k') ?? '';
+const conClave = claveReagendarValida(bookingId, clave);
+// El enlace caduca cuando faltan menos de 24 h para la sesión.
+const caducado = !!booking && !sePuedeReagendar(booking.session_date as string, booking.session_time as string);
+const waAyuda = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valentina, necesito cambiar la hora de mi sesión.')}`;
 
 const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 function formatDate(iso: string) {
@@ -38,7 +44,7 @@ const SESSION_LABELS: Record<string, string> = {
       <p class="label text-stone mb-4">Reagendar</p>
       <div class="divider mb-6"></div>
       <h1 class="display-title mb-4">Cambia tu sesión</h1>
-      <p class="body-lead max-w-lg">Selecciona un nuevo día y hora para tu sesión. Recuerda que el cambio debe hacerse con al menos 24 horas de anticipación.</p>
+      <p class="body-lead max-w-lg">Selecciona un nuevo día y hora para tu sesión. <strong>{REAGENDAR_TEXTO}</strong></p>
     </div>
   </section>
 
@@ -48,7 +54,7 @@ const SESSION_LABELS: Record<string, string> = {
       {!bookingId && (
         <!-- Sin ID: pedir correo + ID manual -->
         <div class="bg-white border border-dust p-8 md:p-10">
-          <p class="body-text mb-6">Ingresa el correo con el que realizaste tu reserva y el ID de tu sesión (lo encuentras en el email de confirmación).</p>
+          <p class="body-text mb-6">Usa el botón <strong>Reagendar mi sesión</strong> del correo de confirmación de tu hora. Si no lo encuentras, <a href={waAyuda} target="_blank" rel="noopener" class="underline">escríbeme por WhatsApp</a>. También puedes ingresar tu correo y el código de tu reserva:</p>
           <div class="flex flex-col gap-5">
             <div>
               <label class="label text-stone block mb-2">Correo electrónico</label>
@@ -73,7 +79,15 @@ const SESSION_LABELS: Record<string, string> = {
         </div>
       )}
 
-      {booking && (
+      {booking && caducado && (
+        <div class="bg-white border border-dust p-8 text-center">
+          <p class="font-heading font-light text-2xl text-ink mb-3">Este enlace caducó</p>
+          <p class="body-text text-stone mb-6">{REAGENDAR_TEXTO} Si necesitas cambiar tu hora, escríbeme y lo vemos.</p>
+          <a href={waAyuda} target="_blank" rel="noopener" class="btn-dark py-3 px-6">Escribir por WhatsApp</a>
+        </div>
+      )}
+
+      {booking && !caducado && (
         <div id="reschedule-form-wrap">
           <!-- Reserva actual -->
           <div class="bg-warm border border-dust p-6 mb-8 flex items-start justify-between gap-4">
@@ -121,10 +135,13 @@ const SESSION_LABELS: Record<string, string> = {
 
             <!-- Email verificación + botón -->
             <div class="mt-6 flex flex-col gap-4">
-              <div>
-                <label class="label text-stone block mb-2">Confirma tu correo *</label>
-                <input id="verify-email" type="email" placeholder="tu@correo.cl" class="field" />
-              </div>
+              {!conClave && (
+                <div>
+                  <label class="label text-stone block mb-2">Confirma tu correo *</label>
+                  <input id="verify-email" type="email" placeholder="tu@correo.cl" class="field" />
+                </div>
+              )}
+              <p class="body-sm text-stone">{REAGENDAR_TEXTO}</p>
               <button id="btn-reagendar" disabled
                 class="btn-dark py-3.5 px-7 w-full opacity-50 cursor-not-allowed">
                 Confirmar nuevo horario
@@ -159,7 +176,7 @@ const SESSION_LABELS: Record<string, string> = {
   .slot-selected { @apply bg-ink text-sand border-ink; }
 </style>
 
-<script define:vars={{ bookingId, serviceId: booking?.service_id ?? '', durationMin: booking?.duration_min ?? '' }}>
+<script define:vars={{ bookingId, serviceId: booking?.service_id ?? '', durationMin: booking?.duration_min ?? '', clave: conClave ? clave : '' }}>
   const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const $ = id => document.getElementById(id);
 
@@ -312,7 +329,7 @@ const SESSION_LABELS: Record<string, string> = {
     const email = $('verify-email')?.value?.trim()?.toLowerCase();
     const errEl = $('reschedule-error');
 
-    if (!email) {
+    if (!email && !clave) {
       if (errEl) { errEl.textContent = 'Ingresa tu correo para confirmar.'; errEl.classList.remove('hidden'); }
       return;
     }
@@ -326,7 +343,7 @@ const SESSION_LABELS: Record<string, string> = {
       const res  = await fetch('/api/reschedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bookingId, email, session_date: selectedDate, session_time: selectedTime }),
+        body: JSON.stringify({ bookingId, email, k: clave, session_date: selectedDate, session_time: selectedTime }),
       });
       const data = await res.json();
       if (data.success) {

@@ -48,6 +48,7 @@ export const POST: APIRoute = async ({ request, url }) => {
       amount:         b.amount ?? 0,
       payment_method: b.payment_method ?? 'manual',
       service_name:   serviceName,
+      booking_id:     bookingId,
     };
     try {
       // skipToggle / reenvío manual: se envía aunque el automático esté desactivado

@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 import { logEmail, logError } from './logger';
 import { stepsItems, STEPS_INTRO } from './stepsContent';
 import { todayCL } from './dateUtils';
+import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
 
 // Inicialización perezosa — no falla si la key no está configurada
 let _resend: Resend | null = null;
@@ -55,6 +56,7 @@ export interface BookingEmailData {
   payment_method: string;
   is_new_patient?: boolean;
   service_name?:  string;
+  booking_id?:    string; // si viene, el correo de confirmación trae el link para reagendar
 }
 
 const SESSION_LABELS: Record<string, string> = {
@@ -141,6 +143,21 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
           Si necesitas reagendar, escríbeme <strong>con al menos 24 horas de anticipación</strong>.
         </p>
         `}
+
+        ${data.booking_id && sePuedeReagendar(data.session_date, data.session_time) ? `
+        <div style="border:1px solid #DDD8CF;padding:1.1rem 1.25rem;margin-bottom:1.5rem;">
+          <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#1A1A18;margin:0 0 0.75rem;">¿Necesitas cambiar tu hora?</p>
+          <a href="${urlReagendar(data.booking_id)}"
+             style="display:inline-block;border:1px solid #576352;color:#576352;padding:0.6rem 1.2rem;
+                    text-decoration:none;font-family:'Inter',sans-serif;font-size:0.75rem;
+                    letter-spacing:0.08em;text-transform:uppercase;">
+            Reagendar mi sesión
+          </a>
+          <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#6B6860;margin:0.75rem 0 0;">
+            <strong>${REAGENDAR_TEXTO}</strong> Después el enlace caduca.
+          </p>
+        </div>
+        ` : ''}
 
         <a href="https://wa.me/56972735696"
            style="display:inline-block;background:#576352;color:white;padding:0.75rem 1.5rem;

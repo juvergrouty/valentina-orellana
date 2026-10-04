@@ -190,6 +190,7 @@ export const POST: APIRoute = async ({ request }) => {
               session_time:   updatedRow.session_time,
               amount:         updatedRow.amount,
               payment_method: 'flow',
+              booking_id:     updatedRow.id,
             };
             // AWAIT: es un webhook; si no esperamos, la función serverless
             // termina y mata la sincronización con Google Calendar / los correos.
