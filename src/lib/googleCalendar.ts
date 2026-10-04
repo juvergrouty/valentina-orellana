@@ -111,7 +111,8 @@ export async function createCalendarEvent(
   if (event.isOnline) {
     body.conferenceData = {
       createRequest: {
-        requestId: `session-${event.date}-${startH}${startM}`,
+        // Único por solicitud (Google lo exige); antes se repetía para la misma fecha y hora.
+        requestId: crypto.randomUUID(),
         conferenceSolutionKey: { type: 'hangoutsMeet' },
       },
     };
@@ -234,6 +235,21 @@ export async function updateCalendarEventTitle(
 /** Pasa un evento a "pagado" (quita el prefijo y lo pone en verde; si se indica el
  *  correo del paciente y aún no es invitado, lo invita) o de vuelta a "por
  *  pagar". Solo hace la llamada de escritura si algo realmente cambia. */
+/** Agrega un Google Meet a un evento que ya existe (ej. una sesión que se
+ *  cambió de presencial a online: su evento se creó sin videollamada). */
+export async function agregarMeetAEvento(accessToken: string, calendarId: string, eventId: string): Promise<string | null> {
+  const url = `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}?conferenceDataVersion=1&sendUpdates=all`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conferenceData: { createRequest: { requestId: crypto.randomUUID(), conferenceSolutionKey: { type: 'hangoutsMeet' } } } }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Google Calendar no pudo agregar el Meet (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  return data.hangoutLink ?? data.conferenceData?.entryPoints?.find((e: any) => e.entryPointType === 'video')?.uri ?? null;
+}
+
 export async function setCalendarEventPaidState(
   accessToken: string,
   calendarId: string,

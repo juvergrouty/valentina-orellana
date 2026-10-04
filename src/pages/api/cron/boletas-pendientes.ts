@@ -21,7 +21,9 @@ export const GET: APIRoute = async ({ request }) => {
   }
 
   const { data: rows, error } = await supabase
-    .from('bookings').select('id, notes').ilike('notes', `%${MARCA_PENDIENTE}%`).limit(20);
+    .from('bookings').select('id, notes').ilike('notes', `%${MARCA_PENDIENTE}%`)
+    .not('status', 'in', '(cancelled,expired)')
+    .order('session_date', { ascending: false }).limit(20);
   if (error) return json({ ok: false, error: error.message }, 500);
 
   // Una marca de hace menos de 5 min puede ser una emisión que se está
@@ -41,8 +43,15 @@ export const GET: APIRoute = async ({ request }) => {
   // respondió (marca BoletaPendienteEmision): se reintenta la emisión, hasta 7
   // días. Pasado ese plazo queda solo el aviso rojo del panel para emitirla a
   // mano. emitBoletaParaReserva tiene candado, así que no se duplica.
+  // Filtrado y ordenado en la consulta (las más recientes primero): antes
+  // reservas viejas, canceladas o desmarcadas podían ocupar los 20 cupos y las
+  // boletas nuevas en cola nunca se reintentaban. Máximo 5 emisiones por
+  // pasada para no pasarse del tiempo de la función a mitad de una emisión.
   const { data: emRows } = await supabase
-    .from('bookings').select('id, notes, status, paid_at').ilike('notes', `%${MARCA_PENDIENTE_EMISION}%`).limit(20);
+    .from('bookings').select('id, notes, status, paid_at').ilike('notes', `%${MARCA_PENDIENTE_EMISION}%`)
+    .not('paid_at', 'is', null)
+    .not('status', 'in', '(cancelled,expired)')
+    .order('paid_at', { ascending: false }).limit(20);
   const marcaEm = new RegExp(`${MARCA_PENDIENTE_EMISION} (\\S+)`);
   const emisiones: Array<{ id: string; ok: boolean; folio?: number | null; error?: string }> = [];
   for (const r of emRows ?? []) {
@@ -50,6 +59,7 @@ export const GET: APIRoute = async ({ request }) => {
     if (folioVigente(r.notes)) continue;
     const t = Date.parse(marcaEm.exec(r.notes ?? '')?.[1] ?? '');
     if (!isNaN(t) && Date.now() - t > 7 * 24 * 60 * 60 * 1000) continue;
+    if (emisiones.length >= 5) break;
     const res = await emitBoletaParaReserva(r.id, { enviarEmail: true });
     emisiones.push({ id: r.id, ok: res.ok, folio: res.folio, error: res.error });
   }

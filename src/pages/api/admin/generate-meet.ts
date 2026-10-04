@@ -1,6 +1,9 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { syncBookingToCalendar } from '../../../lib/syncCalendar';
+import { syncBookingToCalendar, getValidAccessToken } from '../../../lib/syncCalendar';
+import { agregarMeetAEvento } from '../../../lib/googleCalendar';
+import { cambiarNotas } from '../../../lib/apigateway';
+import { logError } from '../../../lib/logger';
 
 export const prerender = false;
 
@@ -28,6 +31,27 @@ export const POST: APIRoute = async ({ request }) => {
   if (!meetLink) {
     const { data: fresh } = await supabase.from('bookings').select('notes').eq('id', id).maybeSingle();
     meetLink = [...(fresh?.notes ?? '').matchAll(/(?:^|\n)Meet: (https:\/\/meet\.google\.com\/\S+)/g)].at(-1)?.[1] ?? null;
+  }
+  // El evento existe pero sin videollamada (ej. la sesión era presencial y se
+  // cambió a online): se le agrega el Meet. Antes el panel decía "No se pudo
+  // generar el link de Meet" para siempre.
+  if (!meetLink) {
+    try {
+      const { data: fila } = await supabase.from('bookings').select('google_event_id').eq('id', id).maybeSingle();
+      const auth = await getValidAccessToken();
+      if (fila?.google_event_id && auth) {
+        meetLink = await agregarMeetAEvento(auth.token, auth.calendarId, fila.google_event_id);
+        if (meetLink) {
+          const link = meetLink;
+          await cambiarNotas(id, (n) => {
+            const sinMeet = n.split('\n').filter(l => !/^\s*Meet:/.test(l)).join('\n').trim();
+            return `${sinMeet ? sinMeet + '\n' : ''}Meet: ${link}`;
+          });
+        }
+      }
+    } catch (e) {
+      await logError('calendar/meet', 'No se pudo agregar el Meet a un evento existente', { bookingId: id, error: e instanceof Error ? e.message : String(e) });
+    }
   }
   return json({ ok: true, meetLink });
 };

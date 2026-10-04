@@ -241,3 +241,24 @@ export async function horaDisponible(c: ConsultaDisponibilidad & { time: string 
   if ('error' in r) return null;
   return r.slots.includes(c.time.slice(0, 5));
 }
+
+/** ¿Una sesión en esa fecha/hora/duración se cruza con otra sesión existente?
+ *  Para lo que agenda Valentina desde el panel (ella puede agendar fuera de su
+ *  horario, pero no encima de otra sesión). Antes solo se detectaba la misma
+ *  hora exacta: 10:30 encima de una sesión de 10:00 a 10:50 pasaba.
+ *  null = no se pudo comprobar. */
+export async function chocaConOtraSesion(date: string, time: string, duracion: number, excluirId?: string): Promise<boolean | null> {
+  const { data, error } = await supabase.from('bookings')
+    .select('id, session_time, duration_min')
+    .eq('session_date', date)
+    .not('status', 'in', '(cancelled,expired)');
+  if (error) return null;
+  const toMin = (t: string) => { const [h, m] = t.slice(0, 5).split(':').map(Number); return h * 60 + m; };
+  const ini = toMin(time);
+  const fin = ini + (duracion || 50);
+  return (data ?? []).some((b: { id: string; session_time: string; duration_min: number | null }) => {
+    if (b.id === excluirId) return false;
+    const bi = toMin(b.session_time);
+    return ini < bi + (b.duration_min ?? 50) && fin > bi;
+  });
+}

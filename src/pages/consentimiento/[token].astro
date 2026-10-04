@@ -14,9 +14,11 @@ const { data: consent } = await supabase.from('consents')
   .eq('token', token!).maybeSingle();
 
 const { data: patient } = consent?.patient_id
-  ? await supabase.from('patients').select('name, rut').eq('id', consent.patient_id).maybeSingle()
+  ? await supabase.from('patients').select('*').eq('id', consent.patient_id).maybeSingle()
   : { data: null };
 
+// Paciente extranjera/o sin RUT chileno: firma con su documento de identidad.
+const sinRut = patient?.sin_rut === true && !patient?.rut;
 const contactEmail = await consentContactEmail();
 const sections = consentSections(contactEmail);
 const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -74,8 +76,8 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
               <input id="signer_name" name="signer_name" type="text" required value={patient.name} class="w-full border border-dust rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label class="label text-stone block mb-2" for="signer_rut">RUT *</label>
-              <input id="signer_rut" name="signer_rut" type="text" required value={patient.rut ?? ''} placeholder="12345678-9" autocomplete="off" class="w-full border border-dust rounded px-3 py-2 text-sm" />
+              <label class="label text-stone block mb-2" for="signer_rut">{sinRut ? `${patient.doc_tipo || 'Documento de identidad'} *` : 'RUT *'}</label>
+              <input id="signer_rut" name="signer_rut" type="text" required value={sinRut ? (patient.doc_numero ?? '') : (patient.rut ?? '')} placeholder={sinRut ? 'Número de documento' : '12345678-9'} autocomplete="off" class="w-full border border-dust rounded px-3 py-2 text-sm" />
             </div>
           </div>
           <p class="text-xs text-stone">Al apretar "Firmar" declaro que leí este documento y que firmo electrónicamente. Se guardará la fecha, la hora y el dispositivo desde donde firmo, y me llegará una copia por correo.</p>
@@ -88,7 +90,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
   </section>
 </Layout>
 
-<script define:vars={{ token }}>
+<script define:vars={{ token, sinRut }}>
 (function () {
   const form = document.getElementById('consent-form');
   if (!form) return;
@@ -99,8 +101,8 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errEl.classList.add('hidden');
-    const rut = form.signer_rut.value.replace(/\./g, '').replace(/\s/g, '');
-    if (!/^\d{7,8}-[\dkK]$/.test(rut)) return showErr('Escribe tu RUT con guion, por ejemplo 12345678-9.');
+    const rut = sinRut ? form.signer_rut.value.trim() : form.signer_rut.value.replace(/\./g, '').replace(/\s/g, '');
+    if (sinRut ? rut.length < 4 : !/^\d{7,8}-[\dkK]$/.test(rut)) return showErr(sinRut ? 'Escribe el número de tu documento.' : 'Escribe tu RUT con guion, por ejemplo 12345678-9.');
     btn.disabled = true;
     btn.textContent = 'Firmando…';
     try {

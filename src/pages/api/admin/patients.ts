@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
+import { limpiarRut, rutValido } from '../../../lib/rut';
 
 export const prerender = false;
 
@@ -16,42 +17,71 @@ export const POST: APIRoute = async ({ request }) => {
   const action   = form.get('action') as string;
   let   redirect = (form.get('redirect') as string) ?? '/admin/pacientes';
 
+  // Datos de la ficha que vienen del formulario (crear y editar).
+  const g = (k: string) => (form.get(k) as string | null)?.trim() ?? '';
+  const sinRut = form.get('sin_rut') === '1';
+  const datos = (): Record<string, string | boolean | null> => ({
+    name:             g('name'),
+    email:            g('email').toLowerCase() || null,
+    phone:            g('phone') || null,
+    rut:              sinRut ? null : (g('rut') ? limpiarRut(g('rut')) : null),
+    birthdate:        g('birthdate') || null,
+    address:          g('address') || null,
+    comuna:           g('comuna') || null,
+    emergency_name:   g('emergency_name') || null,
+    emergency_phone:  g('emergency_phone') || null,
+    notes:            g('notes') || null,
+    sin_rut:          sinRut,
+    doc_tipo:         sinRut ? (g('doc_tipo') || null) : null,
+    doc_numero:       sinRut ? (g('doc_numero') || null) : null,
+    doc_pais:         sinRut ? (g('doc_pais') || null) : null,
+  });
+  // Si la migración 0006 aún no corrió, se guarda sin las columnas nuevas.
+  const sinNuevas = (d: Record<string, unknown>) => {
+    const { comuna: _c, sin_rut: _s, doc_tipo: _t, doc_numero: _n, doc_pais: _p, ...resto } = d;
+    return resto;
+  };
+
   // ── Crear paciente ──────────────────────────────────────────────────────────
+  // Datos mínimos obligatorios (Valentina, 4 oct 2026): nombre completo,
+  // correo, teléfono, dirección, comuna, contacto de emergencia y RUT (o, si
+  // es extranjera/o sin RUT, el documento de su país).
   if (action === 'create') {
-    const { error } = await supabase.from('patients').insert({
-      name:             (form.get('name') as string)?.trim(),
-      email:            (form.get('email') as string)?.trim().toLowerCase() || null,
-      phone:            (form.get('phone') as string)?.trim() || null,
-      rut:              (form.get('rut') as string)?.trim() || null,
-      birthdate:        (form.get('birthdate') as string) || null,
-      address:          (form.get('address') as string)?.trim() || null,
-      emergency_name:   (form.get('emergency_name') as string)?.trim() || null,
-      emergency_phone:  (form.get('emergency_phone') as string)?.trim() || null,
-      notes:            (form.get('notes') as string)?.trim() || null,
-    });
-    if (error) {
-      console.error('[patients] create:', error.message);
-      redirect = withParam(redirect, 'error', `No se pudo crear el paciente: ${error.message}`);
+    const d = datos();
+    const faltan: string[] = [];
+    if (!d.name) faltan.push('nombre');
+    if (!d.email) faltan.push('correo');
+    if (!d.phone) faltan.push('teléfono');
+    if (!d.address) faltan.push('dirección');
+    if (!d.comuna) faltan.push('comuna');
+    if (!d.emergency_name || !d.emergency_phone) faltan.push('contacto de emergencia');
+    if (sinRut ? (!d.doc_numero || !d.doc_pais) : !d.rut) faltan.push(sinRut ? 'documento y país' : 'RUT');
+    if (!sinRut && d.rut && !rutValido(String(d.rut))) faltan.push('RUT válido (revisa el dígito verificador)');
+    if (faltan.length) {
+      redirect = withParam(redirect, 'error', `Falta: ${faltan.join(', ')}.`);
+    } else {
+      let { error } = await supabase.from('patients').insert(d);
+      if (error?.code === '42703') ({ error } = await supabase.from('patients').insert(sinNuevas(d)));
+      if (error) {
+        console.error('[patients] create:', error.message);
+        redirect = withParam(redirect, 'error', `No se pudo crear el paciente: ${error.message}`);
+      }
     }
   }
 
   // ── Actualizar paciente ─────────────────────────────────────────────────────
   if (action === 'update') {
     const id = form.get('id') as string;
-    const { error } = await supabase.from('patients').update({
-      name:             (form.get('name') as string)?.trim(),
-      email:            (form.get('email') as string)?.trim().toLowerCase() || null,
-      phone:            (form.get('phone') as string)?.trim() || null,
-      rut:              (form.get('rut') as string)?.trim() || null,
-      birthdate:        (form.get('birthdate') as string) || null,
-      address:          (form.get('address') as string)?.trim() || null,
-      emergency_name:   (form.get('emergency_name') as string)?.trim() || null,
-      emergency_phone:  (form.get('emergency_phone') as string)?.trim() || null,
-      notes:            (form.get('notes') as string)?.trim() || null,
-    }).eq('id', id);
-    if (error) {
-      console.error('[patients] update:', error.message);
-      redirect = withParam(redirect, 'error', `No se pudo guardar: ${error.message}`);
+    const d = datos();
+    if (!sinRut && d.rut && !rutValido(String(d.rut))) {
+      redirect = withParam(redirect, 'error', 'El RUT no es válido: revisa los números y el dígito verificador.');
+    } else {
+      let { error } = await supabase.from('patients').update(d).eq('id', id);
+      if (error?.code === '42703') ({ error } = await supabase.from('patients').update(sinNuevas(d)).eq('id', id));
+      if (error) {
+        console.error('[patients] update:', error.message);
+        redirect = withParam(redirect, 'error', `No se pudo guardar: ${error.message}`);
+      }
     }
   }
 

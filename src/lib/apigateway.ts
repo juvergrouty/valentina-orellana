@@ -3,6 +3,7 @@ import { sendBoletaEmail, ADMIN_EMAIL_FALLBACK } from './email';
 import { todayCL } from './dateUtils';
 import { logError, logWarn } from './logger';
 import { upsertPatientFromBooking } from './patients';
+import { RUT_EXTRANJERO_SII } from './rut';
 
 /**
  * Integración con API Gateway (apigateway.cl) — Boletas de Honorarios Electrónicas (BHE).
@@ -283,7 +284,7 @@ export async function quitarLineasNotas(bookingId: string, prefijos: string[]): 
   return r.ok || !!r.aborted;
 }
 
-async function cambiarNotas(bookingId: string, fn: (notes: string) => string | null): Promise<{ ok: boolean; aborted?: boolean; error?: string }> {
+export async function cambiarNotas(bookingId: string, fn: (notes: string) => string | null): Promise<{ ok: boolean; aborted?: boolean; error?: string }> {
   for (let i = 0; i < 4; i++) {
     const { data: cur, error } = await supabase.from('bookings').select('notes').eq('id', bookingId).single();
     if (error) return { ok: false, error: error.message };
@@ -318,6 +319,25 @@ export function mensajeErrorSii(error: string): string {
  * salvo que esté ANULADA — mismo criterio que el panel del calendario y la
  * ficha del paciente, para que servidor y pantallas digan siempre lo mismo.
  */
+/** Registra a mano el folio de una boleta que SÍ quedó emitida en el SII
+ *  pero no se guardó en la sesión (respuesta sin folio, función cortada,
+ *  error al guardar). Quita el candado y, si se pide, la deja lista para
+ *  enviarse a la paciente. Nunca emite nada ante el SII. */
+export async function registrarFolioManual(bookingId: string, folio: number, enviar: boolean): Promise<{ ok: boolean; error?: string }> {
+  if (!Number.isInteger(folio) || folio <= 0) return { ok: false, error: 'Folio inválido.' };
+  let yaTenia: number | null = null;
+  const r = await cambiarNotas(bookingId, (n) => {
+    const v = folioVigente(n);
+    if (v) { yaTenia = v.folio; return null; }
+    const base = sinLineas(sinLineas(n, MARCA_EMITIENDO), MARCA_PENDIENTE_EMISION);
+    const pendiente = enviar ? `\n${MARCA_PENDIENTE} ${new Date().toISOString()}` : '';
+    return `${base ? base + '\n' : ''}Boleta Folio ${folio}${pendiente}`;
+  });
+  if (yaTenia) return { ok: false, error: `Esta sesión ya tiene registrada la boleta Folio ${yaTenia}.` };
+  if (!r.ok) return { ok: false, error: r.error ?? 'No se pudo guardar el folio.' };
+  return { ok: true };
+}
+
 export function folioVigente(notes: string | null): { folio: number; codigo: string | null } | null {
   const lineas = [...(notes ?? '').matchAll(/Boleta\s+Folio\s+(\d+)[^\n]*/gi)];
   const ultima = lineas.at(-1);
@@ -488,9 +508,18 @@ export async function emitBoletaParaReserva(
   const already = folioVigente(b.notes);
   if (already) return { ok: true, folio: already.folio, alreadyEmitted: true };
 
+  // select('*'): las columnas comuna/sin_rut (migración 0006) pueden no existir aún.
   const { data: p } = await supabase
-    .from('patients').select('rut, name, address').eq('email', (b.patient_email ?? '').toLowerCase()).maybeSingle();
-  const rutRaw = (opts.rutOverride ?? '').trim() || p?.rut || '';
+    .from('patients').select('*').eq('email', (b.patient_email ?? '').toLowerCase()).maybeSingle();
+  // De dónde sale el RUT (una sola regla, re-auditoría 4 oct 2026):
+  //   1. el que Valentina escribe al emitir desde el panel (corrección explícita);
+  //   2. el de la ficha; si la ficha dice "sin RUT" (extranjera/o), el RUT
+  //      genérico del SII para extranjeros sin RUT, con su nombre;
+  //   3. el que vino en la reserva.
+  // Antes Flow usaba el de la reserva y el reintento el de la ficha: la boleta
+  // podía salir a nombre de otra persona según qué intento la emitiera.
+  const rutFicha = p?.rut?.trim() || (p?.sin_rut ? RUT_EXTRANJERO_SII : '');
+  const rutRaw = (opts.rutDesdePanel ? (opts.rutOverride ?? '').trim() : '') || rutFicha || (opts.rutOverride ?? '').trim() || '';
   if (!rutRaw) return { ok: false, error: 'Falta el RUT del paciente.' };
   if (!b.amount) return { ok: false, error: 'La reserva no tiene monto.' };
 
@@ -550,7 +579,7 @@ export async function emitBoletaParaReserva(
   try {
     const result = await emitirBHE({
       fecha,
-      receptor: { rut: normalizeRut(rutRaw), razonSocial: p?.name ?? b.patient_name, direccion: p?.address ?? '' },
+      receptor: { rut: normalizeRut(rutRaw), razonSocial: p?.name ?? b.patient_name, direccion: p?.address ?? '', comuna: p?.comuna ?? '' },
       detalle:  [{ nombre: glosa, monto: b.amount }],
     }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
 

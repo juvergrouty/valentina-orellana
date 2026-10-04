@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { agregarLineaNotas } from '../../../lib/apigateway';
 import { supabase } from '../../../lib/supabase';
-import { sendReminderEmail, emailTypeEnabled, diaRelativo } from '../../../lib/email';
+import { sendReminderEmail, emailTypeEnabled, deDiaRelativo } from '../../../lib/email';
 import { sendWhatsappText, sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { nowCL, hoursUntilSessionCL } from '../../../lib/dateUtils';
 
@@ -140,7 +140,7 @@ export const GET: APIRoute = async ({ request }) => {
 
       const res = templateName
         ? await sendWhatsappTemplate(b.patient_phone, templateName, templateLang, [firstName, time])
-        : await sendWhatsappText(b.patient_phone, `Hola ${firstName}, te recuerdo tu hora de ${diaRelativo(b.session_date)} a las ${time} hrs. — Valentina Orellana`);
+        : await sendWhatsappText(b.patient_phone, `Hola ${firstName}, te recuerdo tu hora ${deDiaRelativo(b.session_date)} a las ${time} hrs. — Valentina Orellana`);
       if (res.sent) {
         waSent++;
         liveNotes = `${liveNotes ? liveNotes + '\n' : ''}${WA_MARKER} ${today}`;

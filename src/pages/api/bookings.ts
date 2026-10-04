@@ -10,6 +10,7 @@ import { hoursUntilSessionCL } from '../../lib/dateUtils';
 import { expireStaleBookings } from '../../lib/expireBooking';
 import { tagBookingsWithPaymentToken } from '../../lib/debt';
 import { horaDisponible } from '../../lib/disponibilidad';
+import { limpiarRut, rutValido, RUT_EXTRANJERO_SII, TIPOS_DOCUMENTO } from '../../lib/rut';
 
 export const prerender = false;
 
@@ -46,7 +47,17 @@ async function handleBooking(request: Request) {
         patient_rut,
         notes,
         recaptcha_token,
+        patient_address,
+        patient_comuna,
+        emergency_name,
+        emergency_phone,
+        doc_tipo,
+        doc_numero,
+        doc_pais,
   } = body as Record<string, string>;
+  // Extranjera/o sin RUT chileno: registra su documento y la boleta sale con
+  // el RUT genérico del SII para extranjeros (ver src/lib/rut.ts).
+  const sinRut = (body as Record<string, unknown>).sin_rut === true;
 
   // ── Cargar settings ──────────────────────────────────────────────────────────
   const { data: settingsRows } = await supabase.from('settings').select('key, value');
@@ -78,8 +89,27 @@ async function handleBooking(request: Request) {
   // mismo comportamiento que hoy, para no romper el flujo mientras no esté activo.
 
   // ── Validación ───────────────────────────────────────────────────────────────
-  if (!service_id || !modality_choice || !session_date || !session_time || !patient_name || !patient_email || !patient_phone || !patient_rut) {
+  if (!service_id || !modality_choice || !session_date || !session_time || !patient_name || !patient_email || !patient_phone || (!patient_rut && !sinRut)) {
         return json({ error: 'Faltan campos obligatorios.' }, 400);
+  }
+  // Datos mínimos de la ficha (Valentina, 4 oct 2026): dirección, comuna y
+  // contacto de emergencia, además de nombre, correo, teléfono y RUT.
+  const txt = (v: unknown, max: number) => (typeof v === 'string' ? v.trim() : '').slice(0, max);
+  const direccion = txt(patient_address, 200);
+  const comuna    = txt(patient_comuna, 80);
+  const emergNom  = txt(emergency_name, 120);
+  const emergTel  = txt(emergency_phone, 25);
+  if (direccion.length < 3 || /[<>]/.test(direccion)) return json({ error: 'Revisa tu dirección.' }, 400);
+  if (comuna.length < 2 || /[<>]/.test(comuna)) return json({ error: 'Revisa tu comuna.' }, 400);
+  if (emergNom.length < 2 || /[<>]/.test(emergNom)) return json({ error: 'Revisa el nombre de tu contacto de emergencia.' }, 400);
+  if (!/^[\d\s()+.-]{7,25}$/.test(emergTel)) return json({ error: 'Revisa el teléfono de tu contacto de emergencia.' }, 400);
+  const docTipo   = txt(doc_tipo, 40);
+  const docNumero = txt(doc_numero, 40);
+  const docPais   = txt(doc_pais, 60);
+  if (sinRut) {
+    if (!(TIPOS_DOCUMENTO as readonly string[]).includes(docTipo)) return json({ error: 'Elige el tipo de documento.' }, 400);
+    if (!/^[\w.\- ]{4,40}$/.test(docNumero)) return json({ error: 'Revisa el número de tu documento.' }, 400);
+    if (docPais.length < 2 || /[<>]/.test(docPais)) return json({ error: 'Revisa el país de tu documento.' }, 400);
   }
 
   // Nombre y teléfono: texto plano, sin caracteres de HTML y con largo acotado
@@ -94,9 +124,9 @@ async function handleBooking(request: Request) {
         return json({ error: 'Revisa tu correo.' }, 400);
   }
 
-  const rutClean = patient_rut.trim().toUpperCase().replace(/\./g, '').replace(/\s/g, '');
-  if (!/^\d{7,8}-[\dK]$/.test(rutClean)) {
-        return json({ error: 'RUT inválido.' }, 400);
+  const rutClean = sinRut ? RUT_EXTRANJERO_SII : limpiarRut(patient_rut);
+  if (!sinRut && !rutValido(rutClean)) {
+        return json({ error: 'RUT inválido: revisa los números y el dígito verificador.' }, 400);
   }
 
   if (!['online', 'presencial'].includes(modality_choice)) {
@@ -255,6 +285,14 @@ async function handleBooking(request: Request) {
     patient_email: patient_email.trim().toLowerCase(),
     patient_phone: patient_phone.trim(),
     rut:           rutClean,
+    address:         direccion,
+    comuna,
+    emergency_name:  emergNom,
+    emergency_phone: emergTel,
+    sin_rut:         sinRut,
+    doc_tipo:        sinRut ? docTipo : null,
+    doc_numero:      sinRut ? docNumero : null,
+    doc_pais:        sinRut ? docPais : null,
   }).catch((e) => logError('bookings', 'No se pudo guardar el paciente al crear la reserva', { error: e instanceof Error ? e.message : String(e) }));
 
   // ── Leer config desde settings ───────────────────────────────────────────────

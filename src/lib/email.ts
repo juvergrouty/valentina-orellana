@@ -359,6 +359,12 @@ export function diaRelativo(sessionDate: string): string {
   return `el ${DIAS[f.getUTCDay()]} ${sd} de ${MESES[sm - 1]}`;
 }
 
+/** "de hoy" / "de mañana" / "del martes 14 de octubre" (no "de el martes"). */
+export function deDiaRelativo(sessionDate: string): string {
+  const dia = diaRelativo(sessionDate);
+  return dia.startsWith('el ') ? `del ${dia.slice(3)}` : `de ${dia}`;
+}
+
 // ─── Email al cliente: recordatorio de sesión ────────────────────────────────
 export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
@@ -379,11 +385,11 @@ export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent:
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Te espero pronto 🌿</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(data.patient_name)}, te recuerdo tu sesión de ${dia}.
+          Hola ${escapeHtml(data.patient_name)}, te recuerdo tu sesión ${deDiaRelativo(data.session_date)}.
         </p>
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.88rem;line-height:1.8;">
-          <p style="margin:0;"><strong>${sessionLabel}</strong></p>
-          <p style="margin:0.3rem 0 0;color:#6B6860;">${formatDate(data.session_date)} · ${data.session_time}</p>
+          <p style="margin:0;"><strong>${escapeHtml(sessionLabel)}</strong></p>
+          <p style="margin:0.3rem 0 0;color:#6B6860;">${formatDate(data.session_date)} · ${String(data.session_time).slice(0, 5)}</p>
           <p style="margin:0.6rem 0 0;color:#6B6860;">${isOnline ? '🎥 La sesión es online — revisa la invitación con el enlace de Google Meet.' : '📍 La sesión es presencial.'}</p>
         </div>
         <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#6B6860;line-height:1.6;margin-bottom:1.5rem;">

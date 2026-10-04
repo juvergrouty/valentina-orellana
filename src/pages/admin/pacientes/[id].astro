@@ -79,6 +79,17 @@ const notesByDate: Record<string, any> = {};
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+
+// Datos mínimos de la ficha (Valentina, 4 oct 2026): se avisa si faltan.
+const sinRutFicha = patient?.sin_rut === true && !patient?.rut;
+const faltanDatos = patient ? [
+  !patient.email && 'correo',
+  !patient.phone && 'teléfono',
+  !patient.address && 'dirección',
+  !patient.comuna && 'comuna',
+  (!patient.emergency_name || !patient.emergency_phone) && 'contacto de emergencia',
+  sinRutFicha ? (!patient.doc_numero && 'documento') : (!patient.rut && 'RUT'),
+].filter(Boolean) as string[] : [];
 ---
 
 <AdminLayout title={patient.name} current="/admin/pacientes">
@@ -197,6 +208,11 @@ const formatCLP = (n: number) =>
   <!-- ── TAB: INFORMACIÓN ────────────────────────────────────────────────────── -->
   {tab === 'info' && (
     <div style="max-width:580px;">
+      {faltanDatos.length > 0 && (
+        <p style="background:#fef3c7;border:1px solid #fcd34d;color:#92400e;border-radius:6px;padding:0.6rem 0.85rem;font-size:0.82rem;margin:0 0 1rem;">
+          Faltan datos de la ficha: {faltanDatos.join(', ')}.
+        </p>
+      )}
       <form method="POST" action="/api/admin/patients" style="display:flex;flex-direction:column;gap:1.25rem;">
         <input type="hidden" name="action" value="update" />
         <input type="hidden" name="id" value={patient.id} />
@@ -219,15 +235,38 @@ const formatCLP = (n: number) =>
             </div>
             <div>
               <label class="label" style="display:block;margin-bottom:0.3rem;">RUT</label>
-              <input type="text" name="rut" value={patient.rut ?? ''} placeholder="12.345.678-9" />
+              <input type="text" name="rut" id="pf-rut" value={patient.rut ?? ''} placeholder="12.345.678-9" disabled={patient.sin_rut === true && !patient.rut} />
+              <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.4rem;font-size:0.78rem;color:var(--stone);cursor:pointer;">
+                <input type="checkbox" name="sin_rut" id="pf-sin-rut" value="1" checked={patient.sin_rut === true && !patient.rut} style="width:auto;" /> No tiene RUT (extranjera/o)
+              </label>
             </div>
             <div>
               <label class="label" style="display:block;margin-bottom:0.3rem;">Fecha de nacimiento</label>
               <input type="date" name="birthdate" value={patient.birthdate ?? ''} />
             </div>
-            <div style="grid-column:1/-1;">
+            <div id="pf-doc" style={`grid-column:1/-1;display:${patient.sin_rut === true && !patient.rut ? 'grid' : 'none'};grid-template-columns:1fr 1fr 1fr;gap:1rem;`}>
+              <div>
+                <label class="label" style="display:block;margin-bottom:0.3rem;">Documento</label>
+                <select name="doc_tipo">
+                  {['Pasaporte', 'Documento de identidad', 'Otro'].map((t) => <option selected={patient.doc_tipo === t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label class="label" style="display:block;margin-bottom:0.3rem;">Número</label>
+                <input type="text" name="doc_numero" value={patient.doc_numero ?? ''} />
+              </div>
+              <div>
+                <label class="label" style="display:block;margin-bottom:0.3rem;">País</label>
+                <input type="text" name="doc_pais" value={patient.doc_pais ?? ''} />
+              </div>
+            </div>
+            <div>
               <label class="label" style="display:block;margin-bottom:0.3rem;">Dirección</label>
               <input type="text" name="address" value={patient.address ?? ''} />
+            </div>
+            <div>
+              <label class="label" style="display:block;margin-bottom:0.3rem;">Comuna</label>
+              <input type="text" name="comuna" value={patient.comuna ?? ''} />
             </div>
           </div>
         </div>
@@ -347,13 +386,13 @@ const formatCLP = (n: number) =>
                       <>
                         <span class="badge badge-cancelled">✕ Boleta {boletaFolio} anulada</span>
                         {isPaid && (
-                          <button type="button" class="btn btn-outline btn-sm bol-emitir" data-bid={b.id} data-rut={patient.rut ?? ''}>
+                          <button type="button" class="btn btn-outline btn-sm bol-emitir" data-bid={b.id} data-rut={patient.rut ?? (sinRutFicha ? '44444446-0' : '')}>
                             Emitir nueva boleta
                           </button>
                         )}
                       </>
                     ) : isPaid ? (
-                      <button type="button" class="btn btn-outline btn-sm bol-emitir" data-bid={b.id} data-rut={patient.rut ?? ''}>
+                      <button type="button" class="btn btn-outline btn-sm bol-emitir" data-bid={b.id} data-rut={patient.rut ?? (sinRutFicha ? '44444446-0' : '')}>
                         Emitir boleta
                       </button>
                     ) : null}
@@ -1004,5 +1043,16 @@ const formatCLP = (n: number) =>
       agendaSelect.removeAttribute('name');
       custom.setAttribute('name', 'session_time');
     }
+  });
+</script>
+
+<script>
+  // "No tiene RUT": se registra el documento de su país en vez del RUT.
+  const pfSinRut = document.getElementById('pf-sin-rut') as HTMLInputElement | null;
+  pfSinRut?.addEventListener('change', () => {
+    const sin = pfSinRut.checked;
+    const rut = document.getElementById('pf-rut') as HTMLInputElement;
+    rut.disabled = sin;
+    (document.getElementById('pf-doc') as HTMLElement).style.display = sin ? 'grid' : 'none';
   });
 </script>

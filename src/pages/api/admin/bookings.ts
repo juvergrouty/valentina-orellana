@@ -11,6 +11,8 @@ import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { logWarn } from '../../../lib/logger';
 import { todayCL } from '../../../lib/dateUtils';
+import { chocaConOtraSesion } from '../../../lib/disponibilidad';
+import { limpiarRut, rutValido, RUT_EXTRANJERO_SII } from '../../../lib/rut';
 
 export const prerender = false;
 
@@ -267,17 +269,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (!id || !session_date || !session_time) return redirect(dest);
 
-    const { data: conflict } = await supabase
-      .from('bookings').select('id')
-      .eq('session_date', session_date)
-      .eq('session_time', session_time)
-      .not('status', 'in', '(cancelled,expired)')
-      .neq('id', id)
-      .maybeSingle();
-
+    const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
+    // ¿La hora nueva se cruza con otra sesión? (con su duración, sin contar esta misma)
+    const conflict = await chocaConOtraSesion(session_date, session_time, booking?.duration_min ?? 50, id);
     if (conflict) return redirect(conParam(dest) + 'error=conflict');
 
-    const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
     const { error: updErr } = await supabase.from('bookings').update({ session_date, session_time }).eq('id', id);
     // Si no se guardó, no se toca el calendario ni se avisa a la paciente.
     if (updErr) return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(updErr.message.slice(0, 200)));
@@ -499,6 +495,28 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (!finalName) return redirect(conParam(dest) + 'error=missing_fields');
 
+    // Paciente NUEVA creada desde aquí: datos mínimos de la ficha obligatorios
+    // (Valentina, 4 oct 2026). Sin RUT (extranjera/o): documento de su país, y
+    // la boleta sale con el RUT genérico del SII para extranjeros.
+    const nuevaFicha = !patient_id || patient_id === '_new';
+    const fv = (k: string) => form.get(k)?.toString()?.trim() ?? '';
+    const sinRutNueva = nuevaFicha && form.get('sin_rut') === '1';
+    const fichaExtra = {
+      address: fv('patient_address'), comuna: fv('patient_comuna'),
+      emergency_name: fv('emergency_name'), emergency_phone: fv('emergency_phone'),
+      sin_rut: sinRutNueva,
+      doc_tipo: sinRutNueva ? fv('doc_tipo') : null, doc_numero: sinRutNueva ? fv('doc_numero') : null, doc_pais: sinRutNueva ? fv('doc_pais') : null,
+    };
+    if (nuevaFicha) {
+      if (sinRutNueva) finalRut = RUT_EXTRANJERO_SII;
+      const incompleto = !finalPhone || !finalEmail || !fichaExtra.address || !fichaExtra.comuna
+        || !fichaExtra.emergency_name || !fichaExtra.emergency_phone
+        || (sinRutNueva ? (!fichaExtra.doc_numero || !fichaExtra.doc_pais) : !finalRut);
+      if (incompleto) return redirect(conParam(dest) + 'error=missing_patient_data');
+      if (!sinRutNueva && !rutValido(finalRut)) return redirect(conParam(dest) + 'error=rut_invalido');
+      finalRut = sinRutNueva ? finalRut : limpiarRut(finalRut);
+    }
+
     // Determine session_type from service modality
     const svcModality = svc.modality === 'ambos' ? modality_choice : svc.modality;
     const sessionType = svc.type === 'pareja' ? `pareja-${svcModality}` : svcModality;
@@ -523,6 +541,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const { data: settingsRows } = await supabase.from('settings').select('key, value').in('key', ['notification_email']);
     const notifEmail = settingsRows?.find((r: { key: string }) => r.key === 'notification_email')?.value || ADMIN_EMAIL_FALLBACK;
 
+    // Validar el link de pago ANTES de crear las reservas: antes se creaban y
+    // después se avisaba "necesita un correo", y quedaba una reserva fantasma
+    // (esperando pago, que nunca vence) bloqueando esa hora.
+    if (payment_mode === 'link') {
+      if (!finalEmail) return redirect(conParam(dest) + 'error=need_email');
+      const { data: fe } = await supabase.from('settings').select('value').eq('key', 'flow_enabled').maybeSingle();
+      if (fe?.value === 'false') return redirect(conParam(dest) + 'error=flow_disabled');
+    }
+
     const bookingIds: string[] = [];
     let conflictCount = 0;
     let lastInsertError: string | null = null;
@@ -532,13 +559,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       d.setDate(d.getDate() + i * 7);
       const bDate = d.toISOString().split('T')[0];
 
-      // Check for conflict at this slot
-      const { data: conflict } = await supabase
-        .from('bookings').select('id')
-        .eq('session_date', bDate)
-        .eq('session_time', session_time)
-        .not('status', 'in', '(cancelled,expired)')
-        .maybeSingle();
+      // ¿Se cruza con otra sesión ese día? (considera la duración, no solo la
+      // misma hora exacta). Si no se puede comprobar, el índice único de la
+      // base igual impide dos reservas a la misma hora.
+      const conflict = await chocaConOtraSesion(bDate, session_time, durMin);
 
       if (conflict) { conflictCount++; continue; } // Skip slots with conflicts (pack continues)
 
@@ -625,6 +649,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
         const patientId = await upsertPatientFromBooking({
           patient_name: finalName, patient_email: finalEmail, patient_phone: finalPhone, rut: finalRut,
+          ...(nuevaFicha ? fichaExtra : {}),
         });
 
         let paymentUrl: string;
@@ -741,7 +766,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       const { data: b } = await supabase.from('bookings').select('*').eq('id', bid).single();
       if (b) { try { await syncBookingToCalendar(b); } catch (e) { console.error('[create-admin] sync:', e); } }
     }
-    try { await upsertPatientFromBooking({ patient_name: finalName, patient_email: finalEmail, patient_phone: finalPhone, rut: finalRut }); } catch (e) { console.error('[create-admin] patient:', e); }
+    try { await upsertPatientFromBooking({ patient_name: finalName, patient_email: finalEmail, patient_phone: finalPhone, rut: finalRut, ...(nuevaFicha ? fichaExtra : {}) }); } catch (e) { console.error('[create-admin] patient:', e); }
 
     if (sendConf && finalEmail) {
       const emailData = {

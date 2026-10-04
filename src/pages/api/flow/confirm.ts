@@ -200,16 +200,31 @@ export const POST: APIRoute = async ({ request }) => {
           // la boleta ya cumple el rol de "recibo de tu pago".
           if (wasNew.has(updatedRow.id)) {
             const adminEmail = cfg['notification_email'] || ADMIN_EMAIL_FALLBACK;
+            // Nombre real del servicio y si es su primera sesión pagada (el
+            // correo muestra las condiciones del servicio a pacientes nuevas).
+            // Antes el correo salía con el nombre genérico y nunca las mostraba.
+            let serviceName: string | undefined;
+            if (updatedRow.service_id) {
+              const { data: svc } = await supabase.from('services_catalog').select('name').eq('id', updatedRow.service_id).maybeSingle();
+              serviceName = svc?.name ?? undefined;
+            }
+            const { count: pagadasAntes } = await supabase.from('bookings')
+              .select('id', { count: 'exact', head: true })
+              .eq('patient_email', String(updatedRow.patient_email ?? '').toLowerCase())
+              .not('paid_at', 'is', null)
+              .not('id', 'in', `(${ids.join(',')})`);
             const emailData = {
               patient_name:   updatedRow.patient_name,
               patient_email:  updatedRow.patient_email,
               patient_phone:  updatedRow.patient_phone,
               session_type:   updatedRow.session_type,
               session_date:   updatedRow.session_date,
-              session_time:   updatedRow.session_time,
+              session_time:   String(updatedRow.session_time ?? '').slice(0, 5),
               amount:         updatedRow.amount,
               payment_method: 'flow',
               booking_id:     updatedRow.id,
+              service_name:   serviceName,
+              is_new_patient: (pagadasAntes ?? 0) === 0,
             };
             // AWAIT: es un webhook; si no esperamos, la función serverless
             // termina y mata la sincronización con Google Calendar / los correos.

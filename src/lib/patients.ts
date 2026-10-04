@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { logError } from './logger';
 import { sendStepsEmail, sendConsentLinkEmail } from './email';
 import { getOrCreatePendingConsent, consentUrl, vigente, type ConsentRow } from './consent';
+import { limpiarRut, RUT_EXTRANJERO_SII } from './rut';
 
 // Crea o actualiza la ficha del paciente en `patients` a partir de los datos
 // de una reserva. Se llama cada vez que una reserva pasa a `confirmed` —
@@ -10,20 +11,41 @@ import { getOrCreatePendingConsent, consentUrl, vigente, type ConsentRow } from 
 // Devuelve el id de la ficha (creada o existente) — algunos llamadores (ej. el
 // link de pago combinado /pagar/[id]) necesitan el id de inmediato, no solo
 // que la ficha quede creada en algún momento posterior.
-export async function upsertPatientFromBooking(b: {
+export interface DatosFicha {
   patient_name?: string | null;
   patient_email?: string | null;
   patient_phone?: string | null;
   rut?: string | null;
-}, opts: { actualizarRut?: boolean } = {}): Promise<string | null> {
+  // Datos mínimos de la ficha (Valentina, 4 oct 2026). Opcionales aquí porque
+  // no todos los caminos los traen (ej. un cobro); la reserva web y el panel sí.
+  address?: string | null;
+  comuna?: string | null;
+  emergency_name?: string | null;
+  emergency_phone?: string | null;
+  sin_rut?: boolean | null;
+  doc_tipo?: string | null;
+  doc_numero?: string | null;
+  doc_pais?: string | null;
+}
+
+const NUEVAS = ['comuna', 'sin_rut', 'doc_tipo', 'doc_numero', 'doc_pais'];
+
+export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizarRut?: boolean } = {}): Promise<string | null> {
   const email = b.patient_email?.trim().toLowerCase();
   const name  = b.patient_name?.trim();
   if (!email || !name) return null;
+  // El RUT genérico del SII para extranjeros (44.444.446-0) no es el RUT de
+  // la persona: no se guarda como su RUT; se marca "sin RUT".
+  const rutLimpio = limpiarRut(b.rut);
+  const esGenerico = rutLimpio === RUT_EXTRANJERO_SII;
+  const rut = esGenerico ? '' : (b.rut?.trim() ?? '');
+  const sinRut = b.sin_rut === true || esGenerico;
+  const t = (v: string | null | undefined) => v?.trim() || '';
 
   try {
     const { data: existing } = await supabase
       .from('patients')
-      .select('id, name, phone, rut')
+      .select('*')
       .eq('email', email)
       .maybeSingle();
 
@@ -35,19 +57,46 @@ export async function upsertPatientFromBooking(b: {
       // correcciones hechas a mano en la ficha. Solo se completan datos vacíos.
       // Excepción: el RUT que Valentina escribe al emitir una boleta
       // (actualizarRut), que es una corrección explícita suya.
-      const cambios: Record<string, string> = {};
+      const cambios: Record<string, string | boolean> = {};
       if (!existing.name?.trim()) cambios.name = name;
-      if (!existing.phone?.trim() && b.patient_phone?.trim()) cambios.phone = b.patient_phone.trim();
-      if (b.rut?.trim() && (opts.actualizarRut || !existing.rut?.trim())) cambios.rut = b.rut.trim();
+      if (!existing.phone?.trim() && t(b.patient_phone)) cambios.phone = t(b.patient_phone);
+      if (rut && (opts.actualizarRut || !existing.rut?.trim())) cambios.rut = rut;
+      if (!existing.address?.trim() && t(b.address)) cambios.address = t(b.address);
+      if (!existing.emergency_name?.trim() && t(b.emergency_name)) cambios.emergency_name = t(b.emergency_name);
+      if (!existing.emergency_phone?.trim() && t(b.emergency_phone)) cambios.emergency_phone = t(b.emergency_phone);
+      if ('comuna' in existing) {
+        if (!existing.comuna?.trim() && t(b.comuna)) cambios.comuna = t(b.comuna);
+        if (sinRut && !existing.rut?.trim() && !existing.sin_rut) cambios.sin_rut = true;
+        if (!existing.doc_numero?.trim() && t(b.doc_numero)) {
+          cambios.doc_numero = t(b.doc_numero);
+          if (t(b.doc_tipo)) cambios.doc_tipo = t(b.doc_tipo);
+          if (t(b.doc_pais)) cambios.doc_pais = t(b.doc_pais);
+        }
+      }
       if (Object.keys(cambios).length) await supabase.from('patients').update(cambios).eq('id', existing.id);
       return existing.id;
     } else {
-      const { data: inserted } = await supabase.from('patients').insert({
+      const fila: Record<string, string | boolean | null> = {
         name,
         email,
-        phone: b.patient_phone?.trim() || null,
-        rut:   b.rut?.trim() || null,
-      }).select('id').single();
+        phone:           t(b.patient_phone) || null,
+        rut:             rut || null,
+        address:         t(b.address) || null,
+        emergency_name:  t(b.emergency_name) || null,
+        emergency_phone: t(b.emergency_phone) || null,
+        comuna:          t(b.comuna) || null,
+        sin_rut:         sinRut,
+        doc_tipo:        sinRut ? (t(b.doc_tipo) || null) : null,
+        doc_numero:      sinRut ? (t(b.doc_numero) || null) : null,
+        doc_pais:        sinRut ? (t(b.doc_pais) || null) : null,
+      };
+      let { data: inserted, error } = await supabase.from('patients').insert(fila).select('id').single();
+      if (error?.code === '42703') {
+        // Migración 0006 aún no corrida: se guarda sin las columnas nuevas.
+        for (const k of NUEVAS) delete fila[k];
+        ({ data: inserted, error } = await supabase.from('patients').insert(fila).select('id').single());
+      }
+      if (error) throw new Error(error.message);
       return inserted?.id ?? null;
     }
   } catch (err) {
@@ -71,8 +120,9 @@ export async function sendStepsOnFirstPayment(b: {
   const email = b.patient_email?.trim().toLowerCase();
   if (!email) return;
   try {
+    // ilike sin comodines: un "_" o "%" en el correo no debe calzar con otro.
     const { data: previos } = await supabase.from('bookings').select('id')
-      .ilike('patient_email', email).not('paid_at', 'is', null);
+      .ilike('patient_email', email.replace(/[\\%_]/g, (c) => `\\${c}`)).not('paid_at', 'is', null);
     if ((previos ?? []).some(p => !paidBookingIds.includes(p.id))) return;
 
     const patientId = await upsertPatientFromBooking(b);
@@ -83,7 +133,14 @@ export async function sendStepsOnFirstPayment(b: {
     const { data: marcado } = await supabase.from('patients')
       .update({ steps_sent_at: new Date().toISOString() })
       .eq('id', patientId).is('steps_sent_at', null).select('id, name').maybeSingle();
-    if (!marcado) return;
+    if (!marcado) {
+      // "Pasos a seguir" ya se había mandado a mano (botón de la ficha o
+      // WhatsApp): igual corresponde el consentimiento en su primer pago.
+      // Antes se saltaba y la paciente nunca lo recibía sola.
+      const { data: p } = await supabase.from('patients').select('name').eq('id', patientId).maybeSingle();
+      await enviarConsentimientoSiFalta(patientId, p?.name ?? b.patient_name ?? '', email);
+      return;
+    }
 
     const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
     const res = await sendStepsEmail({ patientName: marcado.name, patientEmail: email, clinicAddress: addr?.value ?? '' });

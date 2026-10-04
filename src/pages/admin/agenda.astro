@@ -340,6 +340,12 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
       {errorParam === 'flow_error' && (
         <div class="cal-error-banner">⚠ No se pudo generar el link de pago. Revisa la configuración de Flow.</div>
       )}
+      {errorParam === 'missing_patient_data' && (
+        <div class="cal-error-banner">⚠ Para crear una paciente nueva faltan datos: correo, teléfono, dirección, comuna, contacto de emergencia y RUT (o documento si no tiene RUT). No se agendó nada.</div>
+      )}
+      {errorParam === 'rut_invalido' && (
+        <div class="cal-error-banner">⚠ El RUT no es válido (revisa los números y el dígito verificador). No se agendó nada.</div>
+      )}
       {errorParam === 'missing_fields' && (
         <div class="cal-error-banner">⚠ Faltan datos obligatorios (servicio, fecha, hora o paciente) — no se agendó nada.</div>
       )}
@@ -632,16 +638,50 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
               <input type="tel" name="patient_phone" id="bp-pphone" placeholder="+56 9 XXXX XXXX">
             </div>
             <div class="bp-field">
-              <label>Correo</label>
+              <label>Correo *</label>
               <input type="email" name="patient_email" id="bp-pemail" placeholder="correo@mail.cl">
             </div>
           </div>
           <div class="bp-field">
-            <label>RUT (para la boleta de honorarios)</label>
+            <label>RUT *</label>
             <input type="text" name="patient_rut" id="bp-prut" placeholder="12.345.678-9">
-            <p style="font-size:0.72rem;color:var(--stone);margin-top:0.25rem;">
-              Si lo dejas vacío y envías un link de pago, la boleta no se podrá emitir sola cuando pague — tendrás que emitirla a mano después.
-            </p>
+            <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.35rem;font-size:0.75rem;color:var(--stone);cursor:pointer;">
+              <input type="checkbox" name="sin_rut" id="bp-sin-rut" value="1" style="width:auto;"> No tiene RUT (extranjera/o)
+            </label>
+          </div>
+          <div id="bp-doc" class="bp-field-row" style="display:none">
+            <div class="bp-field">
+              <label>Documento *</label>
+              <select name="doc_tipo"><option>Pasaporte</option><option>Documento de identidad</option><option>Otro</option></select>
+            </div>
+            <div class="bp-field">
+              <label>Número *</label>
+              <input type="text" name="doc_numero" id="bp-doc-numero">
+            </div>
+            <div class="bp-field">
+              <label>País *</label>
+              <input type="text" name="doc_pais" id="bp-doc-pais">
+            </div>
+          </div>
+          <div class="bp-field-row">
+            <div class="bp-field">
+              <label>Dirección *</label>
+              <input type="text" name="patient_address" id="bp-paddress" placeholder="Calle, número, depto.">
+            </div>
+            <div class="bp-field">
+              <label>Comuna *</label>
+              <input type="text" name="patient_comuna" id="bp-pcomuna">
+            </div>
+          </div>
+          <div class="bp-field-row">
+            <div class="bp-field">
+              <label>Contacto de emergencia *</label>
+              <input type="text" name="emergency_name" id="bp-emerg-name" placeholder="Nombre">
+            </div>
+            <div class="bp-field">
+              <label>Tel. emergencia *</label>
+              <input type="tel" name="emergency_phone" id="bp-emerg-phone" placeholder="+56 9 XXXX XXXX">
+            </div>
           </div>
         </div>
 
@@ -1917,13 +1957,7 @@ allCols.forEach(col => {
         document.getElementById('bp-date').value = date;
         document.getElementById('bp-time').value = time;
         document.getElementById('bp-date-label').textContent = isoToLabel(date);
-        document.getElementById('bp-tab-agenda').classList.add('active');
-        document.getElementById('bp-tab-block').classList.remove('active');
-        document.getElementById('bp-agenda-body').style.display = '';
-        document.getElementById('bp-block-body').style.display  = 'none';
-        document.getElementById('bp-open-body').style.display   = 'none';
-        document.getElementById('bp-tab-open')?.classList.remove('active');
-        ocultarQuitarDisp();
+        mostrarPestanaAgenda();
         openBookingPanel(date, time);
       }
     }
@@ -1932,6 +1966,19 @@ allCols.forEach(col => {
     document.addEventListener('mouseup',   onUp);
   });
 });
+
+// Deja el panel lateral en la pestaña "Agendar hora" (las demás ocultas).
+// Lo usan el clic en una celda y el botón "+ Agendar": antes este último
+// abría el panel en la última pestaña usada (ej. "Quitar disponibilidad").
+function mostrarPestanaAgenda() {
+  document.getElementById('bp-tab-agenda').classList.add('active');
+  document.getElementById('bp-tab-block').classList.remove('active');
+  document.getElementById('bp-agenda-body').style.display = '';
+  document.getElementById('bp-block-body').style.display  = 'none';
+  document.getElementById('bp-open-body').style.display   = 'none';
+  document.getElementById('bp-tab-open')?.classList.remove('active');
+  ocultarQuitarDisp();
+}
 
 // Toolbar "+ Agendar" button
 document.getElementById('open-new-btn')?.addEventListener('click', () => {
@@ -1944,12 +1991,38 @@ document.getElementById('open-new-btn')?.addEventListener('click', () => {
   document.getElementById('bp-date').value = today;
   document.getElementById('bp-time').value = time;
   document.getElementById('bp-date-label').textContent = isoToLabel(today);
+  mostrarPestanaAgenda();
   openBookingPanel(today, time);
 });
 
 // ── Booking panel: patient selector ──────────────────────────────────────────
 const bpPatientSel = document.getElementById('bp-patient-sel');
 const bpNewPatient = document.getElementById('bp-new-patient');
+// Paciente nueva: datos mínimos obligatorios (Valentina, 4 oct 2026). Se
+// revisan al enviar (no con "required" del navegador: esos campos quedan
+// ocultos al elegir una paciente existente y bloquearían el formulario).
+function actualizarSinRutNuevo() {
+  const sinRut = document.getElementById('bp-sin-rut')?.checked;
+  const rut = document.getElementById('bp-prut');
+  if (rut) { rut.disabled = !!sinRut; if (sinRut) rut.value = ''; }
+  const doc = document.getElementById('bp-doc');
+  if (doc) doc.style.display = sinRut ? '' : 'none';
+}
+document.getElementById('bp-sin-rut')?.addEventListener('change', actualizarSinRutNuevo);
+document.getElementById('bp-form')?.addEventListener('submit', (e) => {
+  if (bpPatientSel?.value !== '_new') return;
+  const val = (id) => (document.getElementById(id)?.value ?? '').trim();
+  const sinRut = document.getElementById('bp-sin-rut')?.checked;
+  const faltan = [];
+  if (!val('bp-pname')) faltan.push('nombre');
+  if (!val('bp-pphone')) faltan.push('teléfono');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val('bp-pemail'))) faltan.push('correo');
+  if (sinRut ? (!val('bp-doc-numero') || !val('bp-doc-pais')) : !val('bp-prut')) faltan.push(sinRut ? 'documento y país' : 'RUT');
+  if (!val('bp-paddress')) faltan.push('dirección');
+  if (!val('bp-pcomuna')) faltan.push('comuna');
+  if (!val('bp-emerg-name') || !val('bp-emerg-phone')) faltan.push('contacto de emergencia');
+  if (faltan.length) { e.preventDefault(); e.stopImmediatePropagation(); alert('Para crear la paciente falta: ' + faltan.join(', ') + '.'); }
+}, true);
 bpPatientSel?.addEventListener('change', () => {
   const isNew = bpPatientSel.value === '_new';
   bpNewPatient.style.display = isNew ? 'block' : 'none';
@@ -2116,6 +2189,10 @@ function openBloqueoPanel(fromDate, fromTime, toDate, toTime) {
   document.getElementById('bp-tab-open')?.classList.remove('active');
   document.getElementById('bp-open-body').style.display   = 'none';
   ocultarQuitarDisp();
+  // Las pestañas "Abrir"/"Quitar disponibilidad" leen bp-date/bp-time: que
+  // apunten al inicio del bloqueo arrastrado, no a la última celda clicada.
+  document.getElementById('bp-date').value = fromDate;
+  document.getElementById('bp-time').value = fromTime;
 
   document.getElementById('bp-blk-dfrom').value = fromDate;
   document.getElementById('bp-blk-dto').value   = toDate;
@@ -2779,9 +2856,12 @@ document.getElementById('sp-btn-emitir')?.addEventListener('click', async () => 
   btn.disabled = true;
   result.textContent = 'Emitiendo…'; result.style.color = '#6b7280';
   try {
+    // La sesión se fija al apretar: si mientras tanto se abre otra, la
+    // emisión (y un eventual "forzar") sigue siendo de esta.
+    const idSesion = currentBookingId;
     const emitirPost = (forzar) => fetch('/api/admin/apigateway', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'emitir', booking_id: currentBookingId, rut, forzar }),
+      body: JSON.stringify({ action: 'emitir', booking_id: idSesion, rut, forzar }),
     }).then(r => r.json());
     let data = await emitirPost(false);
     // Emisión anterior interrumpida: solo se vuelve a emitir si Valentina

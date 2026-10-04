@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { getAgwConfig, bheEmitidas, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion, emitBoletaParaReserva, enviarBoletaDeReserva, folioVigente, mensajeErrorSii, MARCA_PENDIENTE } from '../../../lib/apigateway';
+import { getAgwConfig, bheEmitidas, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion, emitBoletaParaReserva, enviarBoletaDeReserva, folioVigente, mensajeErrorSii, MARCA_PENDIENTE, registrarFolioManual } from '../../../lib/apigateway';
 import type { BheCausal } from '../../../lib/apigateway';
 import { logError } from '../../../lib/logger';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
@@ -67,6 +67,20 @@ export const POST: APIRoute = async ({ request }) => {
     if (!r.ok) return json({ ok: false, error: r.error ?? 'Error al emitir' }, 502);
     if (r.alreadyEmitted) return json({ ok: false, error: `Esta sesión ya tiene la boleta Folio ${r.folio}. Usa "Enviar por email" para reenviarla.` }, 400);
     return json({ ok: true, folio: r.folio, codigo: r.codigo, enviada: r.enviada, enviadaA: r.enviadaA, errorEnvio: r.errorEnvio });
+  }
+
+  // ── Registrar a mano un folio ya emitido en el SII ────────────────────────
+  // Para boletas que quedaron emitidas pero sin registrar en la sesión: así
+  // se quita el aviso rojo sin emitir una boleta duplicada.
+  if (action === 'registrar_folio') {
+    const bookingId = body.booking_id;
+    const folio = parseInt(String(body.folio ?? ''), 10);
+    if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
+    const r = await registrarFolioManual(bookingId, folio, body.enviar === true);
+    if (!r.ok) return json({ ok: false, error: r.error }, 400);
+    let envio: { sent: boolean; email?: string; error?: string } | null = null;
+    if (body.enviar === true) envio = await enviarBoletaDeReserva(bookingId);
+    return json({ ok: true, folio, enviada: envio?.sent ?? false, enviadaA: envio?.email, errorEnvio: envio?.error });
   }
 
   // ── Enviar la boleta por email al paciente ────────────────────────────────

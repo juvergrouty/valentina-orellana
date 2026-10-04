@@ -815,6 +815,12 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
           {boletaAlerts.slice(0, 6).map(a => (
             <li style="margin:0.15rem 0;">
               <a href={a.href} style="color:#fff;text-decoration:underline;font-weight:600;">{a.patientName}{a.sessionDate ? ` · sesión ${fmtSesion(a.sessionDate)}` : ''}</a>: {a.message}
+              {a.registrarFolio && (
+                <button type="button" class="btn-registrar-folio" data-booking={a.bookingId} data-folio={a.registrarFolio.sugerido ?? ''}
+                  style="margin-left:0.4rem;background:#fff;color:#dc2626;border:none;border-radius:4px;padding:0.15rem 0.55rem;font-size:0.78rem;font-weight:700;cursor:pointer;">
+                  Registrar folio
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -1190,6 +1196,34 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
         body: JSON.stringify({ action: 'descartar', ids }),
       }).then(r => r.json()).catch(() => ({ ok: false }));
       if (res.ok) li.remove(); else { estado.textContent = '⚠ No se pudo quitar el aviso'; botones.forEach(b => (b.disabled = false)); }
+    });
+  });
+</script>
+
+<script>
+  // "Registrar folio": la boleta quedó emitida en el SII pero no registrada en
+  // la sesión. Se anota el folio (sin emitir nada) y, si Valentina quiere, se
+  // envía a la paciente.
+  document.querySelectorAll<HTMLButtonElement>('.btn-registrar-folio').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const valor = prompt('Número de folio de la boleta (como aparece en el SII):', btn.dataset.folio ?? '');
+      if (valor === null) return;
+      const folio = parseInt(valor.trim(), 10);
+      if (!Number.isInteger(folio) || folio <= 0) { alert('Ese número de folio no es válido.'); return; }
+      const enviar = confirm(`¿Enviar la boleta Folio ${folio} por correo a la paciente?\n\nAceptar = registrar y enviar · Cancelar = solo registrar`);
+      btn.disabled = true; btn.textContent = 'Guardando…';
+      const res = await fetch('/api/admin/apigateway', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'registrar_folio', booking_id: btn.dataset.booking, folio, enviar }),
+      }).then(r => r.json()).catch(() => ({ ok: false, error: 'Error de conexión' }));
+      if (res.ok) {
+        btn.closest('li')!.textContent = res.enviada
+          ? `✓ Folio ${folio} registrado y enviado a ${res.enviadaA}.`
+          : enviar ? `✓ Folio ${folio} registrado. El correo no salió (${res.errorEnvio ?? 'error'}); se reintentará solo.` : `✓ Folio ${folio} registrado.`;
+      } else {
+        alert(res.error ?? 'No se pudo registrar el folio.');
+        btn.disabled = false; btn.textContent = 'Registrar folio';
+      }
     });
   });
 </script>

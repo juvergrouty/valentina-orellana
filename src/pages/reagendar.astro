@@ -182,7 +182,7 @@ const SESSION_LABELS: Record<string, string> = {
   #reschedule-form-wrap .slot-selected:hover { @apply bg-ink text-sand border-ink font-semibold; }
 </style>
 
-<script define:vars={{ bookingId, serviceId: booking?.service_id ?? '', durationMin: booking?.duration_min ?? '', clave: conClave ? clave : '' }}>
+<script define:vars={{ bookingId, serviceId: booking?.service_id ?? '', durationMin: booking?.duration_min ?? '', clave: conClave ? clave : '', modalidad: String(booking?.session_type ?? '').includes('online') ? 'online' : 'presencial' }}>
   const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const $ = id => document.getElementById(id);
 
@@ -191,6 +191,10 @@ const SESSION_LABELS: Record<string, string> = {
   let calYear  = new Date().getFullYear();
   let calMonth = new Date().getMonth();
   let loadedSlots = {};
+  // Días de la semana con horario, fechas cerradas y fechas con horas extra
+  // (mismo resumen que la agenda): antes todos los días se veían disponibles,
+  // incluidos feriados, y la paciente lo descubría recién al hacer clic.
+  let diasConHorario = null, fechasCerradas = new Set(), fechasExtra = new Set();
 
   function isoDate(y, m, d) {
     return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -215,6 +219,17 @@ const SESSION_LABELS: Record<string, string> = {
   // ── Calendario ─────────────────────────────────────────────────────────────
   if (bookingId && document.getElementById('calendar-grid')) {
     renderCalendar();
+    if (serviceId) {
+      fetch(`/api/availability/summary?service_id=${encodeURIComponent(serviceId)}`)
+        .then(r => r.json())
+        .then(d => {
+          diasConHorario = new Set(d.weekdays ?? []);
+          fechasCerradas = new Set(d.blocked ?? []);
+          fechasExtra = new Set(d.extra ?? []);
+          renderCalendar();
+        })
+        .catch(() => { /* si falla, se ven todos los días y el clic dice "sin horarios" */ });
+    }
 
     document.getElementById('prev-month')?.addEventListener('click', () => {
       const d = new Date(calYear, calMonth - 1, 1);
@@ -249,7 +264,8 @@ const SESSION_LABELS: Record<string, string> = {
     for (let d = 1; d <= daysInMonth; d++) {
       const iso = isoDate(y, m, d);
       const dateObj = new Date(iso + 'T00:00:00');
-      const isPast  = dateObj < minDate;
+      const sinHorario = diasConHorario !== null && !diasConHorario.has(dateObj.getDay()) && !fechasExtra.has(iso);
+      const isPast  = dateObj < minDate || sinHorario || fechasCerradas.has(iso);
       const isSel   = iso === selectedDate;
 
       const btn = document.createElement('button');
@@ -286,7 +302,7 @@ const SESSION_LABELS: Record<string, string> = {
         // los servicios mezcladas, ~120 por día y repetidas).
         const svcQ = serviceId ? `&service_id=${encodeURIComponent(serviceId)}` : '';
         const durQ = durationMin ? `&duration=${durationMin}` : '';
-        const res  = await fetch(`/api/availability?date=${iso}${svcQ}${durQ}`);
+        const res  = await fetch(`/api/availability?date=${iso}${svcQ}${durQ}&modality=${modalidad}`);
         const data = await res.json();
         slots = data.slots ?? [];
         loadedSlots[iso] = slots;
@@ -359,6 +375,9 @@ const SESSION_LABELS: Record<string, string> = {
         if (detail) detail.textContent = `Tu nueva sesión queda agendada para el ${formatDateEs(selectedDate)} a las ${selectedTime}.`;
       } else {
         if (errEl) { errEl.textContent = data.error ?? 'Error al reagendar.'; errEl.classList.remove('hidden'); }
+        // Hora tomada: se olvidan las horas guardadas para que al elegir otra
+        // vez se vean las actuales.
+        if (res.status === 409) loadedSlots = {};
         btn.textContent = 'Confirmar nuevo horario';
         btn.disabled = false;
       }

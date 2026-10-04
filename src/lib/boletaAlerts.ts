@@ -14,10 +14,11 @@ export interface BoletaAlert {
   sessionDate: string | null;
   message:     string;
   href:        string;
+  registrarFolio?: { sugerido: number | null }; // ofrecer "Registrar folio" (boleta posiblemente emitida sin registrar)
 }
 
 // Contextos de log que significan "la boleta no se emitió".
-const CTX_EMISION = ['boleta/emision', 'flow/boleta-automatica', 'boleta/confirmar-manual', 'boleta/marcar-pagado'];
+const CTX_EMISION = ['boleta/emision', 'flow/boleta-automatica', 'boleta/confirmar-manual', 'boleta/marcar-pagado', 'boleta/folio-no-guardado'];
 // Contextos que significan "se emitió pero no se envió".
 const CTX_ENVIO = ['boleta/envio'];
 
@@ -44,13 +45,14 @@ export async function getBoletaAlerts(): Promise<BoletaAlert[]> {
   ]);
 
   // Último fallo registrado por reserva (los logs vienen del más nuevo al más viejo).
-  const fallo = new Map<string, { tipo: 'emision' | 'envio'; error: string; at: number }>();
+  const fallo = new Map<string, { tipo: 'emision' | 'envio'; error: string; at: number; ctx: string; folio: number | null }>();
   for (const l of logs ?? []) {
     const d = (l.data ?? {}) as Record<string, unknown>;
     const id = typeof d.bookingId === 'string' ? d.bookingId : null;
     if (!id || fallo.has(id)) continue;
     const error = typeof d.error === 'string' && d.error ? d.error : l.message;
-    fallo.set(id, { tipo: CTX_ENVIO.includes(l.context) ? 'envio' : 'emision', error, at: Date.parse(l.created_at) });
+    const folio = typeof d.folio === 'number' ? d.folio : (typeof d.folio === 'string' && /^\d+$/.test(d.folio) ? parseInt(d.folio, 10) : null);
+    fallo.set(id, { tipo: CTX_ENVIO.includes(l.context) ? 'envio' : 'emision', error, at: Date.parse(l.created_at), ctx: l.context, folio });
   }
 
   const ids = [...new Set([...fallo.keys(), ...(pendientes ?? []).map(p => p.id)])];
@@ -74,8 +76,13 @@ export async function getBoletaAlerts(): Promise<BoletaAlert[]> {
     const emitiendo = new RegExp(`${MARCA_EMITIENDO} (\\S+)`).exec(b.notes ?? '');
     const pendEm = new RegExp(`${MARCA_PENDIENTE_EMISION} (\\S+)`).exec(b.notes ?? '');
 
-    if (!vigente && emitiendo && Date.now() - Date.parse(emitiendo[1]) > EMISION_CANDADO_MS) {
-      message = 'La emisión de la boleta se interrumpió. Revisa en el SII si quedó emitida: si no, emítela desde el calendario (te pedirá confirmar).';
+    let registrarFolio: BoletaAlert['registrarFolio'];
+    if (!vigente && f?.ctx === 'boleta/folio-no-guardado') {
+      message = `La boleta Folio ${f.folio ?? '?'} SÍ se emitió en el SII, pero no quedó registrada en la sesión. No la emitas de nuevo: usa "Registrar folio".`;
+      registrarFolio = { sugerido: f.folio };
+    } else if (!vigente && emitiendo && Date.now() - Date.parse(emitiendo[1]) > EMISION_CANDADO_MS) {
+      message = 'La emisión de la boleta se interrumpió. Revisa en el SII si quedó emitida: si está, usa "Registrar folio"; si no, emítela desde el calendario (te pedirá confirmar).';
+      registrarFolio = { sugerido: null };
     } else if (!vigente && pendEm) {
       const dias = (Date.now() - Date.parse(pendEm[1])) / 86400000;
       message = dias > 7
@@ -96,6 +103,7 @@ export async function getBoletaAlerts(): Promise<BoletaAlert[]> {
       patientName: b.patient_name ?? '(sin nombre)',
       sessionDate: b.session_date ?? null,
       message,
+      registrarFolio,
       href: ficha ? `/admin/pacientes/${ficha}?tab=sesiones` : '/admin/logs?filtro=error',
     });
   }
