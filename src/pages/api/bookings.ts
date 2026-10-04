@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
 import { createPaymentOrder, PUBLIC_PAY_TIMEOUT_SECONDS } from '../../lib/flow';
+import { limpiarNotasPaciente } from '../../lib/notasPaciente';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
 import { logInfo, logWarn, logError } from '../../lib/logger';
 import { upsertPatientFromBooking } from '../../lib/patients';
@@ -171,7 +172,7 @@ async function handleBooking(request: Request) {
         patient_email:  patient_email.trim().toLowerCase(),
         patient_phone:  patient_phone.trim(),
         patient_rut:    rutClean,
-        notes:          notes?.trim() ?? null,
+        notes:          limpiarNotasPaciente(notes), // sin marcas internas falsas (ver notasPaciente.ts)
         status:         'pending_payment',
         payment_method: 'flow',
         amount:         finalPrice,

@@ -108,7 +108,17 @@ export const POST: APIRoute = async ({ request }) => {
           .from('bookings').select('*')
           .ilike('notes', `%PagoToken ${likeToken}%`)
           .is('paid_at', null);
-        if (historicos && historicos.length) candidates = historicos;
+        if (historicos && historicos.length) {
+          // Segunda defensa: por esta vía (historial de links), el monto pagado
+          // en Flow tiene que coincidir con el de las sesiones encontradas. Si
+          // no, no se confirma nada y queda para revisión manual.
+          const suma = historicos.reduce((t: number, h: { amount?: number | null }) => t + (Number(h.amount) || 0), 0);
+          if (Number(status.amount) === suma) {
+            candidates = historicos;
+          } else {
+            await logError('flow/monto-no-coincide', 'Pago de Flow encontrado por el historial de links, pero el monto no coincide con las sesiones: no se confirmó. Revisar en Flow.', { token, flowOrder: status.flowOrder, pagado: status.amount, esperado: suma, ids: historicos.map((h: { id: string }) => h.id) });
+          }
+        }
       }
 
       // Pago tardío de una reserva que ya se había liberado ('expired', pasó
