@@ -1,10 +1,10 @@
 ---
 export const prerender = false;
 
+import { tokenAdminValido } from '../../lib/adminSession';
+
 // Si ya tiene sesión, redirigir al panel
-const token    = Astro.cookies.get('vo_admin_token')?.value ?? '';
-const expected = import.meta.env.ADMIN_SECRET;
-if (expected && token === expected) {
+if (tokenAdminValido(Astro.cookies.get('vo_admin_token')?.value)) {
   return Astro.redirect('/admin');
 }
 
@@ -105,7 +105,8 @@ const error = Astro.url.searchParams.get('error');
       <label for="password">Contraseña</label>
       <input id="password" name="password" type="password" required autocomplete="current-password" autofocus />
       <button type="submit">Ingresar</button>
-      {error && <p class="error">Contraseña incorrecta.</p>}
+      {error === 'bloqueado' && <p class="error">Demasiados intentos fallidos. Espera 15 minutos y vuelve a intentarlo.</p>}
+      {error && error !== 'bloqueado' && <p class="error">Contraseña incorrecta.</p>}
     </form>
   </div>
 </body>

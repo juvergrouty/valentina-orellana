@@ -1,4 +1,5 @@
 import { defineMiddleware } from 'astro:middleware';
+import { tokenAdminValido } from './lib/adminSession';
 
 const COOKIE = 'vo_admin_token';
 
@@ -20,10 +21,10 @@ export const onRequest = defineMiddleware((context, next) => {
     return next();
   }
 
-  const token    = context.cookies.get(COOKIE)?.value ?? '';
-  const expected = import.meta.env.ADMIN_SECRET;
+  // Token firmado con vencimiento (ver src/lib/adminSession.ts).
+  const token = context.cookies.get(COOKIE)?.value ?? '';
 
-  if (!expected || token !== expected) {
+  if (!tokenAdminValido(token)) {
     // Las API routes devuelven 401 JSON, las páginas redirigen al login
     if (isAdminApi) {
       return new Response(JSON.stringify({ error: 'No autorizado.' }), {
