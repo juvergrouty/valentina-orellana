@@ -250,7 +250,8 @@ const disponibilidadSemana: Array<{ fecha: string; hora: string; min: number; du
   const durSvc = new Map((allServices as Array<{ id: string; duration_min?: number | null }>).map(sv => [sv.id, sv.duration_min ?? 50]));
   for (const d of weekDays) {
     for (const sl of availByDow[d.dow] ?? []) {
-      if (!sl.svc || quitadasSemana.has(`${d.isoDate}|${sl.start}|${sl.svc}`)) continue;
+      // Solo servicios visibles en la web (los ocultos, como los packs, no se ofrecen a pacientes).
+      if (!sl.svc || !durSvc.has(sl.svc) || quitadasSemana.has(`${d.isoDate}|${sl.start}|${sl.svc}`)) continue;
       disponibilidadSemana.push({ fecha: d.isoDate, hora: sl.start, min: sl.min, dur: durSvc.get(sl.svc) ?? 50, svc: sl.svc, label: svcMap[sl.svc] ?? 'Servicio', slotId: sl.id });
     }
     for (const x of extraByDate[d.isoDate] ?? []) {
@@ -1386,7 +1387,7 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
 
 /* ── Booking panel specific ──────────────────────────────────────────────── */
 .bp-date-label { font-size: 0.875rem; font-weight: 600; color: #111827; margin-bottom: 0.5rem; }
-.bp-tabs { display: flex; gap: 0.25rem; }
+.bp-tabs { display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .bp-tab {
   display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem;
   border: 1px solid #d1d5db; border-radius: 6px; background: white;
