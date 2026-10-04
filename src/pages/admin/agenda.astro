@@ -217,7 +217,7 @@ bookings.forEach(b => { (byDate[b.session_date] ??= []).push(b); });
 // Horas abiertas solo para un día (horasExtra.ts): se pintan siempre, en el
 // color del servicio (o neutro si son para un grupo), con borde punteado. Si
 // ya hay una sesión a esa hora, no se pinta (la hora ya se tomó).
-type ExtraBlock = { hora: string; min: number; svc: string; label: string; height: number };
+type ExtraBlock = { id: string; fecha: string; hora: string; min: number; svc: string; label: string; height: number };
 const extraByDate: Record<string, ExtraBlock[]> = {};
 {
   const fechasSemana = new Set(weekDays.map(d => d.isoDate));
@@ -229,7 +229,7 @@ const extraByDate: Record<string, ExtraBlock[]> = {};
     if (ocupada) continue;
     const [hh, mm] = h.hora.split(':').map(Number);
     (extraByDate[h.fecha] ??= []).push({
-      hora: h.hora, min: hh * 60 + mm, svc: h.servicioId ?? '',
+      id: h.id, fecha: h.fecha, hora: h.hora, min: hh * 60 + mm, svc: h.servicioId ?? '',
       label: h.servicioId ? (svcMap[h.servicioId] ?? 'Servicio') : (GRUPO[h.modalidad] ?? 'Varios servicios'),
       height: h.servicioId ? (durPorServicio.get(h.servicioId) ?? 50) : 50,
     });
@@ -281,6 +281,9 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
     <div class="cal-toolbar">
       {errorParam === 'conflict' && (
         <div class="cal-error-banner">⚠ Conflicto de horario — elige otro.</div>
+      )}
+      {Astro.url.searchParams.get('saved') === 'extra-quitada' && (
+        <div class="cal-error-banner" style="background:#f0fdf4;border-color:#86efac;color:#15803d;">✓ Hora abierta quitada.</div>
       )}
       {Astro.url.searchParams.get('saved') === 'extra' && (
         <div class="cal-error-banner" style="background:#f0fdf4;border-color:#86efac;color:#15803d;">✓ Disponibilidad abierta: ya aparece en la agenda web ese día.</div>
@@ -465,8 +468,8 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
             ))}
 
             {(extraByDate[day.isoDate] ?? []).map(x => (
-              <div class="extra-block" data-svc={x.svc}
-                title={`Hora abierta solo este día · ${x.hora} · ${x.label}`}
+              <div class="extra-block" data-svc={x.svc} data-id={x.id} data-desc={`${x.fecha.split('-').reverse().slice(0, 2).join('/')} ${x.hora} · ${x.label}`}
+                title={`Hora abierta solo este día · ${x.hora} · ${x.label} · clic para quitarla`}
                 style={`top:${x.min - 360}px;height:${Math.max(x.height, 24) - 2}px;--svcbg:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bg};--svcbd:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bd}`}></div>
             ))}
 
@@ -1473,10 +1476,11 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
    visibles. Antes tenían texto y borde y parecían una sesión agendada. */
 .extra-block {
   position: absolute; left: 2px; right: 2px; border-radius: 4px; z-index: 1;
-  pointer-events: none;
+  cursor: pointer;
   background: var(--svcbg, rgba(148,163,184,0.14));
   border-left: 3px solid var(--svcbd, #94a3b8);
 }
+.extra-block:hover { filter: brightness(0.95); }
 .extra-block.svc-hidden { display: none !important; }
 /* visible solo cuando el toggle está activo */
 .cal-scroll.avail-on .avail-block { display: block; }
@@ -1797,7 +1801,7 @@ function applyDragSel(startIdx, endIdx, fromSnap, toSnap) {
 
 allCols.forEach(col => {
   col.addEventListener('mousedown', e => {
-    if (e.target.closest('.cal-event')) return;
+    if (e.target.closest('.cal-event') || e.target.closest('.extra-block')) return;
     if (e.button !== 0) return;
     e.preventDefault();
 
@@ -1940,6 +1944,23 @@ bpServiceSel?.addEventListener('change', () => {
 });
 bpSessionsSel?.addEventListener('change', updatePrice);
 document.querySelectorAll('input[name="modality_choice"]').forEach(r => r.addEventListener('change', updatePrice));
+
+// ── Quitar una hora abierta para un día: clic en su franja del calendario ──────
+document.querySelectorAll('.extra-block').forEach((el) => {
+  el.addEventListener('mousedown', (e) => e.stopPropagation()); // no inicia selección de la celda
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!confirm(`¿Quitar esta hora abierta?\n\n${el.dataset.desc}\n\nDeja de aparecer en la agenda web.`)) return;
+    const f = document.createElement('form');
+    f.method = 'POST';
+    f.action = '/api/admin/horas-extra';
+    for (const [k, v] of [['action', 'quitar'], ['id', el.dataset.id], ['volver', window.location.pathname + window.location.search]]) {
+      const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = v; f.appendChild(i);
+    }
+    document.body.appendChild(f);
+    f.submit();
+  });
+});
 
 // ── Booking panel: tabs ───────────────────────────────────────────────────────
 document.getElementById('bp-tab-agenda')?.addEventListener('click', () => {
