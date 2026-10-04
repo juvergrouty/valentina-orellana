@@ -1,7 +1,11 @@
 ---
 import { getCachedReviews } from '../../lib/googleReviews';
+import { supabase } from '../../lib/supabase';
 
 const cache    = await getCachedReviews();
+// Link a todas las reseñas en Google (antes "12 reseñas en Google" era texto sin enlace).
+const { data: placeRow } = await supabase.from('settings').select('value').eq('key', 'google_place_id').maybeSingle();
+const reviewsUrl = placeRow?.value ? `https://search.google.com/local/reviews?placeid=${encodeURIComponent(placeRow.value)}` : null;
 const reviews  = (cache?.reviews ?? []).filter(r => r.text);
 const featured = reviews[0] ?? null;
 const others   = reviews.slice(1, 5);
@@ -49,7 +53,9 @@ function stars(n: number) {
 
     {cache?.total && (
       <p class="text-center label text-stone mt-14">
-        {cache.rating?.toFixed(1)} ★ · {cache.total} reseñas en Google
+        {reviewsUrl
+          ? <a href={reviewsUrl} target="_blank" rel="noopener" class="underline underline-offset-4 hover:text-ink">{Number(cache.rating ?? 5).toFixed(1)} ★ · Ver las {cache.total} reseñas en Google</a>
+          : <>{Number(cache.rating ?? 5).toFixed(1)} ★ · {cache.total} reseñas en Google</>}
       </p>
     )}
 

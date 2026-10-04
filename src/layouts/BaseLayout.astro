@@ -34,6 +34,13 @@ const jsonLd = Astro.url.pathname === '/' ? {
   areaServed: [{ '@type': 'City', name: 'Las Condes' }, { '@type': 'Country', name: 'Chile' }],
   availableLanguage: 'es',
 } : null;
+// Botones flotantes: en /agenda el de WhatsApp sube para no tapar el sello de
+// reCAPTCHA; el de "Agendar sesión" (solo celular) no aparece en el flujo de
+// reserva/pago ni en páginas privadas.
+const ruta = Astro.url.pathname.replace(/\/$/, '') || '/';
+const enAgenda = ruta === '/agenda';
+const mostrarAgendarFlotante = !['/agenda', '/reagendar', '/confirmacion', '/recuperar'].includes(ruta)
+  && !/^\/(pagar|consentimiento|pasos-a-seguir)\//.test(ruta) && !noindex;
 ---
 
 <!doctype html>
@@ -80,13 +87,24 @@ const jsonLd = Astro.url.pathname === '/' ? {
     </main>
     <Footer />
 
-    <!-- Botón flotante WhatsApp -->
+    <!-- Botón flotante "Agendar sesión" solo en celular (en el menú del celular
+         el botón queda escondido tras la hamburguesa). No en las páginas del
+         propio flujo de reserva/pago. -->
+    {mostrarAgendarFlotante && (
+      <a href="/agenda"
+         class="md:hidden fixed bottom-6 left-6 z-50 h-14 px-6 rounded-full shadow-lg flex items-center font-body text-sm font-medium tracking-wide text-white"
+         style="background-color:#576352;">
+        Agendar sesión
+      </a>
+    )}
+
+    <!-- Botón flotante WhatsApp (en /agenda más arriba: no tapa el sello de reCAPTCHA) -->
     <a
       href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20me%20gustar%C3%ADa%20saber%20m%C3%A1s%20sobre%20las%20sesiones."
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Contactar por WhatsApp"
-      class="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-transform duration-200 hover:scale-110"
+      class={`fixed ${enAgenda ? 'bottom-24' : 'bottom-6'} right-6 z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-transform duration-200 hover:scale-110`}
       style="background-color: #25D366;"
     >
       <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="white">
