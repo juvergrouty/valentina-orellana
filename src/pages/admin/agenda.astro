@@ -307,7 +307,20 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
         <div class="cal-error-banner">⚠ Conflicto de horario — elige otro.</div>
       )}
       {(Astro.url.searchParams.get('saved') === 'hora-quitada-dia' || Astro.url.searchParams.get('saved') === 'hora-quitada-semanal') && (
-        <div class="cal-error-banner" style="background:#f0fdf4;border-color:#86efac;color:#15803d;">{Astro.url.searchParams.get('saved') === 'hora-quitada-dia' ? '✓ Hora quitada solo ese día.' : '✓ Hora quitada del horario semanal.'}</div>
+        <div class="cal-error-banner" style="background:#f0fdf4;border-color:#86efac;color:#15803d;display:flex;align-items:center;gap:0.5rem;">
+          {Astro.url.searchParams.get('saved') === 'hora-quitada-dia' ? '✓ Hora quitada solo ese día.' : '✓ Hora quitada del horario semanal.'}
+          {Astro.url.searchParams.get('deshacer') && (
+            <form method="POST" action="/api/admin/horas-extra" style="display:inline;">
+              <input type="hidden" name="action" value="restaurar-semanal" />
+              <input type="hidden" name="slot_id" value={Astro.url.searchParams.get('deshacer') ?? ''} />
+              <input type="hidden" name="volver" value={`/admin/agenda?w=${weekOffset}`} />
+              <button type="submit" style="background:#15803d;color:#fff;border:none;border-radius:4px;padding:0.15rem 0.6rem;font-size:0.78rem;cursor:pointer;">Deshacer</button>
+            </form>
+          )}
+        </div>
+      )}
+      {Astro.url.searchParams.get('saved') === 'hora-restaurada' && (
+        <div class="cal-error-banner" style="background:#f0fdf4;border-color:#86efac;color:#15803d;">✓ Listo, la hora volvió a tu horario semanal.</div>
       )}
       {Astro.url.searchParams.get('saved') === 'extra-quitada' && (
         <div class="cal-error-banner" style="background:#f0fdf4;border-color:#86efac;color:#15803d;">✓ Hora abierta quitada.</div>

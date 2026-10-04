@@ -37,7 +37,16 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const slotId = form.get('slot_id')?.toString() ?? '';
     if (!slotId) return redirect(`${dest}${sep}error=extra-guardar`);
     const { error } = await supabase.from('availability_slots').update({ active: false }).eq('id', slotId);
-    return redirect(`${dest}${sep}${error ? 'error=extra-guardar' : 'saved=hora-quitada-semanal'}`);
+    // Lleva el id para poder ofrecer "Deshacer" en el aviso.
+    return redirect(`${dest}${sep}${error ? 'error=extra-guardar' : `saved=hora-quitada-semanal&deshacer=${encodeURIComponent(slotId)}`}`);
+  }
+
+  // Deshacer "Todas las semanas": vuelve a activar esa franja del horario semanal.
+  if (action === 'restaurar-semanal') {
+    const slotId = form.get('slot_id')?.toString() ?? '';
+    if (!slotId) return redirect(`${dest}${sep}error=extra-guardar`);
+    const { error } = await supabase.from('availability_slots').update({ active: true }).eq('id', slotId);
+    return redirect(`${dest}${sep}${error ? 'error=extra-guardar' : 'saved=hora-restaurada'}`);
   }
 
   if (action === 'agregar') {
