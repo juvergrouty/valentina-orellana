@@ -83,7 +83,9 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
     ? 'Pago en consulta'
     : data.payment_method === 'transferencia'
     ? 'Transferencia bancaria'
-    : 'Pagado con Flow';
+    : !data.payment_method || data.payment_method === 'flow'
+    ? 'Pagado con Flow'
+    : `Pagado · ${escapeHtml(data.payment_method)}`; // ej. "Efectivo" desde Marcar como pagado
 
   const subject = `Sesión confirmada — Ps. Valentina Orellana`;
   const res = await client.emails.send({

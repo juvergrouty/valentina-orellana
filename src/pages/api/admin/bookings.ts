@@ -108,6 +108,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const rut    = form.get('rut')?.toString()?.trim();
     if (!id) return redirect(dest);
 
+    // Estado antes de pagar: una reserva que esperaba pago (pending_payment)
+    // recibe el correo de confirmación, igual que cuando pagan con Flow.
+    const { data: previa } = await supabase.from('bookings').select('status, paid_at').eq('id', id).maybeSingle();
+    const esperabaPago = previa?.status === 'pending_payment' && !previa?.paid_at;
+
     let { error } = await supabase.from('bookings')
       .update({ paid_at: new Date().toISOString(), payment_note: medio, status: 'confirmed' })
       .eq('id', id);
@@ -127,9 +132,27 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       await markBookingPaidInCalendar(id, true);
     } catch (e) { console.error('[mark_paid] calendar:', e); }
 
-    // "Pasos a seguir" automático si es el primer pago del paciente.
+    // Correo "Tu reserva está confirmada" (con el link para reagendar) si la
+    // reserva esperaba pago y tiene fecha. No para deudas de sesiones pasadas.
     const { data: pagada } = await supabase.from('bookings')
-      .select('patient_name, patient_email, patient_phone, patient_rut').eq('id', id).maybeSingle();
+      .select('patient_name, patient_email, patient_phone, patient_rut, session_type, session_date, session_time, amount, payment_method, service_id').eq('id', id).maybeSingle();
+    if (esperabaPago && pagada?.patient_email && pagada.session_date !== '2099-12-31') {
+      let serviceName: string | undefined;
+      if (pagada.service_id) {
+        const { data: svc } = await supabase.from('services_catalog').select('name').eq('id', pagada.service_id).maybeSingle();
+        serviceName = svc?.name;
+      }
+      try {
+        await sendConfirmationToClient({
+          patient_name: pagada.patient_name, patient_email: pagada.patient_email, patient_phone: pagada.patient_phone ?? '',
+          session_type: pagada.session_type, session_date: pagada.session_date, session_time: String(pagada.session_time).slice(0, 5),
+          amount: pagada.amount ?? 0, payment_method: /transfer/i.test(medio) ? 'transferencia' : /flow/i.test(medio) ? 'flow' : medio,
+          service_name: serviceName, booking_id: id,
+        });
+      } catch (e) { console.error('[mark_paid] confirmación:', e); }
+    }
+
+    // "Pasos a seguir" (y el consentimiento) automático si es el primer pago del paciente.
     if (pagada) await sendStepsOnFirstPayment({ ...pagada, rut: pagada.patient_rut }, [id]);
 
     if (emitir) {
