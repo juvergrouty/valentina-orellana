@@ -175,14 +175,14 @@ const volverAqui = `/admin/servicios/horario/${service.id}`;
     </form>
     {extrasServicio.length > 0 && (
       <div style="margin-top:1rem;border-top:1px solid var(--warm);padding-top:0.75rem;display:flex;flex-direction:column;gap:0.4rem;">
-        <p class="label" style="font-size:0.68rem;">Próximas horas en fechas específicas</p>
+        <p class="label" style="font-size:0.68rem;">Cambios en fechas específicas</p>
         {extrasServicio.map(h => (
           <form method="POST" action="/api/admin/horas-extra" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
             <input type="hidden" name="action" value="quitar" />
             <input type="hidden" name="id" value={h.id} />
             <input type="hidden" name="volver" value={volverAqui} />
-            <span style="font-size:0.82rem;"><strong style="text-transform:capitalize;">{fechaC(h.fecha)}</strong> · {h.hora}</span>
-            <button type="submit" class="btn btn-outline btn-sm">Quitar</button>
+            <span style="font-size:0.82rem;"><strong style="text-transform:capitalize;">{fechaC(h.fecha)}</strong> · {h.hora}{h.quitar ? <span style="color:#b45309;"> · quitada solo ese día</span> : ' · abierta'}</span>
+            <button type="submit" class="btn btn-outline btn-sm">{h.quitar ? 'Restaurar' : 'Quitar'}</button>
           </form>
         ))}
       </div>

@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { nowCL } from '../../lib/dateUtils';
 import { expireStaleBookings } from '../../lib/expireBooking';
 import { logError } from '../../lib/logger';
-import { leerHorasExtra, aplicaA } from '../../lib/horasExtra';
+import { leerHorasExtra, aplicaA, estaQuitada } from '../../lib/horasExtra';
 import { getValidAccessToken } from '../../lib/syncCalendar';
 import { busyIntervals } from '../../lib/googleCalendar';
 
@@ -171,10 +171,13 @@ export const GET: APIRoute = async ({ url }) => {
   if (serviceId) {
     try {
       const svcModalidad = (svcCfg as { modality?: string } | null)?.modality;
-      const extras = (await leerHorasExtra()).filter(h => h.fecha === dateParam && aplicaA(h, svcModalidad, serviceId));
+      const todas = await leerHorasExtra();
+      const extras = todas.filter(h => !h.quitar && h.fecha === dateParam && aplicaA(h, svcModalidad, serviceId));
       for (const h of extras) {
         if (!slotsDelDia.some(s => s.start_time.slice(0, 5) === h.hora)) slotsDelDia = [...slotsDelDia, { start_time: `${h.hora}:00` }];
       }
+      // Horas quitadas solo este día para este servicio (excepción al horario semanal).
+      slotsDelDia = slotsDelDia.filter(s => !estaQuitada(todas, dateParam, s.start_time.slice(0, 5), serviceId));
       slotsDelDia = [...slotsDelDia].sort((a, b) => a.start_time.localeCompare(b.start_time));
     } catch (e) {
       await logError('availability/horas-extra', 'No se pudieron leer las horas extra', { error: e instanceof Error ? e.message : String(e) });

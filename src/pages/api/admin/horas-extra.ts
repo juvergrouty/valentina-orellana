@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { agregarHoraExtra, quitarHoraExtra, type ModalidadExtra } from '../../../lib/horasExtra';
+import { agregarHoraExtra, quitarHoraExtra, quitarHoraDelDia, type ModalidadExtra } from '../../../lib/horasExtra';
 import { todayCL } from '../../../lib/dateUtils';
 import { supabase } from '../../../lib/supabase';
 
@@ -19,6 +19,25 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const id = form.get('id')?.toString() ?? '';
     if (id) await quitarHoraExtra(id);
     return redirect(`${dest}${sep}saved=extra-quitada#horas-extra`);
+  }
+
+  // Quitar una hora del horario semanal SOLO en esa fecha, para un servicio.
+  if (action === 'quitar-dia') {
+    const fecha = form.get('fecha')?.toString() ?? '';
+    const hora  = (form.get('hora')?.toString() ?? '').slice(0, 5);
+    const svcId = form.get('servicio_id')?.toString() ?? '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !/^\d{2}:\d{2}$/.test(hora) || !svcId) return redirect(`${dest}${sep}error=extra-guardar`);
+    const ok = await quitarHoraDelDia(fecha, hora, svcId);
+    return redirect(`${dest}${sep}${ok ? 'saved=hora-quitada-dia' : 'error=extra-guardar'}`);
+  }
+
+  // Quitar una hora del horario semanal de un servicio para TODAS las semanas
+  // (desactiva esa franja; las sesiones ya agendadas no se tocan).
+  if (action === 'quitar-semanal') {
+    const slotId = form.get('slot_id')?.toString() ?? '';
+    if (!slotId) return redirect(`${dest}${sep}error=extra-guardar`);
+    const { error } = await supabase.from('availability_slots').update({ active: false }).eq('id', slotId);
+    return redirect(`${dest}${sep}${error ? 'error=extra-guardar' : 'saved=hora-quitada-semanal'}`);
   }
 
   if (action === 'agregar') {

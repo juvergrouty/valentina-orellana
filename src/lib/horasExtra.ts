@@ -11,7 +11,9 @@ import { todayCL } from './dateUtils';
 export type ModalidadExtra = 'presencial' | 'online' | 'ambos';
 // servicioId: si viene, la hora es solo para ese servicio; si no, para todos los
 // servicios de esa modalidad.
-export interface HoraExtra { id: string; fecha: string; hora: string; modalidad: ModalidadExtra; servicioId?: string }
+// quitar: en vez de abrir una hora, la QUITA solo ese día para ese servicio
+// (excepción a su horario semanal). Se deshace borrando la entrada.
+export interface HoraExtra { id: string; fecha: string; hora: string; modalidad: ModalidadExtra; servicioId?: string; quitar?: boolean }
 
 const KEY = 'horas_extra';
 
@@ -36,7 +38,7 @@ async function guardar(lista: HoraExtra[]): Promise<boolean> {
 
 export async function agregarHoraExtra(fecha: string, hora: string, modalidad: ModalidadExtra, servicioId?: string): Promise<boolean> {
   const lista = await leerHorasExtra();
-  const repetida = lista.some(h => h.fecha === fecha && h.hora === hora &&
+  const repetida = lista.some(h => !h.quitar && h.fecha === fecha && h.hora === hora &&
     (servicioId ? h.servicioId === servicioId : (!h.servicioId && (h.modalidad === modalidad || h.modalidad === 'ambos'))));
   if (repetida) return true;
   lista.push({ id: crypto.randomUUID(), fecha, hora, modalidad, ...(servicioId ? { servicioId } : {}) });
@@ -53,4 +55,17 @@ export function aplicaA(h: HoraExtra, modalidadServicio: string | null | undefin
   if (h.servicioId) return h.servicioId === serviceId; // hora solo para un servicio
   if (!modalidadServicio || modalidadServicio === 'ambos' || h.modalidad === 'ambos') return true;
   return h.modalidad === modalidadServicio;
+}
+
+/** Quita una hora de un servicio SOLO en esa fecha (su horario semanal no cambia). */
+export async function quitarHoraDelDia(fecha: string, hora: string, servicioId: string): Promise<boolean> {
+  const lista = await leerHorasExtra();
+  if (lista.some(h => h.quitar && h.fecha === fecha && h.hora === hora && h.servicioId === servicioId)) return true;
+  lista.push({ id: crypto.randomUUID(), fecha, hora, modalidad: 'ambos', servicioId, quitar: true });
+  return guardar(lista);
+}
+
+/** ¿Esa hora de ese servicio está quitada ese día? */
+export function estaQuitada(lista: HoraExtra[], fecha: string, hora: string, servicioId: string | null | undefined): boolean {
+  return !!servicioId && lista.some(h => h.quitar && h.fecha === fecha && h.hora === hora && h.servicioId === servicioId);
 }

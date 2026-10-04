@@ -48,7 +48,7 @@ export const GET: APIRoute = async ({ url }) => {
   if (serviceId) {
     try {
       const { data: svc } = await supabase.from('services_catalog').select('modality').eq('id', serviceId).maybeSingle();
-      extra = [...new Set((await leerHorasExtra()).filter(h => h.fecha >= today && aplicaA(h, svc?.modality, serviceId)).map(h => h.fecha))];
+      extra = [...new Set((await leerHorasExtra()).filter(h => !h.quitar && h.fecha >= today && aplicaA(h, svc?.modality, serviceId)).map(h => h.fecha))];
     } catch { /* sin horas extra */ }
   }
 

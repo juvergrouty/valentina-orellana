@@ -510,16 +510,17 @@ const feriados: [string, string][] = [
         </form>
         {horasExtra.length > 0 && (
           <div style="margin-top:1rem;border-top:1px solid var(--warm);padding-top:0.75rem;display:flex;flex-direction:column;gap:0.4rem;">
-            <p class="label" style="font-size:0.68rem;">Próximas horas extra</p>
+            <p class="label" style="font-size:0.68rem;">Próximos cambios en días específicos</p>
             {horasExtra.map(h => (
               <form method="POST" action="/api/admin/horas-extra" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
                 <input type="hidden" name="action" value="quitar" />
                 <input type="hidden" name="id" value={h.id} />
                 <span style="font-size:0.8rem;color:var(--ink);">
                   <strong style="text-transform:capitalize;">{fechaCorta(h.fecha)}</strong> · {h.hora} · {h.servicioId ? (nombreServicio.get(h.servicioId) ?? 'Servicio') : `Todos: ${MOD_LABEL[h.modalidad] ?? h.modalidad}`}
+                  {h.quitar && <span style="color:#b45309;"> · quitada solo ese día</span>}
                   {fechasBloqueadas.has(h.fecha) && <span style="color:#b45309;"> · ⚠ ese día está cerrado: no se mostrará</span>}
                 </span>
-                <button type="submit" class="btn btn-outline btn-sm" style="flex-shrink:0;">Quitar</button>
+                <button type="submit" class="btn btn-outline btn-sm" style="flex-shrink:0;">{h.quitar ? 'Restaurar' : 'Quitar'}</button>
               </form>
             ))}
           </div>

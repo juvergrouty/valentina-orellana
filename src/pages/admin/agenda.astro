@@ -100,19 +100,19 @@ const NEUTRAL_COLOR = { bg: '#eef2f7', bd: '#94a3b8' };
 // El horario es POR SERVICIO → cada franja trae su service_id. Degrada si aún no existe.
 async function fetchAvailSlots() {
   const withSvc = await supabase.from('availability_slots')
-    .select('day_of_week, start_time, active, service_id').eq('active', true);
+    .select('id, day_of_week, start_time, active, service_id').eq('active', true);
   if (withSvc.error?.code === '42703') {
     return await supabase.from('availability_slots').select('day_of_week, start_time, active').eq('active', true);
   }
   return withSvc;
 }
 const { data: availSlotsRaw } = await fetchAvailSlots();
-type AvSlot = { start: string; min: number; svc: string; height: number };
+type AvSlot = { id: string; start: string; min: number; svc: string; height: number };
 const availByDow: Record<number, AvSlot[]> = {};
-(availSlotsRaw ?? []).forEach((s: { day_of_week: number; start_time: string; service_id?: string }) => {
+(availSlotsRaw ?? []).forEach((s: { id?: string; day_of_week: number; start_time: string; service_id?: string }) => {
   const hhmm = String(s.start_time).slice(0, 5);
   const [h, m] = hhmm.split(':').map(Number);
-  (availByDow[s.day_of_week] ??= []).push({ start: hhmm, min: h * 60 + m, svc: s.service_id ?? '', height: 55 });
+  (availByDow[s.day_of_week] ??= []).push({ id: s.id ?? '', start: hhmm, min: h * 60 + m, svc: s.service_id ?? '', height: 55 });
 });
 // Altura de cada bloque = duración de la sesión de SU servicio (ej. 50 min).
 // Antes era la distancia al siguiente slot del día mezclando todos los
@@ -219,11 +219,18 @@ bookings.forEach(b => { (byDate[b.session_date] ??= []).push(b); });
 // ya hay una sesión a esa hora, no se pinta (la hora ya se tomó).
 type ExtraBlock = { id: string; fecha: string; hora: string; min: number; svc: string; label: string; height: number };
 const extraByDate: Record<string, ExtraBlock[]> = {};
+// Horas del horario semanal quitadas solo un día (fecha|hora|servicio)
+const quitadasSemana = new Set<string>();
 {
   const fechasSemana = new Set(weekDays.map(d => d.isoDate));
   const durPorServicio = new Map((allServices as Array<{ id: string; duration_min?: number }>).map(sv => [sv.id, sv.duration_min ?? 50]));
   const GRUPO: Record<string, string> = { presencial: 'Todos los presenciales', online: 'Todos los online', ambos: 'Todos los servicios' };
-  for (const h of await leerHorasExtra()) {
+  const todasExtra = await leerHorasExtra();
+  for (const h of todasExtra) {
+    if (h.quitar && h.servicioId) quitadasSemana.add(`${h.fecha}|${h.hora}|${h.servicioId}`);
+  }
+  for (const h of todasExtra) {
+    if (h.quitar) continue;
     if (!fechasSemana.has(h.fecha)) continue;
     const ocupada = (byDate[h.fecha] ?? []).some(b => String(b.session_time).slice(0, 5) === h.hora && !['cancelled', 'expired'].includes(b.status));
     if (ocupada) continue;
@@ -233,6 +240,22 @@ const extraByDate: Record<string, ExtraBlock[]> = {};
       label: h.servicioId ? (svcMap[h.servicioId] ?? 'Servicio') : (GRUPO[h.modalidad] ?? 'Varios servicios'),
       height: h.servicioId ? (durPorServicio.get(h.servicioId) ?? 50) : 50,
     });
+  }
+}
+
+// Datos para la pestaña "Quitar disponibilidad" del panel: lo que se ofrece en
+// cada fecha de la semana (horario semanal + horas abiertas para ese día).
+const disponibilidadSemana: Array<{ fecha: string; hora: string; min: number; dur: number; svc: string; label: string; slotId?: string; extraId?: string }> = [];
+{
+  const durSvc = new Map((allServices as Array<{ id: string; duration_min?: number | null }>).map(sv => [sv.id, sv.duration_min ?? 50]));
+  for (const d of weekDays) {
+    for (const sl of availByDow[d.dow] ?? []) {
+      if (!sl.svc || quitadasSemana.has(`${d.isoDate}|${sl.start}|${sl.svc}`)) continue;
+      disponibilidadSemana.push({ fecha: d.isoDate, hora: sl.start, min: sl.min, dur: durSvc.get(sl.svc) ?? 50, svc: sl.svc, label: svcMap[sl.svc] ?? 'Servicio', slotId: sl.id });
+    }
+    for (const x of extraByDate[d.isoDate] ?? []) {
+      disponibilidadSemana.push({ fecha: d.isoDate, hora: x.hora, min: x.min, dur: x.height, svc: x.svc, label: x.label, extraId: x.id });
+    }
   }
 }
 
@@ -281,6 +304,9 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
     <div class="cal-toolbar">
       {errorParam === 'conflict' && (
         <div class="cal-error-banner">⚠ Conflicto de horario — elige otro.</div>
+      )}
+      {(Astro.url.searchParams.get('saved') === 'hora-quitada-dia' || Astro.url.searchParams.get('saved') === 'hora-quitada-semanal') && (
+        <div class="cal-error-banner" style="background:#f0fdf4;border-color:#86efac;color:#15803d;">{Astro.url.searchParams.get('saved') === 'hora-quitada-dia' ? '✓ Hora quitada solo ese día.' : '✓ Hora quitada del horario semanal.'}</div>
       )}
       {Astro.url.searchParams.get('saved') === 'extra-quitada' && (
         <div class="cal-error-banner" style="background:#f0fdf4;border-color:#86efac;color:#15803d;">✓ Hora abierta quitada.</div>
@@ -461,7 +487,7 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
             ))}
 
             {/* Overlay de horarios disponibles (oculto por defecto; lo activa el menú "Mostrar") */}
-            {(availByDow[day.dow] ?? []).map(s => (
+            {(availByDow[day.dow] ?? []).filter(s => !quitadasSemana.has(`${day.isoDate}|${s.start}|${s.svc}`)).map(s => (
               <div class="avail-block" data-svc={s.svc}
                 title={`Disponible ${s.start}${s.svc && svcMap[s.svc] ? ' · ' + svcMap[s.svc] : ''}`}
                 style={`top:${s.min - 360}px;height:${s.height - 2}px;--svcbg:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bg};--svcbd:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bd}`}></div>
@@ -469,7 +495,7 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
 
             {(extraByDate[day.isoDate] ?? []).map(x => (
               <div class="extra-block" data-svc={x.svc} data-id={x.id} data-desc={`${x.fecha.split('-').reverse().slice(0, 2).join('/')} ${x.hora} · ${x.label}`}
-                title={`Hora abierta solo este día · ${x.hora} · ${x.label} · clic para quitarla`}
+                title={`Hora abierta solo este día · ${x.hora} · ${x.label}`}
                 style={`top:${x.min - 360}px;height:${Math.max(x.height, 24) - 2}px;--svcbg:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bg};--svcbd:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bd}`}></div>
             ))}
 
@@ -544,6 +570,10 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
           <button class="bp-tab" id="bp-tab-block">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
             Bloquear hora
+          </button>
+          <button class="bp-tab" id="bp-tab-unavail">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+            Quitar disponibilidad
           </button>
           <button class="bp-tab" id="bp-tab-open">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
@@ -789,6 +819,14 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
 
         <button type="submit" class="bp-submit-btn">Confirmar bloqueo</button>
       </form>
+    </div>
+
+    <!-- Quitar disponibilidad: horas que se ofrecen a esa hora (semanal o abiertas para ese día) -->
+    <div class="sp-body" id="bp-unavail-body" style="display:none">
+      <p class="bp-blk-desc">Quita una hora disponible de la agenda web.</p>
+      <p class="bp-blk-subdesc">"Solo este día" no cambia tu horario semanal. Las sesiones ya agendadas no se tocan.</p>
+      <div id="bp-unavail-list" style="display:flex;flex-direction:column;gap:0.6rem;margin-top:0.75rem;"></div>
+      <script type="application/json" id="disponibilidad-semana" set:html={JSON.stringify(disponibilidadSemana)}></script>
     </div>
 
     <!-- Abrir disponibilidad: una hora para un servicio SOLO ese día (no se repite cada semana) -->
@@ -1476,11 +1514,10 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
    visibles. Antes tenían texto y borde y parecían una sesión agendada. */
 .extra-block {
   position: absolute; left: 2px; right: 2px; border-radius: 4px; z-index: 1;
-  cursor: pointer;
+  pointer-events: none; /* clic pasa a la celda: se puede agendar encima */
   background: var(--svcbg, rgba(148,163,184,0.14));
   border-left: 3px solid var(--svcbd, #94a3b8);
 }
-.extra-block:hover { filter: brightness(0.95); }
 .extra-block.svc-hidden { display: none !important; }
 /* visible solo cuando el toggle está activo */
 .cal-scroll.avail-on .avail-block { display: block; }
@@ -1868,6 +1905,7 @@ allCols.forEach(col => {
         document.getElementById('bp-block-body').style.display  = 'none';
         document.getElementById('bp-open-body').style.display   = 'none';
         document.getElementById('bp-tab-open')?.classList.remove('active');
+        ocultarQuitarDisp();
         openBookingPanel(date, time);
       }
     }
@@ -1945,23 +1983,6 @@ bpServiceSel?.addEventListener('change', () => {
 bpSessionsSel?.addEventListener('change', updatePrice);
 document.querySelectorAll('input[name="modality_choice"]').forEach(r => r.addEventListener('change', updatePrice));
 
-// ── Quitar una hora abierta para un día: clic en su franja del calendario ──────
-document.querySelectorAll('.extra-block').forEach((el) => {
-  el.addEventListener('mousedown', (e) => e.stopPropagation()); // no inicia selección de la celda
-  el.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!confirm(`¿Quitar esta hora abierta?\n\n${el.dataset.desc}\n\nDeja de aparecer en la agenda web.`)) return;
-    const f = document.createElement('form');
-    f.method = 'POST';
-    f.action = '/api/admin/horas-extra';
-    for (const [k, v] of [['action', 'quitar'], ['id', el.dataset.id], ['volver', window.location.pathname + window.location.search]]) {
-      const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = v; f.appendChild(i);
-    }
-    document.body.appendChild(f);
-    f.submit();
-  });
-});
-
 // ── Booking panel: tabs ───────────────────────────────────────────────────────
 document.getElementById('bp-tab-agenda')?.addEventListener('click', () => {
   document.getElementById('bp-tab-agenda').classList.add('active');
@@ -1993,6 +2014,77 @@ document.getElementById('bp-tab-open')?.addEventListener('click', () => {
   if (t) document.getElementById('bp-open-time').value = t.slice(0, 5);
 });
 
+// ── Quitar disponibilidad (horario semanal o horas abiertas para un día) ─────
+function ocultarQuitarDisp() {
+  const b = document.getElementById('bp-unavail-body');
+  if (b) b.style.display = 'none';
+  document.getElementById('bp-tab-unavail')?.classList.remove('active');
+}
+['bp-tab-agenda', 'bp-tab-block', 'bp-tab-open'].forEach((id) => document.getElementById(id)?.addEventListener('click', ocultarQuitarDisp));
+const DIAS_SEMANA = ['domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados'];
+function enviarHorasExtra(campos) {
+  const f = document.createElement('form');
+  f.method = 'POST';
+  f.action = '/api/admin/horas-extra';
+  for (const [k, v] of Object.entries({ ...campos, volver: window.location.pathname + window.location.search })) {
+    const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = String(v); f.appendChild(i);
+  }
+  document.body.appendChild(f);
+  f.submit();
+}
+function renderQuitarDisp() {
+  const lista = document.getElementById('bp-unavail-list');
+  if (!lista) return;
+  lista.innerHTML = '';
+  const fecha = document.getElementById('bp-date')?.value || '';
+  const hora = (document.getElementById('bp-time')?.value || '').slice(0, 5);
+  const aviso = (txt) => { const p = document.createElement('p'); p.style.cssText = 'font-size:0.82rem;color:#6b7280;'; p.textContent = txt; lista.appendChild(p); };
+  if (!fecha || !hora) { aviso('Haz clic en una hora del calendario para ver qué se ofrece en ese momento.'); return; }
+  let datos = [];
+  try { datos = JSON.parse(document.getElementById('disponibilidad-semana')?.textContent || '[]'); } catch (e) {}
+  const [hh, mm] = hora.split(':').map(Number);
+  const t = hh * 60 + mm;
+  const items = datos.filter((d) => d.fecha === fecha && t >= d.min && t < d.min + d.dur);
+  if (!items.length) { aviso('A esta hora no hay horas disponibles para pacientes.'); return; }
+  const [y, m, d] = fecha.split('-').map(Number);
+  const diaSemana = DIAS_SEMANA[new Date(y, m - 1, d).getDay()];
+  for (const it of items) {
+    const fila = document.createElement('div');
+    fila.style.cssText = 'border:1px solid #e5e7eb;border-radius:8px;padding:0.6rem 0.75rem;display:flex;flex-direction:column;gap:0.45rem;';
+    const t1 = document.createElement('div');
+    t1.style.cssText = 'font-size:0.85rem;font-weight:600;color:#111827;';
+    t1.textContent = `${it.hora} · ${it.label}`;
+    const t2 = document.createElement('div');
+    t2.style.cssText = 'font-size:0.72rem;color:#6b7280;';
+    t2.textContent = it.extraId ? 'Hora abierta solo este día' : `Horario semanal (todos los ${diaSemana})`;
+    const botones = document.createElement('div');
+    botones.style.cssText = 'display:flex;gap:0.4rem;flex-wrap:wrap;';
+    const boton = (txt, fn, fuerte) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = txt;
+      b.style.cssText = `font-size:0.75rem;padding:0.35rem 0.7rem;border-radius:6px;cursor:pointer;border:1px solid ${fuerte ? '#dc2626' : '#d1d5db'};background:#fff;color:${fuerte ? '#dc2626' : '#374151'};`;
+      b.addEventListener('click', fn);
+      botones.appendChild(b);
+    };
+    if (it.extraId) {
+      boton('Quitar', () => { if (confirm(`¿Quitar la hora abierta de las ${it.hora} (${it.label})?`)) enviarHorasExtra({ action: 'quitar', id: it.extraId }); });
+    } else {
+      boton('Solo este día', () => { if (confirm(`¿Quitar las ${it.hora} de ${it.label} solo el ${d}/${m}? Las demás semanas sigue igual.`)) enviarHorasExtra({ action: 'quitar-dia', fecha: it.fecha, hora: it.hora, servicio_id: it.svc }); });
+      boton('Todas las semanas', () => { if (confirm(`Esto quita los ${diaSemana} ${it.hora} de ${it.label} de forma PERMANENTE (todas las semanas).\n\nLas sesiones ya agendadas no se tocan. ¿Continuar?`)) enviarHorasExtra({ action: 'quitar-semanal', slot_id: it.slotId }); }, true);
+    }
+    fila.append(t1, t2, botones);
+    lista.appendChild(fila);
+  }
+}
+document.getElementById('bp-tab-unavail')?.addEventListener('click', () => {
+  ['bp-tab-agenda', 'bp-tab-block', 'bp-tab-open'].forEach((id) => document.getElementById(id)?.classList.remove('active'));
+  document.getElementById('bp-tab-unavail').classList.add('active');
+  ['bp-agenda-body', 'bp-block-body', 'bp-open-body'].forEach((id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  document.getElementById('bp-unavail-body').style.display = '';
+  renderQuitarDisp();
+});
+
 // ── openBloqueoPanel ──────────────────────────────────────────────────────────
 function openBloqueoPanel(fromDate, fromTime, toDate, toTime) {
   document.getElementById('bp-tab-block').classList.add('active');
@@ -2001,6 +2093,7 @@ function openBloqueoPanel(fromDate, fromTime, toDate, toTime) {
   document.getElementById('bp-agenda-body').style.display = 'none';
   document.getElementById('bp-tab-open')?.classList.remove('active');
   document.getElementById('bp-open-body').style.display   = 'none';
+  ocultarQuitarDisp();
 
   document.getElementById('bp-blk-dfrom').value = fromDate;
   document.getElementById('bp-blk-dto').value   = toDate;
