@@ -167,13 +167,19 @@ const SESSION_LABELS: Record<string, string> = {
 
 </BaseLayout>
 
-<style>
-  .day-btn { @apply w-full aspect-square text-xs font-body flex items-center justify-center transition-all duration-150; }
-  .day-available { @apply text-ink hover:bg-warm cursor-pointer; }
-  .day-past { @apply text-dust cursor-default; }
-  .day-selected { @apply bg-ink text-sand font-medium; }
-  .slot-btn { @apply py-2.5 px-1 text-[10px] tracking-widest font-body border border-dust text-stone hover:border-ink hover:text-ink transition-all duration-150 cursor-pointer uppercase; }
-  .slot-selected { @apply bg-ink text-sand border-ink; }
+<!-- is:global: los días y las horas se crean con JavaScript, y los estilos con
+     ámbito (scoped) de Astro no se les aplican. Por eso el día y la hora
+     elegidos no se veían marcados. Acotado a #reschedule-form-wrap. -->
+<style is:global>
+  #reschedule-form-wrap .day-btn { @apply w-full aspect-square text-sm font-body flex items-center justify-center transition-all duration-150 rounded-full; }
+  #reschedule-form-wrap .day-available { @apply text-ink cursor-pointer; }
+  #reschedule-form-wrap .day-available:hover { @apply bg-warm; }
+  #reschedule-form-wrap .day-past { @apply text-dust cursor-default; }
+  #reschedule-form-wrap .day-selected { @apply bg-ink text-sand font-semibold; }
+  #reschedule-form-wrap .slot-btn { @apply py-3 px-1 text-sm font-body border border-dust bg-white text-ink transition-all duration-150 cursor-pointer; }
+  #reschedule-form-wrap .slot-btn:hover { @apply border-forest text-forest; }
+  #reschedule-form-wrap .slot-selected,
+  #reschedule-form-wrap .slot-selected:hover { @apply bg-ink text-sand border-ink font-semibold; }
 </style>
 
 <script define:vars={{ bookingId, serviceId: booking?.service_id ?? '', durationMin: booking?.duration_min ?? '', clave: conClave ? clave : '' }}>
