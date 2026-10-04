@@ -463,10 +463,7 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
             {(extraByDate[day.isoDate] ?? []).map(x => (
               <div class="extra-block" data-svc={x.svc}
                 title={`Hora abierta solo este día · ${x.hora} · ${x.label}`}
-                style={`top:${x.min - 360}px;height:${Math.max(x.height, 24) - 2}px;--svcbg:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bg};--svcbd:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bd}`}>
-                <span class="extra-t">{x.hora} · Hora abierta</span>
-                <span class="extra-s">{x.label}</span>
-              </div>
+                style={`top:${x.min - 360}px;height:${Math.max(x.height, 24) - 2}px;--svcbg:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bg};--svcbd:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bd}`}></div>
             ))}
 
             {(byDate[day.isoDate] ?? []).map(b => (
@@ -1467,15 +1464,15 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
   background: var(--svcbg, rgba(148,163,184,0.14));
   border-left: 3px solid var(--svcbd, #94a3b8);
 }
-/* Horas abiertas solo para un día: siempre visibles, color del servicio y borde punteado */
+/* Horas abiertas solo para un día: se ven IGUAL que un horario disponible del
+   servicio (franja suave + borde izquierdo de color, sin texto), pero siempre
+   visibles. Antes tenían texto y borde y parecían una sesión agendada. */
 .extra-block {
   position: absolute; left: 2px; right: 2px; border-radius: 4px; z-index: 1;
-  pointer-events: none; overflow: hidden; padding: 2px 5px;
-  background: var(--svcbg, #eef2f7); border: 1.5px dashed var(--svcbd, #94a3b8);
-  display: flex; flex-direction: column; gap: 1px;
+  pointer-events: none;
+  background: var(--svcbg, rgba(148,163,184,0.14));
+  border-left: 3px solid var(--svcbd, #94a3b8);
 }
-.extra-block .extra-t { font-size: 0.66rem; font-weight: 700; color: #1f2937; line-height: 1.2; }
-.extra-block .extra-s { font-size: 0.6rem; color: #4b5563; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .extra-block.svc-hidden { display: none !important; }
 /* visible solo cuando el toggle está activo */
 .cal-scroll.avail-on .avail-block { display: block; }
