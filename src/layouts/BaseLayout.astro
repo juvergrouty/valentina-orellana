@@ -41,6 +41,11 @@ const ruta = Astro.url.pathname.replace(/\/$/, '') || '/';
 const enAgenda = ruta === '/agenda';
 const mostrarAgendarFlotante = !['/agenda', '/reagendar', '/confirmacion', '/recuperar'].includes(ruta)
   && !/^\/(pagar|consentimiento|pasos-a-seguir)\//.test(ruta) && !noindex;
+// Google Tag Manager (Analytics/Meta) NO se carga en páginas con datos de una
+// paciente o con claves en el link: pago, consentimiento (nombre y RUT), pasos
+// a seguir, reagendar (clave firmada) y recuperar (token). Re-auditoría 4 oct 2026.
+const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
+  && !/^\/(pagar|consentimiento|pasos-a-seguir)(\/|$)/.test(ruta);
 ---
 
 <!doctype html>
@@ -50,11 +55,11 @@ const mostrarAgendarFlotante = !['/agenda', '/reagendar', '/confirmacion', '/rec
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="facebook-domain-verification" content="jvyq3gto3vw9mqgkpvusajy6srs890" />
     <!-- Google Tag Manager -->
-    <script is:inline>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+    {cargarGTM && <script is:inline>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
     new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
     j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-    })(window,document,'script','dataLayer','GTM-WQHZZSPS');</script>
+    })(window,document,'script','dataLayer','GTM-WQHZZSPS');</script>}
     <!-- End Google Tag Manager -->
     <meta name="description" content={description} />
     <meta property="og:title" content={title} />
@@ -78,8 +83,8 @@ const mostrarAgendarFlotante = !['/agenda', '/reagendar', '/confirmacion', '/rec
   </head>
   <body>
     <!-- Google Tag Manager (noscript) -->
-    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WQHZZSPS"
-    height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+    {cargarGTM && <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WQHZZSPS"
+    height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>}
     <!-- End Google Tag Manager (noscript) -->
     <Header />
     <main>

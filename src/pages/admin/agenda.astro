@@ -840,7 +840,7 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
       <p class="bp-blk-desc">Quita una hora disponible de la agenda web.</p>
       <p class="bp-blk-subdesc">"Solo este día" no cambia tu horario semanal. Las sesiones ya agendadas no se tocan.</p>
       <div id="bp-unavail-list" style="display:flex;flex-direction:column;gap:0.6rem;margin-top:0.75rem;"></div>
-      <script type="application/json" id="disponibilidad-semana" set:html={JSON.stringify(disponibilidadSemana)}></script>
+      <script type="application/json" id="disponibilidad-semana" set:html={JSON.stringify(disponibilidadSemana).replace(/</g, '\\u003c')}></script>
     </div>
 
     <!-- Abrir disponibilidad: una hora para un servicio SOLO ese día (no se repite cada semana) -->
@@ -1730,6 +1730,10 @@ document.addEventListener('click', (e) => {
 })();
 
 // ── Constants ─────────────────────────────────────────────────────────────────
+// Sesión abierta en el panel lateral. Declarada aquí (antes del bloque que
+// reabre el panel con ?booking=) — más abajo daba un error silencioso y el
+// panel no se volvía a abrir después de cada acción (re-auditoría 4 oct 2026).
+let currentBookingId = null;
 const MONTHS_LONG = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const DAYS_LONG   = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
 const DAYS_CAP    = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
@@ -2040,7 +2044,11 @@ function enviarHorasExtra(campos) {
   const f = document.createElement('form');
   f.method = 'POST';
   f.action = '/api/admin/horas-extra';
-  for (const [k, v] of Object.entries({ ...campos, volver: window.location.pathname + window.location.search })) {
+  // Volver a la misma semana con la URL limpia (sin avisos ni "deshacer" de una
+  // acción anterior: se acumulaban y "Deshacer" podía restaurar otra hora).
+  const semana = new URLSearchParams(window.location.search).get('w');
+  const volver = '/admin/agenda' + (semana && /^-?\d+$/.test(semana) ? `?w=${semana}` : '');
+  for (const [k, v] of Object.entries({ ...campos, volver })) {
     const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = String(v); f.appendChild(i);
   }
   document.body.appendChild(f);
@@ -2194,7 +2202,7 @@ document.getElementById('session-panel')?.addEventListener('submit', (e) => {
 {
   const reopenId = new URLSearchParams(location.search).get('booking');
   if (reopenId) {
-    const match = document.querySelector(`.cal-event[data-booking*="${reopenId}"]`);
+    const match = (/^[\w-]+$/.test(reopenId) ? document.querySelector(`.cal-event[data-booking*="${reopenId}"]`) : null);
     if (match) {
       try {
         const parsed = JSON.parse(match.dataset.booking || '{}');
@@ -2258,7 +2266,9 @@ function openSessionDetail(b) {
   // si ya pagó — si el link no existe todavía, se genera al instante al hacer
   // clic (ver ensureMeetLink más abajo), y con ?authuser=<cuenta del negocio>
   // para que no dependa de cuál cuenta de Google esté activa en el navegador.
-  const meetMatch = b.notes?.match(/Meet:\s*(https:\/\/\S+)/);
+  // Solo la marca del sistema (línea que empieza con "Meet: https://meet.google.com/…"),
+  // la última; nunca un link escrito por la paciente en sus notas.
+  const meetMatch = [...(b.notes ?? '').matchAll(/(?:^|\n)Meet: (https:\/\/meet\.google\.com\/\S+)/g)].at(-1);
   const meetDiv   = document.getElementById('sp-meet-link');
   const isOnlineSession = b.session_type?.includes('online');
   if (isOnlineSession) {
@@ -2400,7 +2410,7 @@ function openSessionDetail(b) {
   const locLabel = clinicAddress || 'En mi consulta';
   document.getElementById('sp-location').innerHTML = isOnline
     ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:3px"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Sesión online'
-    : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:3px"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>${locLabel}`;
+    : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:3px"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>${locLabel.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}`;
 
   // Enviar la dirección presencial por WhatsApp — mismo patrón que el link de Meet.
   const locWaBtn = document.getElementById('sp-location-wa');
@@ -2739,7 +2749,8 @@ document.getElementById('sp-meet-wa')?.addEventListener('click', async (e) => {
 });
 
 // ── Emitir boleta ───────────────────────────────────────────────────────────
-let currentBookingId = null;
+// (currentBookingId se declara arriba, en Constants: openSessionDetail lo usa
+// al cargar la página para reabrir el panel tras una acción.)
 document.getElementById('sp-toggle-boleta')?.addEventListener('click', () => {
   const form = document.getElementById('sp-boleta-form');
   form.style.display = form.style.display === 'none' ? 'block' : 'none';

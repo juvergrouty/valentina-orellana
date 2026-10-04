@@ -239,9 +239,21 @@ export const MARCA_EMITIENDO = 'BoletaEmitiendo';
 export const MARCA_PENDIENTE_EMISION = 'BoletaPendienteEmision';
 export const EMISION_CANDADO_MS = 10 * 60 * 1000;
 
-/** Errores en que el SII/API Gateway rechazó ANTES de emitir: es seguro reintentar. */
-export function errorReintentableSii(error: string): boolean {
-  return /\b401\b|autentic|ECONNREFUSED|ENOTFOUND|\b50[234]\b/i.test(error);
+/** Errores en que el SII/API Gateway rechazó ANTES de emitir: es seguro reintentar.
+ *  Solo se mira el código HTTP del inicio del mensaje ("API Gateway 401: …"),
+ *  no el cuerpo (un RUT como 12.502.345-6 no debe contar). 502/504 NO se
+ *  reintentan: suelen ser un corte por tiempo del proxy mientras el SII sigue
+ *  emitiendo, y reintentar podría dejar dos boletas (re-auditoría 4 oct 2026).
+ *  Sin conexión (no se llegó a enviar nada) también es seguro reintentar. */
+export function errorReintentableSii(error: string, causa?: unknown): boolean {
+  const codigoRed = (causa as { code?: string } | undefined)?.code ?? '';
+  if (/^(ECONNREFUSED|ENOTFOUND|EAI_AGAIN)$/.test(codigoRed)) return true;
+  const m = /^API Gateway (\d{3}):/.exec(error);
+  if (!m) return false;
+  const status = Number(m[1]);
+  if (status === 401 || status === 503) return true;
+  // Un 4xx que pide volver a autenticarse en el SII es un rechazo antes de emitir.
+  return status >= 400 && status < 500 && /autentic/i.test(error);
 }
 
 const sinLineas = (notes: string, prefijo: string) =>
@@ -544,7 +556,7 @@ export async function emitBoletaParaReserva(
 
     const folio = result?.data?.Encabezado?.IdDoc?.Folio ?? null;
 
-    // ENCONTRADO (24 sep 2026, caso real de Werner Lange): si apigateway.cl
+    // ENCONTRADO (24 sep 2026, caso real): si apigateway.cl
     // respondía 200 (sin lanzar excepción) pero SIN folio en el lugar
     // esperado — una respuesta "exitosa" pero vacía/con otra forma — el resto
     // de esta función se saltaba entero en silencio (el bloque de abajo nunca
@@ -597,7 +609,7 @@ export async function emitBoletaParaReserva(
     // suelta el candado y, si la sesión está pagada, queda en cola para que el
     // cron la reintente sola. Con cualquier otro error no se sabe si el SII
     // alcanzó a emitirla: el candado queda puesto y el aviso pide revisar.
-    const reintentable = errorReintentableSii(msg);
+    const reintentable = errorReintentableSii(msg, e instanceof Error ? (e as Error & { cause?: unknown }).cause : undefined);
     if (reintentable) {
       await cambiarNotas(bookingId, (n) => {
         let x = sinLineas(n, MARCA_EMITIENDO);

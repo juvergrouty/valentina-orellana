@@ -20,6 +20,12 @@ export function comprobanteDe(notes: string | null): { at: string; path: string 
   return ultima ? { at: ultima[1], path: ultima[2] } : null;
 }
 
+/** ¿La sesión tiene un comprobante de transferencia esperando confirmación?
+ *  Esas sesiones no se vuelven a cobrar en /pagar (evita el doble pago). */
+export function comprobanteEnRevision(notes: string | null | undefined): boolean {
+  return !!comprobanteDe(notes ?? null);
+}
+
 export interface ComprobanteAlert {
   path:        string;
   subidoEl:    string;

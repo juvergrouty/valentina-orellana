@@ -1064,7 +1064,10 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
     }
 
     if (!actions.length && !tuts.length) {
-      html = '<div class="cmdk-empty">Sin resultados para "' + filter + '"</div>';
+      const vacio = document.createElement('div');
+      vacio.className = 'cmdk-empty';
+      vacio.textContent = 'Sin resultados para "' + filter + '"';
+      html = vacio.outerHTML;
     }
 
     cmdkResults.innerHTML = html;

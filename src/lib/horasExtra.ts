@@ -18,11 +18,20 @@ export interface HoraExtra { id: string; fecha: string; hora: string; modalidad:
 const KEY = 'horas_extra';
 
 export async function leerHorasExtra(): Promise<HoraExtra[]> {
-  const { data } = await supabase.from('settings').select('value').eq('key', KEY).maybeSingle();
+  return (await leerParaModificar()) ?? [];
+}
+
+// Lectura estricta para modificar la lista: si la base falla (o el JSON está
+// dañado) devuelve null y NO se guarda nada. Antes una falla momentánea se
+// leía como lista vacía y el guardado siguiente borraba todas las horas
+// abiertas y quitadas (re-auditoría 4 oct 2026).
+async function leerParaModificar(): Promise<HoraExtra[] | null> {
+  const { data, error } = await supabase.from('settings').select('value').eq('key', KEY).maybeSingle();
+  if (error) return null;
   try {
     const lista = JSON.parse(data?.value || '[]');
-    return Array.isArray(lista) ? lista.filter((h: HoraExtra) => h?.fecha && h?.hora) : [];
-  } catch { return []; }
+    return Array.isArray(lista) ? lista.filter((h: HoraExtra) => h?.fecha && h?.hora) : null;
+  } catch { return null; }
 }
 
 async function guardar(lista: HoraExtra[]): Promise<boolean> {
@@ -37,7 +46,11 @@ async function guardar(lista: HoraExtra[]): Promise<boolean> {
 }
 
 export async function agregarHoraExtra(fecha: string, hora: string, modalidad: ModalidadExtra, servicioId?: string): Promise<boolean> {
-  const lista = await leerHorasExtra();
+  let lista = await leerParaModificar();
+  if (!lista) return false;
+  // Abrir una hora que se había quitado "solo este día" para ese servicio:
+  // se borra la excepción (si no, la hora abierta quedaba escondida).
+  if (servicioId) lista = lista.filter(h => !(h.quitar && h.fecha === fecha && h.hora === hora && h.servicioId === servicioId));
   const repetida = lista.some(h => !h.quitar && h.fecha === fecha && h.hora === hora &&
     (servicioId ? h.servicioId === servicioId : (!h.servicioId && (h.modalidad === modalidad || h.modalidad === 'ambos'))));
   if (repetida) return true;
@@ -46,7 +59,8 @@ export async function agregarHoraExtra(fecha: string, hora: string, modalidad: M
 }
 
 export async function quitarHoraExtra(id: string): Promise<boolean> {
-  const lista = await leerHorasExtra();
+  const lista = await leerParaModificar();
+  if (!lista) return false;
   return guardar(lista.filter(h => h.id !== id));
 }
 
@@ -59,7 +73,9 @@ export function aplicaA(h: HoraExtra, modalidadServicio: string | null | undefin
 
 /** Quita una hora de un servicio SOLO en esa fecha (su horario semanal no cambia). */
 export async function quitarHoraDelDia(fecha: string, hora: string, servicioId: string): Promise<boolean> {
-  const lista = await leerHorasExtra();
+  if (fecha < todayCL()) return false; // un día que ya pasó no se guarda
+  const lista = await leerParaModificar();
+  if (!lista) return false;
   if (lista.some(h => h.quitar && h.fecha === fecha && h.hora === hora && h.servicioId === servicioId)) return true;
   lista.push({ id: crypto.randomUUID(), fecha, hora, modalidad: 'ambos', servicioId, quitar: true });
   return guardar(lista);

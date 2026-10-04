@@ -15,7 +15,7 @@ function firma(bookingId: string): string {
 }
 
 export function claveReagendarValida(bookingId: string, k: string | null | undefined): boolean {
-  if (!bookingId || !k || !import.meta.env.ADMIN_SECRET) return false;
+  if (typeof bookingId !== 'string' || typeof k !== 'string' || !bookingId || !k || !import.meta.env.ADMIN_SECRET) return false;
   const a = Buffer.from(firma(bookingId));
   const b = Buffer.from(k);
   return a.length === b.length && timingSafeEqual(a, b);

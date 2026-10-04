@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { getTotalOwedByEmail, tagBookingsWithPaymentToken, manualChargeLabel } from '../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../lib/flow';
 import { logError } from '../../lib/logger';
+import { comprobanteEnRevision } from '../../lib/comprobantes';
 
 export const prerender = false;
 
@@ -28,7 +29,12 @@ export const POST: APIRoute = async ({ request }) => {
     // Se vuelve a consultar la deuda AHORA, no se confía en lo que la página
     // mostraba al cargar — evita cobrar de más o de menos si algo cambió entre
     // que el paciente abrió el link y presionó "Ir a pagar".
-    const pending = await getTotalOwedByEmail(patient.email);
+    const todo = await getTotalOwedByEmail(patient.email);
+    // Las sesiones con comprobante de transferencia en revisión no se cobran de nuevo.
+    const pending = todo.filter(b => !comprobanteEnRevision(b.notes));
+    if (!pending.length && todo.length) {
+      return Response.json({ error: 'Ya recibí tu comprobante de transferencia y lo estoy revisando. No necesitas pagar de nuevo.' }, { status: 400 });
+    }
     if (!pending.length) {
       return Response.json({ error: 'Ya no tienes pagos pendientes. Si crees que esto es un error, escríbele a Valentina.' }, { status: 400 });
     }
@@ -79,6 +85,7 @@ export const POST: APIRoute = async ({ request }) => {
     return Response.json({ ok: true, paymentUrl });
   } catch (err) {
     console.error('[pagar-deuda] error:', err);
-    return Response.json({ error: err instanceof Error ? err.message : 'Error interno del servidor.' }, { status: 500 });
+    await logError('pagar-deuda', 'No se pudo iniciar el pago de sesiones pendientes', { error: err instanceof Error ? err.message : String(err) });
+    return Response.json({ error: 'No se pudo iniciar el pago. Intenta de nuevo o escríbele a Valentina.' }, { status: 500 });
   }
 };

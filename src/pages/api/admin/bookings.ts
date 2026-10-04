@@ -10,13 +10,18 @@ import { quitarLineasNotas } from '../../../lib/apigateway';
 import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { logWarn } from '../../../lib/logger';
+import { todayCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
 
 export const POST: APIRoute = async ({ request, redirect }) => {
   const form   = await request.formData();
   const action = form.get('action')?.toString();
-  const dest   = form.get('redirect')?.toString() ?? '/admin/agenda';
+  // Solo rutas internas (no a otro sitio). conParam: agrega "?" o "&" según
+  // corresponda — antes "/admin/deudas" + "&error=…" daba una página 404.
+  const destRaw = form.get('redirect')?.toString() ?? '';
+  const dest    = /^\/(?!\/)/.test(destRaw) && !destRaw.includes('\\') ? destRaw : '/admin/agenda';
+  const conParam = (d: string) => d + (d.includes('?') ? '&' : '?');
 
   // ── Guardar interruptor de recordatorio (WhatsApp 4h / email 24h) ────────────
   if (action === 'update-reminders') {
@@ -110,17 +115,22 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     // Estado antes de pagar: una reserva que esperaba pago (pending_payment)
     // recibe el correo de confirmación, igual que cuando pagan con Flow.
-    const { data: previa } = await supabase.from('bookings').select('status, paid_at').eq('id', id).maybeSingle();
+    const { data: previa } = await supabase.from('bookings').select('status, paid_at, session_date').eq('id', id).maybeSingle();
     const esperabaPago = previa?.status === 'pending_payment' && !previa?.paid_at;
+    // Sesión que ya pasó (deuda): sin correo de "reserva confirmada" ni
+    // invitación de Google a una fecha pasada.
+    const sesionFutura = !!previa?.session_date && previa.session_date !== '2099-12-31' && previa.session_date >= todayCL();
 
     let { error } = await supabase.from('bookings')
-      .update({ paid_at: new Date().toISOString(), payment_note: medio, status: 'confirmed' })
+      // Si ya estaba pagada (ej. reintento tras un error de boleta), se conserva
+      // la fecha de pago original para no moverla de mes en Finanzas.
+      .update({ paid_at: previa?.paid_at ?? new Date().toISOString(), payment_note: medio, status: 'confirmed' })
       .eq('id', id);
     if (error?.code === '42703') {
-      return redirect(dest + '&error=missing_migration');
+      return redirect(conParam(dest) + 'error=missing_migration');
     }
     if (error) {
-      return redirect(dest + '&error=insert_failed&detail=' + encodeURIComponent(error.message.slice(0, 200)));
+      return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(error.message.slice(0, 200)));
     }
 
     // El evento de Google Calendar deja de verse como "Por pagar". Si la sesión
@@ -128,15 +138,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // que falló), se crea primero; antes quedaba pagada y fuera del calendario.
     try {
       const { data: row } = await supabase.from('bookings').select('*').eq('id', id).maybeSingle();
-      if (row && !row.google_event_id && row.session_date !== '2099-12-31') await syncBookingToCalendar(row);
-      await markBookingPaidInCalendar(id, true);
+      if (row && !row.google_event_id && row.session_date !== '2099-12-31') await syncBookingToCalendar(row, sesionFutura ? {} : { invite: false });
+      await markBookingPaidInCalendar(id, true, { invitar: sesionFutura });
     } catch (e) { console.error('[mark_paid] calendar:', e); }
 
     // Correo "Tu reserva está confirmada" (con el link para reagendar) si la
     // reserva esperaba pago y tiene fecha. No para deudas de sesiones pasadas.
     const { data: pagada } = await supabase.from('bookings')
       .select('patient_name, patient_email, patient_phone, patient_rut, session_type, session_date, session_time, amount, payment_method, service_id').eq('id', id).maybeSingle();
-    if (esperabaPago && pagada?.patient_email && pagada.session_date !== '2099-12-31') {
+    if (esperabaPago && sesionFutura && pagada?.patient_email) {
       let serviceName: string | undefined;
       if (pagada.service_id) {
         const { data: svc } = await supabase.from('services_catalog').select('name').eq('id', pagada.service_id).maybeSingle();
@@ -160,7 +170,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         const boletaRes = await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true, rutDesdePanel: !!rut });
         if (!boletaRes.ok) {
           await logWarn('boleta/marcar-pagado', `Boleta no emitida al marcar como pagado: ${boletaRes.error}`, { bookingId: id, error: boletaRes.error });
-          return redirect(dest + '&error=boleta_failed&detail=' + encodeURIComponent(boletaRes.error ?? ''));
+          return redirect(conParam(dest) + 'error=boleta_failed&detail=' + encodeURIComponent(boletaRes.error ?? ''));
         }
       } catch (e) { console.error('[mark_paid] boleta:', e); }
     }
@@ -206,7 +216,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
     const { error } = await supabase.from('bookings').update({ debt_voided: true }).eq('id', id);
-    if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+    if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
     return redirect(dest);
   }
 
@@ -219,7 +229,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const { error } = await supabase.from('bookings')
       .update({ paid_at: null, payment_note: null })
       .eq('id', id);
-    if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+    if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
     try { await markBookingPaidInCalendar(id, false); } catch (e) { console.error('[unmark_paid] calendar:', e); }
     return redirect(dest);
   }
@@ -232,7 +242,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const { error } = await supabase.from('bookings')
       .update({ no_show: action === 'mark_no_show' })
       .eq('id', id);
-    if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+    if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
     return redirect(dest);
   }
 
@@ -265,12 +275,12 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       .neq('id', id)
       .maybeSingle();
 
-    if (conflict) return redirect(dest + '&error=conflict');
+    if (conflict) return redirect(conParam(dest) + 'error=conflict');
 
     const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
     const { error: updErr } = await supabase.from('bookings').update({ session_date, session_time }).eq('id', id);
     // Si no se guardó, no se toca el calendario ni se avisa a la paciente.
-    if (updErr) return redirect(dest + '&error=insert_failed&detail=' + encodeURIComponent(updErr.message.slice(0, 200)));
+    if (updErr) return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(updErr.message.slice(0, 200)));
     // Nueva fecha: se borran las marcas de recordatorio para que le llegue uno para la fecha nueva.
     await quitarLineasNotas(id, ['RecordatorioEnviado', 'RecordatorioWhatsAppEnviado']);
     try { await rescheduleBookingInCalendar(id, session_date, session_time, booking?.duration_min ?? undefined); } catch (e) { console.error('[reschedule] gcal:', e); }
@@ -299,7 +309,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (!id) return redirect(dest);
     const { data: booking } = await supabase.from('bookings').select('patient_name, google_event_id').eq('id', id).maybeSingle();
     const { error } = await supabase.from('bookings').update({ custom_title: title || null }).eq('id', id);
-    if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+    if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
     // Si el evento ya existe en Google Calendar, refleja el nombre nuevo ahí
     // también — antes esto solo quedaba guardado en la base de datos.
     if (title && booking?.google_event_id) {
@@ -312,7 +322,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   if (action === 'update_amount') {
     const id     = form.get('id')?.toString();
     const amount = parseInt(form.get('amount')?.toString() ?? '');
-    if (!id || isNaN(amount) || amount <= 0) return redirect(dest + '&error=invalid_amount');
+    if (!id || isNaN(amount) || amount <= 0) return redirect(conParam(dest) + 'error=invalid_amount');
     await supabase.from('bookings').update({ amount }).eq('id', id);
     return redirect(dest);
   }
@@ -329,7 +339,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
     if (!booking) return redirect(dest);
     const { data: svc } = await supabase.from('services_catalog').select('*').eq('id', serviceId).single();
-    if (!svc) return redirect(dest + '&error=service_not_found');
+    if (!svc) return redirect(conParam(dest) + 'error=service_not_found');
 
     // Mantiene la modalidad actual (online/presencial) si el nuevo servicio
     // admite ambas; si el servicio es de una sola modalidad, usa esa.
@@ -343,7 +353,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const { error } = await supabase.from('bookings')
       .update({ service_id: serviceId, session_type: sessionType, amount })
       .eq('id', id);
-    if (error?.code === '42703') return redirect(dest + '&error=missing_migration');
+    if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
 
     // Si el evento ya existe en Google Calendar, refleja el servicio nuevo ahí
     // también. Si la sesión tenía un nombre personalizado (custom_title), se
@@ -384,7 +394,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       ? parseInt(overrideRaw) : null;
 
     if (!session_type || !session_date || !session_time || !patient_name || !patient_email || !patient_phone) {
-      return redirect(dest + '&error=missing_fields');
+      return redirect(conParam(dest) + 'error=missing_fields');
     }
 
     // Precio por defecto: SIEMPRE desde services_catalog (fuente autoritativa y
@@ -437,7 +447,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       booking = retry.data; error = retry.error;
     }
 
-    if (error || !booking) return redirect(dest + '&error=conflict');
+    if (error || !booking) return redirect(conParam(dest) + 'error=conflict');
     try { await syncBookingToCalendar(booking); } catch (e) { console.error('[create] sync:', e); }
     try { await upsertPatientFromBooking({ ...booking, rut: booking.patient_rut }); } catch (e) { console.error('[create] patient:', e); }
     return redirect(dest);
@@ -464,13 +474,13 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const notesText        = form.get('notes')?.toString()?.trim() ?? '';
 
     if (!service_id || !session_date || !session_time) {
-      return redirect(dest + '&error=missing_fields');
+      return redirect(conParam(dest) + 'error=missing_fields');
     }
 
     // Lookup service
     const { data: svc } = await supabase
       .from('services_catalog').select('*').eq('id', service_id).single();
-    if (!svc) return redirect(dest + '&error=service_not_found');
+    if (!svc) return redirect(conParam(dest) + 'error=service_not_found');
 
     // Patient info: from patients table OR form fields
     let finalName  = form.get('patient_name')?.toString()?.trim()  ?? '';
@@ -487,7 +497,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       if (p) { finalName = p.name; finalEmail = p.email ?? finalEmail; finalPhone = p.phone ?? finalPhone; finalRut = p.rut ?? finalRut; }
     }
 
-    if (!finalName) return redirect(dest + '&error=missing_fields');
+    if (!finalName) return redirect(conParam(dest) + 'error=missing_fields');
 
     // Determine session_type from service modality
     const svcModality = svc.modality === 'ambos' ? modality_choice : svc.modality;
@@ -581,12 +591,12 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (bookingIds.length === 0) {
       if (lastInsertError) {
-        return redirect(dest + '&error=insert_failed&detail=' + encodeURIComponent(lastInsertError.slice(0, 200)));
+        return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(lastInsertError.slice(0, 200)));
       }
       if (conflictCount > 0) {
-        return redirect(dest + '&error=slot_conflict');
+        return redirect(conParam(dest) + 'error=slot_conflict');
       }
-      return redirect(dest + '&error=unknown_no_booking');
+      return redirect(conParam(dest) + 'error=unknown_no_booking');
     }
 
     // ── Modo LINK DE PAGO: página intermedia /pagar/[id] (misma que "Cobrar") ──
@@ -602,13 +612,13 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // tener su id) y se manda el link a /pagar/[id], que crea la orden de
     // Flow recién cuando el paciente aprieta "Ir a pagar".
     if (payment_mode === 'link') {
-      if (!finalEmail) return redirect(dest + '&error=need_email');
+      if (!finalEmail) return redirect(conParam(dest) + 'error=need_email');
       try {
         // Config de Flow desde settings
         const { data: flowRows } = await supabase.from('settings').select('key, value').in('key', ['flow_env', 'flow_enabled']);
         const fcfg: Record<string, string> = {};
         (flowRows ?? []).forEach((r: { key: string; value: string }) => { fcfg[r.key] = r.value; });
-        if (fcfg['flow_enabled'] === 'false') return redirect(dest + '&error=flow_disabled');
+        if (fcfg['flow_enabled'] === 'false') return redirect(conParam(dest) + 'error=flow_disabled');
 
         const reqUrl  = new URL(request.url);
         const siteUrl = `${reqUrl.protocol}//${reqUrl.host}`;
@@ -719,10 +729,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
         // Redirigir mostrando el link (el banner de "compartir por WhatsApp" solo
         // se muestra si el envío automático no se hizo, para no duplicar el mensaje)
-        return redirect(dest + `&payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}&pl_wa_sent=${waSent ? '1' : '0'}`);
+        return redirect(conParam(dest) + `payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}&pl_wa_sent=${waSent ? '1' : '0'}`);
       } catch (e) {
         console.error('[create-admin] flow order:', e);
-        return redirect(dest + '&error=flow_error');
+        return redirect(conParam(dest) + 'error=flow_error');
       }
     }
 

@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { getTotalOwedByEmail, manualChargeLabel } from '../../lib/debt';
 import { sendTransferReceiptAdmin, ADMIN_EMAIL_FALLBACK } from '../../lib/email';
 import { agregarLineaNotas } from '../../lib/apigateway';
-import { BUCKET_COMPROBANTES, MARCA_COMPROBANTE } from '../../lib/comprobantes';
+import { BUCKET_COMPROBANTES, MARCA_COMPROBANTE, comprobanteEnRevision } from '../../lib/comprobantes';
 import { logError, logInfo } from '../../lib/logger';
 
 export const prerender = false;
@@ -43,8 +43,12 @@ export const POST: APIRoute = async ({ request }) => {
   const { data: patient } = await supabase.from('patients').select('id, name, email').eq('id', patientId).maybeSingle();
   if (!patient?.email) return json({ error: 'Link no válido. Escríbele a Valentina para que te mande uno nuevo.' }, 404);
 
-  const pending = await getTotalOwedByEmail(patient.email);
-  if (!pending.length) return json({ error: 'Ya no tienes pagos pendientes. Si crees que es un error, escríbele a Valentina.' }, 400);
+  const todo = await getTotalOwedByEmail(patient.email);
+  if (!todo.length) return json({ error: 'Ya no tienes pagos pendientes. Si crees que es un error, escríbele a Valentina.' }, 400);
+  // Un comprobante por cobro: si ya hay uno en revisión, no se suben más (evita
+  // correos y archivos repetidos). Si se equivocó de archivo, escribe a Valentina.
+  const pending = todo.filter(b => !comprobanteEnRevision(b.notes));
+  if (!pending.length) return json({ error: 'Ya recibí tu comprobante y lo estoy revisando. Si necesitas cambiarlo, escríbeme por WhatsApp.' }, 400);
   const total = pending.reduce((s, b) => s + b.amount, 0);
 
   // Guardar el comprobante en un bucket privado.

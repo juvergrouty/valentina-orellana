@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { createPaymentOrder, FLOW_URLS, PUBLIC_PAY_TIMEOUT_SECONDS } from '../lib/flow';
 import { hoursUntilSessionCL } from '../lib/dateUtils';
 import { tagBookingsWithPaymentToken } from '../lib/debt';
+import { horaDisponible } from '../lib/disponibilidad';
 
 // ── Recuperar una reserva liberada automáticamente por falta de pago ─────────
 // El paciente llega aquí desde el botón "Pagar y mantener mi hora" del correo
@@ -14,10 +15,22 @@ import { tagBookingsWithPaymentToken } from '../lib/debt';
 //   - Solo si el horario sigue libre (nadie más lo tomó mientras tanto).
 //   - Si se cumple, se reactiva la MISMA reserva (mismos datos del paciente) en
 //     estado pending_payment y se lo redirige a pagar en Flow de inmediato.
+//   - Abrir el link (GET) solo MUESTRA la hora con un botón; la reserva se
+//     reactiva al apretarlo (POST). Los revisores de links de los correos
+//     (ej. Outlook) abren los enlaces antes que la persona, y antes eso gastaba
+//     el link y reactivaba la hora sin que nadie fuera a pagar.
 
-const token = Astro.url.searchParams.get('token') ?? '';
+const esPost = Astro.request.method === 'POST';
+let token = Astro.url.searchParams.get('token') ?? '';
+if (esPost) {
+  try { token = (await Astro.request.formData()).get('token')?.toString() ?? ''; } catch { token = ''; }
+}
 
-type Outcome = 'not_found' | 'too_late' | 'taken' | 'flow_error' | 'ok';
+const DIAS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+let cuando = '';
+
+type Outcome = 'not_found' | 'too_late' | 'taken' | 'flow_error' | 'confirm' | 'ok';
 let outcome: Outcome = 'not_found';
 let errorDetail = '';
 let redirectUrl: string | null = null;
@@ -40,7 +53,8 @@ if (token) {
     if (hoursLeft < 4) {
       outcome = 'too_late';
     } else {
-      // ¿Sigue libre el horario? (alguien más pudo haberlo tomado mientras tanto)
+      // ¿Sigue libre el horario? Mismo cálculo que la agenda (otra reserva,
+      // cruces, bloqueos, Google Calendar), sin contar esta misma reserva.
       const { data: conflict } = await supabase
         .from('bookings')
         .select('id')
@@ -48,10 +62,22 @@ if (token) {
         .eq('session_time', booking.session_time)
         .not('status', 'in', '(cancelled,expired)')
         .neq('id', booking.id)
+        .limit(1)
         .maybeSingle();
+      const libre = conflict ? false : await horaDisponible({
+        date: booking.session_date, time: booking.session_time, serviceId: booking.service_id,
+        duration: booking.duration_min, excluirIds: [booking.id],
+        modality: String(booking.session_type ?? '').includes('online') ? 'online' : 'presencial',
+      });
 
-      if (conflict) {
+      if (!libre) {
         outcome = 'taken';
+      } else if (!esPost) {
+        // Solo mostrar la hora y el botón (ver nota arriba).
+        const [y, m, d] = String(booking.session_date).split('-').map(Number);
+        const dia = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+        cuando = `${DIAS_ES[dia]} ${d} de ${MESES_ES[m - 1]} a las ${String(booking.session_time).slice(0, 5)}`;
+        outcome = 'confirm';
       } else {
         // Reactivar la MISMA fila de forma atómica: solo si sigue en 'expired'
         // (evita doble-clic / doble pago si el link se usa dos veces a la vez).
@@ -74,6 +100,8 @@ if (token) {
             if (cfg['flow_enabled'] === 'false') {
               outcome = 'flow_error';
               errorDetail = 'El pago online está temporalmente deshabilitado.';
+              // No dejar la hora ocupada sin forma de pagarla.
+              await supabase.from('bookings').update({ status: 'expired', recovery_token: crypto.randomUUID() }).eq('id', reactivated.id);
             } else {
               const baseUrl = cfg['flow_env'] === 'production' ? FLOW_URLS.production : FLOW_URLS.sandbox;
               const siteUrl = `${Astro.url.protocol}//${Astro.url.host}`;
@@ -118,8 +146,24 @@ if (outcome === 'ok' && redirectUrl) {
   return Astro.redirect(redirectUrl, 302);
 }
 ---
-<Layout title="Recuperar tu hora — Ps. Valentina Orellana" noindex>
+<Layout title="Recuperar tu hora" noindex>
   <div style="max-width:520px;margin:9rem auto 5rem;padding:0 1.5rem;font-family:'Inter',sans-serif;text-align:center;">
+    {outcome === 'confirm' && (
+      <>
+        <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">Tu hora sigue disponible</h1>
+        <p style="color:#6B6860;line-height:1.6;margin:1rem 0 2rem;">
+          Puedes mantener tu sesión del <strong style="color:#2C2B28;">{cuando}</strong>. Al continuar te llevo a pagar con Flow.
+        </p>
+        <form method="POST" action="/recuperar" style="margin-bottom:1.5rem;">
+          <input type="hidden" name="token" value={token} />
+          <button type="submit"
+                  style="background:#576352;color:white;padding:0.95rem 2rem;border:none;cursor:pointer;
+                         font-size:0.8rem;letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
+            Pagar y mantener mi hora
+          </button>
+        </form>
+      </>
+    )}
     {outcome === 'not_found' && (
       <>
         <h1 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">No encontramos esa reserva</h1>
@@ -154,12 +198,12 @@ if (outcome === 'ok' && redirectUrl) {
         </p>
       </>
     )}
-    <a href={serviceId && (outcome === 'taken' || outcome === 'too_late') ? `/agenda?servicio=${serviceId}` : '/agenda'}
+    {outcome !== 'confirm' && <a href={serviceId && (outcome === 'taken' || outcome === 'too_late') ? `/agenda?servicio=${serviceId}` : '/agenda'}
        style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;
               text-decoration:none;font-size:0.78rem;letter-spacing:0.1em;text-transform:uppercase;
               border-radius:4px;margin-right:0.5rem;">
       Agendar un horario
-    </a>
+    </a>}
     <a href="https://wa.me/56972735696"
        style="display:inline-block;background:transparent;color:#576352;padding:0.85rem 1.75rem;
               text-decoration:none;font-size:0.78rem;letter-spacing:0.1em;text-transform:uppercase;

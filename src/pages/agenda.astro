@@ -833,13 +833,14 @@ const { data: catalogServices } = await supabase
     hide('slots-help-msg');
 
     // Fetch slots — el horario es por servicio, así que la caché incluye el service_id
-    const cacheKey = `${iso}|${state.serviceId ?? ''}`;
+    const cacheKey = `${iso}|${state.serviceId ?? ''}|${state.modalityChoice ?? ''}`;
     let slots = state.loadedSlots[cacheKey];
     if (!slots) {
       try {
         const dur = state.sessionDuration ? `&duration=${state.sessionDuration}` : '';
         const svc = state.serviceId ? `&service_id=${encodeURIComponent(state.serviceId)}` : '';
-        const res = await fetch(`/api/availability?date=${iso}${dur}${svc}`);
+        const mod = state.modalityChoice ? `&modality=${encodeURIComponent(state.modalityChoice)}` : '';
+        const res = await fetch(`/api/availability?date=${iso}${dur}${svc}${mod}`);
         const data = await res.json();
         slots = data.slots ?? [];
         state.loadedSlots[cacheKey] = slots;

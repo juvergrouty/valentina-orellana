@@ -27,7 +27,7 @@ export const POST: APIRoute = async ({ request }) => {
   let meetLink = result.meetLink ?? null;
   if (!meetLink) {
     const { data: fresh } = await supabase.from('bookings').select('notes').eq('id', id).maybeSingle();
-    meetLink = fresh?.notes?.match(/Meet:\s*(https:\/\/\S+)/)?.[1] ?? null;
+    meetLink = [...(fresh?.notes ?? '').matchAll(/(?:^|\n)Meet: (https:\/\/meet\.google\.com\/\S+)/g)].at(-1)?.[1] ?? null;
   }
   return json({ ok: true, meetLink });
 };

@@ -19,7 +19,7 @@ const SIN_FECHA = '2099-12-31'; // cobros manuales sin fecha de sesión
 // abandonada queda 'expired' y no es ni ingreso ni deuda).
 const { data: all } = await supabase
   .from('bookings')
-  .select('id, patient_name, patient_email, amount, status, payment_method, payment_note, session_type, session_date, session_time, paid_at, debt_voided, custom_title, notes')
+  .select('id, patient_name, patient_email, amount, status, payment_method, payment_note, session_type, session_date, session_time, paid_at, debt_voided, custom_title, notes, created_by_admin')
   .not('status', 'in', '(cancelled,expired)');
 const bookings = all ?? [];
 
@@ -55,8 +55,13 @@ pagosMes.forEach(b => {
 // ── Lo que se adeuda (para cobrar): sesiones ya realizadas sin pagar ────────
 // Confirmadas, con fecha de hoy o anterior, sin pago y sin deuda anulada.
 // Los cobros manuales sin fecha (2099) pendientes también se deben.
+// También las sesiones ya realizadas que quedaron "esperando pago" con un link
+// enviado por Valentina (o con comprobante sin confirmar): esas nunca vencen
+// solas y antes no salían ni aquí ni en "Por cobrar".
+const esperandoLink = (b: any) => b.status === 'pending_payment' &&
+  (b.created_by_admin === true || String(b.notes ?? '').includes('ComprobanteTransferencia'));
 const deudas = bookings.filter(b => sinPagar(b) && (
-  (b.status === 'confirmed' && b.session_date !== SIN_FECHA && b.session_date <= todayStr) ||
+  ((b.status === 'confirmed' || esperandoLink(b)) && b.session_date !== SIN_FECHA && b.session_date <= todayStr) ||
   (b.session_date === SIN_FECHA)
 ));
 const totalAdeudado = deudas.reduce((s, b) => s + (b.amount ?? 0), 0);

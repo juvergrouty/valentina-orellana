@@ -18,6 +18,7 @@
 
 import type { APIRoute } from 'astro';
 import { getPaymentStatus } from '../../../lib/flow';
+import { horaDisponible } from '../../../lib/disponibilidad';
 import { supabase } from '../../../lib/supabase';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
 import { syncBookingToCalendar, markBookingPaidInCalendar } from '../../../lib/syncCalendar';
@@ -136,10 +137,18 @@ export const POST: APIRoute = async ({ request }) => {
             .neq('id', c.id)
             .not('status', 'in', '(cancelled,expired)')
             .limit(1);
-          if (ocupada?.length) {
+          // Además del choque exacto: la hora tiene que seguir disponible con el
+          // mismo cálculo de la agenda (cruces, bloqueos, Google Calendar). Si no
+          // se puede comprobar (null), se confirma igual: el pago ya se hizo.
+          const disponible = ocupada?.length ? false : await horaDisponible({
+            date: c.session_date, time: c.session_time, serviceId: c.service_id,
+            duration: c.duration_min, excluirIds: [c.id], sinAnticipacion: true,
+            modality: String(c.session_type ?? '').includes('online') ? 'online' : 'presencial',
+          }).catch(() => null);
+          if (disponible === false) {
             candidates = candidates.filter((x: { id: string }) => x.id !== c.id);
             await logError('flow/pago-hora-ocupada',
-              `Pago recibido de ${c.patient_name} (${c.patient_email}) por la sesión del ${c.session_date} a las ${String(c.session_time).slice(0, 5)}, pero esa hora ya se había liberado y la tomó otra persona. Hay que reembolsar o reagendar.`,
+              `Pago recibido de ${c.patient_name} (${c.patient_email}) por la sesión del ${c.session_date} a las ${String(c.session_time).slice(0, 5)}, pero esa hora ya se había liberado y ya no está disponible (la tomó otra persona, se bloqueó o se ocupó en tu calendario). Hay que reembolsar o reagendar.`,
               { bookingId: c.id, token, flowOrder: status.flowOrder, amount: status.amount });
           } else if (c.google_event_id) {
             // El evento se borró al liberarse la hora: se limpia para que se cree uno nuevo.

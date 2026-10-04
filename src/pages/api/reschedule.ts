@@ -5,6 +5,7 @@ import { rescheduleBookingInCalendar } from '../../lib/syncCalendar';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
 import { quitarLineasNotas } from '../../lib/apigateway';
 import { claveReagendarValida, REAGENDAR_TEXTO } from '../../lib/rescheduleLink';
+import { horaDisponible } from '../../lib/disponibilidad';
 
 export const prerender = false;
 
@@ -43,17 +44,19 @@ export const POST: APIRoute = async ({ request }) => {
   // La hora nueva tiene que estar disponible para el servicio de esta sesión
   // (mismo cálculo que ve la paciente en la agenda: horario del servicio,
   // bloqueos, descanso entre sesiones y reservas existentes).
+  // Se calcula directo (src/lib/disponibilidad.ts), sin pedirle la página al
+  // propio sitio por HTTP. La sesión actual de la paciente no cuenta como
+  // ocupada (puede moverla a una hora que se cruce con la actual).
+  const modalidad = String(booking.session_type ?? '').includes('online') ? 'online' : 'presencial';
+  let libre: boolean | null = null;
   try {
-    const q = new URLSearchParams({ date: session_date });
-    if (booking.service_id) q.set('service_id', booking.service_id);
-    if (booking.duration_min) q.set('duration', String(booking.duration_min));
-    const av = await fetch(new URL(`/api/availability?${q}`, request.url), { signal: AbortSignal.timeout(10000) }).then(r => r.json());
-    if (!Array.isArray(av.slots) || !av.slots.includes(session_time.slice(0, 5))) {
-      return json({ error: 'Ese horario no está disponible. Por favor elige otro.' }, 409);
-    }
-  } catch {
-    return json({ error: 'No se pudo comprobar la disponibilidad. Intenta de nuevo.' }, 503);
-  }
+    libre = await horaDisponible({
+      date: session_date, time: session_time, serviceId: booking.service_id,
+      duration: booking.duration_min, modality: modalidad, excluirIds: [bookingId],
+    });
+  } catch { libre = null; }
+  if (libre === null) return json({ error: 'No se pudo comprobar la disponibilidad. Intenta de nuevo.' }, 503);
+  if (!libre) return json({ error: 'Ese horario no está disponible. Por favor elige otro.' }, 409);
 
   // Verificar que el nuevo horario esté disponible
   const { data: conflict } = await supabase
@@ -61,8 +64,9 @@ export const POST: APIRoute = async ({ request }) => {
     .select('id')
     .eq('session_date', session_date)
     .eq('session_time', session_time)
-    .neq('status', 'cancelled')
+    .not('status', 'in', '(cancelled,expired)') // una reserva abandonada no ocupa la hora
     .neq('id', bookingId)
+    .limit(1)
     .maybeSingle();
 
   if (conflict) {

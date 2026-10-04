@@ -45,8 +45,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   if (action === 'restaurar-semanal') {
     const slotId = form.get('slot_id')?.toString() ?? '';
     if (!slotId) return redirect(`${dest}${sep}error=extra-guardar`);
-    const { error } = await supabase.from('availability_slots').update({ active: true }).eq('id', slotId);
-    return redirect(`${dest}${sep}${error ? 'error=extra-guardar' : 'saved=hora-restaurada'}`);
+    const { data: filas, error } = await supabase.from('availability_slots').update({ active: true }).eq('id', slotId).select('id');
+    // Sin filas = esa franja ya no existe (ej. se volvió a guardar el horario
+    // del servicio): no se dice "listo" si no se restauró nada.
+    return redirect(`${dest}${sep}${error || !filas?.length ? 'error=extra-guardar' : 'saved=hora-restaurada'}`);
   }
 
   if (action === 'agregar') {
@@ -55,7 +57,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // "destino": 'mod:presencial' | 'mod:online' | 'mod:ambos' | 'svc:<id del servicio>'
     const destino = form.get('destino')?.toString() ?? `mod:${form.get('modalidad')?.toString() ?? ''}`;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || fecha < todayCL()) return redirect(`${dest}${sep}error=extra-fecha#horas-extra`);
-    if (!/^\d{2}:\d{2}$/.test(hora)) return redirect(`${dest}${sep}error=extra-hora#horas-extra`);
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) return redirect(`${dest}${sep}error=extra-hora#horas-extra`);
     let mod: ModalidadExtra;
     let servicioId: string | undefined;
     if (destino.startsWith('svc:')) {

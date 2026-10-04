@@ -3,6 +3,7 @@ export const prerender = false;
 import Layout from '../../layouts/BaseLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { getTotalOwedByEmail, manualChargeLabel } from '../../lib/debt';
+import { comprobanteEnRevision } from '../../lib/comprobantes';
 
 // Página pública (sin login) que el paciente abre desde el link que Valentina
 // le manda por WhatsApp/email. A diferencia de un link de pago con monto fijo,
@@ -14,8 +15,13 @@ const { id } = Astro.params;
 const { data: patient } = await supabase
   .from('patients').select('id, name, email').eq('id', id!).maybeSingle();
 
-const pending = patient?.email ? await getTotalOwedByEmail(patient.email) : [];
+const todo = patient?.email ? await getTotalOwedByEmail(patient.email) : [];
+// Sesiones con comprobante de transferencia esperando confirmación: no se
+// vuelven a cobrar (evita que pague dos veces).
+const enRevision = todo.filter(b => comprobanteEnRevision(b.notes));
+const pending = todo.filter(b => !comprobanteEnRevision(b.notes));
 const total = pending.reduce((s, b) => s + b.amount, 0);
+const totalRevision = enRevision.reduce((s, b) => s + b.amount, 0);
 
 const SESSION_LABELS: Record<string, string> = {
   'online': 'Sesión individual online', 'presencial': 'Sesión individual presencial',
@@ -54,6 +60,11 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
         <p class="font-heading text-2xl mb-3">Link no válido</p>
         <p class="text-stone">Este link de pago no es correcto. Escríbele a Valentina para que te mande uno nuevo.</p>
       </div>
+    ) : !pending.length && enRevision.length ? (
+      <div class="text-center">
+        <p class="font-heading text-2xl mb-3">Hola {patient.name.split(' ')[0]}</p>
+        <p class="text-stone">Recibí tu comprobante de transferencia por {formatCLP(totalRevision)} y lo estoy revisando. Apenas lo confirme te llegará la boleta a tu correo. No necesitas pagar de nuevo.</p>
+      </div>
     ) : !pending.length ? (
       <div class="text-center">
         <p class="font-heading text-2xl mb-3">Hola {patient.name.split(' ')[0]} 🎉</p>
@@ -64,6 +75,9 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
         <p class="label text-stone mb-1">Hola {patient.name.split(' ')[0]}</p>
         <h1 class="font-heading text-2xl md:text-3xl mb-2">Sesiones por pagar</h1>
         <p class="text-stone text-sm mb-8">Revisa y paga las sesiones que tienes con Ps. Valentina Orellana.</p>
+        {enRevision.length > 0 && (
+          <p class="text-sm bg-sand border border-dust rounded-lg px-4 py-3 mb-6">Ya recibí tu comprobante de transferencia por {formatCLP(totalRevision)} y lo estoy revisando. Esas sesiones no aparecen abajo.</p>
+        )}
 
         <div class="border border-dust rounded-lg divide-y divide-dust mb-6">
           {pending.map((b) => (

@@ -220,13 +220,13 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
 /** Cambia el evento de la reserva a "pagado" (quita "Por pagar" y lo pone en verde, e
  *  invita al paciente) o de vuelta a "por pagar" (al anular un pago). Mejor
  *  esfuerzo: si falla, queda en /admin/logs y no interrumpe el flujo. */
-export async function markBookingPaidInCalendar(bookingId: string, paid: boolean): Promise<void> {
+export async function markBookingPaidInCalendar(bookingId: string, paid: boolean, opts: { invitar?: boolean } = {}): Promise<void> {
   try {
     const { data: booking } = await supabase.from('bookings').select('google_event_id, patient_email').eq('id', bookingId).single();
     if (!booking?.google_event_id) return;
     const auth = await getValidAccessToken();
     if (!auth) return;
-    await setCalendarEventPaidState(auth.token, auth.calendarId, booking.google_event_id, paid, paid ? (booking.patient_email || undefined) : undefined);
+    await setCalendarEventPaidState(auth.token, auth.calendarId, booking.google_event_id, paid, paid && opts.invitar !== false ? (booking.patient_email || undefined) : undefined);
   } catch (e) {
     await logError('calendar/estado-pago', 'No se pudo actualizar el estado de pago del evento de Google Calendar', { bookingId, paid, error: e instanceof Error ? e.message : String(e) });
   }

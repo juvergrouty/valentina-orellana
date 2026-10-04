@@ -408,7 +408,14 @@ const servicesJson  = JSON.stringify(services  ?? []);
     matches.forEach(p => {
       const item = document.createElement('div');
       item.style.cssText = 'padding:0.65rem 1rem;cursor:pointer;font-size:0.88rem;border-bottom:1px solid var(--warm);';
-      item.innerHTML = `<strong>${p.name}</strong><br><span style="color:var(--stone);font-size:0.78rem;">${p.email ?? '—'} · ${p.phone ?? '—'}</span>`;
+      // textContent (no innerHTML): el nombre y el teléfono los escribe la paciente
+      // en la agenda pública y no deben interpretarse como HTML.
+      const nombre = document.createElement('strong');
+      nombre.textContent = p.name ?? '';
+      const datos = document.createElement('span');
+      datos.style.cssText = 'color:var(--stone);font-size:0.78rem;';
+      datos.textContent = `${p.email ?? '—'} · ${p.phone ?? '—'}`;
+      item.append(nombre, document.createElement('br'), datos);
       item.addEventListener('mouseenter', () => item.style.background = 'var(--warm)');
       item.addEventListener('mouseleave', () => item.style.background = '');
       item.addEventListener('click', () => selectPatient(p));

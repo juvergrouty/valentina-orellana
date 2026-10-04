@@ -11,7 +11,11 @@ const cleared = Astro.url.searchParams.get('cleared') === '1';
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   if (form.get('action') === 'clear') {
-    await supabase.from('admin_logs').delete().lt('created_at', new Date().toISOString());
+    // No se borran los registros de boletas (de ellos sale el aviso rojo de
+    // "Boleta NO emitida", que debe seguir hasta que se resuelva) ni los de
+    // acceso (cuentan para el límite de intentos de contraseña).
+    await supabase.from('admin_logs').delete().lt('created_at', new Date().toISOString())
+      .not('context', 'like', 'boleta/%').not('context', 'like', 'auth/%');
   }
   return Astro.redirect('/admin/logs?cleared=1');
 }

@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { agregarLineaNotas } from './apigateway';
 
 // "Deuda real" = misma definición usada en el calendario (agenda.astro, evClass)
 // y en /admin/deudas: reserva CONFIRMADA (la sesión se dio o se va a dar) sin
@@ -25,7 +26,7 @@ export function manualChargeLabel(notes: string | null | undefined): string | nu
 export async function getPendingDebtByEmail(email: string): Promise<DebtBooking[]> {
   const { data } = await supabase
     .from('bookings')
-    .select('id, session_type, session_date, session_time, amount')
+    .select('id, session_type, session_date, session_time, amount, notes')
     .eq('patient_email', email.toLowerCase())
     .eq('status', 'confirmed')
     .is('paid_at', null)
@@ -44,10 +45,8 @@ export async function getPendingDebtByEmail(email: string): Promise<DebtBooking[
 // paciente pague con CUALQUIERA de los links que se le hayan mandado, sin
 // importar el orden en que se generaron ni cuál quedó como "el vigente".
 export async function tagBookingsWithPaymentToken(bookingIds: string[], token: string): Promise<void> {
-  const { data: rows } = await supabase.from('bookings').select('id, notes').in('id', bookingIds);
-  await Promise.all((rows ?? []).map((r: { id: string; notes: string | null }) =>
-    supabase.from('bookings').update({ notes: `${r.notes ? r.notes + '\n' : ''}PagoToken ${token}` }).eq('id', r.id)
-  ));
+  // agregarLineaNotas: escritura atómica, no pisa otra marca escrita al mismo tiempo.
+  await Promise.all(bookingIds.map((id) => agregarLineaNotas(id, `PagoToken ${token}`)));
 }
 
 // "Todo lo que el paciente debe pagar" = deuda real (arriba) MÁS las sesiones

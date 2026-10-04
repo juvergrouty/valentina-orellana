@@ -9,6 +9,7 @@ import { ADMIN_EMAIL_FALLBACK } from '../../lib/email';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
 import { expireStaleBookings } from '../../lib/expireBooking';
 import { tagBookingsWithPaymentToken } from '../../lib/debt';
+import { horaDisponible } from '../../lib/disponibilidad';
 
 export const prerender = false;
 
@@ -21,7 +22,7 @@ export const POST: APIRoute = async ({ request }) => {
           const msg = fatal instanceof Error ? fatal.message : String(fatal);
           console.error('[bookings] Error fatal:', msg);
           await logError('bookings/fatal', 'Excepción no controlada al crear una reserva — el paciente no pudo reservar', { error: msg });
-          return json({ error: 'Error interno del servidor.', detail: msg }, 500);
+          return json({ error: 'Error interno del servidor.' }, 500);
     }
 };
 
@@ -79,6 +80,18 @@ async function handleBooking(request: Request) {
   // ── Validación ───────────────────────────────────────────────────────────────
   if (!service_id || !modality_choice || !session_date || !session_time || !patient_name || !patient_email || !patient_phone || !patient_rut) {
         return json({ error: 'Faltan campos obligatorios.' }, 400);
+  }
+
+  // Nombre y teléfono: texto plano, sin caracteres de HTML y con largo acotado
+  // (se muestran en el panel y en correos; re-auditoría 4 oct 2026).
+  if (/[<>]/.test(patient_name) || patient_name.trim().length > 120 || patient_name.trim().length < 2) {
+        return json({ error: 'Revisa tu nombre: usa solo letras.' }, 400);
+  }
+  if (!/^[\d\s()+.-]{7,25}$/.test(patient_phone.trim())) {
+        return json({ error: 'Revisa tu teléfono.' }, 400);
+  }
+  if (patient_email.trim().length > 200 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(patient_email.trim())) {
+        return json({ error: 'Revisa tu correo.' }, 400);
   }
 
   const rutClean = patient_rut.trim().toUpperCase().replace(/\./g, '').replace(/\s/g, '');
@@ -158,6 +171,26 @@ async function handleBooking(request: Request) {
         durationMin = svc.duration_min ?? 50;
   }
 
+  // La modalidad tiene que ser una que el servicio ofrece.
+  if (svc.modality && svc.modality !== 'ambos' && svc.modality !== modality_choice) {
+        return json({ error: 'Modalidad inválida para este servicio.' }, 400);
+  }
+
+  // La hora tiene que estar disponible de verdad (mismo cálculo que la agenda:
+  // horario del servicio, horas extra/quitadas, bloqueos, Google Calendar,
+  // descanso entre sesiones y cruces con otras reservas). Antes solo se
+  // revisaba que no hubiera otra reserva a la misma hora exacta.
+  const libre = await horaDisponible({
+        date: session_date, time: session_time, serviceId: service_id,
+        duration: durationMin, modality: modality_choice,
+  });
+  if (libre === null) {
+        return json({ error: 'No pudimos comprobar la disponibilidad. Intenta de nuevo en un momento.' }, 503);
+  }
+  if (!libre) {
+        return json({ error: 'Esa hora ya no está disponible. Por favor elige otra.' }, 409);
+  }
+
   await logInfo('bookings', 'Servicio y precio', {
         service_id, name: svc.name, modality_choice, session_type, finalPrice, durationMin,
   });
@@ -203,6 +236,10 @@ async function handleBooking(request: Request) {
         insertError = retry.error;
   }
 
+  if (insertError?.code === '23505') {
+        // Otra persona tomó la misma hora en el mismo instante (índice único).
+        return json({ error: 'Ese horario ya fue reservado. Por favor elige otro.' }, 409);
+  }
   if (insertError || !bookingData) {
         await logError('bookings', 'Error insertando reserva', { error: insertError?.message, code: insertError?.code, session_type, session_date, session_time });
         console.error('Error insertando reserva:', insertError);
