@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { nowCL } from '../../lib/dateUtils';
 import { expireStaleBookings } from '../../lib/expireBooking';
 import { logError } from '../../lib/logger';
+import { leerHorasExtra, aplicaA } from '../../lib/horasExtra';
 
 export const prerender = false;
 
@@ -66,7 +67,7 @@ export const GET: APIRoute = async ({ url }) => {
   async function fetchServiceCfg() {
     if (!serviceId) return { data: null };
     const full = await supabase.from('services_catalog')
-      .select('duration_min, break_min, booking_window_days').eq('id', serviceId).maybeSingle();
+      .select('duration_min, break_min, booking_window_days, modality').eq('id', serviceId).maybeSingle();
     if (full.error?.code === '42703') {
       return await supabase.from('services_catalog').select('duration_min').eq('id', serviceId).maybeSingle();
     }
@@ -136,7 +137,23 @@ export const GET: APIRoute = async ({ url }) => {
   }
 
   if (slotsError) return new Response(JSON.stringify({ error: 'Error consultando disponibilidad.' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-  if (!slots || slots.length === 0) return new Response(JSON.stringify({ slots: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+  // Horas extra abiertas por Valentina solo para esta fecha (ver horasExtra.ts).
+  // Se suman al horario semanal del servicio; si la hora ya existe, no se duplica.
+  let slotsDelDia = (slots ?? []) as { start_time: string; modality?: string }[];
+  if (serviceId) {
+    try {
+      const svcModalidad = (svcCfg as { modality?: string } | null)?.modality;
+      const extras = (await leerHorasExtra()).filter(h => h.fecha === dateParam && aplicaA(h, svcModalidad));
+      for (const h of extras) {
+        if (!slotsDelDia.some(s => s.start_time.slice(0, 5) === h.hora)) slotsDelDia = [...slotsDelDia, { start_time: `${h.hora}:00` }];
+      }
+      slotsDelDia = [...slotsDelDia].sort((a, b) => a.start_time.localeCompare(b.start_time));
+    } catch (e) {
+      await logError('availability/horas-extra', 'No se pudieron leer las horas extra', { error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  if (!slotsDelDia.length) return new Response(JSON.stringify({ slots: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   if (blockedDate) return new Response(JSON.stringify({ slots: [], blocked: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   if (bookedError) return new Response(JSON.stringify({ error: 'Error consultando reservas.' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 
@@ -160,7 +177,7 @@ export const GET: APIRoute = async ({ url }) => {
   const isToday = dateParam === nowHour.toISOString().slice(0, 10);
   const nowMin  = nowHour.getHours() * 60 + nowHour.getMinutes() + 60; // +60 min buffer
 
-  const available = slots
+  const available = slotsDelDia
     // Si se pidió por service_id, la query ya filtró; si no, se filtra por modalidad (compat).
     .filter((s: { modality?: string }) =>
       serviceId || !reqModality || !s.modality || s.modality === 'ambos' || s.modality === reqModality)

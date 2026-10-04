@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { todayCL } from '../../../lib/dateUtils';
+import { leerHorasExtra, aplicaA } from '../../../lib/horasExtra';
 
 export const prerender = false;
 
@@ -41,7 +42,17 @@ export const GET: APIRoute = async ({ url }) => {
     }
   }
 
-  return new Response(JSON.stringify({ weekdays, blocked }), {
+  // Fechas con horas extra para este servicio: se habilitan en el calendario
+  // aunque ese día de la semana no tenga horario normal.
+  let extra: string[] = [];
+  if (serviceId) {
+    try {
+      const { data: svc } = await supabase.from('services_catalog').select('modality').eq('id', serviceId).maybeSingle();
+      extra = [...new Set((await leerHorasExtra()).filter(h => h.fecha >= today && aplicaA(h, svc?.modality)).map(h => h.fecha))];
+    } catch { /* sin horas extra */ }
+  }
+
+  return new Response(JSON.stringify({ weekdays, blocked, extra }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });

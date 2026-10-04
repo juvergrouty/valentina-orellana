@@ -3,6 +3,7 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { todayCL } from '../../lib/dateUtils';
+import { leerHorasExtra } from '../../lib/horasExtra';
 
 const today = todayCL();
 
@@ -43,6 +44,14 @@ const daysWithSlots = DAYS.filter(d => (byDay.get(d.n) ?? []).length > 0);
 const totalActive   = (slots ?? []).filter(s => s.active).length;
 
 const savedMsg = Astro.url.searchParams.get('saved');
+const errorMsg = Astro.url.searchParams.get('error');
+
+// Horas extra en días específicos (ver src/lib/horasExtra.ts)
+const horasExtra = (await leerHorasExtra()).filter(h => h.fecha >= today);
+const fechasBloqueadas = new Set((blocked ?? []).map((b: { date: string }) => b.date));
+const MOD_LABEL: Record<string, string> = { presencial: 'Presencial', online: 'Online', ambos: 'Presencial y online' };
+const DIAS_CORTOS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const fechaCorta = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return `${DIAS_CORTOS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d}/${m}`; };
 
 const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const formatDate = (iso: string) => {
@@ -132,6 +141,16 @@ const feriados: [string, string][] = [
   {savedMsg === 'blocked' && (
     <div style="background:#f0fdf4;border:1px solid #86efac;color:#15803d;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
       ✓ Fecha bloqueada correctamente.
+    </div>
+  )}
+  {(savedMsg === 'extra' || savedMsg === 'extra-quitada') && (
+    <div style="background:#f0fdf4;border:1px solid #86efac;color:#15803d;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
+      {savedMsg === 'extra' ? '✓ Hora extra abierta. Ya aparece en la agenda web ese día.' : '✓ Hora extra quitada.'}
+    </div>
+  )}
+  {errorMsg?.startsWith('extra') && (
+    <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
+      {errorMsg === 'extra-fecha' ? 'Elige una fecha de hoy en adelante.' : errorMsg === 'extra-hora' ? 'Elige una hora válida.' : errorMsg === 'extra-modalidad' ? 'Elige la modalidad.' : 'No se pudo guardar la hora extra. Intenta de nuevo.'}
     </div>
   )}
   {savedMsg === 'cfg' && (
@@ -455,6 +474,50 @@ const feriados: [string, string][] = [
 
     <!-- Formularios -->
     <div style="display:flex;flex-direction:column;gap:1rem;">
+
+      <!-- Abrir hora extra en un día específico -->
+      <div class="card" id="horas-extra">
+        <p class="label" style="margin-bottom:0.35rem;">Abrir hora extra en un día</p>
+        <p style="font-size:0.75rem;color:var(--stone);margin-bottom:1rem;line-height:1.5;">Aparece en la agenda web solo ese día (no se repite las semanas siguientes). Úsalo para recuperar las horas de un feriado o un bloqueo.</p>
+        <form method="POST" action="/api/admin/horas-extra" style="display:flex;flex-direction:column;gap:0.85rem;">
+          <input type="hidden" name="action" value="agregar" />
+          <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
+            <div style="flex:1;min-width:140px;">
+              <label class="label" style="margin-bottom:0.3rem;display:block;">Fecha</label>
+              <input type="date" name="fecha" required min={today} />
+            </div>
+            <div style="width:110px;">
+              <label class="label" style="margin-bottom:0.3rem;display:block;">Hora</label>
+              <input type="time" name="hora" required step="300" />
+            </div>
+          </div>
+          <div>
+            <label class="label" style="margin-bottom:0.3rem;display:block;">Modalidad</label>
+            <select name="modalidad" required>
+              <option value="presencial">Presencial (individual y pareja)</option>
+              <option value="online">Online (individual y pareja)</option>
+              <option value="ambos">Presencial y online</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-dark" style="width:100%;justify-content:center;">Abrir hora</button>
+        </form>
+        {horasExtra.length > 0 && (
+          <div style="margin-top:1rem;border-top:1px solid var(--warm);padding-top:0.75rem;display:flex;flex-direction:column;gap:0.4rem;">
+            <p class="label" style="font-size:0.68rem;">Próximas horas extra</p>
+            {horasExtra.map(h => (
+              <form method="POST" action="/api/admin/horas-extra" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
+                <input type="hidden" name="action" value="quitar" />
+                <input type="hidden" name="id" value={h.id} />
+                <span style="font-size:0.8rem;color:var(--ink);">
+                  <strong style="text-transform:capitalize;">{fechaCorta(h.fecha)}</strong> · {h.hora} · {MOD_LABEL[h.modalidad] ?? h.modalidad}
+                  {fechasBloqueadas.has(h.fecha) && <span style="color:#b45309;"> · ⚠ ese día está cerrado: no se mostrará</span>}
+                </span>
+                <button type="submit" class="btn btn-outline btn-sm" style="flex-shrink:0;">Quitar</button>
+              </form>
+            ))}
+          </div>
+        )}
+      </div>
 
       <!-- Bloquear fecha -->
       <div class="card">

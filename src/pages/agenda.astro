@@ -632,6 +632,7 @@ const { data: catalogServices } = await supabase
       const d = await res.json();
       state.availableWeekdays = new Set(d.weekdays ?? []);
       state.blockedDates = new Set(d.blocked ?? []);
+      state.extraDates = new Set(d.extra ?? []); // fechas con horas extra abiertas por Valentina
       renderCalendar(); // re-pintar ya con los días deshabilitados
     } catch { /* si falla, el calendario sigue mostrando los días (el clic dirá "sin horarios") */ }
   }
@@ -774,7 +775,7 @@ const { data: catalogServices } = await supabase
       const isToday = iso === new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
       // Día sin horario para este servicio (ej. no atiende sáb/dom) o feriado bloqueado
       const dow        = dateObj.getDay();
-      const noWeekday  = state.availableWeekdays !== null && !state.availableWeekdays.has(dow);
+      const noWeekday  = state.availableWeekdays !== null && !state.availableWeekdays.has(dow) && !(state.extraDates && state.extraDates.has(iso));
       const isBlocked  = state.blockedDates.has(iso);
       const unavailable = noWeekday || isBlocked;
       const disabled   = isPast || unavailable;
