@@ -73,6 +73,12 @@ export const GET: APIRoute = async ({ request }) => {
   const { data: formRow } = await supabase.from('settings').select('value').eq('key', 'evaluation_form_url').maybeSingle();
   const formUrl = formRow?.value || undefined;
 
+  // La reseña se pide UNA vez por paciente (3 oct 2026). Antes la marca era por
+  // sesión, así que quien tenía la casilla marcada recibía "Tu opinión me
+  // ayudaría mucho" semana tras semana.
+  const { data: yaPedidas } = await supabase.from('bookings').select('patient_email').ilike('notes', `%${MARKER}%`);
+  const resenaPedida = new Set((yaPedidas ?? []).map((r: { patient_email: string | null }) => String(r.patient_email ?? '').toLowerCase()).filter(Boolean));
+
   let sent = 0, failed = 0, skipped = 0;
   let evalSent = 0, evalFailed = 0, evalSkipped = 0;
 
@@ -93,6 +99,7 @@ export const GET: APIRoute = async ({ request }) => {
     doReview: {
       if (!alreadyEnded) { skipped++; break doReview; }
       if (liveNotes.includes(MARKER)) { skipped++; break doReview; }        // ya enviada
+      if (resenaPedida.has(String(b.patient_email).toLowerCase())) { skipped++; break doReview; } // ya se le pidió antes
       // review_email_enabled es opt-in y por defecto false: si el paciente
       // reservó solo por el sitio, NO se le pide reseña automáticamente (a
       // diferencia del recordatorio y la boleta, que sí van por defecto).
@@ -110,6 +117,7 @@ export const GET: APIRoute = async ({ request }) => {
 
       if (res.sent) {
         sent++;
+        resenaPedida.add(String(b.patient_email).toLowerCase());
         liveNotes = `${liveNotes ? liveNotes + '\n' : ''}${MARKER} ${today}`;
         await agregarLineaNotas(b.id, `${MARKER} ${today}`);
       } else {

@@ -21,7 +21,10 @@ export const GET: APIRoute = async ({ request }) => {
     if (!secret || auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
   }
 
-  const { claimed } = await expireStaleBookings();
+  // El link "Pagar y mantener mi hora" se arma con el dominio real de esta
+  // petición (www.valentinaorellana.cl). Sin esto usaba PUBLIC_SITE_URL, que en
+  // Vercel apunta a *.vercel.app (ver expireBooking.ts).
+  const { claimed } = await expireStaleBookings(new URL(request.url).origin);
 
   return json({ ok: true, released: claimed });
 };
