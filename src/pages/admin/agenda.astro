@@ -1,5 +1,6 @@
 ---
 export const prerender = false;
+import { leerHorasExtra } from '../../lib/horasExtra';
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { pricingPlans } from '../../data/services';
@@ -199,6 +200,7 @@ const weekDays = Array.from({ length: 7 }, (_, i) => {
 
 const weekLabel = `${weekStart.getDate()} – ${weekEnd.getDate()} ${MONTHS_ES[weekEnd.getMonth()]} ${weekEnd.getFullYear()}`;
 
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
@@ -207,6 +209,28 @@ type BRow = (typeof bookings)[number];
 
 const byDate: Record<string, BRow[]> = {};
 bookings.forEach(b => { (byDate[b.session_date] ??= []).push(b); });
+
+// Horas abiertas solo para un día (horasExtra.ts): se pintan siempre, en el
+// color del servicio (o neutro si son para un grupo), con borde punteado. Si
+// ya hay una sesión a esa hora, no se pinta (la hora ya se tomó).
+type ExtraBlock = { hora: string; min: number; svc: string; label: string; height: number };
+const extraByDate: Record<string, ExtraBlock[]> = {};
+{
+  const fechasSemana = new Set(weekDays.map(d => d.isoDate));
+  const durPorServicio = new Map((allServices as Array<{ id: string; duration_min?: number }>).map(sv => [sv.id, sv.duration_min ?? 50]));
+  const GRUPO: Record<string, string> = { presencial: 'Todos los presenciales', online: 'Todos los online', ambos: 'Todos los servicios' };
+  for (const h of await leerHorasExtra()) {
+    if (!fechasSemana.has(h.fecha)) continue;
+    const ocupada = (byDate[h.fecha] ?? []).some(b => String(b.session_time).slice(0, 5) === h.hora && !['cancelled', 'expired'].includes(b.status));
+    if (ocupada) continue;
+    const [hh, mm] = h.hora.split(':').map(Number);
+    (extraByDate[h.fecha] ??= []).push({
+      hora: h.hora, min: hh * 60 + mm, svc: h.servicioId ?? '',
+      label: h.servicioId ? (svcMap[h.servicioId] ?? 'Servicio') : (GRUPO[h.modalidad] ?? 'Varios servicios'),
+      height: h.servicioId ? (durPorServicio.get(h.servicioId) ?? 50) : 50,
+    });
+  }
+}
 
 function evStyle(time: string, dur: number | null): string {
   const [h, m] = time.split(':').map(Number);
@@ -336,12 +360,19 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
             </label>
             <div class="cal-show-sep"></div>
             <p class="cal-show-lbl">Filtrar por servicio</p>
-            <select id="svc-filter" style="width:100%;font-size:0.8rem;padding:0.35rem 0.4rem;border:1px solid #d1d5db;border-radius:5px;">
-              <option value="">Todos los servicios</option>
+            <!-- Varios servicios a la vez (Valentina, 4 oct 2026): marcar los que quiere ver -->
+            <div id="svc-filter" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem;font-size:0.8rem;">
+              <label style="display:flex;align-items:center;gap:0.45rem;cursor:pointer;font-weight:600;">
+                <input type="checkbox" id="svc-all" checked /> Todos los servicios
+              </label>
               {allSvcFull.map((s) => (
-                <option value={s.id}>{s.name}</option>
+                <label style="display:flex;align-items:center;gap:0.45rem;cursor:pointer;">
+                  <input type="checkbox" class="svc-cb" value={s.id} />
+                  <span style={`width:10px;height:10px;border-radius:2px;flex-shrink:0;background:${(svcColor[s.id] ?? NEUTRAL_COLOR).bd};`}></span>
+                  {s.name}
+                </label>
               ))}
-            </select>
+            </div>
             <div class="cal-show-sep"></div>
             <button type="button" id="open-horarios-btn" class="cal-show-config">⚙ Configurar horarios (por servicio) →</button>
           </div>
@@ -427,6 +458,15 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
               <div class="avail-block" data-svc={s.svc}
                 title={`Disponible ${s.start}${s.svc && svcMap[s.svc] ? ' · ' + svcMap[s.svc] : ''}`}
                 style={`top:${s.min - 360}px;height:${s.height - 2}px;--svcbg:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bg};--svcbd:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bd}`}></div>
+            ))}
+
+            {(extraByDate[day.isoDate] ?? []).map(x => (
+              <div class="extra-block" data-svc={x.svc}
+                title={`Hora abierta solo este día · ${x.hora} · ${x.label}`}
+                style={`top:${x.min - 360}px;height:${Math.max(x.height, 24) - 2}px;--svcbg:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bg};--svcbd:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bd}`}>
+                <span class="extra-t">{x.hora} · Hora abierta</span>
+                <span class="extra-s">{x.label}</span>
+              </div>
             ))}
 
             {(byDate[day.isoDate] ?? []).map(b => (
@@ -1427,6 +1467,16 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
   background: var(--svcbg, rgba(148,163,184,0.14));
   border-left: 3px solid var(--svcbd, #94a3b8);
 }
+/* Horas abiertas solo para un día: siempre visibles, color del servicio y borde punteado */
+.extra-block {
+  position: absolute; left: 2px; right: 2px; border-radius: 4px; z-index: 1;
+  pointer-events: none; overflow: hidden; padding: 2px 5px;
+  background: var(--svcbg, #eef2f7); border: 1.5px dashed var(--svcbd, #94a3b8);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.extra-block .extra-t { font-size: 0.66rem; font-weight: 700; color: #1f2937; line-height: 1.2; }
+.extra-block .extra-s { font-size: 0.6rem; color: #4b5563; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.extra-block.svc-hidden { display: none !important; }
 /* visible solo cuando el toggle está activo */
 .cal-scroll.avail-on .avail-block { display: block; }
 /* el filtro por servicio (dropdown) oculta las franjas de otros servicios */
@@ -1535,20 +1585,37 @@ document.addEventListener('click', (e) => {
   });
 
   // ── Filtro por servicio: oculta citas Y franjas del overlay de otros servicios ─
-  const svcFilter = document.getElementById('svc-filter');
-  function applySvcFilter(id) {
-    document.querySelectorAll('.cal-event, .avail-block').forEach((el) => {
-      el.classList.toggle('svc-hidden', !!id && el.dataset.svc !== id);
+  // Varios servicios a la vez: sin ninguno marcado = todos. Las horas abiertas
+  // para un grupo (sin servicio puntual) se muestran siempre.
+  const svcAll = document.getElementById('svc-all');
+  const svcCbs = Array.from(document.querySelectorAll('.svc-cb'));
+  function applySvcFilter(ids) {
+    const set = new Set(ids);
+    document.querySelectorAll('.cal-event, .avail-block, .extra-block').forEach((el) => {
+      const grupo = el.classList.contains('extra-block') && !el.dataset.svc;
+      el.classList.toggle('svc-hidden', set.size > 0 && !grupo && !set.has(el.dataset.svc));
     });
+    if (svcAll) svcAll.checked = set.size === 0;
   }
+  function seleccionados() { return svcCbs.filter((cb) => cb.checked).map((cb) => cb.value); }
+  function guardarFiltro(ids) { try { localStorage.setItem('vo_svc_filter_multi', JSON.stringify(ids)); } catch (e) {} }
   try {
-    const sf = localStorage.getItem('vo_svc_filter') || '';
-    if (sf && svcFilter) svcFilter.value = sf;
-    applySvcFilter(sf);
-  } catch (e) {}
-  svcFilter?.addEventListener('change', () => {
-    applySvcFilter(svcFilter.value);
-    try { localStorage.setItem('vo_svc_filter', svcFilter.value); } catch (e) {}
+    const guardado = JSON.parse(localStorage.getItem('vo_svc_filter_multi') || '[]');
+    const previo = localStorage.getItem('vo_svc_filter'); // filtro antiguo de un solo servicio
+    const ids = Array.isArray(guardado) && guardado.length ? guardado : (previo ? [previo] : []);
+    svcCbs.forEach((cb) => { cb.checked = ids.includes(cb.value); });
+    applySvcFilter(seleccionados());
+  } catch (e) { applySvcFilter([]); }
+  svcCbs.forEach((cb) => cb.addEventListener('change', () => {
+    const ids = seleccionados();
+    applySvcFilter(ids);
+    guardarFiltro(ids);
+  }));
+  svcAll?.addEventListener('change', () => {
+    if (svcAll.checked) svcCbs.forEach((cb) => { cb.checked = false; });
+    else if (!seleccionados().length) svcAll.checked = true; // sin selección = todos
+    applySvcFilter(seleccionados());
+    guardarFiltro(seleccionados());
   });
 
   // "Configurar horarios" → ahora el horario es POR SERVICIO: se edita en Servicios
