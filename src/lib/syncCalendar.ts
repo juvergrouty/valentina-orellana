@@ -5,7 +5,7 @@
  */
 
 import { supabase } from './supabase';
-import { refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle, setCalendarEventPaidState, UNPAID_PREFIX } from './googleCalendar';
+import { quitarPrefijoSiHayInvitados, refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle, setCalendarEventPaidState, UNPAID_PREFIX } from './googleCalendar';
 import { logError } from './logger';
 
 const SESSION_LABELS: Record<string, string> = {
@@ -230,4 +230,28 @@ export async function markBookingPaidInCalendar(bookingId: string, paid: boolean
   } catch (e) {
     await logError('calendar/estado-pago', 'No se pudo actualizar el estado de pago del evento de Google Calendar', { bookingId, paid, error: e instanceof Error ? e.message : String(e) });
   }
+}
+
+/**
+ * Corrección única (3 oct 2026) de eventos YA enviados: invitaciones a
+ * pacientes con el título "Por pagar · …". Corre una sola vez al abrir el
+ * panel (marca en settings) sobre las sesiones futuras con evento.
+ */
+export async function corregirPrefijoInvitacionesUnaVez(): Promise<void> {
+  const MARCA = 'fix_prefijo_invitados_v1';
+  const { data: hecho } = await supabase.from('settings').select('value').eq('key', MARCA).maybeSingle();
+  if (hecho?.value) return;
+  // Se marca antes de empezar: si algo falla, no se reintenta en cada carga.
+  await supabase.from('settings').upsert({ key: MARCA, value: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  const auth = await getValidAccessToken();
+  if (!auth) return;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const { data: rows } = await supabase.from('bookings').select('id, google_event_id')
+    .gte('session_date', hoy).neq('session_date', '2099-12-31')
+    .not('google_event_id', 'is', null).not('status', 'in', '(cancelled,expired)').limit(200);
+  let corregidos = 0;
+  for (const r of rows ?? []) {
+    try { if (await quitarPrefijoSiHayInvitados(auth.token, auth.calendarId, r.google_event_id)) corregidos++; } catch { /* sigue con las demás */ }
+  }
+  await supabase.from('settings').upsert({ key: MARCA, value: `${new Date().toISOString()} · ${corregidos} corregidos de ${(rows ?? []).length}`, updated_at: new Date().toISOString() }, { onConflict: 'key' });
 }

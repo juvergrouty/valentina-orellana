@@ -90,7 +90,9 @@ export async function createCalendarEvent(
   };
 
   const body: any = {
-    summary:     event.unpaid ? UNPAID_PREFIX + event.title : event.title,
+    // "Por pagar · " solo si la paciente NO está invitada: el título lo ve
+    // ella en su invitación. Con invitada, el aviso para Valentina es el color rojo.
+    summary:     event.unpaid && !event.attendeeEmail ? UNPAID_PREFIX + event.title : event.title,
     description: event.description ?? '',
     start: { dateTime: toISO(startDate), timeZone: TIMEZONE },
     end:   { dateTime: toISO(endDate),   timeZone: TIMEZONE },
@@ -258,7 +260,11 @@ export async function setCalendarEventPaidState(
       invite = true;
     }
   } else {
-    if (!hasPrefix) body.summary = UNPAID_PREFIX + summary;
+    // Con la paciente invitada no se agrega el prefijo (lo vería en su
+    // calendario); el color rojo basta para Valentina.
+    const tieneInvitados = (ev.attendees ?? []).length > 0;
+    if (!hasPrefix && !tieneInvitados) body.summary = UNPAID_PREFIX + summary;
+    if (hasPrefix && tieneInvitados) body.summary = summary.slice(UNPAID_PREFIX.length);
     if (ev.colorId !== UNPAID_COLOR_ID) body.colorId = UNPAID_COLOR_ID;
   }
   if (Object.keys(body).length === 0) return;
@@ -276,4 +282,21 @@ export async function getGoogleUserInfo(accessToken: string) {
   });
   if (!res.ok) throw new Error('Error obteniendo info del usuario');
   return res.json() as Promise<{ email: string; name: string; picture: string }>;
+}
+
+/** Quita "Por pagar · " del título si el evento tiene invitados (la paciente
+ *  lo veía en su calendario). Devuelve true si cambió algo. */
+export async function quitarPrefijoSiHayInvitados(accessToken: string, calendarId: string, eventId: string): Promise<boolean> {
+  const base = `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`;
+  const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+  const getRes = await fetch(base, { headers, signal: AbortSignal.timeout(6000) });
+  if (!getRes.ok) return false;
+  const ev = await getRes.json();
+  const summary: string = ev.summary ?? '';
+  if (!summary.startsWith(UNPAID_PREFIX) || !(ev.attendees ?? []).length) return false;
+  const res = await fetch(`${base}?sendUpdates=none`, {
+    method: 'PATCH', headers, body: JSON.stringify({ summary: summary.slice(UNPAID_PREFIX.length) }),
+    signal: AbortSignal.timeout(6000),
+  });
+  return res.ok;
 }

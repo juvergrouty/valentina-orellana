@@ -4,6 +4,7 @@ import { getBoletaAlerts, type BoletaAlert } from '../../lib/boletaAlerts';
 import { getConsentAlerts, type ConsentAlert } from '../../lib/consent';
 import { getBlockedDayAlerts, type BlockedDayAlert } from '../../lib/blockedDayAlerts';
 import { cerrarFeriadosConfirmados } from '../../lib/feriados';
+import { corregirPrefijoInvitacionesUnaVez } from '../../lib/syncCalendar';
 import { getComprobanteAlerts, type ComprobanteAlert } from '../../lib/comprobantes';
 
 interface Props {
@@ -51,6 +52,8 @@ const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZ
 // Antes del aviso: cerrar los feriados confirmados que se acercan (también lo
 // hace la tarea diaria google-reviews-refresh; esto solo escribe si falta alguno).
 try { await cerrarFeriadosConfirmados(); } catch { /* no debe tumbar el admin */ }
+// Corrección única de invitaciones ya enviadas con "Por pagar" (ver syncCalendar.ts).
+try { await corregirPrefijoInvitacionesUnaVez(); } catch { /* no debe tumbar el admin */ }
 let blockedDayAlerts: BlockedDayAlert[] = [];
 try {
   blockedDayAlerts = (await getBlockedDayAlerts()).filter(a => a.presencial.length || a.online.length || a.agendadas);
