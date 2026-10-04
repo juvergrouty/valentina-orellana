@@ -63,7 +63,7 @@ export const POST: APIRoute = async ({ request }) => {
   if (action === 'emitir') {
     const bookingId = body.booking_id;
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
-    const r = await emitBoletaParaReserva(bookingId, { rutOverride: body.rut, enviarEmail: true, forzar: body.forzar === true });
+    const r = await emitBoletaParaReserva(bookingId, { rutOverride: body.rut, enviarEmail: true, forzar: body.forzar === true, rutDesdePanel: !!body.rut });
     if (!r.ok) return json({ ok: false, error: r.error ?? 'Error al emitir' }, 502);
     if (r.alreadyEmitted) return json({ ok: false, error: `Esta sesión ya tiene la boleta Folio ${r.folio}. Usa "Enviar por email" para reenviarla.` }, 400);
     return json({ ok: true, folio: r.folio, codigo: r.codigo, enviada: r.enviada, enviadaA: r.enviadaA, errorEnvio: r.errorEnvio });

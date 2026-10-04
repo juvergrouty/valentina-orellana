@@ -157,7 +157,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (emitir) {
       try {
-        const boletaRes = await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true });
+        const boletaRes = await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true, rutDesdePanel: !!rut });
         if (!boletaRes.ok) {
           await logWarn('boleta/marcar-pagado', `Boleta no emitida al marcar como pagado: ${boletaRes.error}`, { bookingId: id, error: boletaRes.error });
           return redirect(dest + '&error=boleta_failed&detail=' + encodeURIComponent(boletaRes.error ?? ''));

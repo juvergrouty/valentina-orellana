@@ -15,7 +15,7 @@ export async function upsertPatientFromBooking(b: {
   patient_email?: string | null;
   patient_phone?: string | null;
   rut?: string | null;
-}): Promise<string | null> {
+}, opts: { actualizarRut?: boolean } = {}): Promise<string | null> {
   const email = b.patient_email?.trim().toLowerCase();
   const name  = b.patient_name?.trim();
   if (!email || !name) return null;
@@ -23,15 +23,23 @@ export async function upsertPatientFromBooking(b: {
   try {
     const { data: existing } = await supabase
       .from('patients')
-      .select('id, phone, rut')
+      .select('id, name, phone, rut')
       .eq('email', email)
       .maybeSingle();
 
     if (existing) {
-      // No pisar un teléfono/RUT ya guardado con uno vacío.
-      const phone = b.patient_phone?.trim() || existing.phone;
-      const rut   = b.rut?.trim() || existing.rut;
-      await supabase.from('patients').update({ name, phone, rut }).eq('id', existing.id);
+      // Una ficha que ya existe NO se sobrescribe con lo que venga de una
+      // reserva o un cobro (3 oct 2026): antes cada reserva pisaba nombre,
+      // teléfono y RUT, así que otra persona que reservara con ese correo (ej.
+      // la pareja) cambiaba el RUT con que salen las boletas, y se perdían las
+      // correcciones hechas a mano en la ficha. Solo se completan datos vacíos.
+      // Excepción: el RUT que Valentina escribe al emitir una boleta
+      // (actualizarRut), que es una corrección explícita suya.
+      const cambios: Record<string, string> = {};
+      if (!existing.name?.trim()) cambios.name = name;
+      if (!existing.phone?.trim() && b.patient_phone?.trim()) cambios.phone = b.patient_phone.trim();
+      if (b.rut?.trim() && (opts.actualizarRut || !existing.rut?.trim())) cambios.rut = b.rut.trim();
+      if (Object.keys(cambios).length) await supabase.from('patients').update(cambios).eq('id', existing.id);
       return existing.id;
     } else {
       const { data: inserted } = await supabase.from('patients').insert({

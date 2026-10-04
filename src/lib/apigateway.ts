@@ -461,7 +461,9 @@ export async function emitBoletaParaReserva(
   bookingId: string,
   // forzar: Valentina revisó en el SII que una emisión interrumpida NO quedó
   // emitida y pide emitir de nuevo (solo libera un candado viejo, nunca uno en curso).
-  opts: { rutOverride?: string; enviarEmail?: boolean; forzar?: boolean } = {},
+  // rutDesdePanel: el RUT lo escribió Valentina en el panel → corrige la ficha.
+  // Si viene de la reserva (Flow, transferencia), solo completa la ficha si estaba vacía.
+  opts: { rutOverride?: string; enviarEmail?: boolean; forzar?: boolean; rutDesdePanel?: boolean } = {},
 ): Promise<{ ok: boolean; folio?: number | null; codigo?: string | null; error?: string; alreadyEmitted?: boolean; enviada?: boolean; enviadaA?: string; errorEnvio?: string }> {
   const cfg = await getAgwConfig();
   if (!cfg) return { ok: false, error: 'API Gateway no configurado.' };
@@ -490,7 +492,7 @@ export async function emitBoletaParaReserva(
   // que beneficie a todos los flujos que llaman esta función.
   if (b.patient_email && (!p?.rut || p.rut !== normalizeRut(rutRaw))) {
     try {
-      await upsertPatientFromBooking({ patient_name: p?.name ?? b.patient_name, patient_email: b.patient_email, rut: normalizeRut(rutRaw) });
+      await upsertPatientFromBooking({ patient_name: p?.name ?? b.patient_name, patient_email: b.patient_email, rut: normalizeRut(rutRaw) }, { actualizarRut: !!opts.rutDesdePanel });
     } catch (e) {
       await logError('boleta/guardar-rut', 'No se pudo guardar el RUT en la ficha del paciente', { bookingId, error: e instanceof Error ? e.message : String(e) });
     }
