@@ -30,6 +30,14 @@ export const articulos: Articulo[] = [
     publicado: true,
   },
   {
+    slug: 'volver-a-elegirse',
+    titulo: 'Volver a elegirse',
+    bajada: 'Qué hace falta para que una pareja que se alejó pueda reencontrarse.',
+    categoria: 'Vínculos',
+    etiqueta: 'Pareja',
+    publicado: true,
+  },
+  {
     slug: 'el-hombre-que-puede-solo',
     titulo: 'El hombre que puede solo',
     bajada: 'Sobre la desconexión que funciona durante años, hasta que un día deja de funcionar.',
