@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { logError } from './logger';
-import { sendStepsEmail } from './email';
+import { sendStepsEmail, sendConsentLinkEmail } from './email';
+import { getOrCreatePendingConsent, consentUrl, vigente, type ConsentRow } from './consent';
 
 // Crea o actualiza la ficha del paciente en `patients` a partir de los datos
 // de una reserva. Se llama cada vez que una reserva pasa a `confirmed` —
@@ -81,8 +82,34 @@ export async function sendStepsOnFirstPayment(b: {
     if (!res.sent) {
       await supabase.from('patients').update({ steps_sent_at: null }).eq('id', patientId);
       await logError('email/pasos-automatico', `No se pudo enviar "Pasos a seguir" a ${email} tras su primer pago`, { email, error: res.reason });
+      return;
     }
+    // "Pasos a seguir" promete "te llegará un link para firmar el
+    // consentimiento": se manda junto, en el primer pago (Valentina, 3 oct 2026).
+    await enviarConsentimientoSiFalta(patientId, marcado.name, email);
   } catch (err) {
     await logError('email/pasos-automatico', 'Error al enviar "Pasos a seguir" tras el primer pago', { email, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+// Manda por correo el link del consentimiento informado si el paciente no
+// tiene uno vigente firmado ni uno ya enviado esperando firma. Mismo link y
+// mismo registro (sent_at/sent_via) que el botón "Enviar por correo" de la ficha.
+export async function enviarConsentimientoSiFalta(patientId: string, name: string, email: string): Promise<void> {
+  try {
+    const { data: rows } = await supabase.from('consents').select('*').eq('patient_id', patientId);
+    const lista = (rows ?? []) as ConsentRow[];
+    if (vigente(lista)) return;                                  // ya firmó
+    if (lista.some(r => !r.signed_at && r.sent_at)) return;      // ya se le mandó y está pendiente
+    const c = await getOrCreatePendingConsent(patientId);
+    const url = consentUrl('https://www.valentinaorellana.cl', c.token);
+    const res = await sendConsentLinkEmail({ patientName: name, patientEmail: email, url });
+    if (!res.sent) {
+      await logError('consentimiento/automatico', `No se pudo enviar el consentimiento a ${email} tras su primer pago`, { patientId, error: res.reason });
+      return;
+    }
+    await supabase.from('consents').update({ sent_at: new Date().toISOString(), sent_via: 'email' }).eq('id', c.id);
+  } catch (e) {
+    await logError('consentimiento/automatico', 'Error al enviar el consentimiento tras el primer pago', { patientId, error: e instanceof Error ? e.message : String(e) });
   }
 }
