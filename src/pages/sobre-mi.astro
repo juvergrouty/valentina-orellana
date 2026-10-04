@@ -3,7 +3,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
 ---
 
-<BaseLayout title="Sobre mí" description="Conoce a la Ps. Valentina Orellana — formación, enfoque y valores.">
+<BaseLayout title="Sobre mí · Psicóloga en Las Condes" description="Conoce a la Ps. Valentina Orellana: más de 15 años acompañando a adultos y parejas, su formación en terapia sistémica y su forma de trabajar.">
 
   <PageHero label="Mi historia" title="Sobre mí" image="/images/banner-sobre-mi.jpg" imageMobile="/images/banner-sobre-mi-mobile.jpg" />
 
@@ -46,11 +46,12 @@ import PageHero   from '../components/sections/PageHero.astro';
           <ul class="space-y-5">
             {[
               ['Psicología', 'Universidad del Desarrollo'],
-              ['Especialización en Terapia Sistémica', 'N° de registro 360070 · Superintendencia de Salud'],
+              ['Especialización en Terapia Sistémica', ''],
+              ['Registro Superintendencia de Salud', 'N° 360070'],
             ].map(([titulo, inst]) => (
               <li class="grid grid-cols-1 gap-0.5 border-b border-dust pb-5">
                 <p class="font-body font-medium text-sm text-ink">{titulo}</p>
-                <p class="label text-stone">{inst}</p>
+                {inst && <p class="label text-stone">{inst}</p>}
               </li>
             ))}
           </ul>
@@ -69,7 +70,7 @@ import PageHero   from '../components/sections/PageHero.astro';
           </div>
         </div>
 
-        <a href="/agenda" class="btn-dark inline-flex">Reservar una sesión</a>
+        <a href="/agenda" class="btn-dark inline-flex">Agendar sesión</a>
       </div>
 
     </div>
