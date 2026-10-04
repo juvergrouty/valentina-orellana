@@ -23,7 +23,7 @@ export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: 
   {
     const q = await supabase
       .from('bookings')
-      .select('id, patient_name, patient_email, session_date, session_time, google_event_id, created_by_admin')
+      .select('id, patient_name, patient_email, session_date, session_time, google_event_id, created_by_admin, notes')
       .eq('status', 'pending_payment')
       .neq('session_date', '2099-12-31') // no tocar cobros manuales sin fecha
       .lt('created_at', cutoff);
@@ -40,7 +40,10 @@ export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: 
     }
   }
 
-  const candidates = (stale ?? []).filter((b: { created_by_admin?: boolean }) => !b.created_by_admin);
+  // Tampoco se libera una reserva con comprobante de transferencia por
+  // confirmar: la paciente ya pagó, solo falta que Valentina lo confirme.
+  const candidates = (stale ?? []).filter((b: { created_by_admin?: boolean; notes?: string | null }) =>
+    !b.created_by_admin && !(b.notes ?? '').includes('ComprobanteTransferencia'));
   if (!candidates.length) return { claimed: 0 };
 
   const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();

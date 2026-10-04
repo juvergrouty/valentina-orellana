@@ -4,6 +4,7 @@ import { getBoletaAlerts, type BoletaAlert } from '../../lib/boletaAlerts';
 import { getConsentAlerts, type ConsentAlert } from '../../lib/consent';
 import { getBlockedDayAlerts, type BlockedDayAlert } from '../../lib/blockedDayAlerts';
 import { cerrarFeriadosConfirmados } from '../../lib/feriados';
+import { getComprobanteAlerts, type ComprobanteAlert } from '../../lib/comprobantes';
 
 interface Props {
   title: string;
@@ -42,6 +43,11 @@ let consentAlerts: ConsentAlert[] = [];
 try { consentAlerts = await getConsentAlerts(); } catch { /* no debe tumbar el admin */ }
 // Días cerrados (feriados/vacaciones) de las próximas 2 semanas, con las horas
 // que se pierden por modalidad (ver src/lib/blockedDayAlerts.ts).
+// Comprobantes de transferencia por confirmar (ver src/lib/comprobantes.ts).
+let comprobanteAlerts: ComprobanteAlert[] = [];
+try { comprobanteAlerts = await getComprobanteAlerts(); } catch { /* no debe tumbar el admin */ }
+const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 // Antes del aviso: cerrar los feriados confirmados que se acercan (también lo
 // hace la tarea diaria google-reviews-refresh; esto solo escribe si falta alguno).
 try { await cerrarFeriadosConfirmados(); } catch { /* no debe tumbar el admin */ }
@@ -783,6 +789,22 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
 
   <!-- ── Main area ──────────────────────────────────────────────────────── -->
   <main class="enc-main">
+    {comprobanteAlerts.length > 0 && (
+      <div role="alert" id="comprobantes-alert" style="background:#1d4ed8;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
+        <p style="font-weight:700;margin:0 0 0.35rem;">💸 {comprobanteAlerts.length === 1 ? 'Hay 1 comprobante de transferencia por confirmar' : `Hay ${comprobanteAlerts.length} comprobantes de transferencia por confirmar`}: revisa tu banco y confirma el pago</p>
+        <ul style="margin:0;padding-left:1.1rem;">
+          {comprobanteAlerts.map(a => (
+            <li style="margin:0.3rem 0;" data-ids={a.bookingIds.join(',')}>
+              <strong>{a.patientName}</strong> · {clp(a.total)} · subido el {fechaHora(a.subidoEl)} ·{' '}
+              <a href={`/api/admin/comprobante?b=${a.bookingIds[0]}`} target="_blank" rel="noopener" style="color:#fff;text-decoration:underline;font-weight:600;">Ver comprobante</a>{' '}
+              <button type="button" class="cmp-confirmar" style="margin-left:0.4rem;background:#fff;color:#1d4ed8;border:none;border-radius:4px;padding:0.2rem 0.6rem;font-weight:700;cursor:pointer;">Confirmar pago</button>{' '}
+              <button type="button" class="cmp-descartar" style="background:none;color:#fff;border:1px solid rgba(255,255,255,.6);border-radius:4px;padding:0.15rem 0.5rem;cursor:pointer;">No corresponde</button>
+              <span class="cmp-estado" style="margin-left:0.4rem;"></span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
     {boletaAlerts.length > 0 && (
       <div role="alert" style="background:#dc2626;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
         <p style="font-weight:700;margin:0 0 0.35rem;">⚠ {boletaAlerts.length === 1 ? 'Hay 1 boleta con problemas' : `Hay ${boletaAlerts.length} boletas con problemas`}</p>
@@ -1112,3 +1134,56 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   });
 </script>
 </html>
+
+<script>
+  // Comprobantes de transferencia por confirmar: "Confirmar pago" usa el mismo
+  // "Marcar como pagado" de siempre (pago, calendario, boleta, Pasos a seguir),
+  // una vez por cada sesión que cubre el comprobante.
+  document.querySelectorAll<HTMLElement>('#comprobantes-alert li').forEach((li) => {
+    const ids = (li.dataset.ids ?? '').split(',').filter(Boolean);
+    const estado = li.querySelector<HTMLElement>('.cmp-estado')!;
+    const botones = li.querySelectorAll<HTMLButtonElement>('button');
+
+    li.querySelector('.cmp-confirmar')?.addEventListener('click', async () => {
+      const nombre = li.querySelector('strong')?.textContent ?? '';
+      if (!confirm(`¿Confirmas que la transferencia de ${nombre} está en tu banco?\n\nLa sesión queda pagada y se emite y envía la boleta.`)) return;
+      botones.forEach(b => (b.disabled = true));
+      estado.textContent = 'Confirmando y emitiendo boleta…';
+      const errores: string[] = [];
+      for (const id of ids) {
+        const fd = new FormData();
+        fd.set('action', 'mark_paid');
+        fd.set('id', id);
+        fd.set('medio', 'Transferencia');
+        fd.set('emitir_boleta', 'on');
+        fd.set('redirect', '/robots.txt?ok=1');
+        try {
+          const res = await fetch('/api/admin/bookings', { method: 'POST', body: fd });
+          const q = new URL(res.url).searchParams;
+          const err = q.get('error');
+          // boleta_failed: el pago SÍ quedó registrado; solo falló la boleta
+          // (queda en el aviso rojo de boletas y se reintenta si fue el SII).
+          if (err === 'boleta_failed') errores.push(`pago confirmado, pero la boleta no se emitió: ${q.get('detail') ?? ''}`);
+          else if (!res.ok || err) errores.push(q.get('detail') || err || `HTTP ${res.status}`);
+        } catch { errores.push('error de conexión'); }
+      }
+      if (errores.length) {
+        estado.textContent = `⚠ ${errores.join(' · ')}`;
+        botones.forEach(b => (b.disabled = false));
+      } else {
+        estado.textContent = '✓ Pago confirmado. La boleta se envía sola.';
+        setTimeout(() => location.reload(), 1500);
+      }
+    });
+
+    li.querySelector('.cmp-descartar')?.addEventListener('click', async () => {
+      if (!confirm('¿Quitar este aviso? Las sesiones siguen sin pagar y el comprobante deja de aparecer.')) return;
+      botones.forEach(b => (b.disabled = true));
+      const res = await fetch('/api/admin/comprobante', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'descartar', ids }),
+      }).then(r => r.json()).catch(() => ({ ok: false }));
+      if (res.ok) li.remove(); else { estado.textContent = '⚠ No se pudo quitar el aviso'; botones.forEach(b => (b.disabled = false)); }
+    });
+  });
+</script>

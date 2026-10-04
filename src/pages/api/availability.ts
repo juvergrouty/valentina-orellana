@@ -83,7 +83,7 @@ export const GET: APIRoute = async ({ url }) => {
       .select('session_time, duration_min')
       .eq('session_date', dateParam)
       .neq('status', 'cancelled')
-      .or(`status.eq.confirmed,created_by_admin.eq.true,and(status.eq.pending_payment,created_at.gte.${recentCutoff})`);
+      .or(`status.eq.confirmed,created_by_admin.eq.true,and(status.eq.pending_payment,created_at.gte.${recentCutoff}),and(status.eq.pending_payment,notes.ilike.*ComprobanteTransferencia*)`);
     if (res.error?.code === '42703') {
       return await supabase.from('bookings')
         .select('session_time, duration_min')

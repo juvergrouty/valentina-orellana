@@ -314,6 +314,11 @@ const formatCLP = (n: number) =>
                     </button>
                     <span class={`badge ${badgeClass}`}>{badgeLabel}</span>
                     {!isCancelled && <span class={`badge ${payBadgeClass}`}>{payBadgeLabel}</span>}
+                    {(b.notes ?? '').includes('ComprobanteTransferencia') && (
+                      <a href={`/api/admin/comprobante?b=${b.id}`} target="_blank" rel="noopener" class="btn btn-outline btn-sm">
+                        {isPaid ? 'Ver comprobante' : 'Comprobante por confirmar'}
+                      </a>
+                    )}
                     <span style="font-size:0.82rem;color:var(--stone);display:flex;align-items:center;gap:0.2rem;">
                       {formatCLP(b.amount)}
                       <button type="button" class="btn-edit-amount" data-bid={b.id} data-amount={b.amount} title="Editar monto"

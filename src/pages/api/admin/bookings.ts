@@ -118,8 +118,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       return redirect(dest + '&error=insert_failed&detail=' + encodeURIComponent(error.message.slice(0, 200)));
     }
 
-    // El evento de Google Calendar deja de verse como "Por pagar"
-    try { await markBookingPaidInCalendar(id, true); } catch (e) { console.error('[mark_paid] calendar:', e); }
+    // El evento de Google Calendar deja de verse como "Por pagar". Si la sesión
+    // no tenía evento (reserva con link de pago que nunca lo tuvo, o un sync
+    // que falló), se crea primero; antes quedaba pagada y fuera del calendario.
+    try {
+      const { data: row } = await supabase.from('bookings').select('*').eq('id', id).maybeSingle();
+      if (row && !row.google_event_id && row.session_date !== '2099-12-31') await syncBookingToCalendar(row);
+      await markBookingPaidInCalendar(id, true);
+    } catch (e) { console.error('[mark_paid] calendar:', e); }
 
     // "Pasos a seguir" automático si es el primer pago del paciente.
     const { data: pagada } = await supabase.from('bookings')

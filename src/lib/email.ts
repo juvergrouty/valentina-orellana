@@ -972,3 +972,45 @@ export async function sendConsentSignedCopy(opts: {
   });
   await logEmail('email/consentimiento-copia', opts.to.join(', '), subject, !res.error, res.error?.message);
 }
+
+// ─── Email a Valentina: comprobante de transferencia POR CONFIRMAR ───────────
+// La paciente subió su comprobante en /pagar/[id]. Nada se marcó pagado: el
+// pago se confirma con "Confirmar pago" en el panel (aviso arriba en todas las
+// páginas). Lleva el comprobante adjunto para revisarlo contra el banco.
+export async function sendTransferReceiptAdmin(opts: {
+  to:           string;
+  patientName:  string;
+  patientEmail: string;
+  total:        number;
+  sesiones:     { label: string; amount: number }[];
+  fileName:     string;
+  fileBase64:   string;
+  panelUrl:     string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+  const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+  const subject = `Comprobante de transferencia por confirmar: ${opts.patientName} · ${clp(opts.total)}`;
+  const filas = opts.sesiones.map(s => `<tr><td style="padding:0.3rem 0;">${escapeHtml(s.label)}</td><td style="padding:0.3rem 0;text-align:right;">${clp(s.amount)}</td></tr>`).join('');
+  const res = await client.emails.send({
+    from: FROM,
+    to:   opts.to,
+    subject,
+    html: `
+      <div style="font-family:'Inter',Arial,sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        <h1 style="font-family:Georgia,serif;font-size:1.35rem;font-weight:400;margin:0 0 0.75rem;">Comprobante de transferencia por confirmar</h1>
+        <p style="font-size:0.9rem;line-height:1.6;color:#4A4840;margin:0 0 1rem;">
+          <strong>${escapeHtml(opts.patientName)}</strong> (${escapeHtml(opts.patientEmail)}) subió el comprobante adjunto.
+          Revisa que la transferencia esté en tu banco y aprieta <strong>Confirmar pago</strong> en el aviso del panel: ahí queda pagado y se emite y envía la boleta.
+        </p>
+        <table style="width:100%;border-collapse:collapse;font-size:0.88rem;">
+          ${filas}
+          <tr><td style="padding:0.5rem 0 0;font-weight:600;border-top:1px solid #DDD8CF;">Total</td><td style="padding:0.5rem 0 0;text-align:right;font-weight:600;border-top:1px solid #DDD8CF;">${clp(opts.total)}</td></tr>
+        </table>
+        <p style="margin:1.5rem 0 0;"><a href="${escapeHtml(opts.panelUrl)}" style="display:inline-block;background:#576352;color:#fff;padding:0.7rem 1.2rem;text-decoration:none;font-weight:600;">Abrir el panel</a></p>
+      </div>`,
+    attachments: [{ filename: opts.fileName, content: opts.fileBase64 }],
+  });
+  await logEmail('email/transferencia', opts.to, subject, !res.error, res.error?.message);
+  return res.error ? { sent: false, reason: res.error.message } : { sent: true };
+}

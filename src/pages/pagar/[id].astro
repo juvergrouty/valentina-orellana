@@ -29,6 +29,22 @@ function formatDate(iso: string) {
 }
 
 const pendingJson = JSON.stringify({ patientId: patient?.id ?? null });
+
+// Datos para transferir (Configuración → Pagos). Transferencia = excepción
+// para quien no puede pagar con tarjeta: sube su comprobante y Valentina lo
+// confirma desde el panel (ver src/lib/comprobantes.ts).
+const { data: trRows } = await supabase.from('settings').select('key, value').like('key', 'transfer_%');
+const tr: Record<string, string> = Object.fromEntries((trRows ?? []).map((r: { key: string; value: string }) => [r.key, (r.value ?? '').trim()]));
+const datosTransferencia = [
+  ['Titular', tr['transfer_account_holder']],
+  ['RUT', tr['transfer_rut']],
+  ['Banco', tr['transfer_bank_name']],
+  ['Tipo de cuenta', tr['transfer_account_type']],
+  ['N° de cuenta', tr['transfer_account_number']],
+  ['Correo', tr['transfer_email']],
+].filter(([, v]) => v) as [string, string][];
+const datosCompletos = !!tr['transfer_account_number'];
+const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valentina, no puedo pagar con tarjeta. ¿Me envías los datos para transferir?')}`;
 ---
 
 <Layout title="Pagar sesiones pendientes" description="Revisa y paga tus sesiones pendientes con Ps. Valentina Orellana." noindex>
@@ -69,6 +85,40 @@ const pendingJson = JSON.stringify({ patientId: patient?.id ?? null });
 
         <button type="button" id="btn-pagar" class="btn-dark w-full justify-center text-center">Ir a pagar</button>
         <p id="pagar-error" class="hidden text-sm text-red-600 text-center mt-3"></p>
+
+        <!-- Transferencia (excepción) -->
+        <div class="mt-6 text-center">
+          <button type="button" id="btn-transfer-toggle" aria-expanded="false" aria-controls="transfer-box"
+            class="text-sm text-stone underline underline-offset-4 hover:text-ink">
+            ¿No puedes pagar con tarjeta de débito o crédito?
+          </button>
+        </div>
+        <div id="transfer-box" hidden class="mt-5 border border-dust rounded-lg p-5 text-left">
+          <p class="font-medium text-sm mb-1">Puedes pagar por transferencia</p>
+          <p class="text-xs text-stone mb-4">1. Transfiere <strong>{formatCLP(total)}</strong> a esta cuenta. 2. Sube aquí la foto o captura del comprobante.</p>
+          {datosCompletos ? (
+            <dl class="divide-y divide-dust text-sm mb-5">
+              {datosTransferencia.map(([k, v]) => (
+                <div class="flex items-center justify-between gap-3 py-2">
+                  <dt class="text-stone">{k}</dt>
+                  <dd class="flex items-center gap-2 min-w-0">
+                    <span class="font-medium break-all">{v}</span>
+                    <button type="button" class="copy-btn text-xs border border-dust rounded px-2 py-0.5 hover:border-ink" data-copy={v}>Copiar</button>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p class="text-sm mb-5"><a href={waDatos} target="_blank" rel="noopener" class="underline">Escríbeme por WhatsApp y te mando los datos para transferir</a>.</p>
+          )}
+          <form id="transfer-form" class="flex flex-col gap-3">
+            <label for="comprobante" class="text-sm font-medium">Comprobante de la transferencia</label>
+            <input id="comprobante" name="comprobante" type="file" accept="image/*,application/pdf" required
+              class="text-sm file:mr-3 file:border file:border-dust file:bg-white file:px-3 file:py-1.5 file:text-sm" />
+            <button type="submit" id="btn-comprobante" class="btn-dark w-full justify-center text-center">Enviar comprobante</button>
+            <p id="transfer-msg" class="hidden text-sm text-center" role="status" aria-live="polite"></p>
+          </form>
+        </div>
         <p class="text-xs text-stone text-center mt-6">Si tienes dudas sobre los montos o las sesiones, escríbele directamente a Valentina.</p>
       </>
     )}
@@ -76,6 +126,65 @@ const pendingJson = JSON.stringify({ patientId: patient?.id ?? null });
 </Layout>
 
 <script define:vars={{ pendingJson }}>
+// Transferencia: mostrar datos, copiar y subir el comprobante.
+(function () {
+  const toggle = document.getElementById('btn-transfer-toggle');
+  const box = document.getElementById('transfer-box');
+  if (!toggle || !box) return;
+  toggle.addEventListener('click', () => {
+    box.hidden = !box.hidden;
+    toggle.setAttribute('aria-expanded', String(!box.hidden));
+  });
+  document.querySelectorAll('.copy-btn').forEach((b) => {
+    b.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copiado'; }
+      catch { b.textContent = 'Mantén presionado para copiar'; }
+      setTimeout(() => { b.textContent = 'Copiar'; }, 2000);
+    });
+  });
+
+  // Fotos grandes del celular: se achican antes de subir (máx. 4 MB en el servidor).
+  async function achicar(file) {
+    if (!file.type.startsWith('image/') || file.size <= 3.5 * 1024 * 1024) return file;
+    try {
+      const img = await createImageBitmap(file);
+      const escala = Math.min(1, 1800 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * escala); c.height = Math.round(img.height * escala);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.82));
+      return blob ? new File([blob], 'comprobante.jpg', { type: 'image/jpeg' }) : file;
+    } catch { return file; }
+  }
+
+  const form = document.getElementById('transfer-form');
+  const msg = document.getElementById('transfer-msg');
+  const btn = document.getElementById('btn-comprobante');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('comprobante');
+    if (!input.files || !input.files[0]) return;
+    btn.disabled = true; btn.textContent = 'Enviando…';
+    msg.classList.add('hidden');
+    try {
+      const fd = new FormData();
+      fd.set('patientId', JSON.parse(pendingJson).patientId);
+      fd.set('comprobante', await achicar(input.files[0]));
+      const res = await fetch('/api/comprobante-transferencia', { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        form.innerHTML = '<p class="text-sm text-center leading-relaxed"><strong>¡Listo! Recibí tu comprobante.</strong><br>Apenas confirme la transferencia te llegará la boleta a tu correo. No necesitas hacer nada más.</p>';
+        return;
+      }
+      msg.textContent = data.error ?? 'No se pudo enviar el comprobante. Intenta de nuevo.';
+    } catch {
+      msg.textContent = 'Error de conexión. Intenta de nuevo.';
+    }
+    msg.className = 'text-sm text-center text-red-600';
+    btn.disabled = false; btn.textContent = 'Enviar comprobante';
+  });
+})();
+
 (function () {
   const btn = document.getElementById('btn-pagar');
   if (!btn) return;
