@@ -114,14 +114,18 @@ const availByDow: Record<number, AvSlot[]> = {};
   const [h, m] = hhmm.split(':').map(Number);
   (availByDow[s.day_of_week] ??= []).push({ start: hhmm, min: h * 60 + m, svc: s.service_id ?? '', height: 55 });
 });
-// Altura de cada bloque = distancia al siguiente slot del mismo día (para que teselen)
-Object.keys(availByDow).forEach(k => {
-  const arr = availByDow[+k].sort((a, b) => a.min - b.min);
-  arr.forEach((s, i) => {
-    const gap = i < arr.length - 1 ? arr[i + 1].min - s.min : 55;
-    s.height = Math.max(20, Math.min(gap, 90));
+// Altura de cada bloque = duración de la sesión de SU servicio (ej. 50 min).
+// Antes era la distancia al siguiente slot del día mezclando todos los
+// servicios: si dos servicios tenían la misma hora, la distancia era 0 y la
+// franja quedaba en el mínimo (20 px), mucho más chica que la sesión.
+{
+  const durServicio = new Map((allServices as Array<{ id: string; duration_min?: number | null }>).map(sv => [sv.id, sv.duration_min ?? 50]));
+  Object.keys(availByDow).forEach(k => {
+    availByDow[+k].sort((a, b) => a.min - b.min).forEach(s => {
+      s.height = Math.max(20, durServicio.get(s.svc) ?? 50);
+    });
   });
-});
+}
 
 // Mapa email → RUT (para prellenar la emisión de boleta) y email → id de ficha
 // (para el botón "Escribir evolución" del panel — enlaza directo a la ficha si ya existe)
