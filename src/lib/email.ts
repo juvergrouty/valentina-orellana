@@ -197,6 +197,13 @@ export async function sendSessionUpdatedEmail(data: {
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
   const subject = `${data.reason} — Ps. Valentina Orellana`;
+  // Dónde: dirección de la consulta (presencial) o aviso del Meet (online).
+  const esOnline = (data.session_type ?? '').includes('online');
+  let lugar = 'Online · el enlace de Google Meet está en la invitación de tu calendario';
+  if (!esOnline) {
+    const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
+    lugar = addr?.value?.trim() || 'Presencial en consulta';
+  }
   const res = await client.emails.send({
     from: FROM,
     to:   data.patient_email,
@@ -209,9 +216,10 @@ export async function sendSessionUpdatedEmail(data: {
         </p>
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
           <table style="width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:0.85rem;">
-            <tr><td style="padding:0.4rem 0;color:#6B6860;width:40%;">Tipo de sesión</td><td style="padding:0.4rem 0;font-weight:500;">${sessionLabel}</td></tr>
+            <tr><td style="padding:0.4rem 0;color:#6B6860;width:40%;">Tipo de sesión</td><td style="padding:0.4rem 0;font-weight:500;">${escapeHtml(sessionLabel)}</td></tr>
             <tr><td style="padding:0.4rem 0;color:#6B6860;">Fecha</td><td style="padding:0.4rem 0;font-weight:500;">${formatDate(data.session_date)}</td></tr>
-            <tr><td style="padding:0.4rem 0;color:#6B6860;">Hora</td><td style="padding:0.4rem 0;font-weight:500;">${data.session_time}</td></tr>
+            <tr><td style="padding:0.4rem 0;color:#6B6860;">Hora</td><td style="padding:0.4rem 0;font-weight:500;">${String(data.session_time).slice(0, 5)}</td></tr>
+            <tr><td style="padding:0.4rem 0;color:#6B6860;">${esOnline ? 'Modalidad' : 'Dirección'}</td><td style="padding:0.4rem 0;font-weight:500;">${escapeHtml(lugar)}</td></tr>
             <tr><td style="padding:0.4rem 0;color:#6B6860;">Valor</td><td style="padding:0.4rem 0;font-weight:500;">${formatCLP(data.amount)}</td></tr>
           </table>
         </div>

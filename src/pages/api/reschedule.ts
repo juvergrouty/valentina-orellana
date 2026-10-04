@@ -115,6 +115,13 @@ export const POST: APIRoute = async ({ request }) => {
   // nueva. A Valentina: aviso de que fue un REAGENDAMIENTO, no una reserva
   // nueva — antes esto reusaba sendNotificationToAdmin, que decía "Nueva
   // reserva confirmada" y era indistinguible de una reserva real nueva.
+  // Nombre real del servicio (el mismo que ve en la agenda).
+  let serviceName: string | undefined;
+  if (booking.service_id) {
+    const { data: svc } = await supabase.from('services_catalog').select('name').eq('id', booking.service_id).maybeSingle();
+    serviceName = svc?.name;
+  }
+
   // AWAIT: en una función serverless, sin esperar, los correos pueden no salir.
   await Promise.all([
     sendSessionUpdatedEmail({
@@ -125,6 +132,7 @@ export const POST: APIRoute = async ({ request }) => {
       session_date,
       session_time,
       amount:        booking.amount,
+      service_name:  serviceName,
     }).catch(console.error),
     sendRescheduleAdminAlert({
       patient_name:  booking.patient_name,

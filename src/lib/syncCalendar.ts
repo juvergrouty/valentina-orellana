@@ -26,6 +26,12 @@ export interface BookingForCalendar {
 }
 
 /** Obtiene un access_token válido desde settings, refrescando si es necesario */
+/** Dirección de la consulta (Configuración → clinic_address), o undefined. */
+async function direccionConsulta(): Promise<string | undefined> {
+  const { data } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
+  return data?.value?.trim() || undefined;
+}
+
 export async function getValidAccessToken(): Promise<{ token: string; calendarId: string } | null> {
   const { data: rows } = await supabase.from('settings').select('key, value')
     .in('key', ['google_access_token','google_refresh_token','google_token_expiry','google_calendar_id']);
@@ -71,11 +77,14 @@ export async function deleteBookingFromCalendar(bookingId: string): Promise<void
 /** Actualiza fecha/hora del evento en Google Calendar al reagendar */
 export async function rescheduleBookingInCalendar(bookingId: string, date: string, time: string, durationMin = 55): Promise<void> {
   try {
-    const { data: booking } = await supabase.from('bookings').select('google_event_id').eq('id', bookingId).single();
+    const { data: booking } = await supabase.from('bookings').select('google_event_id, session_type').eq('id', bookingId).single();
     if (!booking?.google_event_id) return;
     const auth = await getValidAccessToken();
     if (!auth) return;
-    await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin);
+    // Presencial: la invitación lleva la dirección (también corrige eventos
+    // antiguos que se crearon sin ella).
+    const location = (booking.session_type ?? '').includes('online') ? undefined : await direccionConsulta();
+    await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin, location);
   } catch (e) {
     await logError('calendar/reagendar', 'No se pudo actualizar el evento de Google Calendar', { bookingId, date, time, error: e instanceof Error ? e.message : String(e) });
   }
@@ -159,18 +168,23 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
       }
     }
 
-    // Leer duración de settings
+    // Duración: la de la propia reserva (la que se ve en el panel); si no la
+    // tiene, la de settings. Antes era siempre la de settings (55).
     const { data: durRows } = await supabase.from('settings').select('key, value')
       .in('key', ['session_duration_min']);
     const durCfg: Record<string, string> = {};
     (durRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { durCfg[key] = value; });
-    const durationMin = parseInt(durCfg['session_duration_min'] ?? '55');
+    const { data: durRow } = await supabase.from('bookings').select('duration_min').eq('id', booking.id).maybeSingle();
+    const durationMin = Number(durRow?.duration_min) || parseInt(durCfg['session_duration_min'] ?? '55');
 
     const sessionLabel = SESSION_LABELS[booking.session_type] ?? booking.session_type;
+    // Presencial: la invitación de Google lleva la dirección de la consulta.
+    const location = isOnline ? undefined : await direccionConsulta();
 
     const event = await createCalendarEvent(accessToken, {
       title:         `${sessionLabel} — ${booking.patient_name}`,
-      description:   `Sesión con Ps. Valentina Orellana\nPaciente: ${booking.patient_name}\nTipo: ${sessionLabel}`,
+      description:   `Sesión con Ps. Valentina Orellana\nPaciente: ${booking.patient_name}\nTipo: ${sessionLabel}${location ? `\nDirección: ${location}` : ''}`,
+      location,
       date:          booking.session_date,
       startTime:     booking.session_time.slice(0, 5),
       durationMin,

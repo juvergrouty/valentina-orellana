@@ -59,6 +59,7 @@ export async function exchangeCodeForTokens(code: string): Promise<{
 export interface CalendarEventInput {
   title:        string;
   description?: string;
+  location?:    string;   // dirección de la consulta (sesiones presenciales)
   date:         string;   // YYYY-MM-DD
   startTime:    string;   // HH:MM
   durationMin:  number;   // minutos
@@ -95,6 +96,7 @@ export async function createCalendarEvent(
     end:   { dateTime: toISO(endDate),   timeZone: TIMEZONE },
   };
 
+  if (event.location)  body.location = event.location;
   if (event.unpaid)    body.colorId = UNPAID_COLOR_ID;
   else if (event.paid) body.colorId = PAID_COLOR_ID;
 
@@ -177,6 +179,7 @@ export async function updateCalendarEventTime(
   date: string,
   startTime: string,
   durationMin: number,
+  location?: string,
 ): Promise<void> {
   const startDate = new Date(`${date}T${startTime}:00`);
   const endDate   = new Date(startDate.getTime() + durationMin * 60_000);
@@ -192,6 +195,7 @@ export async function updateCalendarEventTime(
       body: JSON.stringify({
         start: { dateTime: toISO(startDate), timeZone: TIMEZONE },
         end:   { dateTime: toISO(endDate),   timeZone: TIMEZONE },
+        ...(location ? { location } : {}),
       }),
     }
   );
