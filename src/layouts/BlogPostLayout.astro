@@ -52,6 +52,17 @@ const jsonLd = {
     <article class="body">
       <Fragment set:html={cuerpo} />
 
+      <!-- Llamado a agendar al terminar de leer (antes no había ninguno: en
+           celular, quien terminaba un artículo no veía cómo agendar). -->
+      <aside class="cta-agenda">
+        <p class="cta-t">Si te reconociste en lo que leíste, podemos trabajarlo en terapia, a tu ritmo, presencial en Las Condes u online.</p>
+        <div class="cta-b">
+          <a href="/agenda" class="cta-btn">Agendar una sesión</a>
+          <a href={`https://wa.me/56972735696?text=${encodeURIComponent(`Hola Valentina, leí "${articulo.titulo}" en tu blog y me gustaría consultarte por una sesión.`)}`}
+             target="_blank" rel="noopener" class="cta-wa">o escríbeme por WhatsApp</a>
+        </div>
+      </aside>
+
       {sigue.length > 0 && (
         <div class="end">
           <h3>Sigue leyendo</h3>
@@ -73,6 +84,12 @@ const jsonLd = {
 
 <style>
   .post { background: #FAF7F4; color: #2E332A; }
+  .cta-agenda { margin: 48px 0 8px; padding: 28px 28px 26px; background: #EEF0EA; border-radius: 22px; text-align: center; }
+  .cta-t { font-family: Domine, serif; font-size: 21px; line-height: 1.45; margin: 0 0 20px !important; text-align: center !important; hyphens: none !important; -webkit-hyphens: none !important; color: #2E332A; }
+  .cta-b { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .cta-btn { display: inline-block; background: #576352; color: #fff; padding: 14px 28px; border-radius: 999px; font-family: Inter, sans-serif; font-weight: 600; font-size: 15px; text-decoration: none; }
+  .cta-btn:hover { background: #46503f; }
+  .cta-wa { font-family: Inter, sans-serif; font-size: 14px; color: #576352; text-decoration: underline; text-underline-offset: 3px; }
   .hero { position: relative; height: 520px; overflow: hidden; }
   .hero img { width: 100%; height: 100%; object-fit: cover; filter: saturate(.85); }
   .hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(46,51,42,0) 40%, rgba(46,51,42,.55)); }
