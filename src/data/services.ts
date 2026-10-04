@@ -76,7 +76,7 @@ export const pricingPlans: PricingPlan[] = [
   {
     id: 'online',
     title: 'Individual Online',
-    price: 45000,
+    price: 60000,
     currency: 'CLP',
     duration: '50 minutos',
     modality: 'Videollamada (Zoom / Meet)',
@@ -90,7 +90,7 @@ export const pricingPlans: PricingPlan[] = [
   {
     id: 'presencial',
     title: 'Individual Presencial',
-    price: 500,
+    price: 60000,
     currency: 'CLP',
     duration: '50 minutos',
     modality: 'Las Condes',
@@ -105,7 +105,7 @@ export const pricingPlans: PricingPlan[] = [
   {
     id: 'pareja-online',
     title: 'Pareja Online',
-    price: 60000,
+    price: 75000,
     currency: 'CLP',
     duration: '60 minutos',
     modality: 'Videollamada (Zoom / Meet)',
@@ -119,7 +119,7 @@ export const pricingPlans: PricingPlan[] = [
   {
     id: 'pareja-presencial',
     title: 'Pareja Presencial',
-    price: 70000,
+    price: 75000,
     currency: 'CLP',
     duration: '60 minutos',
     modality: 'Las Condes',
@@ -129,23 +129,5 @@ export const pricingPlans: PricingPlan[] = [
       'Confirmación inmediata',
       'Recordatorio por WhatsApp',
     ],
-  },
-];
-
-export const testimonials = [
-  {
-    name: 'Carolina M.',
-    text: 'Valentina tiene una capacidad increíble para hacer que te sientas escuchada y segura desde la primera sesión. Gracias a su acompañamiento pude manejar mi ansiedad de una manera que nunca creí posible.',
-    service: 'Psicología de Adultos',
-  },
-  {
-    name: 'Diego y Sofía',
-    text: 'La terapia de pareja con Valentina fue un antes y un después para nuestra relación. Aprendimos a comunicarnos con respeto y a entender las necesidades del otro.',
-    service: 'Terapia de Pareja',
-  },
-  {
-    name: 'Marcela T.',
-    text: 'Como PAS, encontrar a una psicóloga que entienda realmente lo que significa ser altamente sensible fue un alivio enorme. Valentina lo hace con mucha empatía y profesionalismo.',
-    service: 'Trauma y PSA',
   },
 ];
