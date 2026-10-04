@@ -150,7 +150,7 @@ export async function getPaymentStatus(token: string, baseUrl?: string): Promise
   const params: Params = { apiKey, token };
   const qs = buildQuery(params, secretKey);
 
-  const res = await fetch(`${base}/payment/getStatus?${qs}`);
+  const res = await fetch(`${base}/payment/getStatus?${qs}`, { signal: AbortSignal.timeout(8000) });
 
   if (!res.ok) {
     const msg = await res.text().catch(() => res.status.toString());

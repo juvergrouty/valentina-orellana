@@ -1,13 +1,14 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { sendBulkEmail } from '../../../lib/email';
+import { rutaInterna } from '../../../lib/rutaInterna';
 
 export const prerender = false;
 
 export const POST: APIRoute = async ({ request, redirect }) => {
   const form    = await request.formData();
   const action  = form.get('action')?.toString();
-  const dest    = form.get('redirect')?.toString() ?? '/admin/comunicaciones';
+  const dest    = rutaInterna(form.get('redirect'), '/admin/comunicaciones');
 
   if (action === 'send-bulk') {
     const subject = form.get('subject')?.toString().trim() ?? '';

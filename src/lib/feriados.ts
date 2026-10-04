@@ -57,8 +57,23 @@ export async function crearEventoCierre(fecha: string, titulo: string): Promise<
         signal: AbortSignal.timeout(8000),
       },
     );
-    // 409 = el evento ya existe (se había creado antes): no es un error.
-    if (!res.ok && res.status !== 409) {
+    // 409 = ese id ya existe: o el evento sigue ahí, o se borró al quitar el
+    // bloqueo (Google guarda los borrados como "cancelados" y no deja reusar el
+    // id). Se reactiva con PATCH para que el día vuelva a verse en el calendario.
+    if (res.status === 409) {
+      const r2 = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(auth.calendarId)}/events/${eventIdCierre(fecha)}`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'confirmed', summary: titulo, start: { date: fecha }, end: { date: addDays(fecha, 1) }, transparency: 'opaque' }),
+          signal: AbortSignal.timeout(8000),
+        },
+      );
+      if (!r2.ok) await logError('feriados/calendar', `No se pudo volver a anotar el día cerrado ${fecha} en Google Calendar`, { status: r2.status });
+      return;
+    }
+    if (!res.ok) {
       await logError('feriados/calendar', `No se pudo anotar el día cerrado ${fecha} en Google Calendar`, { status: res.status, body: (await res.text()).slice(0, 300) });
     }
   } catch (e) {

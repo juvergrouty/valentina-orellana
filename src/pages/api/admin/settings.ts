@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
+import { rutaInterna } from '../../../lib/rutaInterna';
 
 export const prerender = false;
 
@@ -11,14 +12,16 @@ export const GET: APIRoute = async () => {
   const { data, error } = await supabase.from('settings').select('key, value');
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   const settings: Record<string, string> = {};
-  (data ?? []).forEach(({ key, value }) => { settings[key] = value; });
+  // Sin claves secretas (tokens de Google, claves de API, contraseñas): nada
+  // de la página las necesita y no deben viajar al navegador.
+  (data ?? []).forEach(({ key, value }) => { if (!/token|secret|clave|password|api_key/i.test(key)) settings[key] = value; });
   return new Response(JSON.stringify(settings), { headers: { 'Content-Type': 'application/json' } });
 };
 
 // POST — guardar settings usando UPDATE o INSERT explícitos
 export const POST: APIRoute = async ({ request }) => {
   const form     = await request.formData();
-  const redirect = (form.get('redirect') as string) ?? '/admin/configuracion';
+  const redirect = rutaInterna(form.get('redirect'), '/admin/configuracion');
 
   const updates: Record<string, string> = {};
 

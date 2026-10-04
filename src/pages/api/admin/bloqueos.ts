@@ -1,57 +1,24 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { crearEventoCierre, borrarEventoCierre } from '../../../lib/feriados';
+import { crearEventoCierre, borrarEventoCierre, FERIADOS_CONFIRMADOS } from '../../../lib/feriados';
+import { todayCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
-
-// Feriados fijos de Chile por año (sin Semana Santa — fecha variable)
-function feriadosChile(year: number): string[] {
-  // Semana Santa: calcular domingo de Pascua con algoritmo de Butcher
-  function easter(y: number) {
-    const a = y % 19, b = Math.floor(y / 100), c = y % 100;
-    const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
-    const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
-    const i = Math.floor(c / 4), k = c % 4;
-    const l = (32 + 2 * e + 2 * i - h - k) % 7;
-    const m = Math.floor((a + 11 * h + 22 * l) / 451);
-    const month = Math.floor((h + l - 7 * m + 114) / 31);
-    const day   = ((h + l - 7 * m + 114) % 31) + 1;
-    return new Date(y, month - 1, day);
-  }
-  const easterDay = easter(year);
-  const viernesSanto = new Date(easterDay); viernesSanto.setDate(easterDay.getDate() - 2);
-  const sabadoGloria = new Date(easterDay); sabadoGloria.setDate(easterDay.getDate() - 1);
-  const toISO = (d: Date) => d.toISOString().slice(0, 10);
-
-  return [
-    `${year}-01-01`,  // Año Nuevo
-    toISO(viernesSanto),  // Viernes Santo
-    toISO(sabadoGloria),  // Sábado de Gloria
-    `${year}-05-01`,  // Día del Trabajo
-    `${year}-05-21`,  // Glorias Navales
-    `${year}-06-20`,  // Pueblos Indígenas
-    `${year}-06-29`,  // San Pedro y San Pablo
-    `${year}-07-16`,  // Virgen del Carmen
-    `${year}-08-15`,  // Asunción
-    `${year}-09-18`,  // Fiestas Patrias
-    `${year}-09-19`,  // Glorias del Ejército
-    `${year}-10-12`,  // Encuentro Dos Mundos
-    `${year}-10-31`,  // Iglesias Evangélicas
-    `${year}-11-01`,  // Todos los Santos
-    `${year}-12-08`,  // Inmaculada Concepción
-    `${year}-12-25`,  // Navidad
-  ];
-}
 
 export const POST: APIRoute = async ({ request, redirect }) => {
   const form   = await request.formData();
   const action = form.get('action')?.toString();
-  const dest   = form.get('_redirect')?.toString() ?? '/admin/horarios';
+  // Solo rutas internas del panel.
+  const destRaw = form.get('_redirect')?.toString() ?? '';
+  const dest    = /^\/admin(\/|$|\?)/.test(destRaw) && !destRaw.includes('//') ? destRaw : '/admin/horarios';
 
   // ── Quitar bloqueo ────────────────────────────────────────────────────────
   if (action === 'delete') {
     const id    = form.get('id')?.toString();
-    const table = form.get('table')?.toString() ?? 'blocked_dates';
+    // Solo estas dos tablas (antes el nombre de la tabla venía del formulario
+    // sin revisar y se podía borrar por id en cualquier otra).
+    const tableRaw = form.get('table')?.toString() ?? 'blocked_dates';
+    const table = tableRaw === 'blocked_slots' ? 'blocked_slots' : 'blocked_dates';
     if (id) {
       // Si era un día cerrado, quitar también su anotación en Google Calendar.
       const { data: row } = table === 'blocked_dates'
@@ -89,9 +56,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         rows.push({ date: cursor.toISOString().slice(0, 10), reason });
         cursor.setDate(cursor.getDate() + 1);
       }
+      let ok = true;
       for (let i = 0; i < rows.length; i += 50) {
-        await supabase.from('blocked_dates').upsert(rows.slice(i, i + 50), { onConflict: 'date' });
+        const { error } = await supabase.from('blocked_dates').upsert(rows.slice(i, i + 50), { onConflict: 'date' });
+        if (error) ok = false;
       }
+      // Igual que un día suelto: cada día cerrado queda anotado en Google Calendar
+      // (hasta 62 días, para no pasarse del tiempo de la función).
+      if (ok) for (const r of rows.slice(0, 62)) await crearEventoCierre(r.date, reason ? `Cerrado · ${reason}` : 'Cerrado');
     }
     return redirect(dest);
   }
@@ -136,12 +108,16 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   }
 
   // ── Bloquear feriados de Chile del año en curso ───────────────────────────
+  // Solo los feriados CONFIRMADOS de hoy en adelante (src/lib/feriados.ts).
+  // Antes usaba una lista fija con fechas que cambian (Pueblos Indígenas,
+  // traslados por ley) y cerraba también fechas ya pasadas, sin anotarlas en
+  // Google Calendar.
   if (action === 'block-feriados') {
-    const year     = new Date().getFullYear();
-    const feriados = feriadosChile(year);
-    const rows     = feriados.map(d => ({ date: d, reason: 'Feriado' }));
-    for (let i = 0; i < rows.length; i += 50) {
-      await supabase.from('blocked_dates').upsert(rows.slice(i, i + 50), { onConflict: 'date' });
+    const hoy = todayCL();
+    for (const f of FERIADOS_CONFIRMADOS.filter(f => f.fecha >= hoy)) {
+      const titulo = `Feriado · ${f.nombre}`;
+      const { error } = await supabase.from('blocked_dates').upsert({ date: f.fecha, reason: titulo }, { onConflict: 'date' });
+      if (!error) await crearEventoCierre(f.fecha, titulo);
     }
     return redirect(dest);
   }

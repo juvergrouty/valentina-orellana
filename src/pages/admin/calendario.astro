@@ -2,7 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { refreshAccessToken } from '../../lib/googleCalendar';
+import { getValidAccessToken } from '../../lib/syncCalendar';
 import { todayCL } from '../../lib/dateUtils';
 
 // Leer settings de Google
@@ -20,17 +20,9 @@ let events: any[] = [];
 
 if (googleConnected) {
   try {
-    const expiry = parseInt(cfg['google_token_expiry'] ?? '0');
-    if (!cfg['google_access_token'] || Date.now() > expiry - 60_000) {
-      const refreshed = await refreshAccessToken(cfg['google_refresh_token']);
-      accessToken = refreshed.access_token;
-      await supabase.from('settings').upsert(
-        { key: 'google_access_token', value: accessToken, updated_at: new Date().toISOString() },
-        { onConflict: 'key' }
-      );
-    } else {
-      accessToken = cfg['google_access_token'];
-    }
+    // Mismo helper que el resto del sistema: renueva el token solo cuando
+    // vence y guarda su nuevo vencimiento (antes se renovaba en cada carga).
+    accessToken = (await getValidAccessToken())?.token ?? '';
 
     // Traer eventos de los próximos 30 días
     const now    = new Date().toISOString();
@@ -177,7 +169,7 @@ const embedUrl = googleConnected
 
 </AdminLayout>
 
-<script define:vars={{ accessToken, calendarId }}>
+<script is:inline>
   // Eliminar evento del calendario
   window.deleteEvent = async function(eventId) {
     if (!confirm('¿Eliminar este evento del calendario?')) return;
@@ -216,20 +208,12 @@ const embedUrl = googleConnected
     btn.disabled    = true;
 
     try {
-      const body = {
-        summary: title,
-        start: { dateTime: `${date}T${start}:00`, timeZone: 'America/Santiago' },
-        end:   { dateTime: `${date}T${end}:00`,   timeZone: 'America/Santiago' },
-      };
-
-      const res = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
-        {
-          method:  'POST',
-          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-          body:    JSON.stringify(body),
-        }
-      );
+      // Lo crea el servidor: el token de Google ya no viaja a esta página.
+      const res = await fetch('/api/admin/google/quick-event', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ summary: title, date, start, end }),
+      });
 
       if (res.ok) {
         msg.textContent = '✓ Evento agregado. Recarga para verlo.';

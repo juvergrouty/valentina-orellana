@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { limpiarRut, rutValido } from '../../../lib/rut';
+import { rutaInterna } from '../../../lib/rutaInterna';
 
 export const prerender = false;
 
@@ -15,7 +16,7 @@ function withParam(path: string, key: string, value: string): string {
 export const POST: APIRoute = async ({ request }) => {
   const form     = await request.formData();
   const action   = form.get('action') as string;
-  let   redirect = (form.get('redirect') as string) ?? '/admin/pacientes';
+  let   redirect = rutaInterna(form.get('redirect'), '/admin/pacientes');
 
   // Datos de la ficha que vienen del formulario (crear y editar).
   const g = (k: string) => (form.get(k) as string | null)?.trim() ?? '';

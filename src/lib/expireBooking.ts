@@ -2,6 +2,8 @@ import { supabase } from './supabase';
 import { sendPendingExpiredEmail, sendExpiredBookingAdminAlert, ADMIN_EMAIL_FALLBACK } from './email';
 import { deleteBookingFromCalendar } from './syncCalendar';
 import { logError } from './logger';
+import { getPaymentStatus, FLOW_URLS } from './flow';
+import { agregarLineaNotas } from './apigateway';
 
 const EXPIRE_AFTER_MS = 30 * 60 * 1000;
 
@@ -23,7 +25,7 @@ export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: 
   {
     const q = await supabase
       .from('bookings')
-      .select('id, patient_name, patient_email, session_date, session_time, google_event_id, created_by_admin, notes')
+      .select('id, patient_name, patient_email, session_date, session_time, google_event_id, created_by_admin, notes, mp_preference_id')
       .eq('status', 'pending_payment')
       .neq('session_date', '2099-12-31') // no tocar cobros manuales sin fecha
       .lt('created_at', cutoff);
@@ -56,8 +58,27 @@ export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: 
   const resolvedSiteUrl = (siteUrl ?? import.meta.env.PUBLIC_SITE_URL ?? 'https://www.valentinaorellana.cl').replace(/\/$/, '');
 
   let claimed = 0;
+  // Entorno de Flow (mismo criterio que la reserva: setting flow_env o variable de entorno).
+  const { data: envRow } = await supabase.from('settings').select('value').eq('key', 'flow_env').maybeSingle();
+  const flowBase = envRow?.value === 'production' ? FLOW_URLS.production : envRow?.value === 'sandbox' ? FLOW_URLS.sandbox : undefined;
 
   for (const b of candidates) {
+    // Antes de liberarla se le pregunta a Flow si alcanzó a pagar: si el aviso
+    // de Flow se atrasa, antes le llegaba "tu hora se liberó" a alguien que ya
+    // pagó (y podía terminar pagando dos veces desde /recuperar).
+    if (b.mp_preference_id) {
+      try {
+        const st = await getPaymentStatus(b.mp_preference_id, flowBase);
+        if (st.status === 2) {
+          // Se avisa una sola vez (esta limpieza corre en cada carga de la agenda).
+          if (!(b.notes ?? '').includes('PagoSinAviso')) {
+            await logError('flow/pagado-sin-aviso', `Flow dice que ${b.patient_name} pagó su sesión del ${b.session_date}, pero el aviso de pago aún no llega: no se liberó la hora. Revisa el pago en Flow y márcala pagada si corresponde.`, { bookingId: b.id, token: b.mp_preference_id });
+            await agregarLineaNotas(b.id, `PagoSinAviso ${new Date().toISOString()}`);
+          }
+          continue;
+        }
+      } catch { /* si Flow no responde, se sigue como antes */ }
+    }
     const token = crypto.randomUUID();
     // "Reclama" la fila de forma atómica con el propio WHERE status='pending_payment':
     // si otra de las 3 llamadas (u otra ejecución concurrente de esta misma) ya la

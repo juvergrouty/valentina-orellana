@@ -22,8 +22,10 @@ const path = current ?? '';
 // correos. Esto se compara contra la última vez que abrió /admin/logs
 // (guardado en settings) — si hay errores más nuevos que esa visita, se avisa
 // acá mismo, en cualquier página que abra, sin que tenga que acordarse de nada.
-let newErrorCount = 0;
-try {
+// Los avisos se consultan EN PARALELO (antes uno tras otro, unas 12
+// consultas en serie antes de mostrar cada página del panel). Cada uno
+// tiene su propio catch: una falla no debe tumbar el resto del admin.
+async function contarErroresNuevos(): Promise<number> {
   const { data: setting } = await supabase.from('settings').select('value').eq('key', 'logs_last_seen_at').maybeSingle();
   const lastSeen = setting?.value || '1970-01-01T00:00:00.000Z';
   const { count } = await supabase
@@ -31,33 +33,32 @@ try {
     .select('id', { count: 'exact', head: true })
     .eq('level', 'error')
     .gt('created_at', lastSeen);
-  newErrorCount = count ?? 0;
-} catch { /* si falla esta consulta, no debe tumbar el resto del admin */ }
-
-// Boletas con error de emisión/envío (ver src/lib/boletaAlerts.ts): visible
-// hasta que el problema se resuelva, no hasta que se abra /admin/logs.
-let boletaAlerts: BoletaAlert[] = [];
-try { boletaAlerts = await getBoletaAlerts(); } catch { /* no debe tumbar el admin */ }
-// Pacientes activos sin consentimiento de datos firmado (Ley 21.719): aviso
-// permanente pedido por Valentina (3 oct 2026). Se apaga solo cuando firman.
-let consentAlerts: ConsentAlert[] = [];
-try { consentAlerts = await getConsentAlerts(); } catch { /* no debe tumbar el admin */ }
+  return count ?? 0;
+}
 // Días cerrados (feriados/vacaciones) de las próximas 2 semanas, con las horas
-// que se pierden por modalidad (ver src/lib/blockedDayAlerts.ts).
-// Comprobantes de transferencia por confirmar (ver src/lib/comprobantes.ts).
-let comprobanteAlerts: ComprobanteAlert[] = [];
-try { comprobanteAlerts = await getComprobanteAlerts(); } catch { /* no debe tumbar el admin */ }
+// que se pierden por modalidad (ver src/lib/blockedDayAlerts.ts). Antes del
+// aviso se cierran los feriados confirmados que se acercan (también lo hace la
+// tarea diaria google-reviews-refresh; esto solo escribe si falta alguno).
+async function avisosDiasCerrados(): Promise<BlockedDayAlert[]> {
+  try { await cerrarFeriadosConfirmados(); } catch { /* sigue igual */ }
+  return (await getBlockedDayAlerts()).filter(a => a.presencial.length || a.online.length || a.agendadas);
+}
+const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts] = await Promise.all([
+  // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
+  // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
+  contarErroresNuevos().catch(() => 0),
+  // Boletas con error de emisión/envío: visibles hasta que se resuelvan.
+  getBoletaAlerts().catch((): BoletaAlert[] => []),
+  // Pacientes activos sin consentimiento firmado (Ley 21.719).
+  getConsentAlerts().catch((): ConsentAlert[] => []),
+  // Comprobantes de transferencia por confirmar (ver src/lib/comprobantes.ts).
+  getComprobanteAlerts().catch((): ComprobanteAlert[] => []),
+  avisosDiasCerrados().catch((): BlockedDayAlert[] => []),
+  // Corrección única de invitaciones ya enviadas con "Por pagar" (ver syncCalendar.ts).
+  corregirPrefijoInvitacionesUnaVez().catch(() => undefined),
+]);
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-// Antes del aviso: cerrar los feriados confirmados que se acercan (también lo
-// hace la tarea diaria google-reviews-refresh; esto solo escribe si falta alguno).
-try { await cerrarFeriadosConfirmados(); } catch { /* no debe tumbar el admin */ }
-// Corrección única de invitaciones ya enviadas con "Por pagar" (ver syncCalendar.ts).
-try { await corregirPrefijoInvitacionesUnaVez(); } catch { /* no debe tumbar el admin */ }
-let blockedDayAlerts: BlockedDayAlert[] = [];
-try {
-  blockedDayAlerts = (await getBlockedDayAlerts()).filter(a => a.presencial.length || a.online.length || a.agendadas);
-} catch { /* no debe tumbar el admin */ }
 const horasTxt = (n: number, tipo: 'presencial' | 'online') =>
   `${n} ${n === 1 ? 'hora' : 'horas'} ${tipo === 'online' ? 'online' : (n === 1 ? 'presencial' : 'presenciales')}`;
 const fmtSesion = (d: string | null) => d ? d.split('-').reverse().join('-') : '';

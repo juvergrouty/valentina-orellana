@@ -17,8 +17,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
   if (action === 'quitar') {
     const id = form.get('id')?.toString() ?? '';
-    if (id) await quitarHoraExtra(id);
-    return redirect(`${dest}${sep}saved=extra-quitada#horas-extra`);
+    const ok = id ? await quitarHoraExtra(id) : false;
+    // "Restaurar" (deshace un "quitar solo este día") usa esta misma acción:
+    // el aviso dice lo que realmente pasó.
+    const aviso = form.get('restaurar') === '1' ? 'extra-restaurada' : 'extra-quitada';
+    return redirect(`${dest}${sep}${ok ? `saved=${aviso}` : 'error=extra-guardar'}#horas-extra`);
   }
 
   // Quitar una hora del horario semanal SOLO en esa fecha, para un servicio.

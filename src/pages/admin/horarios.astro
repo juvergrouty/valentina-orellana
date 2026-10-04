@@ -145,9 +145,9 @@ const feriados: [string, string][] = [
       ✓ Fecha bloqueada correctamente.
     </div>
   )}
-  {(savedMsg === 'extra' || savedMsg === 'extra-quitada') && (
+  {(savedMsg === 'extra' || savedMsg === 'extra-quitada' || savedMsg === 'extra-restaurada') && (
     <div style="background:#f0fdf4;border:1px solid #86efac;color:#15803d;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
-      {savedMsg === 'extra' ? '✓ Hora extra abierta. Ya aparece en la agenda web ese día.' : '✓ Hora extra quitada.'}
+      {savedMsg === 'extra' ? '✓ Hora extra abierta. Ya aparece en la agenda web ese día.' : savedMsg === 'extra-restaurada' ? '✓ Listo, la hora volvió a la agenda web ese día.' : '✓ Hora extra quitada.'}
     </div>
   )}
   {errorMsg?.startsWith('extra') && (
@@ -515,6 +515,7 @@ const feriados: [string, string][] = [
               <form method="POST" action="/api/admin/horas-extra" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
                 <input type="hidden" name="action" value="quitar" />
                 <input type="hidden" name="id" value={h.id} />
+                {h.quitar && <input type="hidden" name="restaurar" value="1" />}
                 <span style="font-size:0.8rem;color:var(--ink);">
                   <strong style="text-transform:capitalize;">{fechaCorta(h.fecha)}</strong> · {h.hora} · {h.servicioId ? (nombreServicio.get(h.servicioId) ?? 'Servicio') : `Todos: ${MOD_LABEL[h.modalidad] ?? h.modalidad}`}
                   {h.quitar && <span style="color:#b45309;"> · quitada solo ese día</span>}
@@ -752,7 +753,7 @@ updatePreview();
 document.getElementById('btn-reset-slots')?.addEventListener('click', async () => {
   const inactive = document.querySelectorAll<HTMLButtonElement>('.slot-chip[data-active="false"]');
   if (!inactive.length) return;
-  if (!confirm(`¿Reactivar ${inactive.length} slot${inactive.length !== 1 ? 's' : ''} desactivado${inactive.length !== 1 ? 's' : ''}?`)) return;
+  if (!confirm(`¿Reactivar ${inactive.length} slot${inactive.length !== 1 ? 's' : ''} desactivado${inactive.length !== 1 ? 's' : ''}?\n\nOjo: también vuelven a abrirse las horas que quitaste "Todas las semanas" desde el calendario.`)) return;
 
   try {
     const res  = await fetch('/api/admin/slots/reset', { method: 'POST' });
