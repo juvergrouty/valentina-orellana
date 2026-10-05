@@ -28,7 +28,7 @@ export const POST: APIRoute = async ({ request, url }) => {
   if (action === 'confirmation' || action === 'reminder') {
     if (!bookingId) return json({ ok: false, error: 'Falta la sesión (booking_id).' }, 400);
     const { data: b } = await supabase.from('bookings')
-      .select('patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id')
+      .select('patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, paid_at, payment_note')
       .eq('id', bookingId).maybeSingle();
     if (!b) return json({ ok: false, error: 'Sesión no encontrada.' }, 404);
     if (!b.patient_email) return json({ ok: false, error: 'La sesión no tiene correo del paciente.' }, 400);
@@ -44,9 +44,15 @@ export const POST: APIRoute = async ({ request, url }) => {
       patient_phone:  b.patient_phone ?? '',
       session_type:   b.session_type,
       session_date:   b.session_date,
-      session_time:   b.session_time,
+      session_time:   String(b.session_time ?? '').slice(0, 5),
       amount:         b.amount ?? 0,
-      payment_method: b.payment_method ?? 'manual',
+      // Cómo se pagó DE VERDAD (payment_note de "Marcar como pagado"), no cómo
+      // se reservó: antes un reenvío decía "Pagado con Flow" aunque hubiera
+      // pagado por transferencia, o aunque no hubiera pagado todavía.
+      payment_method: !b.paid_at ? 'pendiente'
+        : /transfer/i.test(b.payment_note ?? '') ? 'transferencia'
+        : /flow|webpay/i.test(b.payment_note ?? '') || (!b.payment_note && b.payment_method === 'flow') ? 'flow'
+        : (b.payment_note || b.payment_method || 'manual'),
       service_name:   serviceName,
       booking_id:     bookingId,
     };

@@ -4,6 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { todayCL } from '../../lib/dateUtils';
 import { leerHorasExtra } from '../../lib/horasExtra';
+import { estadoFeriados } from '../../lib/feriados';
 
 const today = todayCL();
 
@@ -62,23 +63,9 @@ const formatDate = (iso: string) => {
   return `${dow.charAt(0).toUpperCase() + dow.slice(1)}, ${parseInt(d)} de ${MONTHS_ES[parseInt(m)-1]}`;
 };
 
-const feriados: [string, string][] = [
-  ['2026-01-01', 'Año Nuevo'],
-  ['2026-04-03', 'Viernes Santo'],
-  ['2026-04-04', 'Sábado Santo'],
-  ['2026-05-01', 'Día del Trabajo'],
-  ['2026-05-21', 'Glorias Navales'],
-  ['2026-06-29', 'San Pedro y San Pablo'],
-  ['2026-07-16', 'V. del Carmen'],
-  ['2026-08-15', 'Asunción de la Virgen'],
-  ['2026-09-18', 'Independencia Nacional'],
-  ['2026-09-19', 'Glorias del Ejército'],
-  ['2026-10-12', 'Encuentro Dos Mundos'],
-  ['2026-10-31', 'Día de las Iglesias Ev.'],
-  ['2026-11-01', 'Día de Todos los Santos'],
-  ['2026-12-08', 'Inmaculada Concepción'],
-  ['2026-12-25', 'Navidad'],
-].filter(([date]) => date >= today);
+// Feriados confirmados (src/lib/feriados.ts) con su estado y la decisión de
+// Valentina: ya no se cierran solos (5 oct 2026).
+const feriados = await estadoFeriados().catch(() => []);
 ---
 
 <style>
@@ -572,24 +559,27 @@ const feriados: [string, string][] = [
         </form>
       </div>
 
-      <!-- Feriados Chile 2026 -->
+      <!-- Feriados: Valentina decide cada uno (ya no se cierran solos) -->
       {feriados.length > 0 && (
-        <div class="card">
-          <p class="label" style="margin-bottom:1rem;">Feriados Chile 2026</p>
-          <div style="display:flex;flex-direction:column;gap:0.45rem;">
-            {feriados.map(([date, label]) => (
-              <form method="POST" action="/api/admin/bloqueos"
-                style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
-                <input type="hidden" name="action" value="block-single" />
-                <input type="hidden" name="date" value={date} />
-                <input type="hidden" name="reason" value={label} />
-                <input type="hidden" name="_redirect" value="/admin/horarios?saved=blocked" />
+        <div class="card" id="feriados">
+          <p class="label" style="margin-bottom:0.35rem;">Feriados</p>
+          <p style="font-size:0.75rem;color:var(--stone);margin-bottom:0.9rem;line-height:1.5;">Te aviso 2 semanas antes de cada uno. Aunque cierres el día, igual puedes agendar a alguien desde el calendario.</p>
+          <div style="display:flex;flex-direction:column;gap:0.5rem;">
+            {feriados.map((f) => (
+              <form method="POST" action="/api/admin/feriados"
+                style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+                <input type="hidden" name="fecha" value={f.fecha} />
+                <input type="hidden" name="redirect" value="/admin/horarios#feriados" />
                 <span style="font-size:0.78rem;color:var(--ink);">
-                  {date.slice(5).replace('-', '/')} — {label}
+                  <strong>{fechaCorta(f.fecha)}</strong> — {f.nombre}
+                  <span style={`margin-left:0.35rem;font-size:0.7rem;font-weight:600;color:${f.cerrado ? '#b45309' : '#15803d'};`}>
+                    {f.cerrado ? 'Cerrado' : 'Abierto'}{f.decision ? '' : ' · sin decidir'}
+                  </span>
                 </span>
-                <button type="submit" class="btn btn-outline btn-sm" style="flex-shrink:0;">
-                  Bloquear
-                </button>
+                <span style="display:flex;gap:0.35rem;flex-shrink:0;">
+                  {!f.cerrado || !f.decision ? <button type="submit" name="decision" value="cerrar" class="btn btn-outline btn-sm">{f.cerrado ? 'Mantener cerrado' : 'Cerrar'}</button> : null}
+                  {f.cerrado || !f.decision ? <button type="submit" name="decision" value="atender" class="btn btn-outline btn-sm">{f.cerrado ? 'Abrir' : 'Atender normal'}</button> : null}
+                </span>
               </form>
             ))}
           </div>

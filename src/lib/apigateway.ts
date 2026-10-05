@@ -362,9 +362,8 @@ export async function enviarBoletaDeReserva(bookingId: string): Promise<{ sent: 
   if (!b) return { sent: false, error: 'Reserva no encontrada.' };
 
   const marcarPendiente = async (error: string) => {
-    const { data: cur } = await supabase.from('bookings').select('notes').eq('id', bookingId).single();
-    const base = quitarPendiente(cur?.notes ?? '');
-    await supabase.from('bookings').update({ notes: `${base ? base + '\n' : ''}${MARCA_PENDIENTE} ${new Date().toISOString()}` }).eq('id', bookingId);
+    // Escrituras atómicas (cambiarNotas): no pisan otra marca escrita al mismo tiempo.
+    await cambiarNotas(bookingId, (n) => { const base = quitarPendiente(n); return `${base ? base + '\n' : ''}${MARCA_PENDIENTE} ${new Date().toISOString()}`; });
     await logError('boleta/envio', `Boleta emitida pero NO enviada a ${b.patient_email ?? '(sin email)'} — se reintentará automáticamente`, { bookingId, error });
     return { sent: false, error, pendiente: true };
   };
@@ -372,7 +371,7 @@ export async function enviarBoletaDeReserva(bookingId: string): Promise<{ sent: 
   // Casos sin reintento posible: se saca la marca de pendiente para que el
   // cron no insista para siempre.
   const descartarPendiente = async () => {
-    if (b.notes?.includes(MARCA_PENDIENTE)) await supabase.from('bookings').update({ notes: quitarPendiente(b.notes) }).eq('id', bookingId);
+    if (b.notes?.includes(MARCA_PENDIENTE)) await cambiarNotas(bookingId, (n) => { const x = quitarPendiente(n); return x === n ? null : x; });
   };
   const vigente = folioVigente(b.notes);
   if (!vigente) {
@@ -415,11 +414,14 @@ export async function enviarBoletaDeReserva(bookingId: string): Promise<{ sent: 
   }
 
   {
-    const { data: cur } = await supabase.from('bookings').select('notes').eq('id', bookingId).single();
-    let notes = quitarPendiente(cur?.notes ?? '');
-    notes = notes.replace(new RegExp(`(Boleta Folio ${folio})(?!\\d)(?! · Cod)`), `$1 · Cod ${codigo}`);
-    notes = `${notes ? notes + '\n' : ''}BoletaEmailEnviada ${new Date().toISOString()} ${b.patient_email}`;
-    await supabase.from('bookings').update({ notes }).eq('id', bookingId);
+    // Si esta escritura fallara, la marca de pendiente quedaría y el cron
+    // reenviaría la boleta: se registra para que se vea.
+    const r = await cambiarNotas(bookingId, (n) => {
+      let notes = quitarPendiente(n);
+      notes = notes.replace(new RegExp(`(Boleta Folio ${folio})(?!\\d)(?! · Cod)`), `$1 · Cod ${codigo}`);
+      return `${notes ? notes + '\n' : ''}BoletaEmailEnviada ${new Date().toISOString()} ${b.patient_email}`;
+    });
+    if (!r.ok) await logError('boleta/envio', 'La boleta se envió pero no quedó registrado el envío (podría reenviarse)', { bookingId, folio, error: r.error });
   }
 
   // Copia para Valentina — no afecta el resultado (el paciente ya la recibió).
@@ -572,7 +574,9 @@ export async function emitBoletaParaReserva(
     if (!isNaN(t) && Date.now() - t > EMISION_CANDADO_MS) {
       return { ok: false, error: 'Una emisión anterior de esta boleta se interrumpió. Revisa en el SII si quedó emitida antes de volver a emitirla.' };
     }
-    if (!isNaN(t)) return { ok: false, error: 'La boleta de esta sesión se está emitiendo en este momento.' };
+    // Puede estar emitiéndose ahora, o haber fallado con un error dudoso (el
+    // candado queda puesto hasta 10 min): el mensaje dice ambas cosas.
+    if (!isNaN(t)) return { ok: false, error: 'Esta boleta se está emitiendo o acaba de fallar. Espera unos minutos y revisa en el SII si quedó emitida antes de volver a intentar.' };
     return { ok: false, error: candado.error ?? 'No se pudo preparar la emisión.' };
   }
 

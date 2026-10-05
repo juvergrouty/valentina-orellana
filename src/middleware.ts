@@ -1,9 +1,9 @@
 import { defineMiddleware } from 'astro:middleware';
-import { tokenAdminValido } from './lib/adminSession';
+import { tokenAdminValido, tokenRevocado } from './lib/adminSession';
 
 const COOKIE = 'vo_admin_token';
 
-export const onRequest = defineMiddleware((context, next) => {
+export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
 
   // Única ruta pública dentro de /api/admin: el login. El callback de Google
@@ -24,7 +24,22 @@ export const onRequest = defineMiddleware((context, next) => {
   // Token firmado con vencimiento (ver src/lib/adminSession.ts).
   const token = context.cookies.get(COOKIE)?.value ?? '';
 
-  if (!tokenAdminValido(token)) {
+  // Acciones del panel (POST, etc.) solo desde páginas de este mismo sitio:
+  // otra página no puede hacer que el navegador de Valentina ejecute acciones
+  // de su panel. Si el navegador no manda Origin/Referer, se deja pasar.
+  if (isAdminApi && !['GET', 'HEAD', 'OPTIONS'].includes(context.request.method)) {
+    const origen = context.request.headers.get('origin') || context.request.headers.get('referer');
+    if (origen) {
+      let host = '';
+      try { host = new URL(origen).host; } catch { /* inválido */ }
+      const propios = [context.url.host, context.request.headers.get('host'), context.request.headers.get('x-forwarded-host')].filter(Boolean);
+      if (!propios.includes(host)) {
+        return new Response(JSON.stringify({ error: 'Origen no permitido.' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+  }
+
+  if (!tokenAdminValido(token) || await tokenRevocado(token)) {
     // Las API routes devuelven 401 JSON, las páginas redirigen al login
     if (isAdminApi) {
       return new Response(JSON.stringify({ error: 'No autorizado.' }), {

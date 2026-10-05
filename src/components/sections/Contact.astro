@@ -96,6 +96,8 @@
 
 <script>
   const form   = document.getElementById('contact-form') as HTMLFormElement;
+  // Momento en que se abrió el formulario: un bot lo envía al instante.
+  const abiertoEn = Date.now();
   const status = document.getElementById('form-status');
   const button = form?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
 
@@ -118,7 +120,7 @@
       const res = await fetch('/api/contacto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.fromEntries(data)),
+        body: JSON.stringify({ ...Object.fromEntries(data), t: Date.now() - abiertoEn }),
       });
       const result = await res.json();
       if (result.ok) {

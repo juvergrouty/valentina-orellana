@@ -33,3 +33,42 @@ export function igualesSeguro(a: string, b: string): boolean {
   const hb = createHmac('sha256', 'cmp').update(b).digest();
   return timingSafeEqual(ha, hb);
 }
+
+// ── Sesiones cerradas ("Cerrar sesión") ───────────────────────────────────────
+// Antes, cerrar sesión solo borraba la cookie de ESE navegador: si alguien
+// había copiado el token, seguía sirviendo hasta que venciera (8 h). Ahora la
+// firma del token queda en una lista de revocados (settings) hasta su
+// vencimiento, y el middleware la rechaza. La lista se cachea 30 s por instancia.
+const SETTING_REVOCADOS = 'admin_tokens_revocados';
+let cacheRevocados: { firmas: Set<string>; leido: number } | null = null;
+
+async function leerRevocados(): Promise<{ firma: string; vence: number }[]> {
+  const { supabase } = await import('./supabase');
+  const { data } = await supabase.from('settings').select('value').eq('key', SETTING_REVOCADOS).maybeSingle();
+  try { const l = JSON.parse(data?.value || '[]'); return Array.isArray(l) ? l : []; } catch { return []; }
+}
+
+export async function tokenRevocado(token: string): Promise<boolean> {
+  const firma = token.split('.')[2] ?? '';
+  if (!cacheRevocados || Date.now() - cacheRevocados.leido > 30_000) {
+    try {
+      const lista = await leerRevocados();
+      cacheRevocados = { firmas: new Set(lista.map(r => r.firma)), leido: Date.now() };
+    } catch { return false; } // si no se puede leer, no se bloquea el panel
+  }
+  return cacheRevocados.firmas.has(firma);
+}
+
+export async function revocarTokenAdmin(token: string): Promise<void> {
+  const partes = token.split('.');
+  if (partes.length !== 3) return;
+  const { supabase } = await import('./supabase');
+  const ahora = Date.now();
+  const lista = (await leerRevocados()).filter(r => r.vence > ahora); // los vencidos ya no sirven igual
+  lista.push({ firma: partes[2], vence: Number(partes[1]) || ahora + DURACION_SESION_MS });
+  await supabase.from('settings').upsert(
+    { key: SETTING_REVOCADOS, value: JSON.stringify(lista), updated_at: new Date().toISOString() },
+    { onConflict: 'key' },
+  );
+  cacheRevocados = null;
+}

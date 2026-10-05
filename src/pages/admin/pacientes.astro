@@ -14,7 +14,10 @@ const errorMsg = Astro.url.searchParams.get('error') ?? '';
 let query = supabase.from('patients').select('*').order('name');
 if (filtro === 'activos')   query = query.eq('active', true);
 if (filtro === 'inactivos') query = query.eq('active', false);
-if (q) query = query.or(`name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,rut.ilike.%${q}%`);
+// Sin los caracteres que rompen el filtro (coma, paréntesis, comodines): antes
+// buscar "Pérez, Ana" daba "Sin resultados".
+const qLimpio = q.replace(/[,()%_*\\]/g, ' ').trim();
+if (qLimpio) query = query.or(`name.ilike.%${qLimpio}%,email.ilike.%${qLimpio}%,phone.ilike.%${qLimpio}%,rut.ilike.%${qLimpio}%`);
 
 const { data: patients } = await query;
 

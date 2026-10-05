@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { getAgwConfig, bheEmitidas, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion, emitBoletaParaReserva, enviarBoletaDeReserva, folioVigente, mensajeErrorSii, MARCA_PENDIENTE, registrarFolioManual } from '../../../lib/apigateway';
+import { getAgwConfig, bheEmitidas, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion, emitBoletaParaReserva, enviarBoletaDeReserva, folioVigente, mensajeErrorSii, MARCA_PENDIENTE, registrarFolioManual, cambiarNotas } from '../../../lib/apigateway';
 import type { BheCausal } from '../../../lib/apigateway';
 import { logError } from '../../../lib/logger';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
@@ -129,11 +129,12 @@ export const POST: APIRoute = async ({ request }) => {
 
     try {
       const result = await bheEmail(codigo, email, cfg);
-      {
-        const base = (b.notes ?? '').split('\n').filter(l => !l.startsWith(MARCA_PENDIENTE)).join('\n');
-        const marca = `${base ? base + '\n' : ''}BoletaEmailEnviada ${new Date().toISOString()} ${email}`;
-        await supabase.from('bookings').update({ notes: marca }).eq('id', bookingId);
-      }
+      // Escritura atómica: se relee la nota actual (el envío tarda segundos y
+      // entretanto pudo escribirse otra marca, ej. un recordatorio).
+      await cambiarNotas(bookingId, (n) => {
+        const base = n.split('\n').filter(l => !l.startsWith(MARCA_PENDIENTE)).join('\n');
+        return `${base ? base + '\n' : ''}BoletaEmailEnviada ${new Date().toISOString()} ${email}`;
+      });
       // Copia para Valentina — para que tenga registro de cada boleta enviada
       // sin tener que entrar al admin a revisarlas una por una. No bloquea la
       // respuesta si falla (el paciente ya recibió la suya).
@@ -198,12 +199,16 @@ export const POST: APIRoute = async ({ request }) => {
 
     try {
       await bheAnular(cfg.siiRut, folio, causal, cfg);
-      // Marca la línea vigente (la última de ese folio), no la primera.
-      const lineas = (b.notes ?? '').split('\n');
-      const idx = lineas.map(l => new RegExp(`Boleta\\s+Folio\\s+${folio}(?!\\d)`, 'i').test(l)).lastIndexOf(true);
-      if (idx >= 0) lineas[idx] = `${lineas[idx]} · ANULADA`;
-      const nuevaNota = lineas.join('\n');
-      await supabase.from('bookings').update({ notes: nuevaNota }).eq('id', bookingId);
+      // Marca la línea vigente (la última de ese folio), no la primera. Escritura
+      // atómica sobre la nota actual (la anulación en el SII tarda segundos).
+      const r = await cambiarNotas(bookingId, (n) => {
+        const lineas = n.split('\n');
+        const idx = lineas.map(l => new RegExp(`Boleta\\s+Folio\\s+${folio}(?!\\d)`, 'i').test(l)).lastIndexOf(true);
+        if (idx < 0) return null;
+        lineas[idx] = `${lineas[idx]} · ANULADA`;
+        return lineas.join('\n');
+      });
+      if (!r.ok) await logError('boleta/anular', `La boleta Folio ${folio} se anuló en el SII pero no quedó marcada en la sesión`, { bookingId, error: r.error });
       return json({ ok: true, folio });
     } catch (e) {
       return json({ ok: false, error: mensajeErrorSii(e instanceof Error ? e.message : 'Error al anular') }, 502);

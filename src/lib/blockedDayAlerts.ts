@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { todayCL } from './dateUtils';
+import { leerHorasExtra } from './horasExtra';
 
 // Aviso anticipado de días y horas cerradas — a pedido de Valentina (3 oct
 // 2026): quiere saber con tiempo cuántas horas pierde, separadas en
@@ -20,6 +21,7 @@ export interface BlockedDayAlert {
   serviciosPresencial: string[]; // servicios afectados (nombres del catálogo)
   serviciosOnline:     string[];
   agendadas:  number;   // sesiones ya agendadas en ese día/rango (habría que moverlas)
+  extrasSemana: number; // horas que ya abriste en días específicos de esa semana (para compensar)
 }
 
 const DIAS_ANTES = 14;
@@ -67,6 +69,9 @@ export async function getBlockedDayAlerts(): Promise<BlockedDayAlert[]> {
 
   // Horario semanal de los servicios que se ofrecen en la web, y sesiones agendadas.
   const fechas = [...new Set(cierres.map(c => c.date))];
+  const extras = (await leerHorasExtra().catch(() => [])).filter(h => !h.quitar);
+  // Lunes a domingo de la semana de una fecha.
+  const semanaDe = (iso: string) => { const dow = weekday(iso); const lunes = addDays(iso, dow === 0 ? -6 : 1 - dow); return [lunes, addDays(lunes, 6)]; };
   const [{ data: services }, { data: slots }, { data: bookings }] = await Promise.all([
     supabase.from('services_catalog').select('id, modality, name, duration_min').eq('visible', true),
     supabase.from('availability_slots').select('day_of_week, start_time, service_id').eq('active', true),
@@ -101,7 +106,10 @@ export async function getBlockedDayAlerts(): Promise<BlockedDayAlert[]> {
       return ini < c.to && ini + (x.duration_min ?? 50) > c.from;
     }).length;
     const [, m, d] = c.date.split('-').map(Number);
+    const [lun, dom] = semanaDe(c.date);
+    const extrasSemana = new Set(extras.filter(h => h.fecha >= lun && h.fecha <= dom && h.fecha !== c.date).map(h => `${h.fecha} ${h.hora}`)).size;
     return {
+      extrasSemana,
       date: c.date,
       label: `${DIAS[dow]} ${d} ${MESES[m - 1]}`,
       rango: c.rango,
@@ -113,4 +121,29 @@ export async function getBlockedDayAlerts(): Promise<BlockedDayAlert[]> {
       agendadas,
     };
   });
+}
+
+/** Para el aviso de feriados: por cada fecha, cuántas horas de la agenda web
+ *  caen ese día (presencial / online) y cuántas sesiones ya hay agendadas. */
+export async function resumenDiaCompleto(fechas: string[]): Promise<Record<string, { presencial: number; online: number; agendadas: number }>> {
+  if (!fechas.length) return {};
+  const [{ data: services }, { data: slots }, { data: bookings }] = await Promise.all([
+    supabase.from('services_catalog').select('id, modality').eq('visible', true),
+    supabase.from('availability_slots').select('day_of_week, start_time, service_id').eq('active', true),
+    supabase.from('bookings').select('session_date').in('session_date', fechas).in('status', ['confirmed', 'pending_payment']),
+  ]);
+  const mod = new Map((services ?? []).map((s: { id: string; modality: string }) => [s.id, s.modality]));
+  const out: Record<string, { presencial: number; online: number; agendadas: number }> = {};
+  for (const f of fechas) {
+    const dow = weekday(f);
+    const pres = new Set<string>(), onl = new Set<string>();
+    for (const s of (slots ?? []) as { day_of_week: number; start_time: string; service_id: string | null }[]) {
+      if (s.day_of_week !== dow || !s.service_id || !mod.has(s.service_id)) continue;
+      const m = mod.get(s.service_id);
+      if (m === 'presencial' || m === 'ambos') pres.add(s.start_time.slice(0, 5));
+      if (m === 'online' || m === 'ambos') onl.add(s.start_time.slice(0, 5));
+    }
+    out[f] = { presencial: pres.size, online: onl.size, agendadas: (bookings ?? []).filter((b: { session_date: string }) => b.session_date === f).length };
+  }
+  return out;
 }

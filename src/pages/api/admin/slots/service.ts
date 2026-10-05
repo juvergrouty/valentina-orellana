@@ -66,9 +66,19 @@ export const POST: APIRoute = async ({ request }) => {
         active:      true,
       }));
 
-    // Borrar el horario actual de ESTE servicio y volver a insertarlo
-    const { error: delErr } = await supabase.from('availability_slots').delete().eq('service_id', serviceId);
+    // Borrar el horario ACTIVO de este servicio y volver a insertarlo. Las
+    // horas quitadas "Todas las semanas" (inactivas) se conservan para poder
+    // restaurarlas; antes guardar el horario las borraba. Si la grilla vuelve
+    // a incluir una de ellas, la inactiva se reemplaza por la nueva activa.
+    const { error: delErr } = await supabase.from('availability_slots').delete().eq('service_id', serviceId).eq('active', true);
     if (delErr) return json({ ok: false, error: 'Error al limpiar: ' + delErr.message }, 500);
+    const { data: inactivas } = await supabase.from('availability_slots')
+      .select('id, day_of_week, start_time').eq('service_id', serviceId).eq('active', false);
+    const reabiertas = (inactivas ?? []).filter((i: { day_of_week: number; start_time: string }) =>
+      clean.some(c => c.day_of_week === i.day_of_week && c.start_time.slice(0, 5) === String(i.start_time).slice(0, 5)));
+    if (reabiertas.length) {
+      await supabase.from('availability_slots').delete().in('id', reabiertas.map((r: { id: string }) => r.id));
+    }
 
     if (clean.length > 0) {
       const { error: insErr } = await supabase.from('availability_slots').insert(clean);

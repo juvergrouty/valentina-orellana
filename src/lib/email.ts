@@ -79,7 +79,9 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
   }
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
-  const payLabel = data.payment_method === 'manual'
+  const payLabel = data.payment_method === 'pendiente'
+    ? 'Pendiente de pago'
+    : data.payment_method === 'manual'
     ? 'Pago en consulta'
     : data.payment_method === 'transferencia'
     ? 'Transferencia bancaria'

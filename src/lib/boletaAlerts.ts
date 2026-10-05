@@ -90,6 +90,10 @@ export async function getBoletaAlerts(): Promise<BoletaAlert[]> {
         : `Boleta pendiente: el SII no respondió${f ? ` (${mensajeErrorSii(f.error)})` : ''}. Se reintenta sola automáticamente.`;
     } else if (b.notes?.includes(MARCA_PENDIENTE) && vigente) {
       message = `Boleta Folio ${vigente.folio} emitida pero NO enviada al paciente${f ? `: ${mensajeErrorSii(f.error)}` : '.'} Se reintenta sola.`;
+    } else if (f?.tipo === 'emision' && !vigente && emitiendo) {
+      // Falló con un error dudoso (el candado sigue): pudo quedar emitida.
+      message = `La emisión falló (${mensajeErrorSii(f.error)}). Puede haber quedado emitida: revisa en el SII; si está, usa "Registrar folio".`;
+      registrarFolio = { sugerido: null };
     } else if (f?.tipo === 'emision' && !vigente) {
       message = `Boleta NO emitida: ${mensajeErrorSii(f.error)}`;
     } else if (f?.tipo === 'envio' && vigente && ultimoEnvio(b.notes) < f.at) {

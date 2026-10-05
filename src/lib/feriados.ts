@@ -3,9 +3,9 @@ import { todayCL } from './dateUtils';
 import { getValidAccessToken } from './syncCalendar';
 import { logError } from './logger';
 
-// Cierre automático de feriados — a pedido de Valentina (3 oct 2026): los
-// feriados se cierran en la agenda web y quedan anotados en su Google
-// Calendar ("Feriado · <nombre>"), sin que ella tenga que hacer nada.
+// Feriados — a pedido de Valentina: avisarle de cada feriado y que ELLA
+// decida si cierra o atiende ese día (5 oct 2026; antes, 3 oct, se cerraban
+// solos). Un día cerrado queda anotado en su Google Calendar.
 //
 // SOLO fechas CONFIRMADAS. Antes de agregar un año nuevo, verificar cada fecha
 // contra una fuente oficial: algunos feriados se trasladan por ley y otros
@@ -20,11 +20,6 @@ export const FERIADOS_CONFIRMADOS: { fecha: string; nombre: string }[] = [
   { fecha: '2026-12-25', nombre: 'Navidad' },
 ];
 
-// Se cierran con esta anticipación (el aviso del panel sale 14 días antes).
-const DIAS_ANTES_CIERRE = 60;
-// Fechas ya cerradas automáticamente. Si Valentina quita un bloqueo a mano
-// (decide atender ese feriado), no se vuelve a cerrar.
-const SETTING_PROCESADOS = 'feriados_cerrados_auto';
 
 function addDays(iso: string, n: number): string {
   const [y, m, d] = iso.split('-').map(Number);
@@ -99,38 +94,65 @@ export async function borrarEventoCierre(fecha: string): Promise<void> {
   }
 }
 
-/** Cierra en la web y en Google Calendar los feriados confirmados de los
- *  próximos DIAS_ANTES_CIERRE días que todavía no se hayan cerrado. */
-export async function cerrarFeriadosConfirmados(): Promise<{ cerrados: string[] }> {
+// ── Decisión de Valentina por feriado (5 oct 2026) ──────────────────────────
+// Ya NO se cierran solos: 2 semanas antes aparece un aviso en el panel y ella
+// elige "Cerrar el día" o "Atender normal" (puede igual agendar a alguien a
+// mano en un día cerrado desde el panel). La decisión queda en settings.
+const SETTING_DECISIONES = 'feriados_decision'; // JSON { "YYYY-MM-DD": "cerrar" | "atender" }
+export const DIAS_AVISO_FERIADO = 14;
+
+export type DecisionFeriado = 'cerrar' | 'atender';
+
+export async function leerDecisionesFeriados(): Promise<Record<string, DecisionFeriado>> {
+  const { data } = await supabase.from('settings').select('value').eq('key', SETTING_DECISIONES).maybeSingle();
+  try { const o = JSON.parse(data?.value || '{}'); return o && typeof o === 'object' ? o : {}; } catch { return {}; }
+}
+
+/** Aplica la decisión (cierra o abre el día en la web y en Google Calendar) y la guarda. */
+export async function decidirFeriado(fecha: string, decision: DecisionFeriado): Promise<boolean> {
+  const f = FERIADOS_CONFIRMADOS.find(x => x.fecha === fecha);
+  if (!f) return false;
+  const titulo = `Feriado · ${f.nombre}`;
+  if (decision === 'cerrar') {
+    const { error } = await supabase.from('blocked_dates').upsert({ date: fecha, reason: titulo }, { onConflict: 'date' });
+    if (error) { await logError('feriados/decidir', `No se pudo cerrar el feriado ${fecha}`, { error: error.message }); return false; }
+    await crearEventoCierre(fecha, titulo);
+  } else {
+    const { error } = await supabase.from('blocked_dates').delete().eq('date', fecha);
+    if (error) { await logError('feriados/decidir', `No se pudo abrir el feriado ${fecha}`, { error: error.message }); return false; }
+    await borrarEventoCierre(fecha);
+  }
+  const decisiones = await leerDecisionesFeriados();
+  decisiones[fecha] = decision;
+  const { error } = await supabase.from('settings').upsert(
+    { key: SETTING_DECISIONES, value: JSON.stringify(decisiones), updated_at: new Date().toISOString() },
+    { onConflict: 'key' },
+  );
+  if (error) await logError('feriados/decidir', 'No se pudo guardar la decisión del feriado', { fecha, error: error.message });
+  return !error;
+}
+
+export interface FeriadoEstado {
+  fecha: string; nombre: string;
+  cerrado: boolean;                 // hoy está cerrado en la agenda web
+  decision: DecisionFeriado | null; // lo que eligió Valentina (null = no ha decidido)
+}
+
+/** Todos los feriados confirmados de hoy en adelante, con su estado. */
+export async function estadoFeriados(): Promise<FeriadoEstado[]> {
   const hoy = todayCL();
-  const hasta = addDays(hoy, DIAS_ANTES_CIERRE);
-  const proximos = FERIADOS_CONFIRMADOS.filter(f => f.fecha >= hoy && f.fecha <= hasta);
-  if (!proximos.length) return { cerrados: [] };
+  const proximos = FERIADOS_CONFIRMADOS.filter(f => f.fecha >= hoy);
+  if (!proximos.length) return [];
+  const [decisiones, { data: cerrados }] = await Promise.all([
+    leerDecisionesFeriados(),
+    supabase.from('blocked_dates').select('date').in('date', proximos.map(f => f.fecha)),
+  ]);
+  const setCerrados = new Set((cerrados ?? []).map((r: { date: string }) => r.date));
+  return proximos.map(f => ({ ...f, cerrado: setCerrados.has(f.fecha), decision: decisiones[f.fecha] ?? null }));
+}
 
-  const { data: setting } = await supabase.from('settings').select('value').eq('key', SETTING_PROCESADOS).maybeSingle();
-  const procesados = new Set((setting?.value ?? '').split(',').filter(Boolean));
-  const pendientes = proximos.filter(f => !procesados.has(f.fecha));
-  if (!pendientes.length) return { cerrados: [] };
-
-  const cerrados: string[] = [];
-  for (const f of pendientes) {
-    const titulo = `Feriado · ${f.nombre}`;
-    const { error } = await supabase.from('blocked_dates').upsert({ date: f.fecha, reason: titulo }, { onConflict: 'date' });
-    if (error) {
-      await logError('feriados/cerrar', `No se pudo cerrar el feriado ${f.fecha} en la agenda web`, { error: error.message });
-      continue;
-    }
-    await crearEventoCierre(f.fecha, titulo);
-    procesados.add(f.fecha);
-    cerrados.push(f.fecha);
-  }
-
-  if (cerrados.length) {
-    const { error } = await supabase.from('settings').upsert(
-      { key: SETTING_PROCESADOS, value: [...procesados].sort().join(','), updated_at: new Date().toISOString() },
-      { onConflict: 'key' },
-    );
-    if (error) await logError('feriados/cerrar', 'No se pudo registrar qué feriados ya se cerraron', { error: error.message });
-  }
-  return { cerrados };
+/** Feriados de las próximas 2 semanas sobre los que Valentina aún no decide. */
+export async function feriadosPorDecidir(): Promise<FeriadoEstado[]> {
+  const hasta = addDays(todayCL(), DIAS_AVISO_FERIADO);
+  return (await estadoFeriados()).filter(f => f.fecha <= hasta && !f.decision);
 }

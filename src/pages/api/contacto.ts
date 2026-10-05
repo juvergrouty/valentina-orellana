@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
 import { sendContactFormEmail, ADMIN_EMAIL_FALLBACK } from '../../lib/email';
+import { logInfo } from '../../lib/logger';
 
 export const prerender = false;
 
@@ -23,6 +24,18 @@ export const POST: APIRoute = async ({ request }) => {
   // Campo trampa (invisible para personas): si viene lleno es un bot. Se responde
   // "ok" sin enviar nada, para que no sepa que fue descartado.
   if ((body.website ?? '').trim()) return json({ ok: true });
+  // Enviado menos de 3 segundos después de abrir la página: un bot. Igual "ok".
+  const tiempo = Number(body.t);
+  if (Number.isFinite(tiempo) && tiempo < 3000) return json({ ok: true });
+  // Máximo 5 mensajes por conexión cada hora (antes, sin límite: alguien podía
+  // llenar el correo de Valentina en bucle).
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'desconocida';
+  {
+    const desde = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { count } = await supabase.from('admin_logs').select('id', { count: 'exact', head: true })
+      .eq('context', 'contacto/enviado').gt('created_at', desde).eq('data->>ip', ip);
+    if ((count ?? 0) >= 5) return json({ ok: false, error: 'Recibí varios mensajes seguidos desde tu conexión. Escríbeme por WhatsApp, por favor.' }, 429);
+  }
 
   if (!nombre || !email) {
     return json({ ok: false, error: 'Faltan el nombre o el correo.' }, 400);
@@ -39,6 +52,7 @@ export const POST: APIRoute = async ({ request }) => {
 
   const res = await sendContactFormEmail({ nombre, email, motivo, mensaje }, adminEmail);
   if (!res.sent) return json({ ok: false, error: 'No se pudo enviar el mensaje. Intenta por WhatsApp.' }, 502);
+  await logInfo('contacto/enviado', `Mensaje de contacto de ${nombre}`, { ip });
 
   return json({ ok: true });
 };

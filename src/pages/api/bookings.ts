@@ -154,6 +154,24 @@ async function handleBooking(request: Request) {
   try { await expireStaleBookings(new URL(request.url).origin); }
   catch (e) { await logError('bookings/expirar', 'Falló la limpieza de reservas vencidas', { error: e instanceof Error ? e.message : String(e) }); }
 
+  // ── Reserva anterior SIN PAGAR de la misma persona ───────────────────────────
+  // Si fue a pagar, se arrepintió y vuelve a reservar (por ejemplo, la misma
+  // hora), su reserva anterior sin pagar la bloqueaba y le decía "esa hora se
+  // acaba de ocupar". Se libera en silencio (sin el correo de "tu hora se
+  // liberó"): queda 'expired', así que un pago tardío de esa orden igual se
+  // recupera por el aviso de Flow si la hora sigue libre.
+  {
+    const { data: previas } = await supabase.from('bookings')
+      .select('id, created_by_admin, notes')
+      .eq('patient_email', patient_email.trim().toLowerCase())
+      .eq('status', 'pending_payment');
+    const liberar = (previas ?? []).filter((b: { created_by_admin?: boolean | null; notes?: string | null }) =>
+      !b.created_by_admin && !(b.notes ?? '').includes('ComprobanteTransferencia')).map((b: { id: string }) => b.id);
+    if (liberar.length) {
+      await supabase.from('bookings').update({ status: 'expired' }).in('id', liberar).eq('status', 'pending_payment');
+    }
+  }
+
   // ── Verificar disponibilidad ─────────────────────────────────────────────────
   const { data: existing } = await supabase
       .from('bookings')
