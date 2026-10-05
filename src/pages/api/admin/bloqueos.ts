@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { crearEventoCierre, borrarEventoCierre, FERIADOS_CONFIRMADOS } from '../../../lib/feriados';
+import { crearEventoCierre, borrarEventoCierre, listaFeriados } from '../../../lib/feriados';
 import { todayCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
@@ -108,13 +108,13 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   }
 
   // ── Bloquear feriados de Chile del año en curso ───────────────────────────
-  // Solo los feriados CONFIRMADOS de hoy en adelante (src/lib/feriados.ts).
+  // Solo feriados nacionales de hoy en adelante (descargados + verificados, src/lib/feriados.ts).
   // Antes usaba una lista fija con fechas que cambian (Pueblos Indígenas,
   // traslados por ley) y cerraba también fechas ya pasadas, sin anotarlas en
   // Google Calendar.
   if (action === 'block-feriados') {
     const hoy = todayCL();
-    for (const f of FERIADOS_CONFIRMADOS.filter(f => f.fecha >= hoy)) {
+    for (const f of (await listaFeriados()).filter(f => f.fecha >= hoy)) {
       const titulo = `Feriado · ${f.nombre}`;
       const { error } = await supabase.from('blocked_dates').upsert({ date: f.fecha, reason: titulo }, { onConflict: 'date' });
       if (!error) await crearEventoCierre(f.fecha, titulo);
