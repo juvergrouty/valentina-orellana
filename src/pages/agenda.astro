@@ -1041,7 +1041,7 @@ const { data: catalogServices } = await supabase
       const primerError = document.querySelector('#patient-form .field-error:not(.hidden)');
       primerError?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const previo = primerError?.previousElementSibling;
-      const campo = previo?.matches('input,select,textarea') ? previo : previo?.querySelector('input,select,textarea');
+      const campo = previo?.matches('input,select,textarea') ? previo : previo?.querySelector('#patient_phone, input:not(#phone_cc), select, textarea');
       campo?.focus({ preventScroll: true });
       return;
     }
@@ -1229,11 +1229,15 @@ const { data: catalogServices } = await supabase
     const crudo = ($('patient_phone').value || '').trim();
     if (crudo.startsWith('+')) {
       const d = crudo.replace(/\D/g, '');
+      if (d.startsWith('56')) return d.length === 11 ? `+${d}` : '';
       return d.length >= 8 && d.length <= 15 ? `+${d}` : '';
     }
     const cc = ($('phone_cc').value || '').replace(/\D/g, '');
     let num = crudo.replace(/\D/g, '');
     if (cc && num.startsWith(cc) && num.length > (cc === '56' ? 9 : 8)) num = num.slice(cc.length);
+    // Fuera de Chile se suele escribir el 0 del prefijo nacional (ej. 07911…):
+    // en formato internacional no va.
+    if (cc !== '56') num = num.replace(/^0/, '');
     if (!/^\d{1,4}$/.test(cc)) return '';
     if (cc === '56') return num.length === 9 ? `+56${num}` : '';
     return num.length >= 6 && cc.length + num.length <= 15 ? `+${cc}${num}` : '';

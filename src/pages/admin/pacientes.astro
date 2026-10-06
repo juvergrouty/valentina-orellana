@@ -70,7 +70,8 @@ const formatCLP = (n: number) =>
 function waLink(phone: string | null): string | null {
   if (!phone) return null;
   const digits = phone.replace(/[^\d]/g, '');
-  return digits ? `https://wa.me/${digits.startsWith('56') ? digits : '56' + digits}` : null;
+  // 9 dígitos = celular chileno sin código; si no, ya trae el código de país.
+  return digits ? `https://wa.me/${digits.length === 9 ? '56' + digits : digits}` : null;
 }
 
 const TABS = [
