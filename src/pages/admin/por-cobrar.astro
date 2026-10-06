@@ -112,7 +112,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
                 ? `Hola ${firstName}, te recuerdo el link de pago pendiente: ${payUrl}`
                 : `Hola ${firstName}, te recuerdo el link de pago para tu sesión (${formatCLP(b.amount)}): ${payUrl}`
             ) : '';
-            const waUrl = payUrl && waNumber.length >= 11 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
+            const waUrl = payUrl && waNumber.length >= 10 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
             return (
               <tr>
                 <td>

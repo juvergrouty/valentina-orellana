@@ -261,7 +261,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
                 {cobros.map(c => {
                   const phone = (c.patient_phone ?? '').replace(/\D/g, '');
                   const waPhone = phone.length === 9 ? '56' + phone : phone;
-                  const waUrl = waPhone.length >= 11
+                  const waUrl = waPhone.length >= 10
                     ? `https://wa.me/${waPhone}`
                     : null;
                   return (

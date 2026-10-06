@@ -93,7 +93,7 @@ export const POST: APIRoute = async ({ request, url }) => {
     if (!b) return json({ ok: false, error: 'Sesión no encontrada.' }, 404);
     const digits = (b.patient_phone ?? '').replace(/\D/g, '');
     const phone  = digits.length === 9 ? '56' + digits : digits;
-    if (phone.length < 11) return json({ ok: false, error: 'El paciente no tiene un teléfono válido.' }, 400);
+    if (phone.length < 10) return json({ ok: false, error: 'El paciente no tiene un teléfono válido.' }, 400);
     const text = stepsWhatsappText(b.patient_name ?? '', await stepsPageUrl(url.origin));
     if (b.patient_email) {
       await supabase.from('patients').update({ steps_sent_at: new Date().toISOString() }).ilike('email', b.patient_email.trim());

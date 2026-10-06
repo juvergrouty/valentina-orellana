@@ -172,7 +172,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     const waMessage = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n${modalityLine}${dateLine}💰 $${amountFmt} CLP\n\n💳 Enlace de pago: ${paymentUrl}${meetLine}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
 
-    const whatsappUrl = waPhone.length >= 11
+    const whatsappUrl = waPhone.length >= 10
       ? `https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}`
       : null;
 

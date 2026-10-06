@@ -290,11 +290,13 @@ const errorParam   = Astro.url.searchParams.get('error');
 const errorDetail  = Astro.url.searchParams.get('detail');
 const paymentLink  = Astro.url.searchParams.get('payment_link');
 const plPhoneRaw   = (Astro.url.searchParams.get('pl_phone') ?? '').replace(/\D/g, '');
+// 9 dígitos = celular chileno sin código; si no, ya trae el código de país.
+const plPhoneWa    = plPhoneRaw.length === 9 ? '56' + plPhoneRaw : plPhoneRaw;
 const plWaSent     = Astro.url.searchParams.get('pl_wa_sent') === '1';
 const plWaMsg      = paymentLink ? `Hola 👋 Te comparto el enlace de pago para tu sesión: ${paymentLink}` : '';
 // El botón manual de WhatsApp solo se muestra si el envío automático (plantilla
 // de Meta) no se hizo — para no mandar el mensaje duplicado.
-const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${plPhoneRaw}?text=${encodeURIComponent(plWaMsg)}` : null;
+const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${plPhoneWa}?text=${encodeURIComponent(plWaMsg)}` : null;
 ---
 
 <AdminLayout title="Agenda" current="/admin/agenda" fullHeight={true}>
@@ -2337,7 +2339,7 @@ function openSessionDetail(b) {
   }
   if (b.patient_phone) {
     const a = document.createElement('a');
-    a.href = infoWaPhone.length >= 11 ? `https://wa.me/${infoWaPhone}` : `tel:${b.patient_phone}`;
+    a.href = infoWaPhone.length >= 10 ? `https://wa.me/${infoWaPhone}` : `tel:${b.patient_phone}`;
     a.target = '_blank'; a.rel = 'noopener';
     a.textContent = b.patient_phone;
     a.className = 'sp-contact-link';
@@ -2360,7 +2362,7 @@ function openSessionDetail(b) {
     window.__currentMeetUrl = meetMatch ? meetMatch[1] : null;
     const waDigits2 = (b.patient_phone || '').replace(/\D/g, '');
     const waPhone2  = waDigits2.length === 9 ? '56' + waDigits2 : waDigits2;
-    window.__currentMeetWaPhone = waPhone2.length >= 11 ? waPhone2 : null;
+    window.__currentMeetWaPhone = waPhone2.length >= 10 ? waPhone2 : null;
     window.__currentMeetPatientFirstName = b.patient_name.split(' ')[0];
   } else {
     meetDiv.style.display = 'none';
@@ -2389,7 +2391,7 @@ function openSessionDetail(b) {
   const waDigits = (b.patient_phone || '').replace(/\D/g, '');
   const waPhone  = waDigits.length === 9 ? '56' + waDigits : waDigits;
   const remTime  = b.session_time.slice(0, 5);
-  if (waPhone.length >= 11) {
+  if (waPhone.length >= 10) {
     const isOnlineRem = b.session_type?.includes('online');
     const whereLine = isOnlineRem
       ? 'Es una sesión online — te paso el link de la videollamada apenas se acerque la hora.'
@@ -2406,7 +2408,7 @@ function openSessionDetail(b) {
   // propio navegador de la admin, lo que la mandaba a ella a escribir la reseña.)
   const reviewBtn = document.getElementById('sp-btn-review-wa');
   if (reviewBtn) {
-    if (waPhone.length >= 11 && typeof reviewUrl === 'string' && reviewUrl) {
+    if (waPhone.length >= 10 && typeof reviewUrl === 'string' && reviewUrl) {
       const reviewMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Si te sirvió nuestra sesión, me encantaría que me dejaras una reseña en Google (toma menos de un minuto): ${reviewUrl}`;
       reviewBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(reviewMsg)}`;
       reviewBtn.style.display = '';
@@ -2427,7 +2429,7 @@ function openSessionDetail(b) {
     const payUrl = b.patient_id ? `${window.location.origin}/pagar/${b.patient_id}` : `${flowCheckoutBase}?token=${b.mp_preference_id}`;
     const payMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te comparto el link de pago: ${payUrl}`;
     const waPayBtn = document.getElementById('sp-paylink-wa');
-    if (waPhone.length >= 11) {
+    if (waPhone.length >= 10) {
       waPayBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(payMsg)}`;
       waPayBtn.style.display = '';
     } else {
@@ -2500,7 +2502,7 @@ function openSessionDetail(b) {
   if (!isOnline && locLabel) {
     const locWaDigits = (b.patient_phone || '').replace(/\D/g, '');
     const locWaPhone  = locWaDigits.length === 9 ? '56' + locWaDigits : locWaDigits;
-    if (locWaPhone.length >= 11) {
+    if (locWaPhone.length >= 10) {
       const locMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te espero en: ${locLabel}`;
       locWaBtn.href = `https://wa.me/${locWaPhone}?text=${encodeURIComponent(locMsg)}`;
       locWaBtn.style.display = 'inline-flex';
