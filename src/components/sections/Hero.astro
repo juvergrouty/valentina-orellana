@@ -64,7 +64,7 @@ const total   = cache?.total ?? null;
                 ))}
               </div>
               <p class="font-body text-sm text-stone leading-snug">
-                <span class="font-medium text-ink">{rating.toFixed(1)} en Google</span>{total ? ` · ${total} reseñas` : ''}
+                <span class="font-medium text-ink">{rating.toFixed(1).replace('.', ',')} en Google</span>{total ? ` · ${total} reseñas` : ''}
               </p>
             </div>
 

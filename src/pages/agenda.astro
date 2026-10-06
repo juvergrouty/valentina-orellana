@@ -135,7 +135,7 @@ const { data: catalogServices } = await supabase
               <p class="font-heading font-semibold text-2xl text-ink mb-1">Online</p>
               <p id="presel-price-online" class="font-heading font-light text-xl text-ink mb-3"></p>
               <div class="h-px bg-dust my-3"></div>
-              <p class="font-body text-sm text-stone">Videollamada · Zoom o Meet</p>
+              <p class="font-body text-sm text-stone">Videollamada · Google Meet</p>
             </button>
             <button type="button" id="presel-presencial-btn"
               class="bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer">
@@ -255,12 +255,16 @@ const { data: catalogServices } = await supabase
             <div>
               <label class="label text-stone block mb-2" for="patient_phone">Teléfono *</label>
               <div class="flex border border-dust focus-within:border-ink transition-colors bg-white">
-                <span class="flex items-center px-3 font-body text-sm text-stone bg-warm border-r border-dust select-none">+56</span>
+                <!-- Código de país editable (Valentina, 5 oct 2026): muchas pacientes
+                     chilenas usan números de otros países (ej. +1 de EE.UU.). -->
+                <input id="phone_cc" type="tel" value="+56" maxlength="5" aria-label="Código de país"
+                  autocomplete="tel-country-code" inputmode="tel"
+                  class="w-[4.5rem] px-3 font-body text-sm text-stone bg-warm border-r border-dust outline-none" />
                 <input id="patient_phone" name="patient_phone" type="tel" required
-                  placeholder="9 9999 9999" maxlength="11"
-                  class="flex-1 px-3 py-2.5 font-body text-sm text-ink bg-white outline-none placeholder:text-dust" />
+                  placeholder="9 1234 5678" maxlength="20" autocomplete="tel-national" inputmode="tel"
+                  class="flex-1 min-w-0 px-3 py-2.5 font-body text-sm text-ink bg-white outline-none placeholder:text-stone/60" />
               </div>
-              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa tu teléfono.</p>
+              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Revisa el código de país y el número (en Chile, 9 dígitos).</p>
             </div>
           </div>
           <div>
@@ -317,13 +321,13 @@ const { data: catalogServices } = await supabase
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-7">
             <div>
               <label class="label text-stone block mb-2" for="emergency_name">Contacto de emergencia *</label>
-              <input id="emergency_name" type="text" placeholder="Nombre" class="field" />
+              <input id="emergency_name" type="text" placeholder="Nombre" autocomplete="section-emergencia name" class="field" />
               <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa un contacto de emergencia.</p>
             </div>
             <div>
               <label class="label text-stone block mb-2" for="emergency_phone">Teléfono de emergencia *</label>
-              <input id="emergency_phone" type="tel" placeholder="+56 9 9999 9999" class="field" />
-              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa su teléfono.</p>
+              <input id="emergency_phone" type="tel" placeholder="+56 9 1234 5678" autocomplete="section-emergencia tel" class="field" />
+              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa un teléfono válido para tu contacto de emergencia, con código de país.</p>
             </div>
           </div>
           <div>
@@ -352,6 +356,7 @@ const { data: catalogServices } = await supabase
               Continuar al pago
             </button>
             <p id="form-error" class="hidden font-body text-xs text-red-500 text-center mt-3"></p>
+            <p class="font-body text-xs text-stone text-center mt-3">Al continuar aceptas las <a href="/condiciones" target="_blank" class="underline underline-offset-2 hover:text-ink">condiciones del servicio y la política de privacidad</a>.</p>
           </div>
         </form>
       </div>
@@ -599,7 +604,7 @@ const { data: catalogServices } = await supabase
         const dur      = svc.duration_min ?? 50;
         const tagColor = svc.modality === 'online' ? 'text-forest' : 'text-gold';
         const tagText  = svc.modality === 'online' ? 'Online' : 'Presencial';
-        const modLabel = svc.modality === 'online' ? 'Videollamada · Zoom o Meet' : 'Las Condes';
+        const modLabel = svc.modality === 'online' ? 'Videollamada · Google Meet' : 'Las Condes';
 
         card.className += ' cursor-pointer hover:border-forest/40 hover:bg-warm';
         card.innerHTML = `
@@ -879,7 +884,7 @@ const { data: catalogServices } = await supabase
     const sc = $('slots-container');
     if (sc) { sc.classList.remove('hidden'); sc.style.display = 'flex'; sc.style.flexDirection = 'column'; }
     $('slots-date-label').textContent = formatDateEs(iso);
-    $('slots-grid').innerHTML = '<p class="col-span-3 text-xs text-muted py-2">Cargando horarios...</p>';
+    $('slots-grid').innerHTML = '<p class="col-span-3 text-xs text-stone py-2">Cargando horarios...</p>';
     hide('no-slots-msg');
     hide('slots-help-msg');
 
@@ -986,10 +991,10 @@ const { data: catalogServices } = await supabase
   function buildBookingSummary() {
     $('booking-summary').innerHTML = `
       <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        <span class="text-muted">Sesión:</span>     <span class="font-medium">${state.sessionTitle}</span>
-        <span class="text-muted">Fecha:</span>       <span class="font-medium">${formatDateEs(state.selectedDate)}</span>
-        <span class="text-muted">Hora:</span>        <span class="font-medium">${state.selectedTime}</span>
-        <span class="text-muted">Valor:</span>       <span class="font-medium text-primary">${formatCLP(state.sessionPrice)}</span>
+        <span class="text-stone">Sesión:</span>     <span class="font-medium">${state.sessionTitle}</span>
+        <span class="text-stone">Fecha:</span>       <span class="font-medium">${formatDateEs(state.selectedDate)}</span>
+        <span class="text-stone">Hora:</span>        <span class="font-medium">${state.selectedTime}</span>
+        <span class="text-stone">Valor:</span>       <span class="font-medium text-forest">${formatCLP(state.sessionPrice)}</span>
       </div>
     `;
   }
@@ -1001,8 +1006,7 @@ const { data: catalogServices } = await supabase
     const name   = $('patient_name').value.trim();
     const email  = $('patient_email').value.trim();
     const rut    = $('patient_rut').value.trim();
-    const phoneRaw = $('patient_phone').value.replace(/\D/g, '');
-    const phone  = phoneRaw.length === 9 ? `+56${phoneRaw}` : '';
+    const phone  = telefonoCompleto();
     const motivo = $('motivo_consulta').value.trim();
     const notes  = motivo
       ? `Motivo: ${motivo}` + ($('patient_notes').value.trim() ? `\n\n${$('patient_notes').value.trim()}` : '')
@@ -1031,7 +1035,16 @@ const { data: catalogServices } = await supabase
     if (emergNom.length < 2)  { $('emergency_name').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!/^[\d\s()+.-]{7,25}$/.test(emergTel)) { $('emergency_phone').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!motivo) { $('motivo_consulta').nextElementSibling?.classList.remove('hidden'); valid = false; }
-    if (!valid) return;
+    if (!valid) {
+      // Con un formulario largo, en el celular el error puede quedar fuera de la
+      // pantalla: se lleva la vista al primer campo con problema.
+      const primerError = document.querySelector('#patient-form .field-error:not(.hidden)');
+      primerError?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const previo = primerError?.previousElementSibling;
+      const campo = previo?.matches('input,select,textarea') ? previo : previo?.querySelector('input,select,textarea');
+      campo?.focus({ preventScroll: true });
+      return;
+    }
 
     const btn = $('submit-patient');
     btn.textContent = 'Procesando...';
@@ -1120,8 +1133,8 @@ const { data: catalogServices } = await supabase
       show('payment-ready');
 
       $('payment-summary').innerHTML = `
-        <p class="font-heading text-xl text-dark">${formatCLP(state.sessionPrice)}</p>
-        <p class="text-xs text-muted mt-1">${state.sessionTitle} · ${formatDateEs(state.selectedDate)} · ${state.selectedTime}</p>
+        <p class="font-heading text-xl text-ink">${formatCLP(state.sessionPrice)}</p>
+        <p class="text-xs text-stone mt-1">${state.sessionTitle} · ${formatDateEs(state.selectedDate)} · ${state.selectedTime}</p>
       `;
 
       $('mp-checkout-btn').href = data.checkoutUrl;
@@ -1209,30 +1222,41 @@ const { data: catalogServices } = await supabase
     }
   });
 
-  // ─── Formato teléfono ─────────────────────────────────────────────────────
+  // ─── Teléfono: código de país + número (cualquier país) ────────────────────
+  // Si el número empieza con "+", se toma completo (internacional) e ignora el
+  // código. Si se pegó o autocompletó con el código incluido, se quita.
+  function telefonoCompleto() {
+    const crudo = ($('patient_phone').value || '').trim();
+    if (crudo.startsWith('+')) {
+      const d = crudo.replace(/\D/g, '');
+      return d.length >= 8 && d.length <= 15 ? `+${d}` : '';
+    }
+    const cc = ($('phone_cc').value || '').replace(/\D/g, '');
+    let num = crudo.replace(/\D/g, '');
+    if (cc && num.startsWith(cc) && num.length > (cc === '56' ? 9 : 8)) num = num.slice(cc.length);
+    if (!/^\d{1,4}$/.test(cc)) return '';
+    if (cc === '56') return num.length === 9 ? `+56${num}` : '';
+    return num.length >= 6 && cc.length + num.length <= 15 ? `+${cc}${num}` : '';
+  }
   const phoneInput = $('patient_phone');
   if (phoneInput) {
     phoneInput.addEventListener('input', () => {
-      // Solo dígitos
-      let digits = phoneInput.value.replace(/\D/g, '').slice(0, 9);
-      // Formato: 9 9999 9999
-      if (digits.length <= 1) {
-        phoneInput.value = digits;
-      } else if (digits.length <= 5) {
-        phoneInput.value = `${digits[0]} ${digits.slice(1)}`;
-      } else {
-        phoneInput.value = `${digits[0]} ${digits.slice(1, 5)} ${digits.slice(5)}`;
-      }
-    });
-    phoneInput.addEventListener('keydown', (e) => {
-      // Permitir: backspace, delete, tab, flechas, ctrl/cmd+a/c/v/x
-      const allowed = ['Backspace','Delete','Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
-      if (allowed.includes(e.key)) return;
-      if ((e.ctrlKey || e.metaKey) && ['a','c','v','x'].includes(e.key.toLowerCase())) return;
-      // Bloquear si no es dígito
-      if (!/^\d$/.test(e.key)) e.preventDefault();
+      // Formato "9 1234 5678" solo para números chilenos escritos sin "+".
+      const cc = ($('phone_cc').value || '').replace(/\D/g, '');
+      if (cc !== '56' || phoneInput.value.trim().startsWith('+')) return;
+      let digits = phoneInput.value.replace(/\D/g, '');
+      if (digits.length > 9 && digits.startsWith('56')) digits = digits.slice(2); // pegado con +56
+      digits = digits.slice(0, 9);
+      if (digits.length <= 1) phoneInput.value = digits;
+      else if (digits.length <= 5) phoneInput.value = `${digits[0]} ${digits.slice(1)}`;
+      else phoneInput.value = `${digits[0]} ${digits.slice(1, 5)} ${digits.slice(5)}`;
     });
   }
+  $('phone_cc')?.addEventListener('input', (e) => {
+    const el = e.target;
+    const d = el.value.replace(/[^\d]/g, '').slice(0, 4);
+    el.value = '+' + d;
+  });
 
   // ─── RUT: formato + dígito verificador (mismo cálculo que src/lib/rut.ts) ──
   function rutValido(r) {
@@ -1271,8 +1295,11 @@ const { data: catalogServices } = await supabase
       const poner = (id, v) => { const el = $(id); if (el && v) el.value = v; };
       poner('patient_name', d.datos.nombre);
       poner('patient_email', d.datos.correo);
-      poner('patient_phone', d.datos.telefono);
-      $('patient_phone')?.dispatchEvent(new Event('input'));
+      // Teléfono guardado completo (+56..., +1...): los chilenos van al formato
+      // de siempre; los de otros países se ponen completos con su "+".
+      const telGuardado = String(d.datos.telefono || '');
+      if (telGuardado.startsWith('+56')) { $('phone_cc').value = '+56'; poner('patient_phone', telGuardado.slice(3)); $('patient_phone')?.dispatchEvent(new Event('input')); }
+      else poner('patient_phone', telGuardado);
       poner('patient_address', d.datos.direccion);
       poner('patient_comuna', d.datos.comuna);
       poner('emergency_name', d.datos.emergNombre);

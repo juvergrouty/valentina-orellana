@@ -54,8 +54,8 @@ function stars(n: number) {
     {cache?.total && (
       <p class="text-center label text-stone mt-14">
         {reviewsUrl
-          ? <a href={reviewsUrl} target="_blank" rel="noopener" class="underline underline-offset-4 hover:text-ink">{Number(cache.rating ?? 5).toFixed(1)} ★ · Ver las {cache.total} reseñas en Google</a>
-          : <>{Number(cache.rating ?? 5).toFixed(1)} ★ · {cache.total} reseñas en Google</>}
+          ? <a href={reviewsUrl} target="_blank" rel="noopener" class="underline underline-offset-4 hover:text-ink">{Number(cache.rating ?? 5).toFixed(1).replace('.', ',')} ★ · Ver las {cache.total} reseñas en Google</a>
+          : <>{Number(cache.rating ?? 5).toFixed(1).replace('.', ',')} ★ · {cache.total} reseñas en Google</>}
       </p>
     )}
 

@@ -68,6 +68,13 @@ const SESSION_LABELS: Record<string, string> = {
 
 // ─── Email al cliente: confirmación ──────────────────────────────────────────
 // opts.skipToggle = true → reenvío manual del admin (ignora el interruptor de correos automáticos)
+/** Dónde es la sesión: la dirección de la consulta (presencial) o el aviso del Meet (online). */
+async function lugarSesion(sessionType: string | null | undefined): Promise<string> {
+  if ((sessionType ?? '').includes('online')) return 'Online · el enlace de Google Meet está en la invitación de tu calendario';
+  const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
+  return addr?.value?.trim() ? `Presencial · ${addr.value.trim()}` : 'Presencial en la consulta';
+}
+
 export async function sendConfirmationToClient(data: BookingEmailData, opts: { skipToggle?: boolean } = {}) {
   const client = getResend();
   if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
@@ -79,6 +86,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
   }
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
+  const lugar = await lugarSesion(data.session_type);
   const payLabel = data.payment_method === 'pendiente'
     ? 'Pendiente de pago'
     : data.payment_method === 'manual'
@@ -107,7 +115,11 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
           <table style="width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:0.85rem;">
             <tr>
               <td style="padding:0.4rem 0;color:#6B6860;width:40%;">Tipo de sesión</td>
-              <td style="padding:0.4rem 0;font-weight:500;">${sessionLabel}</td>
+              <td style="padding:0.4rem 0;font-weight:500;">${escapeHtml(sessionLabel)}</td>
+            </tr>
+            <tr>
+              <td style="padding:0.4rem 0;color:#6B6860;">Modalidad</td>
+              <td style="padding:0.4rem 0;font-weight:500;">${escapeHtml(lugar)}</td>
             </tr>
             <tr>
               <td style="padding:0.4rem 0;color:#6B6860;">Fecha</td>
@@ -115,7 +127,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
             </tr>
             <tr>
               <td style="padding:0.4rem 0;color:#6B6860;">Hora</td>
-              <td style="padding:0.4rem 0;font-weight:500;">${data.session_time}</td>
+              <td style="padding:0.4rem 0;font-weight:500;">${String(data.session_time).slice(0, 5)}</td>
             </tr>
             <tr>
               <td style="padding:0.4rem 0;color:#6B6860;">Valor</td>
@@ -374,6 +386,7 @@ export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent:
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
   const isOnline = (data.session_type ?? '').includes('online');
+  const lugar = await lugarSesion(data.session_type);
   // "hoy" / "mañana" / la fecha, según el día real de la sesión (hora de Chile).
   // Antes decía siempre "hoy", aunque el recordatorio sale hasta 24 h antes.
   const dia = diaRelativo(data.session_date);
@@ -392,10 +405,10 @@ export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent:
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.88rem;line-height:1.8;">
           <p style="margin:0;"><strong>${escapeHtml(sessionLabel)}</strong></p>
           <p style="margin:0.3rem 0 0;color:#6B6860;">${formatDate(data.session_date)} · ${String(data.session_time).slice(0, 5)}</p>
-          <p style="margin:0.6rem 0 0;color:#6B6860;">${isOnline ? '🎥 La sesión es online — revisa la invitación con el enlace de Google Meet.' : '📍 La sesión es presencial.'}</p>
+          <p style="margin:0.6rem 0 0;color:#6B6860;">${isOnline ? '🎥 La sesión es online — revisa la invitación con el enlace de Google Meet.' : `📍 ${escapeHtml(lugar)}`}</p>
         </div>
         <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#6B6860;line-height:1.6;margin-bottom:1.5rem;">
-          Si necesitas reagendar, escríbeme lo antes posible.
+          Recuerda que solo puedes reagendar avisando con al menos 24 horas de anticipación.
         </p>
         <a href="https://wa.me/56972735696"
            style="display:inline-block;background:#576352;color:white;padding:0.75rem 1.5rem;
@@ -682,12 +695,12 @@ export async function sendBoletaEmail(opts: {
       <div style="font-family:'Inter',sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         <p style="font-size:0.95rem;color:#6B6860;margin-bottom:1.25rem;">Hola ${escapeHtml(opts.patientName)},</p>
         <p style="font-size:0.92rem;line-height:1.7;">
-          Muchas gracias por tu sesión. Te adjunto tu <strong>boleta de honorarios electrónica${folioTxt}</strong>
+          Gracias por tu pago. Te adjunto tu <strong>boleta de honorarios electrónica${folioTxt}</strong>
           por la atención psicológica.
         </p>
         <p style="font-size:0.92rem;line-height:1.7;">
-          Puedes usar este documento para solicitar el <strong>reembolso en tu Isapre, Fonasa o seguro de salud</strong>,
-          si tu plan lo contempla.
+          Puedes usar este documento para solicitar el <strong>reembolso en tu Isapre o en tu seguro complementario de salud</strong>,
+          según tu plan.
         </p>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
@@ -959,7 +972,7 @@ export async function sendConsentLinkEmail(opts: {
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(opts.patientName.split(' ')[0])}, te comparto el consentimiento para el tratamiento de tus datos
           en la terapia, que pide la nueva ley de protección de datos personales. Toma unos 2 minutos:
-          lo lees, marcas lo que autorizas y firmas con tu nombre y RUT.
+          lo lees, marcas lo que autorizas y firmas con tu nombre y RUT (o tu documento de identidad, si no tienes RUT chileno).
         </p>
         <a href="${opts.url}"
            style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;

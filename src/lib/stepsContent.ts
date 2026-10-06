@@ -33,12 +33,12 @@ export function stepsItems(clinicAddress?: string | null): StepItem[] {
     {
       icon: 'shield',
       titulo: 'Boleta y reembolso',
-      texto: 'Después de cada sesión te llega por correo tu boleta de honorarios electrónica emitida ante el SII. Guárdala: con ella puedes pedir el reembolso en tu prestador o seguro de salud, si corresponde.',
+      texto: 'Al pagar cada sesión te llega por correo tu boleta de honorarios electrónica emitida ante el SII. Guárdala: con ella puedes pedir el reembolso en tu prestador o seguro de salud, si corresponde.',
     },
     {
       icon: 'clock',
       titulo: 'Si necesitas reagendar',
-      texto: 'Avísame con al menos 24 horas de anticipación. Con menos aviso puede no ser posible y la sesión se considera realizada.',
+      texto: 'Avísame con al menos 24 horas de anticipación (o usa el enlace de tu correo de confirmación). Si avisas con menos de 24 horas, no es posible reagendar y la sesión se considera realizada.',
     },
     {
       icon: 'check',

@@ -79,7 +79,7 @@ export const pricingPlans: PricingPlan[] = [
     price: 60000,
     currency: 'CLP',
     duration: '50 minutos',
-    modality: 'Videollamada (Zoom / Meet)',
+    modality: 'Videollamada (Google Meet)',
     features: [
       'Desde cualquier lugar de Chile',
       'Flexibilidad de horarios',
@@ -108,7 +108,7 @@ export const pricingPlans: PricingPlan[] = [
     price: 75000,
     currency: 'CLP',
     duration: '50 minutos',
-    modality: 'Videollamada (Zoom / Meet)',
+    modality: 'Videollamada (Google Meet)',
     features: [
       'Sesión para ambos',
       'Desde cualquier lugar de Chile',

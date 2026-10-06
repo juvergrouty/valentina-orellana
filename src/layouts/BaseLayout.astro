@@ -34,6 +34,9 @@ const jsonLd = Astro.url.pathname === '/' ? {
   image: ogImage,
   telephone: '+56972735696',
   areaServed: [{ '@type': 'City', name: 'Las Condes' }, { '@type': 'Country', name: 'Chile' }],
+  address: { '@type': 'PostalAddress', addressLocality: 'Las Condes', addressRegion: 'Región Metropolitana', addressCountry: 'CL' },
+  priceRange: '$60.000 – $75.000',
+  sameAs: ['https://www.instagram.com/psicologa.valentinaorellana/'],
   availableLanguage: 'es',
 } : null;
 // Botones flotantes: en /agenda el de WhatsApp sube para no tapar el sello de

@@ -34,7 +34,7 @@ export const POST: APIRoute = async ({ request }) => {
     datos: {
       nombre:    b.patient_name ?? '',
       correo:    b.patient_email ?? '',
-      telefono:  String(b.patient_phone ?? '').replace(/^\+56/, ''),
+      telefono:  String(b.patient_phone ?? ''),
       rut:       sinRut ? '' : (b.patient_rut ?? p?.rut ?? ''),
       sinRut,
       docTipo:   p?.doc_tipo ?? '',
