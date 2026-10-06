@@ -76,7 +76,7 @@ export const pricingPlans: PricingPlan[] = [
   {
     id: 'online',
     title: 'Individual Online',
-    price: 60000,
+    price: 65000,
     currency: 'CLP',
     duration: '50 minutos',
     modality: 'Videollamada (Google Meet)',
@@ -90,7 +90,7 @@ export const pricingPlans: PricingPlan[] = [
   {
     id: 'presencial',
     title: 'Individual Presencial',
-    price: 60000,
+    price: 65000,
     currency: 'CLP',
     duration: '50 minutos',
     modality: 'Las Condes',
