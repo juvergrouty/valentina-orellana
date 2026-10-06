@@ -170,12 +170,19 @@ async function handleBooking(request: Request) {
     const { data: previas } = await supabase.from('bookings')
       .select('id, created_by_admin, notes, mp_preference_id, session_date, session_time')
       .eq('patient_email', patient_email.trim().toLowerCase())
-      .eq('status', 'pending_payment');
+      .eq('status', 'pending_payment')
+      .neq('session_date', '2099-12-31'); // cobros manuales: nunca se tocan
     for (const b of (previas ?? []) as { id: string; created_by_admin?: boolean | null; notes?: string | null; mp_preference_id?: string | null; session_date: string; session_time: string }[]) {
       if (b.created_by_admin || (b.notes ?? '').includes('ComprobanteTransferencia') || (b.notes ?? '').includes('PagoSinAviso')) continue;
       if (b.mp_preference_id) {
         let pagada = false;
-        try { pagada = (await getPaymentStatus(b.mp_preference_id, flowBaseTemprano)).status === 2; } catch { /* sin respuesta: se trata como no pagada */ }
+        try {
+          const st = await Promise.race([
+            getPaymentStatus(b.mp_preference_id, flowBaseTemprano),
+            new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Flow lento')), 4000)),
+          ]);
+          pagada = st.status === 2;
+        } catch { /* sin respuesta: se trata como no pagada */ }
         if (pagada) {
           if (b.session_date === session_date && String(b.session_time).slice(0, 5) === session_time) {
             return json({ error: 'Ya pagaste esta hora: en unos minutos te llega el correo de confirmación. Si no llega, escríbeme por WhatsApp.' }, 409);
@@ -285,12 +292,16 @@ async function handleBooking(request: Request) {
   };
 
   // Ahora sí: se liberan sus reservas anteriores sin pagar (ver arriba).
+  // Solo se restauran las que liberó ESTA petición (un doble clic no debe
+  // revivir lo que liberó la otra).
+  let liberadasAqui: string[] = [];
   if (liberables.length) {
-        await supabase.from('bookings').update({ status: 'expired' }).in('id', liberables).eq('status', 'pending_payment');
+        const { data: exp } = await supabase.from('bookings').update({ status: 'expired' }).in('id', liberables).eq('status', 'pending_payment').select('id');
+        liberadasAqui = (exp ?? []).map((r: { id: string }) => r.id);
   }
-  // Si la nueva no se puede crear, se restauran las anteriores.
+  // Si la nueva no se puede crear (o no se puede cobrar), se restauran las anteriores.
   const restaurarLiberadas = async () => {
-        if (liberables.length) await supabase.from('bookings').update({ status: 'pending_payment' }).in('id', liberables).eq('status', 'expired').is('recovery_token', null);
+        if (liberadasAqui.length) await supabase.from('bookings').update({ status: 'pending_payment' }).in('id', liberadasAqui).eq('status', 'expired').is('recovery_token', null);
   };
 
   let { data: bookingData, error: insertError } = await tryInsert(bookingPayload);
@@ -401,6 +412,7 @@ async function handleBooking(request: Request) {
   // ── Flow deshabilitado desde admin ────────────────────────────────────────────
   if (!flowEnabled) {
         await supabase.from('bookings').delete().eq('id', booking.id);
+        await restaurarLiberadas();
         return json({ error: 'El pago online está temporalmente deshabilitado. Por favor coordina tu sesión por WhatsApp.' }, 503);
   }
 
@@ -408,6 +420,7 @@ async function handleBooking(request: Request) {
   if (!finalPrice || isNaN(finalPrice) || finalPrice < 100) {
         await logError('bookings', 'Precio inválido antes de Flow', { finalPrice, service_id, session_type });
         await supabase.from('bookings').delete().eq('id', booking.id);
+        await restaurarLiberadas();
         return json({ error: `Precio inválido (${finalPrice}). Actualiza el precio del servicio en el admin.` }, 400);
   }
 
@@ -447,6 +460,7 @@ async function handleBooking(request: Request) {
       // Siempre eliminar la reserva para no dejar slots bloqueados
       if (booking?.id) {
               const { error: delErr } = await supabase.from('bookings').delete().eq('id', booking.id);
+              await restaurarLiberadas();
               if (delErr) await logError('bookings', 'Error eliminando reserva fallida', { bookingId: booking.id, error: delErr.message });
       }
 

@@ -141,7 +141,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (id) {
       const { error } = await supabase.from('session_notes').update({ deleted_at: new Date().toISOString() }).eq('id', id);
       if (error) {
-        redirect = withParam(redirect, 'error', error.code === '42703'
+        redirect = withParam(redirect, 'error', (error.code === '42703' || error.code === 'PGRST204')
           ? 'Falta activar el archivo de notas en la base de datos (migración 0007). La nota no se modificó.'
           : `No se pudo archivar la nota: ${error.message}`);
       }

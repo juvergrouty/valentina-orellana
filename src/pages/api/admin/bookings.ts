@@ -534,9 +534,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Precio y duración según la modalidad elegida (igual que la agenda web y
     // "cambiar servicio"); antes se usaba siempre el precio base del servicio.
     const precioModalidad = svc.modality === 'ambos'
-      ? (svcModality === 'online' ? (svc.price_online ?? svc.price) : (svc.price_presencial ?? svc.price))
+      ? (svcModality === 'online' ? (svc.price_online || svc.price) : (svc.price_presencial || svc.price))
       : svc.price;
     const totalPrice     = overrideAmount ?? precioModalidad;
+    if (!Number.isFinite(totalPrice) || totalPrice < 100) return redirect(conParam(dest) + 'error=precio_invalido');
     const durMin         = (svc.modality === 'ambos'
       ? (svcModality === 'online' ? svc.duration_min_online : svc.duration_min_presencial)
       : null) ?? svc.duration_min ?? 50;
@@ -564,7 +565,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Fechas del pack y cuáles chocan con otra sesión (considera la duración).
     // Las que chocan se saltan y se AVISA (antes se saltaban en silencio). Cada
     // sesión creada lleva su parte del precio; el link cobra solo las creadas.
-    let creadas = 0;
+    let creadas = 0;           // sesiones insertadas con éxito
+    let totalCobrado = 0;      // suma real de lo insertado (lo que se cobra)
     for (let i = 0; i < sessions_count; i++) {
       const d = new Date(`${session_date}T00:00:00`);
       d.setDate(d.getDate() + i * 7);
@@ -575,7 +577,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       const conflict = await chocaConOtraSesion(bDate, session_time, durMin);
 
       if (conflict) { conflictCount++; continue; } // Skip slots with conflicts (pack continues)
-      creadas++;
+      // El resto de la división va en la primera sesión que SÍ se crea.
+      const montoSesion = perSessionBase + (creadas === 0 ? remainder : 0);
 
       const payload: Record<string, unknown> = {
         session_type:   sessionType,
@@ -589,7 +592,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         notes:          notesText || null,
         status:         payment_mode === 'link' ? 'pending_payment' : 'confirmed',
         payment_method: payment_mode === 'link' ? 'flow' : 'manual',
-        amount:         perSessionBase + (creadas === 1 ? remainder : 0),
+        amount:         montoSesion,
         duration_min:   durMin,
         created_by_admin: true, // creada desde el panel admin: nunca debe auto-eliminarse por falta de pago,
                                  // ni siquiera cuando payment_mode==='link' (queda en pending_payment esperando el pago)
@@ -616,6 +619,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       }
       if (booking) {
         bookingIds.push(booking.id);
+        creadas++;
+        totalCobrado += montoSesion;
       } else if (insErr) {
         // No silenciar el error: antes esto se perdía por completo y la admin
         // no tenía forma de saber por qué "no pasó nada" al agendar.
@@ -625,7 +630,6 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     }
 
     // Lo que realmente se cobra: la suma de las sesiones creadas.
-    const totalCobrado = perSessionBase * bookingIds.length + (bookingIds.length && conflictCount < sessions_count ? remainder : 0);
     const avisoPack = conflictCount > 0 && bookingIds.length > 0 ? `&pack_creadas=${bookingIds.length}&pack_saltadas=${conflictCount}` : '';
     if (bookingIds.length === 0) {
       if (lastInsertError) {

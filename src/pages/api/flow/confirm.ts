@@ -131,27 +131,45 @@ export const POST: APIRoute = async ({ request }) => {
       if (!selErr && candidates?.length) {
         for (const c of candidates.filter((x: { status: string }) => x.status === 'expired')) {
           // Si la hora la ocupa una reserva NUEVA SIN PAGAR de la misma paciente
-          // (volvió a reservar y después pagó en la pestaña vieja de Flow), se
-          // libera esa reserva nueva y se confirma la que sí pagó. Re-auditoría 5 oct.
+          // (volvió a reservar y después pagó en la pestaña vieja de Flow), esa
+          // reserva nueva no debe impedir confirmar la que sí pagó. Re-auditoría
+          // 5 oct, con revisión independiente:
+          //   - solo las que se CRUZAN con la hora pagada (no todo el día);
+          //   - nunca las que Flow ya dio por pagadas ni las PagoSinAviso;
+          //   - se liberan recién si la pagada se puede confirmar.
+          const toMinC = (t: string) => { const [h, m] = String(t).slice(0, 5).split(':').map(Number); return h * 60 + m; };
+          const iniC = toMinC(c.session_time), finC = iniC + (c.duration_min ?? 50);
+          const sinPagar: string[] = [];
           {
             const { data: propias } = await supabase.from('bookings')
-              .select('id, created_by_admin, paid_at, notes')
+              .select('id, created_by_admin, paid_at, notes, mp_preference_id, session_time, duration_min')
               .eq('patient_email', String(c.patient_email ?? '').toLowerCase())
               .eq('session_date', c.session_date)
               .eq('status', 'pending_payment')
               .neq('id', c.id);
-            const sinPagar = (propias ?? []).filter((p: { created_by_admin?: boolean | null; paid_at?: string | null; notes?: string | null }) =>
-              !p.created_by_admin && !p.paid_at && !(p.notes ?? '').includes('ComprobanteTransferencia')).map((p: { id: string }) => p.id);
-            if (sinPagar.length) {
-              await supabase.from('bookings').update({ status: 'expired' }).in('id', sinPagar).eq('status', 'pending_payment');
-              await logInfo('flow/pago-reserva-anterior', `${c.patient_name} pagó su reserva anterior; se liberó su reserva nueva sin pagar`, { pagada: c.id, liberadas: sinPagar });
+            for (const p of (propias ?? []) as { id: string; created_by_admin?: boolean | null; paid_at?: string | null; notes?: string | null; mp_preference_id?: string | null; session_time: string; duration_min: number | null }[]) {
+              if (p.created_by_admin || p.paid_at || /ComprobanteTransferencia|PagoSinAviso/.test(p.notes ?? '')) continue;
+              const ini = toMinC(p.session_time), fin = ini + (p.duration_min ?? 50);
+              if (!(ini < finC && fin > iniC)) continue; // no se cruza: no se toca
+              if (p.mp_preference_id) {
+                let pagada = true; // si Flow no responde, por seguridad se asume pagada (no se toca)
+                try {
+                  const st = await Promise.race([
+                    getPaymentStatus(p.mp_preference_id, flowBaseUrl),
+                    new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Flow lento')), 4000)),
+                  ]);
+                  pagada = st.status === 2;
+                } catch { /* se deja como pagada */ }
+                if (pagada) continue;
+              }
+              sinPagar.push(p.id);
             }
           }
           const { data: ocupada } = await supabase
             .from('bookings').select('id')
             .eq('session_date', c.session_date)
             .eq('session_time', c.session_time)
-            .neq('id', c.id)
+            .not('id', 'in', `(${[c.id, ...sinPagar].join(',')})`)
             .not('status', 'in', '(cancelled,expired)')
             .limit(1);
           // Además del choque exacto: la hora tiene que seguir disponible con el
@@ -159,9 +177,13 @@ export const POST: APIRoute = async ({ request }) => {
           // se puede comprobar (null), se confirma igual: el pago ya se hizo.
           const disponible = ocupada?.length ? false : await horaDisponible({
             date: c.session_date, time: c.session_time, serviceId: c.service_id,
-            duration: c.duration_min, excluirIds: [c.id], sinAnticipacion: true,
+            duration: c.duration_min, excluirIds: [c.id, ...sinPagar], sinAnticipacion: true,
             modality: String(c.session_type ?? '').includes('online') ? 'online' : 'presencial',
           }).catch(() => null);
+          if (disponible !== false && sinPagar.length) {
+            await supabase.from('bookings').update({ status: 'expired' }).in('id', sinPagar).eq('status', 'pending_payment');
+            await logInfo('flow/pago-reserva-anterior', `${c.patient_name} pagó su reserva anterior; se liberó su reserva nueva sin pagar que se cruzaba`, { pagada: c.id, liberadas: sinPagar });
+          }
           if (disponible === false) {
             candidates = candidates.filter((x: { id: string }) => x.id !== c.id);
             await logError('flow/pago-hora-ocupada',

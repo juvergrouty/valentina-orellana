@@ -349,6 +349,9 @@ const plWaUrl      = (!plWaSent && plPhoneRaw.length >= 11) ? `https://wa.me/${p
       {errorParam === 'missing_fields' && (
         <div class="cal-error-banner">⚠ Faltan datos obligatorios (servicio, fecha, hora o paciente) — no se agendó nada.</div>
       )}
+      {errorParam === 'precio_invalido' && (
+        <div class="cal-error-banner">⚠ El servicio no tiene precio para esa modalidad. Revísalo en Servicios o escribe el monto a mano. No se agendó nada.</div>
+      )}
       {Astro.url.searchParams.get('pack_saltadas') && (
         <div class="cal-error-banner">⚠ Del pack se agendaron {Astro.url.searchParams.get('pack_creadas')} sesiones; {Astro.url.searchParams.get('pack_saltadas')} se saltaron porque chocaban con otra sesión. Se cobra solo lo agendado. Agenda esas semanas a mano en otro horario si corresponde.</div>
       )}
@@ -2542,7 +2545,7 @@ function openSessionDetail(b) {
   const stepsMsg = document.getElementById('sp-steps-msg');
   if (stepsMsg) stepsMsg.style.display = 'none';
   const boletaRut = document.getElementById('sp-boleta-rut');
-  if (boletaRut) { boletaRut.value = b.patient_rut || ''; boletaRut.dataset.original = boletaRut.value; }
+  if (boletaRut) { boletaRut.value = (b.patient_rut || '').trim(); boletaRut.dataset.original = boletaRut.value; }
   document.getElementById('sp-boleta-form').style.display = 'none';
   const boletaResult  = document.getElementById('sp-boleta-result');
   const boletaActions = document.getElementById('sp-boleta-actions');
