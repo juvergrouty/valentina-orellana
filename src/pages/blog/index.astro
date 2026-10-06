@@ -98,6 +98,10 @@ const [destacado, ...resto] = articulos;
 
   .ig { margin-top: 5rem; }
   .ig-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 22px; }
+  /* El usuario de Instagram es una palabra larga: puede partirse en el celular
+     (antes ensanchaba la página a 450 px en una pantalla de 375). */
+  .ig-head > div { min-width: 0; }
+  .ig-head h2 { overflow-wrap: anywhere; }
   .ig-link { font-family: Inter, sans-serif; font-size: 15px; font-weight: 700; color: #576352; text-decoration: none; white-space: nowrap; }
   .strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
 
