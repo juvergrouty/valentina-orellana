@@ -76,9 +76,11 @@
 
     const revisar = (ordenar: boolean) => {
       const v = input.value.trim();
-      const ok = !v || normalizarTelefono(v) !== null;
+      // Un número ya guardado que no se tocó no se revisa (fichas antiguas).
+      const sinCambios = v === input.defaultValue.trim() && v !== '';
+      const ok = !v || sinCambios || normalizarTelefono(v) !== null;
       aviso.hidden = ok;
-      if (ok && v && ordenar) input.value = telefonoLegible(normalizarTelefono(v)!);
+      if (ok && v && !sinCambios && ordenar) input.value = telefonoLegible(normalizarTelefono(v)!);
       return ok;
     };
     input.addEventListener('blur', () => revisar(true));

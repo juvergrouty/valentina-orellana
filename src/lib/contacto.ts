@@ -38,6 +38,7 @@ const DOMINIOS_VALIDOS_PARECIDOS = new Set([
   'hotmail.es', 'outlook.cl', 'mail.com', 'me.com', 'msn.com', 'gmx.com', 'aol.com',
   'live.com.ar', 'live.com.mx', 'hotmail.com.ar', 'yahoo.com.ar', 'yahoo.com.mx', 'yahoo.cl',
   'hotmail.co.uk', 'yahoo.co.uk', 'live.co.uk', 'icloud.cl',
+  'ymail.com', 'email.com', 'hotmail.fr', 'hotmail.it', 'hotmail.de', 'yahoo.fr', 'outlook.fr', 'live.fr',
 ]);
 
 /** Mientras se escribe "nombre@gm" → ["nombre@gmail.com"]. Vacío si no aplica. */

@@ -42,7 +42,11 @@ export const POST: APIRoute = async ({ request }) => {
     doc_pais:         sinRut ? (g('doc_pais') || null) : null,
   });
   // Un teléfono escrito pero mal (ni chileno de 9 dígitos ni +código válido).
-  const telefonoMal = () => ['phone', 'emergency_phone'].some(k => g(k) && !normalizarTelefono(g(k)));
+  // `guardados`: teléfonos que ya tenía la ficha. Si no se cambiaron, no se
+  // revisan ni se tocan (fichas antiguas con fijos de 8 dígitos, anotaciones…),
+  // para no impedir guardar otros datos de la ficha.
+  const telefonoMal = (guardados: Record<string, string | null> = {}) =>
+    ['phone', 'emergency_phone'].some(k => g(k) && g(k) !== (guardados[k] ?? '').trim() && !normalizarTelefono(g(k)));
   // Si la migración 0006 aún no corrió, se guarda sin las columnas nuevas.
   const sinNuevas = (d: Record<string, unknown>) => {
     const { comuna: _c, sin_rut: _s, doc_tipo: _t, doc_numero: _n, doc_pais: _p, ...resto } = d;
@@ -81,9 +85,14 @@ export const POST: APIRoute = async ({ request }) => {
   if (action === 'update') {
     const id = form.get('id') as string;
     const d = datos();
+    const { data: actual } = await supabase.from('patients').select('phone, emergency_phone').eq('id', id).maybeSingle();
+    const guardados = { phone: actual?.phone ?? null, emergency_phone: actual?.emergency_phone ?? null };
+    for (const k of ['phone', 'emergency_phone'] as const) {
+      if (g(k) && g(k) === (guardados[k] ?? '').trim()) d[k] = guardados[k];
+    }
     if (!sinRut && d.rut && !rutValido(String(d.rut))) {
       redirect = withParam(redirect, 'error', 'El RUT no es válido: revisa los números y el dígito verificador.');
-    } else if (telefonoMal()) {
+    } else if (telefonoMal(guardados)) {
       redirect = withParam(redirect, 'error', `Revisa el teléfono: ${MSG_TELEFONO}.`);
     } else {
       let { error } = await supabase.from('patients').update(d).eq('id', id);
