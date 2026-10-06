@@ -84,7 +84,9 @@ export async function calcularDisponibilidad(c: ConsultaDisponibilidad): Promise
       .select('id, session_time, duration_min')
       .eq('session_date', dateParam)
       .neq('status', 'cancelled')
-      .or(`status.eq.confirmed,created_by_admin.eq.true,and(status.eq.pending_payment,created_at.gte.${recentCutoff}),and(status.eq.pending_payment,notes.ilike.*ComprobanteTransferencia*)`);
+      // PagoSinAviso: Flow dice que está pagada pero su aviso no llega; la hora
+      // sigue siendo de esa paciente (no se ofrece a otras).
+      .or(`status.eq.confirmed,created_by_admin.eq.true,and(status.eq.pending_payment,created_at.gte.${recentCutoff}),and(status.eq.pending_payment,notes.ilike.*ComprobanteTransferencia*),and(status.eq.pending_payment,notes.ilike.*PagoSinAviso*)`);
     if (res.error?.code === '42703') {
       return await supabase.from('bookings')
         .select('id, session_time, duration_min')

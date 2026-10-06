@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
-import { createPaymentOrder, PUBLIC_PAY_TIMEOUT_SECONDS } from '../../lib/flow';
+import { createPaymentOrder, PUBLIC_PAY_TIMEOUT_SECONDS, getPaymentStatus, FLOW_URLS } from '../../lib/flow';
 import { limpiarNotasPaciente } from '../../lib/notasPaciente';
 import { sendConfirmationToClient, sendNotificationToAdmin } from '../../lib/email';
 import { logInfo, logWarn, logError } from '../../lib/logger';
@@ -156,19 +156,34 @@ async function handleBooking(request: Request) {
 
   // ── Reserva anterior SIN PAGAR de la misma persona ───────────────────────────
   // Si fue a pagar, se arrepintió y vuelve a reservar (por ejemplo, la misma
-  // hora), su reserva anterior sin pagar la bloqueaba y le decía "esa hora se
-  // acaba de ocupar". Se libera en silencio (sin el correo de "tu hora se
-  // liberó"): queda 'expired', así que un pago tardío de esa orden igual se
-  // recupera por el aviso de Flow si la hora sigue libre.
+  // hora), su reserva anterior sin pagar no debe bloquearla. Re-auditoría 5 oct:
+  //   - antes de tocarla se le pregunta a Flow: si ya la pagó (el aviso viene
+  //     atrasado) NO se libera;
+  //   - se libera recién justo antes de crear la nueva (no antes de revisar la
+  //     hora), y si la nueva falla se restaura;
+  //   - si después paga en la pestaña vieja de Flow, el aviso de pago
+  //     (flow/confirm.ts) confirma esa reserva y libera la nueva sin pagar.
+  const flowBaseTemprano = settings['flow_env'] === 'production' ? FLOW_URLS.production
+    : settings['flow_env'] === 'sandbox' ? FLOW_URLS.sandbox : undefined;
+  let liberables: string[] = [];
   {
     const { data: previas } = await supabase.from('bookings')
-      .select('id, created_by_admin, notes')
+      .select('id, created_by_admin, notes, mp_preference_id, session_date, session_time')
       .eq('patient_email', patient_email.trim().toLowerCase())
       .eq('status', 'pending_payment');
-    const liberar = (previas ?? []).filter((b: { created_by_admin?: boolean | null; notes?: string | null }) =>
-      !b.created_by_admin && !(b.notes ?? '').includes('ComprobanteTransferencia')).map((b: { id: string }) => b.id);
-    if (liberar.length) {
-      await supabase.from('bookings').update({ status: 'expired' }).in('id', liberar).eq('status', 'pending_payment');
+    for (const b of (previas ?? []) as { id: string; created_by_admin?: boolean | null; notes?: string | null; mp_preference_id?: string | null; session_date: string; session_time: string }[]) {
+      if (b.created_by_admin || (b.notes ?? '').includes('ComprobanteTransferencia') || (b.notes ?? '').includes('PagoSinAviso')) continue;
+      if (b.mp_preference_id) {
+        let pagada = false;
+        try { pagada = (await getPaymentStatus(b.mp_preference_id, flowBaseTemprano)).status === 2; } catch { /* sin respuesta: se trata como no pagada */ }
+        if (pagada) {
+          if (b.session_date === session_date && String(b.session_time).slice(0, 5) === session_time) {
+            return json({ error: 'Ya pagaste esta hora: en unos minutos te llega el correo de confirmación. Si no llega, escríbeme por WhatsApp.' }, 409);
+          }
+          continue; // pagada: no se toca
+        }
+      }
+      liberables.push(b.id);
     }
   }
 
@@ -179,6 +194,8 @@ async function handleBooking(request: Request) {
       .eq('session_date', session_date)
       .eq('session_time', session_time)
       .not('status', 'in', '(cancelled,expired)')
+      .not('id', 'in', `(${['00000000-0000-0000-0000-000000000000', ...liberables].join(',')})`)
+      .limit(1)
       .maybeSingle();
 
   if (existing) {
@@ -230,7 +247,7 @@ async function handleBooking(request: Request) {
   // revisaba que no hubiera otra reserva a la misma hora exacta.
   const libre = await horaDisponible({
         date: session_date, time: session_time, serviceId: service_id,
-        duration: durationMin, modality: modality_choice,
+        duration: durationMin, modality: modality_choice, excluirIds: liberables,
   });
   if (libre === null) {
         return json({ error: 'No pudimos comprobar la disponibilidad. Intenta de nuevo en un momento.' }, 503);
@@ -267,6 +284,15 @@ async function handleBooking(request: Request) {
         return { data, error };
   };
 
+  // Ahora sí: se liberan sus reservas anteriores sin pagar (ver arriba).
+  if (liberables.length) {
+        await supabase.from('bookings').update({ status: 'expired' }).in('id', liberables).eq('status', 'pending_payment');
+  }
+  // Si la nueva no se puede crear, se restauran las anteriores.
+  const restaurarLiberadas = async () => {
+        if (liberables.length) await supabase.from('bookings').update({ status: 'pending_payment' }).in('id', liberables).eq('status', 'expired').is('recovery_token', null);
+  };
+
   let { data: bookingData, error: insertError } = await tryInsert(bookingPayload);
 
   // Si falla por columna inexistente, reintentar quitando columnas opcionales una a una
@@ -286,9 +312,11 @@ async function handleBooking(request: Request) {
 
   if (insertError?.code === '23505') {
         // Otra persona tomó la misma hora en el mismo instante (índice único).
+        await restaurarLiberadas();
         return json({ error: 'Ese horario ya fue reservado. Por favor elige otro.' }, 409);
   }
   if (insertError || !bookingData) {
+        await restaurarLiberadas();
         await logError('bookings', 'Error insertando reserva', { error: insertError?.message, code: insertError?.code, session_type, session_date, session_time });
         console.error('Error insertando reserva:', insertError);
         return json({ error: 'Error al crear la reserva. Intenta nuevamente.' }, 500);

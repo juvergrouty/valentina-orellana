@@ -25,7 +25,7 @@ import { syncBookingToCalendar, markBookingPaidInCalendar } from '../../../lib/s
 import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
-import { logError, logWarn } from '../../../lib/logger';
+import { logInfo, logError, logWarn } from '../../../lib/logger';
 import { tagBookingsWithPaymentToken } from '../../../lib/debt';
 
 export const prerender = false;
@@ -130,6 +130,23 @@ export const POST: APIRoute = async ({ request }) => {
       // (PUBLIC_PAY_TIMEOUT_SECONDS) esto debería ser muy raro.
       if (!selErr && candidates?.length) {
         for (const c of candidates.filter((x: { status: string }) => x.status === 'expired')) {
+          // Si la hora la ocupa una reserva NUEVA SIN PAGAR de la misma paciente
+          // (volvió a reservar y después pagó en la pestaña vieja de Flow), se
+          // libera esa reserva nueva y se confirma la que sí pagó. Re-auditoría 5 oct.
+          {
+            const { data: propias } = await supabase.from('bookings')
+              .select('id, created_by_admin, paid_at, notes')
+              .eq('patient_email', String(c.patient_email ?? '').toLowerCase())
+              .eq('session_date', c.session_date)
+              .eq('status', 'pending_payment')
+              .neq('id', c.id);
+            const sinPagar = (propias ?? []).filter((p: { created_by_admin?: boolean | null; paid_at?: string | null; notes?: string | null }) =>
+              !p.created_by_admin && !p.paid_at && !(p.notes ?? '').includes('ComprobanteTransferencia')).map((p: { id: string }) => p.id);
+            if (sinPagar.length) {
+              await supabase.from('bookings').update({ status: 'expired' }).in('id', sinPagar).eq('status', 'pending_payment');
+              await logInfo('flow/pago-reserva-anterior', `${c.patient_name} pagó su reserva anterior; se liberó su reserva nueva sin pagar`, { pagada: c.id, liberadas: sinPagar });
+            }
+          }
           const { data: ocupada } = await supabase
             .from('bookings').select('id')
             .eq('session_date', c.session_date)

@@ -44,8 +44,10 @@ export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: 
 
   // Tampoco se libera una reserva con comprobante de transferencia por
   // confirmar: la paciente ya pagó, solo falta que Valentina lo confirme.
+  // Tampoco las que Flow ya informó como pagadas (PagoSinAviso): esas esperan
+  // a Valentina, y no se vuelve a consultar a Flow por ellas en cada carga.
   const candidates = (stale ?? []).filter((b: { created_by_admin?: boolean; notes?: string | null }) =>
-    !b.created_by_admin && !(b.notes ?? '').includes('ComprobanteTransferencia'));
+    !b.created_by_admin && !(b.notes ?? '').includes('ComprobanteTransferencia') && !(b.notes ?? '').includes('PagoSinAviso'));
   if (!candidates.length) return { claimed: 0 };
 
   const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
@@ -68,7 +70,12 @@ export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: 
     // pagó (y podía terminar pagando dos veces desde /recuperar).
     if (b.mp_preference_id) {
       try {
-        const st = await getPaymentStatus(b.mp_preference_id, flowBase);
+        // Máximo 4 s por consulta: esta limpieza corre al cargar la agenda y no
+        // debe dejarla esperando si Flow está lento.
+        const st = await Promise.race([
+          getPaymentStatus(b.mp_preference_id, flowBase),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Flow lento')), 4000)),
+        ]);
         if (st.status === 2) {
           // Se avisa una sola vez (esta limpieza corre en cada carga de la agenda).
           if (!(b.notes ?? '').includes('PagoSinAviso')) {

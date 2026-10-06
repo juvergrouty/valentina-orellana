@@ -185,9 +185,15 @@ async function leerFeriadosGuardados(): Promise<{ fecha: string; nombre: string 
 export async function listaFeriados(): Promise<{ fecha: string; nombre: string }[]> {
   let guardados = await leerFeriadosGuardados();
   if (!guardados.length) {
-    // Primera vez (aún no corre la tarea diaria): se descargan ahora.
-    await actualizarFeriadosAutomaticos().catch(() => undefined);
-    guardados = await leerFeriadosGuardados();
+    // Primera vez (aún no corre la tarea diaria): se descargan ahora, pero a lo
+    // más un intento cada 6 horas. Si la fuente no responde, el panel no debe
+    // esperarla en cada página: se usan los feriados verificados a mano.
+    const { data: intento } = await supabase.from('settings').select('value').eq('key', 'feriados_auto_intento').maybeSingle();
+    if (!intento?.value || Date.now() - Date.parse(intento.value) > 6 * 60 * 60 * 1000) {
+      await supabase.from('settings').upsert({ key: 'feriados_auto_intento', value: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'key' });
+      await actualizarFeriadosAutomaticos().catch(() => undefined);
+      guardados = await leerFeriadosGuardados();
+    }
   }
   const porFecha = new Map<string, { fecha: string; nombre: string }>();
   for (const f of guardados) porFecha.set(f.fecha, f);

@@ -115,18 +115,37 @@ export const POST: APIRoute = async ({ request }) => {
     if (error) console.error('[session_notes] add:', error.message);
   }
 
-  // ── Editar nota ─────────────────────────────────────────────────────────────
+  // ── Editar nota: se guarda la versión anterior (nunca se pisa) ──────────────
+  // La ficha clínica se conserva 15 años (re-auditoría 5 oct 2026).
   if (action === 'update_note') {
     const id      = form.get('id') as string;
     const content = (form.get('content') as string)?.trim();
     if (id && content) {
-      await supabase.from('session_notes').update({ content }).eq('id', id);
+      const { data: actual, error: lecturaErr } = await supabase.from('session_notes').select('*').eq('id', id).maybeSingle();
+      if (lecturaErr || !actual) {
+        redirect = withParam(redirect, 'error', 'No se pudo leer la nota para guardarla.');
+      } else if (!('historial' in actual)) {
+        redirect = withParam(redirect, 'error', 'Falta activar el historial de notas en la base de datos (migración 0007). La nota no se modificó.');
+      } else if (actual.content !== content) {
+        const historial = Array.isArray(actual.historial) ? actual.historial : [];
+        historial.push({ content: actual.content, reemplazada: new Date().toISOString() });
+        const { error } = await supabase.from('session_notes').update({ content, historial }).eq('id', id);
+        if (error) redirect = withParam(redirect, 'error', `No se pudo guardar la nota: ${error.message}`);
+      }
     }
   }
 
-  // ── Eliminar nota ───────────────────────────────────────────────────────────
+  // ── "Eliminar" nota = archivarla (deja de verse; no se borra) ───────────────
   if (action === 'delete_note') {
-    await supabase.from('session_notes').delete().eq('id', form.get('id') as string);
+    const id = form.get('id') as string;
+    if (id) {
+      const { error } = await supabase.from('session_notes').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+      if (error) {
+        redirect = withParam(redirect, 'error', error.code === '42703'
+          ? 'Falta activar el archivo de notas en la base de datos (migración 0007). La nota no se modificó.'
+          : `No se pudo archivar la nota: ${error.message}`);
+      }
+    }
   }
 
   return new Response(null, { status: 302, headers: { Location: redirect } });

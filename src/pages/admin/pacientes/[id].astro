@@ -7,7 +7,7 @@ import { vigente, type ConsentRow } from '../../../lib/consent';
 
 const { id } = Astro.params;
 
-const [{ data: patient }, { data: notes }, { data: bookings }, { data: allSvc }] = await Promise.all([
+const [{ data: patient }, { data: notasTodas }, { data: bookings }, { data: allSvc }] = await Promise.all([
   supabase.from('patients').select('*').eq('id', id!).single(),
   supabase.from('session_notes').select('*').eq('patient_id', id!).order('session_date', { ascending: false }),
   supabase.from('bookings').select('*').eq('patient_email', '').order('session_date', { ascending: false }).limit(0),
@@ -16,6 +16,8 @@ const [{ data: patient }, { data: notes }, { data: bookings }, { data: allSvc }]
     .eq('visible', true).order('sort_order'),
 ]);
 const allServices = allSvc ?? [];
+// Las notas archivadas no se muestran, pero se conservan (ficha clínica, 15 años).
+const notes = (notasTodas ?? []).filter((n: { deleted_at?: string | null }) => !n.deleted_at);
 
 // Buscar reservas por email del paciente si tiene email
 let patientBookings: any[] = [];
@@ -42,6 +44,7 @@ const fmtCL = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone:
 
 const tab  = Astro.url.searchParams.get('tab') ?? 'info';
 const saved = Astro.url.searchParams.get('saved') === '1';
+const errorFicha = Astro.url.searchParams.get('error') ?? '';
 
 function formatDate(iso: string) {
   return new Date(iso + 'T00:00:00').toLocaleDateString('es-CL', { day:'2-digit', month:'long', year:'numeric' });
@@ -94,7 +97,8 @@ const faltanDatos = patient ? [
 
 <AdminLayout title={patient.name} current="/admin/pacientes">
 
-  {saved && <div class="alert-success">✓ Cambios guardados.</div>}
+  {saved && !errorFicha && <div class="alert-success">✓ Cambios guardados.</div>}
+  {errorFicha && <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.65rem 1rem;border-radius:6px;font-size:0.85rem;margin-bottom:1rem;">✕ {errorFicha}</div>}
 
   <!-- Header paciente -->
   <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:2rem;flex-wrap:wrap;">
@@ -467,7 +471,7 @@ const faltanDatos = patient ? [
                             <input type="hidden" name="id" value={nota.id} />
                             <input type="hidden" name="redirect" value={`${redirectBase}?tab=sesiones`} />
                             <button type="submit" class="btn btn-danger btn-sm"
-                              onclick="return confirm('¿Eliminar esta nota?')">Eliminar</button>
+                              onclick="return confirm('¿Archivar esta nota? Deja de verse en la ficha, pero se conserva (la ficha clínica se guarda 15 años).')">Archivar</button>
                           </form>
                         </div>
                       </div>
@@ -538,7 +542,7 @@ const faltanDatos = patient ? [
                 <input type="hidden" name="id" value={note.id} />
                 <input type="hidden" name="redirect" value={`${redirectBase}?tab=notas`} />
                 <button type="submit" class="btn btn-danger btn-sm"
-                  onclick="return confirm('¿Eliminar esta nota?')">✕</button>
+                  onclick="return confirm('¿Archivar esta nota? Deja de verse en la ficha, pero se conserva (la ficha clínica se guarda 15 años).')" title="Archivar">✕</button>
               </form>
             </div>
             <p style="font-size:0.88rem;line-height:1.7;color:var(--ink);white-space:pre-wrap;">{note.content}</p>

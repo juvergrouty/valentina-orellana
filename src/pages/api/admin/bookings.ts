@@ -169,7 +169,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     if (emitir) {
       try {
-        const boletaRes = await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true, rutDesdePanel: !!rut });
+        const boletaRes = await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true, rutDesdePanel: !!rut && form.get('rut_editado') === '1' });
         if (!boletaRes.ok) {
           await logWarn('boleta/marcar-pagado', `Boleta no emitida al marcar como pagado: ${boletaRes.error}`, { bookingId: id, error: boletaRes.error });
           return redirect(conParam(dest) + 'error=boleta_failed&detail=' + encodeURIComponent(boletaRes.error ?? ''));
@@ -531,8 +531,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // que CADA sesión tenga su propio monto y pueda emitirse una boleta por sesión
     // (necesario para el reembolso en la isapre). El resto de la división lo
     // absorbe la primera sesión, así la suma cuadra exactamente con el total.
-    const totalPrice     = overrideAmount ?? svc.price;
-    const durMin         = svc.duration_min ?? 50;
+    // Precio y duración según la modalidad elegida (igual que la agenda web y
+    // "cambiar servicio"); antes se usaba siempre el precio base del servicio.
+    const precioModalidad = svc.modality === 'ambos'
+      ? (svcModality === 'online' ? (svc.price_online ?? svc.price) : (svc.price_presencial ?? svc.price))
+      : svc.price;
+    const totalPrice     = overrideAmount ?? precioModalidad;
+    const durMin         = (svc.modality === 'ambos'
+      ? (svcModality === 'online' ? svc.duration_min_online : svc.duration_min_presencial)
+      : null) ?? svc.duration_min ?? 50;
     const perSessionBase = Math.floor(totalPrice / sessions_count);
     const remainder      = totalPrice - perSessionBase * sessions_count;
 
@@ -554,17 +561,21 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     let conflictCount = 0;
     let lastInsertError: string | null = null;
 
+    // Fechas del pack y cuáles chocan con otra sesión (considera la duración).
+    // Las que chocan se saltan y se AVISA (antes se saltaban en silencio). Cada
+    // sesión creada lleva su parte del precio; el link cobra solo las creadas.
+    let creadas = 0;
     for (let i = 0; i < sessions_count; i++) {
       const d = new Date(`${session_date}T00:00:00`);
       d.setDate(d.getDate() + i * 7);
       const bDate = d.toISOString().split('T')[0];
 
-      // ¿Se cruza con otra sesión ese día? (considera la duración, no solo la
-      // misma hora exacta). Si no se puede comprobar, el índice único de la
-      // base igual impide dos reservas a la misma hora.
+      // Si no se puede comprobar, el índice único de la base igual impide dos
+      // reservas a la misma hora.
       const conflict = await chocaConOtraSesion(bDate, session_time, durMin);
 
       if (conflict) { conflictCount++; continue; } // Skip slots with conflicts (pack continues)
+      creadas++;
 
       const payload: Record<string, unknown> = {
         session_type:   sessionType,
@@ -578,7 +589,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         notes:          notesText || null,
         status:         payment_mode === 'link' ? 'pending_payment' : 'confirmed',
         payment_method: payment_mode === 'link' ? 'flow' : 'manual',
-        amount:         perSessionBase + (i === 0 ? remainder : 0),
+        amount:         perSessionBase + (creadas === 1 ? remainder : 0),
         duration_min:   durMin,
         created_by_admin: true, // creada desde el panel admin: nunca debe auto-eliminarse por falta de pago,
                                  // ni siquiera cuando payment_mode==='link' (queda en pending_payment esperando el pago)
@@ -613,6 +624,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       }
     }
 
+    // Lo que realmente se cobra: la suma de las sesiones creadas.
+    const totalCobrado = perSessionBase * bookingIds.length + (bookingIds.length && conflictCount < sessions_count ? remainder : 0);
+    const avisoPack = conflictCount > 0 && bookingIds.length > 0 ? `&pack_creadas=${bookingIds.length}&pack_saltadas=${conflictCount}` : '';
     if (bookingIds.length === 0) {
       if (lastInsertError) {
         return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(lastInsertError.slice(0, 200)));
@@ -663,7 +677,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
           const baseUrl = fcfg['flow_env'] === 'production' ? FLOW_URLS.production : FLOW_URLS.sandbox;
           const order = await createPaymentOrder({
             subject:         svc.name,
-            amount:          totalPrice,
+            amount:          totalCobrado,
             email:           finalEmail,
             orderId:         bookingIds[0],
             urlConfirmation: `${siteUrl}/api/flow/confirm`,
@@ -688,7 +702,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
             patientName:  finalName,
             patientEmail: finalEmail,
             serviceName:  svc.name,
-            amount:       totalPrice,
+            amount:       totalCobrado,
             sessionDate:  session_date,
             sessionTime:  session_time,
             paymentUrl,
@@ -711,7 +725,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
               const isOnline = sessionType.includes('online');
               const modalidad = isOnline ? 'Online (por videollamada)' : (addrRow?.value?.trim() || 'Presencial en consulta');
               const fechaHora = `${session_date} a las ${session_time}`;
-              const valorTxt  = `$${totalPrice.toLocaleString('es-CL')}`;
+              const valorTxt  = `$${totalCobrado.toLocaleString('es-CL')}`;
               const res = await sendWhatsappTemplate(
                 finalPhone,
                 templateName,
@@ -736,7 +750,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
             session_type:   sessionType,
             session_date,
             session_time,
-            amount:         totalPrice,
+            amount:         totalCobrado,
             payment_method: 'link',
             service_name:   svc.name,
           };
@@ -754,7 +768,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
         // Redirigir mostrando el link (el banner de "compartir por WhatsApp" solo
         // se muestra si el envío automático no se hizo, para no duplicar el mensaje)
-        return redirect(conParam(dest) + `payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}&pl_wa_sent=${waSent ? '1' : '0'}`);
+        return redirect(conParam(dest) + `payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}&pl_wa_sent=${waSent ? '1' : '0'}${avisoPack}`);
       } catch (e) {
         console.error('[create-admin] flow order:', e);
         return redirect(conParam(dest) + 'error=flow_error');
@@ -776,7 +790,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         session_type:   sessionType,
         session_date,
         session_time,
-        amount:         totalPrice,
+        amount:         totalCobrado,
         payment_method: 'manual',
         service_name:   svc.name,
       };
@@ -784,7 +798,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[create-admin] notif:', e); }
     }
 
-    return redirect(dest);
+    return redirect(avisoPack ? conParam(dest) + avisoPack.slice(1) : dest);
   }
 
   return redirect(dest);

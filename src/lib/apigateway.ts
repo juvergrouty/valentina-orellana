@@ -503,7 +503,7 @@ export async function emitBoletaParaReserva(
   if (!cfg) return { ok: false, error: 'API Gateway no configurado.' };
 
   const { data: b } = await supabase
-    .from('bookings').select('patient_name, patient_email, amount, session_type, session_date, notes, service_id, paid_at').eq('id', bookingId).single();
+    .from('bookings').select('patient_name, patient_email, patient_rut, amount, session_type, session_date, notes, service_id, paid_at').eq('id', bookingId).single();
   if (!b) return { ok: false, error: 'Reserva no encontrada.' };
 
   // Una boleta anulada no cuenta: se puede emitir una nueva para esa sesión.
@@ -521,7 +521,11 @@ export async function emitBoletaParaReserva(
   // Antes Flow usaba el de la reserva y el reintento el de la ficha: la boleta
   // podía salir a nombre de otra persona según qué intento la emitiera.
   const rutFicha = p?.rut?.trim() || (p?.sin_rut ? RUT_EXTRANJERO_SII : '');
-  const rutRaw = (opts.rutDesdePanel ? (opts.rutOverride ?? '').trim() : '') || rutFicha || (opts.rutOverride ?? '').trim() || '';
+  // rutDesdePanel = Valentina CAMBIÓ el RUT en el campo del panel (el campo
+  // viene precargado; el panel avisa solo si ella lo editó). Re-auditoría 5 oct:
+  // antes un RUT precargado de la reserva pisaba el RUT correcto de la ficha.
+  const corregidoEnPanel = !!opts.rutDesdePanel && !!(opts.rutOverride ?? '').trim();
+  const rutRaw = (corregidoEnPanel ? (opts.rutOverride ?? '').trim() : '') || rutFicha || (opts.rutOverride ?? '').trim() || '';
   if (!rutRaw) return { ok: false, error: 'Falta el RUT del paciente.' };
   if (!b.amount) return { ok: false, error: 'La reserva no tiene monto.' };
 
@@ -535,7 +539,7 @@ export async function emitBoletaParaReserva(
   // que beneficie a todos los flujos que llaman esta función.
   if (b.patient_email && (!p?.rut || p.rut !== normalizeRut(rutRaw))) {
     try {
-      await upsertPatientFromBooking({ patient_name: p?.name ?? b.patient_name, patient_email: b.patient_email, rut: normalizeRut(rutRaw) }, { actualizarRut: !!opts.rutDesdePanel });
+      await upsertPatientFromBooking({ patient_name: p?.name ?? b.patient_name, patient_email: b.patient_email, rut: normalizeRut(rutRaw) }, { actualizarRut: corregidoEnPanel });
     } catch (e) {
       await logError('boleta/guardar-rut', 'No se pudo guardar el RUT en la ficha del paciente', { bookingId, error: e instanceof Error ? e.message : String(e) });
     }

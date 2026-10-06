@@ -15,7 +15,7 @@ if (Astro.request.method === 'POST') {
     // "Boleta NO emitida", que debe seguir hasta que se resuelva) ni los de
     // acceso (cuentan para el límite de intentos de contraseña).
     await supabase.from('admin_logs').delete().lt('created_at', new Date().toISOString())
-      .not('context', 'like', 'boleta/%').not('context', 'like', 'auth/%');
+      .not('context', 'like', 'boleta/%').not('context', 'like', 'auth/%').not('context', 'like', 'flow/boleta%');
   }
   return Astro.redirect('/admin/logs?cleared=1');
 }

@@ -40,6 +40,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   if (!tokenAdminValido(token) || await tokenRevocado(token)) {
+    // Un formulario del panel enviado con la sesión vencida (navegación del
+    // navegador, no un fetch) vuelve al login en vez de mostrar un JSON crudo.
+    const esNavegacion = context.request.headers.get('sec-fetch-mode') === 'navigate'
+      || (context.request.headers.get('accept') ?? '').includes('text/html');
+    if (isAdminApi && esNavegacion) return context.redirect('/admin/login?expirada=1');
     // Las API routes devuelven 401 JSON, las páginas redirigen al login
     if (isAdminApi) {
       return new Response(JSON.stringify({ error: 'No autorizado.' }), {

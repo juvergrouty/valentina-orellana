@@ -58,6 +58,9 @@ export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizar
       // Excepción: el RUT que Valentina escribe al emitir una boleta
       // (actualizarRut), que es una corrección explícita suya.
       const cambios: Record<string, string | boolean> = {};
+      // Paciente dada de baja que vuelve a reservar: se reactiva (si no, no
+      // aparecía en la agenda del panel ni en los avisos de consentimiento).
+      if (existing.active === false) cambios.active = true;
       if (!existing.name?.trim()) cambios.name = name;
       if (!existing.phone?.trim() && t(b.patient_phone)) cambios.phone = t(b.patient_phone);
       if (rut && (opts.actualizarRut || !existing.rut?.trim())) cambios.rut = rut;
