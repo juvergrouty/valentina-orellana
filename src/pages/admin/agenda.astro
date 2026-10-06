@@ -345,6 +345,9 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       {errorParam === 'missing_patient_data' && (
         <div class="cal-error-banner">⚠ Para crear una paciente nueva faltan datos: correo, teléfono, dirección, comuna, contacto de emergencia y RUT (o documento si no tiene RUT). No se agendó nada.</div>
       )}
+      {errorParam === 'telefono_invalido' && (
+        <div class="cal-error-banner">⚠ Revisa el teléfono: en Chile son 9 dígitos (ej. 9 1234 5678); si es de otro país, escríbelo con + y el código (ej. +1 305 555 1234). No se agendó nada.</div>
+      )}
       {errorParam === 'rut_invalido' && (
         <div class="cal-error-banner">⚠ El RUT no es válido (revisa los números y el dígito verificador). No se agendó nada.</div>
       )}
@@ -643,7 +646,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           <div class="bp-field-row">
             <div class="bp-field">
               <label>Teléfono *</label>
-              <input type="tel" name="patient_phone" id="bp-pphone" placeholder="+56 9 XXXX XXXX">
+              <input type="tel" name="patient_phone" id="bp-pphone" data-validar-telefono placeholder="+56 9 XXXX XXXX">
             </div>
             <div class="bp-field">
               <label>Correo *</label>
@@ -688,7 +691,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
             </div>
             <div class="bp-field">
               <label>Tel. emergencia *</label>
-              <input type="tel" name="emergency_phone" id="bp-emerg-phone" placeholder="+56 9 XXXX XXXX">
+              <input type="tel" name="emergency_phone" id="bp-emerg-phone" data-validar-telefono placeholder="+56 9 XXXX XXXX">
             </div>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
 import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar } from '../../../lib/syncCalendar';
@@ -392,6 +393,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (!session_type || !session_date || !session_time || !patient_name || !patient_email || !patient_phone) {
       return redirect(conParam(dest) + 'error=missing_fields');
     }
+    if (!normalizarTelefono(patient_phone)) return redirect(conParam(dest) + 'error=telefono_invalido');
 
     // Precio por defecto: SIEMPRE desde services_catalog (fuente autoritativa y
     // actualizada desde /admin/servicios). Antes se leía de una fila vieja en
@@ -427,7 +429,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     const basePayload: Record<string, unknown> = {
       session_type, session_date, session_time,
-      patient_name, patient_email, patient_phone,
+      patient_name, patient_email, patient_phone: normalizarTelefono(patient_phone) ?? patient_phone,
       notes: notes || null,
       status: 'confirmed', payment_method: 'manual', amount,
       created_by_admin: true, // creada desde el panel admin: nunca debe auto-eliminarse por falta de pago
@@ -514,6 +516,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         || (sinRutNueva ? (!fichaExtra.doc_numero || !fichaExtra.doc_pais) : !finalRut);
       if (incompleto) return redirect(conParam(dest) + 'error=missing_patient_data');
       if (!sinRutNueva && !rutValido(finalRut)) return redirect(conParam(dest) + 'error=rut_invalido');
+      const telOk = normalizarTelefono(finalPhone), emergOk = normalizarTelefono(fichaExtra.emergency_phone);
+      if (!telOk || !emergOk) return redirect(conParam(dest) + 'error=telefono_invalido');
+      finalPhone = telOk; fichaExtra.emergency_phone = emergOk;
       finalRut = sinRutNueva ? finalRut : limpiarRut(finalRut);
     }
 

@@ -1,0 +1,99 @@
+---
+// Ayudas en los campos de contacto, para que los datos queden bien escritos:
+// - Correo (input[type=email]): sugiere @gmail.com, @hotmail.com… mientras se
+//   escribe y avisa errores típicos ("¿Quisiste decir …@gmail.com?").
+// - Teléfono (input[data-validar-telefono]): revisa el número al salir del
+//   campo, lo deja ordenado (+56 9 1234 5678) y no deja guardar si está mal.
+//   Sin "+" se entiende que es chileno; con "+" va el código del país.
+---
+<style is:global>
+  .cc-sugerencias { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
+  .cc-sugerencias[hidden] { display: none; }
+  .cc-sugerencias button {
+    font: inherit; font-size: 0.78rem; line-height: 1.2; cursor: pointer;
+    padding: 0.3rem 0.6rem; border-radius: 999px;
+    border: 1px solid rgba(90, 99, 82, 0.35); background: rgba(90, 99, 82, 0.08); color: inherit;
+    max-width: 100%; overflow-wrap: anywhere; text-align: left;
+  }
+  .cc-sugerencias button:hover, .cc-sugerencias button:focus-visible { background: rgba(90, 99, 82, 0.18); }
+  .cc-aviso { font-size: 0.78rem; margin-top: 0.3rem; color: #a23b2c; }
+  .cc-aviso[hidden] { display: none; }
+</style>
+
+<script>
+  import { normalizarTelefono, telefonoLegible, sugerenciasCorreo, correccionCorreo } from '../lib/contacto';
+
+  // Se inserta después del aviso de error propio del campo (si lo tiene), para
+  // no cambiar el "nextElementSibling" que usan los formularios existentes.
+  function insertarDespues(input: HTMLElement, el: HTMLElement) {
+    let ref: Element = input;
+    while (ref.nextElementSibling && /field-error|cc-/.test(ref.nextElementSibling.className)) ref = ref.nextElementSibling;
+    ref.insertAdjacentElement('afterend', el);
+  }
+
+  function prepararCorreo(input: HTMLInputElement) {
+    if (input.dataset.ccListo) return;
+    input.dataset.ccListo = '1';
+    const caja = document.createElement('div');
+    caja.className = 'cc-sugerencias';
+    caja.hidden = true;
+    insertarDespues(input, caja);
+
+    const mostrar = (opciones: string[], etiqueta = (op: string) => op) => {
+      caja.innerHTML = '';
+      opciones.forEach((op) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = etiqueta(op);
+        // mousedown: se elige antes de que el campo pierda el foco.
+        b.addEventListener('mousedown', (e) => e.preventDefault());
+        b.addEventListener('click', () => {
+          input.value = op;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          caja.hidden = true;
+        });
+        caja.appendChild(b);
+      });
+      caja.hidden = opciones.length === 0;
+    };
+
+    input.addEventListener('input', () => mostrar(sugerenciasCorreo(input.value)));
+    input.addEventListener('blur', () => {
+      const c = correccionCorreo(input.value);
+      mostrar(c ? [c] : [], (op) => `¿Quisiste decir ${op}?`);
+    });
+  }
+
+  function prepararTelefono(input: HTMLInputElement) {
+    if (input.dataset.ccListo) return;
+    input.dataset.ccListo = '1';
+    const aviso = document.createElement('p');
+    aviso.className = 'cc-aviso';
+    aviso.hidden = true;
+    aviso.textContent = 'Revisa el número: en Chile son 9 dígitos (ej. 9 1234 5678). Si es de otro país, escríbelo con + y el código (ej. +1 305 555 1234).';
+    insertarDespues(input, aviso);
+
+    const revisar = (ordenar: boolean) => {
+      const v = input.value.trim();
+      const ok = !v || normalizarTelefono(v) !== null;
+      aviso.hidden = ok;
+      if (ok && v && ordenar) input.value = telefonoLegible(normalizarTelefono(v)!);
+      return ok;
+    };
+    input.addEventListener('blur', () => revisar(true));
+    input.addEventListener('input', () => { if (!aviso.hidden) revisar(false); });
+    input.form?.addEventListener('submit', (e) => {
+      // Un campo escondido (ej. paciente ya existente) no se revisa.
+      if (input.offsetParent !== null && !revisar(true)) { e.preventDefault(); e.stopImmediatePropagation(); input.focus(); }
+    }, true);
+  }
+
+  function preparar() {
+    document.querySelectorAll<HTMLInputElement>('input[type=email]:not([data-sin-sugerencias])').forEach(prepararCorreo);
+    document.querySelectorAll<HTMLInputElement>('input[data-validar-telefono]').forEach(prepararTelefono);
+  }
+  preparar();
+  // Formularios que se arman después (modales del panel).
+  new MutationObserver(preparar).observe(document.body, { childList: true, subtree: true });
+</script>

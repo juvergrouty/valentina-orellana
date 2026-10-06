@@ -235,7 +235,7 @@ const faltanDatos = patient ? [
             </div>
             <div>
               <label class="label" style="display:block;margin-bottom:0.3rem;">Teléfono</label>
-              <input type="tel" name="phone" value={patient.phone ?? ''} />
+              <input type="tel" name="phone" data-validar-telefono value={patient.phone ?? ''} />
             </div>
             <div>
               <label class="label" style="display:block;margin-bottom:0.3rem;">RUT</label>
@@ -284,7 +284,7 @@ const faltanDatos = patient ? [
             </div>
             <div>
               <label class="label" style="display:block;margin-bottom:0.3rem;">Teléfono</label>
-              <input type="tel" name="emergency_phone" value={patient.emergency_phone ?? ''} />
+              <input type="tel" name="emergency_phone" data-validar-telefono value={patient.emergency_phone ?? ''} />
             </div>
           </div>
         </div>

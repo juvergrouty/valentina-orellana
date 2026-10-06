@@ -1,6 +1,7 @@
 ---
 export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
+import CamposContacto from '../components/CamposContacto.astro';
 import { supabase } from '../lib/supabase';
 
 const formatCLP = (n: number) =>
@@ -326,7 +327,7 @@ const { data: catalogServices } = await supabase
             </div>
             <div>
               <label class="label text-stone block mb-2" for="emergency_phone">Teléfono de emergencia *</label>
-              <input id="emergency_phone" type="tel" placeholder="+56 9 1234 5678" autocomplete="section-emergencia tel" class="field" />
+              <input id="emergency_phone" type="tel" data-validar-telefono placeholder="+56 9 1234 5678" autocomplete="section-emergencia tel" class="field" />
               <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa un teléfono válido para tu contacto de emergencia, con código de país.</p>
             </div>
           </div>
@@ -431,6 +432,7 @@ const { data: catalogServices } = await supabase
       </div>
     </div>
   </section>
+<CamposContacto />
 </BaseLayout>
 
 <!-- is:global: el calendario y los horarios se generan con innerHTML/createElement (JS)

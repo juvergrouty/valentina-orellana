@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { limpiarRut, rutValido } from '../../../lib/rut';
 import { rutaInterna } from '../../../lib/rutaInterna';
@@ -13,6 +14,8 @@ function withParam(path: string, key: string, value: string): string {
   return u.pathname + '?' + u.searchParams.toString();
 }
 
+const MSG_TELEFONO = 'teléfono bien escrito (en Chile 9 dígitos; de otro país, con + y el código)';
+
 export const POST: APIRoute = async ({ request }) => {
   const form     = await request.formData();
   const action   = form.get('action') as string;
@@ -24,19 +27,22 @@ export const POST: APIRoute = async ({ request }) => {
   const datos = (): Record<string, string | boolean | null> => ({
     name:             g('name'),
     email:            g('email').toLowerCase() || null,
-    phone:            g('phone') || null,
+    // Teléfonos guardados siempre como +<código><número> (si son válidos).
+    phone:            normalizarTelefono(g('phone')) ?? (g('phone') || null),
     rut:              sinRut ? null : (g('rut') ? limpiarRut(g('rut')) : null),
     birthdate:        g('birthdate') || null,
     address:          g('address') || null,
     comuna:           g('comuna') || null,
     emergency_name:   g('emergency_name') || null,
-    emergency_phone:  g('emergency_phone') || null,
+    emergency_phone:  normalizarTelefono(g('emergency_phone')) ?? (g('emergency_phone') || null),
     notes:            g('notes') || null,
     sin_rut:          sinRut,
     doc_tipo:         sinRut ? (g('doc_tipo') || null) : null,
     doc_numero:       sinRut ? (g('doc_numero') || null) : null,
     doc_pais:         sinRut ? (g('doc_pais') || null) : null,
   });
+  // Un teléfono escrito pero mal (ni chileno de 9 dígitos ni +código válido).
+  const telefonoMal = () => ['phone', 'emergency_phone'].some(k => g(k) && !normalizarTelefono(g(k)));
   // Si la migración 0006 aún no corrió, se guarda sin las columnas nuevas.
   const sinNuevas = (d: Record<string, unknown>) => {
     const { comuna: _c, sin_rut: _s, doc_tipo: _t, doc_numero: _n, doc_pais: _p, ...resto } = d;
@@ -58,6 +64,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!d.emergency_name || !d.emergency_phone) faltan.push('contacto de emergencia');
     if (sinRut ? (!d.doc_numero || !d.doc_pais) : !d.rut) faltan.push(sinRut ? 'documento y país' : 'RUT');
     if (!sinRut && d.rut && !rutValido(String(d.rut))) faltan.push('RUT válido (revisa el dígito verificador)');
+    if (telefonoMal()) faltan.push(MSG_TELEFONO);
     if (faltan.length) {
       redirect = withParam(redirect, 'error', `Falta: ${faltan.join(', ')}.`);
     } else {
@@ -76,6 +83,8 @@ export const POST: APIRoute = async ({ request }) => {
     const d = datos();
     if (!sinRut && d.rut && !rutValido(String(d.rut))) {
       redirect = withParam(redirect, 'error', 'El RUT no es válido: revisa los números y el dígito verificador.');
+    } else if (telefonoMal()) {
+      redirect = withParam(redirect, 'error', `Revisa el teléfono: ${MSG_TELEFONO}.`);
     } else {
       let { error } = await supabase.from('patients').update(d).eq('id', id);
       if (error?.code === '42703') ({ error } = await supabase.from('patients').update(sinNuevas(d)).eq('id', id));
