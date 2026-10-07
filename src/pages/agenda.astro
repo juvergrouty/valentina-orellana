@@ -1101,6 +1101,15 @@ const { data: catalogServices } = await supabase
       const data = await res.json();
 
       if (!res.ok || !data.checkoutUrl) {
+        // Lo que va después de la @ no recibe correos → paso 3, marcar el campo
+        if (data.errorType === 'email_dominio') {
+          goToStep(3);
+          const emailInput = document.getElementById('patient_email');
+          const emailErr   = emailInput?.nextElementSibling;
+          if (emailErr) { emailErr.textContent = data.error; emailErr.classList.remove('hidden'); }
+          emailInput?.focus();
+          return; // finally re-habilitará el botón
+        }
         // Email inválido → volver al paso 3 y marcar el campo
         if (data.errorType === 'invalid_email') {
           goToStep(3);

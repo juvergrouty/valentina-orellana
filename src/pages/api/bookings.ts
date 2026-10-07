@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { dominioRecibeCorreo } from '../../lib/correoDominio';
 import { supabase } from '../../lib/supabase';
 import { createPaymentOrder, PUBLIC_PAY_TIMEOUT_SECONDS, getPaymentStatus, FLOW_URLS } from '../../lib/flow';
 import { limpiarNotasPaciente } from '../../lib/notasPaciente';
@@ -123,6 +124,11 @@ async function handleBooking(request: Request) {
   }
   if (patient_email.trim().length > 200 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(patient_email.trim())) {
         return json({ error: 'Revisa tu correo.' }, 400);
+  }
+  // Lo que va después de la @ tiene que recibir correos (ej. "@gmial.com" no).
+  if (!(await dominioRecibeCorreo(patient_email))) {
+        const dom = patient_email.trim().split('@').pop();
+        return json({ error: `Revisa tu correo: "@${dom}" no recibe correos.`, errorType: 'email_dominio' }, 400);
   }
 
   const rutClean = sinRut ? RUT_EXTRANJERO_SII : limpiarRut(patient_rut);

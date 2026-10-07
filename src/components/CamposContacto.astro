@@ -82,9 +82,27 @@
     };
 
     input.addEventListener('input', () => mostrar(sugerenciasCorreo(input.value)));
-    input.addEventListener('blur', () => {
+
+    const aviso = document.createElement('p');
+    aviso.className = 'cc-aviso';
+    aviso.hidden = true;
+    insertarDespues(caja, aviso);
+    let consultado = '';
+
+    input.addEventListener('input', () => { aviso.hidden = true; });
+    input.addEventListener('blur', async () => {
       const c = correccionCorreo(input.value);
       mostrar(c ? [c] : [], (op) => `¿Quisiste decir ${op}?`);
+      // ¿Lo que va después de la @ recibe correos? (solo avisa, no bloquea aquí)
+      const v = input.value.trim();
+      if (c || v === consultado || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return;
+      consultado = v;
+      try {
+        const r = await fetch(`/api/correo-dominio?correo=${encodeURIComponent(v)}`).then((x) => x.json());
+        if (input.value.trim() !== v) return;
+        aviso.textContent = `Revisa tu correo: "@${v.split('@').pop()}" no recibe correos.`;
+        aviso.hidden = r.ok !== false;
+      } catch { /* sin conexión: no se avisa */ }
     });
   }
 
