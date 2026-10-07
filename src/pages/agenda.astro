@@ -323,7 +323,7 @@ const { data: catalogServices } = await supabase
             <div>
               <label class="label text-stone block mb-2" for="emergency_phone">Teléfono de emergencia *</label>
               <input id="emergency_phone" type="tel" data-validar-telefono placeholder="+56 9 1234 5678" autocomplete="section-emergencia tel" class="field" />
-              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa un teléfono válido para tu contacto de emergencia, con código de país.</p>
+              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa el teléfono de tu contacto de emergencia.</p>
             </div>
           </div>
           <div>
@@ -1032,7 +1032,7 @@ const { data: catalogServices } = await supabase
     if (direccion.length < 3) { $('patient_address').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (comuna.length < 2)    { $('patient_comuna').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (emergNom.length < 2)  { $('emergency_name').nextElementSibling?.classList.remove('hidden'); valid = false; }
-    if (!/^[\d\s()+.-]{7,25}$/.test(emergTel)) { $('emergency_phone').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    if (!/^[\d\s()+.-]{7,25}$/.test(emergTel)) { $('emergency_phone').closest('div').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!motivo) { $('motivo_consulta').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!valid) {
       // Con un formulario largo, en el celular el error puede quedar fuera de la
@@ -1040,7 +1040,7 @@ const { data: catalogServices } = await supabase
       const primerError = document.querySelector('#patient-form .field-error:not(.hidden)');
       primerError?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const previo = primerError?.previousElementSibling;
-      const campo = previo?.matches('input,select,textarea') ? previo : previo?.querySelector('input, select, textarea');
+      const campo = previo?.matches('input,select,textarea') ? previo : (previo?.querySelector('input') ?? previo?.querySelector('select, textarea'));
       campo?.focus({ preventScroll: true });
       return;
     }

@@ -155,9 +155,12 @@
       return true;
     };
 
-    const original = input.value.trim();
-    if (original && !separar(original)) {
-      const d = original.replace(/\D/g, '');
+    // El dato que venía guardado en la página (no lo que el navegador
+    // restauró al volver atrás, que se arma de nuevo con el país elegido).
+    const original = input.defaultValue.trim();
+    const actual = input.value.trim();
+    if (actual && !separar(actual)) {
+      const d = actual.replace(/\D/g, '');
       if (d.length === 9) input.value = formatearNacional(PAIS_DEFECTO, d);
     }
     ponerPais(pais);

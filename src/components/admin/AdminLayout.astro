@@ -65,7 +65,7 @@ async function estadoGoogle(): Promise<'ok' | 'desconectado' | 'fallando'> {
 }
 // Cumpleaños de hoy (hora de Chile) de pacientes activos con fecha de
 // nacimiento en la ficha. Un 29 de febrero se saluda el 28 en años no bisiestos.
-type Cumple = { id: string; nombre: string; edad: number | null; wa: string | null };
+type Cumple = { id: string; nombre: string; edad: number | null; wa: string | null; tieneTel: boolean };
 async function cumpleanosHoy(): Promise<Cumple[]> {
   const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const [y, m, d] = hoy.split('-').map(Number);
@@ -81,8 +81,9 @@ async function cumpleanosHoy(): Promise<Cumple[]> {
     const texto = mensajeCumpleanos(nombre);
     return [{
       id: p.id, nombre: String(p.name).trim(),
-      edad: by > 1900 ? y - by : null,
-      wa: telWa.length >= 10 ? `https://wa.me/${telWa}?text=${encodeURIComponent(texto)}` : null,
+      edad: by > 1900 && by < y ? y - by : null,
+      wa: telWa.length >= 10 && telWa.length <= 15 ? `https://wa.me/${telWa}?text=${encodeURIComponent(texto)}` : null,
+      tieneTel: !!digitos,
     }];
   });
 }
@@ -918,7 +919,7 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
               <span>🎂 Hoy es el cumpleaños de tu paciente <a href={`/admin/pacientes/${c.id}`} style="color:#fff;font-weight:700;text-decoration:underline;">{c.nombre}</a>{c.edad ? ` (cumple ${c.edad})` : ''}.</span>
               {c.wa
                 ? <a href={c.wa} target="_blank" rel="noopener" class="cumple-wa" style="background:#fff;color:#8c5866;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;text-decoration:none;">Saludar por WhatsApp</a>
-                : <span style="font-size:0.78rem;opacity:0.9;">(no tiene teléfono en la ficha)</span>}
+                : <span style="font-size:0.78rem;opacity:0.9;">{c.tieneTel ? '(revisa su teléfono en la ficha para poder escribirle)' : '(no tiene teléfono en la ficha)'}</span>}
               <span class="cumple-ok" hidden style="font-size:0.78rem;opacity:0.9;">✓ Saludo abierto</span>
             </li>
           ))}

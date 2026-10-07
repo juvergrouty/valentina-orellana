@@ -572,9 +572,9 @@ const servicesJson  = JSON.stringify(services  ?? []);
     // Validación cliente
     if (!name) { showError('Selecciona un paciente o ingresa un nombre.'); return; }
     if (!email) { showError('El email es requerido para generar el cobro en Flow.'); return; }
-    if (customPhone && customPhone.offsetParent !== null && customPhone.value.trim()) {
+    if (mode !== 'registrado' && customPhone.value.trim() && !window.telefonoDe?.(customPhone)) {
       customPhone.dispatchEvent(new Event('blur'));
-      if (customPhone.parentElement?.querySelector('.cc-aviso:not([hidden])')) { showError('Revisa el teléfono: en Chile son 9 dígitos; si es de otro país, escríbelo con + y el código.'); return; }
+      showError('Revisa el teléfono: elige el país y escribe solo el número (en Chile son 9 dígitos).'); return;
     }
     if (!amount || parseInt(amount) < 1000) { showError('Ingresa un monto válido (mínimo $1.000 CLP).'); return; }
     if (!desc) { showError('Ingresa una descripción del cobro.'); return; }
