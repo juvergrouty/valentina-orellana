@@ -63,7 +63,35 @@ async function estadoGoogle(): Promise<'ok' | 'desconectado' | 'fallando'> {
     .eq('context', 'availability/google').gt('created_at', desde);
   return (count ?? 0) >= 3 ? 'fallando' : 'ok';
 }
-const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google] = await Promise.all([
+// Cumpleaños de hoy (hora de Chile) de pacientes activos con fecha de
+// nacimiento en la ficha. Un 29 de febrero se saluda el 28 en años no bisiestos.
+type Cumple = { id: string; nombre: string; edad: number | null; wa: string | null };
+async function cumpleanosHoy(): Promise<Cumple[]> {
+  const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const [y, m, d] = hoy.split('-').map(Number);
+  const bisiesto = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const { data } = await supabase.from('patients').select('id, name, phone, birthdate').eq('active', true).not('birthdate', 'is', null);
+  return (data ?? []).flatMap((p) => {
+    const [by, bm, bd] = String(p.birthdate).slice(0, 10).split('-').map(Number);
+    const esHoy = (bm === m && bd === d) || (!bisiesto && bm === 2 && bd === 29 && m === 2 && d === 28);
+    if (!esHoy || !p.name) return [];
+    const digitos = String(p.phone ?? '').replace(/\D/g, '');
+    const telWa = digitos.length === 9 ? '56' + digitos : digitos;
+    const nombre = String(p.name).trim().split(/\s+/)[0];
+    const texto = mensajeCumpleanos(nombre);
+    return [{
+      id: p.id, nombre: String(p.name).trim(),
+      edad: by > 1900 ? y - by : null,
+      wa: telWa.length >= 10 ? `https://wa.me/${telWa}?text=${encodeURIComponent(texto)}` : null,
+    }];
+  });
+}
+// Saludo por WhatsApp: Valentina lo envía desde su teléfono y puede editarlo antes.
+function mensajeCumpleanos(nombre: string): string {
+  return `Hola ${nombre}! Vi que hoy es tu cumpleaños y no quería dejar pasar el día sin saludarte. Que lo pases muy lindo y lo disfrutes harto 🎂 Un abrazo`;
+}
+
+const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos] = await Promise.all([
   // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
   // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
   contarErroresNuevos().catch(() => 0),
@@ -78,6 +106,7 @@ const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDay
   estadoGoogle().catch(() => 'ok' as const),
   // Corrección única de invitaciones ya enviadas con "Por pagar" (ver syncCalendar.ts).
   corregirPrefijoInvitacionesUnaVez().catch(() => undefined),
+  cumpleanosHoy().catch((): Cumple[] => []),
 ]);
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -881,6 +910,21 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
         ✕ No se pudo guardar la decisión del feriado. Intenta de nuevo.
       </div>
     )}
+    {cumpleanos.length > 0 && (
+      <div role="status" id="cumpleanos-alert" style="background:#8c5866;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
+        <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:0.4rem;">
+          {cumpleanos.map(c => (
+            <li data-id={c.id} style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
+              <span>🎂 Hoy es el cumpleaños de tu paciente <a href={`/admin/pacientes/${c.id}`} style="color:#fff;font-weight:700;text-decoration:underline;">{c.nombre}</a>{c.edad ? ` (cumple ${c.edad})` : ''}.</span>
+              {c.wa
+                ? <a href={c.wa} target="_blank" rel="noopener" class="cumple-wa" style="background:#fff;color:#8c5866;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;text-decoration:none;">Saludar por WhatsApp</a>
+                : <span style="font-size:0.78rem;opacity:0.9;">(no tiene teléfono en la ficha)</span>}
+              <span class="cumple-ok" hidden style="font-size:0.78rem;opacity:0.9;">✓ Saludo abierto</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
     {feriadoAlerts.length > 0 && (
       <div role="status" style="background:#7c4a1e;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
         <p style="font-weight:700;margin:0 0 0.35rem;">🎌 {feriadoAlerts.length === 1 ? 'Se acerca un feriado' : 'Se acercan feriados'}: decide si cierras o atiendes ese día</p>
@@ -978,6 +1022,19 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
     </div>
   </div>
 <CamposContacto />
+<script>
+  // "✓ Saludo abierto" junto al cumpleaños una vez que se abrió WhatsApp (solo en este navegador).
+  const hoyCumple = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+  document.querySelectorAll<HTMLElement>('#cumpleanos-alert li').forEach((li) => {
+    const clave = `cumple-${hoyCumple}-${li.dataset.id}`;
+    const ok = li.querySelector<HTMLElement>('.cumple-ok');
+    try { if (localStorage.getItem(clave)) ok!.hidden = false; } catch { /* sin almacenamiento */ }
+    li.querySelector('.cumple-wa')?.addEventListener('click', () => {
+      ok!.hidden = false;
+      try { localStorage.setItem(clave, '1'); } catch { /* sin almacenamiento */ }
+    });
+  });
+</script>
 </body>
 <script>
   const sidebar  = document.getElementById('enc-sidebar');

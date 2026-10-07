@@ -526,7 +526,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
       return {
         name:  customName.value.trim(),
         email: customEmail.value.trim(),
-        phone: customPhone.value.trim(),
+        phone: window.telefonoDe?.(customPhone) || customPhone.value.trim(),
       };
     }
   }

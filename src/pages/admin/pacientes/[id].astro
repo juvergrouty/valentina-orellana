@@ -240,7 +240,7 @@ const faltanDatos = patient ? [
             </div>
             <div>
               <label class="label" style="display:block;margin-bottom:0.3rem;">RUT</label>
-              <input type="text" name="rut" id="pf-rut" value={patient.rut ?? ''} placeholder="12.345.678-9" disabled={patient.sin_rut === true && !patient.rut} />
+              <input type="text" name="rut" id="pf-rut" data-rut maxlength="12" value={patient.rut ?? ''} placeholder="12.345.678-9" disabled={patient.sin_rut === true && !patient.rut} />
               <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.4rem;font-size:0.78rem;color:var(--stone);cursor:pointer;">
                 <input type="checkbox" name="sin_rut" id="pf-sin-rut" value="1" checked={patient.sin_rut === true && !patient.rut} style="width:auto;" /> No tiene RUT (extranjera/o)
               </label>

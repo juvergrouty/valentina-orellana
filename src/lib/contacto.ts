@@ -43,11 +43,12 @@ const DOMINIOS_VALIDOS_PARECIDOS = new Set([
 
 /** Mientras se escribe "nombre@gm" → ["nombre@gmail.com"]. Vacío si no aplica. */
 export function sugerenciasCorreo(valor: string, max = 4): string[] {
-  const v = valor.trim().toLowerCase();
+  // Lo escrito antes de la @ se respeta tal cual (mayúsculas incluidas).
+  const v = valor.trim();
   const at = v.indexOf('@');
   if (at < 1 || v.indexOf('@', at + 1) !== -1) return [];
   const local = v.slice(0, at);
-  const dom = v.slice(at + 1);
+  const dom = v.slice(at + 1).toLowerCase();
   if (DOMINIOS_CORREO.includes(dom)) return [];
   return DOMINIOS_CORREO.filter(d => d.startsWith(dom)).slice(0, max).map(d => `${local}@${d}`);
 }
@@ -67,10 +68,11 @@ function distancia(a: string, b: string): number {
 
 /** "nombre@gmial.com" → "nombre@gmail.com"; null si el dominio parece correcto. */
 export function correccionCorreo(valor: string): string | null {
-  const v = valor.trim().toLowerCase();
+  const v = valor.trim();
   const m = /^([^\s@]+)@([^\s@]+\.[^\s@]+)$/.exec(v);
   if (!m) return null;
-  const [, local, dom] = m;
+  const local = m[1];
+  const dom = m[2].toLowerCase();
   if (DOMINIOS_CORREO.includes(dom) || DOMINIOS_VALIDOS_PARECIDOS.has(dom)) return null;
   let mejor: string | null = null, dMin = 3;
   for (const d of DOMINIOS_CORREO) {

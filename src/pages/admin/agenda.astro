@@ -655,7 +655,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           </div>
           <div class="bp-field">
             <label>RUT *</label>
-            <input type="text" name="patient_rut" id="bp-prut" placeholder="12.345.678-9">
+            <input type="text" name="patient_rut" id="bp-prut" data-rut maxlength="12" placeholder="12.345.678-9">
             <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.35rem;font-size:0.75rem;color:var(--stone);cursor:pointer;">
               <input type="checkbox" name="sin_rut" id="bp-sin-rut" value="1" style="width:auto;"> No tiene RUT (extranjera/o)
             </label>

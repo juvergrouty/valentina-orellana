@@ -1,10 +1,13 @@
 ---
 // Ayudas en los campos de contacto, para que los datos queden bien escritos:
 // - Correo (input[type=email]): sugiere @gmail.com, @hotmail.com… mientras se
-//   escribe y avisa errores típicos ("¿Quisiste decir …@gmail.com?").
-// - Teléfono (input[data-validar-telefono]): revisa el número al salir del
-//   campo, lo deja ordenado (+56 9 1234 5678) y no deja guardar si está mal.
-//   Sin "+" se entiende que es chileno; con "+" va el código del país.
+//   escribe y avisa errores típicos ("¿Quisiste decir …@gmail.com?"). Nunca
+//   cambia lo que la persona escribió antes de la @.
+// - Teléfono (input[data-validar-telefono]): al lado aparece la casilla del
+//   país (Chile por defecto) y la persona escribe solo su número, que se va
+//   ordenando solo (9 1234 5678). Se guarda como +<código><número>.
+//   Si está mal escrito no deja guardar.
+// - RUT (input[data-rut]): se van poniendo solos los puntos y el guion.
 ---
 <style is:global>
   .cc-sugerencias { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
@@ -18,19 +21,36 @@
   .cc-sugerencias button:hover, .cc-sugerencias button:focus-visible { background: rgba(90, 99, 82, 0.18); }
   .cc-aviso { font-size: 0.78rem; margin-top: 0.3rem; color: #a23b2c; }
   .cc-aviso[hidden] { display: none; }
+  .cc-tel { display: flex; gap: 0.4rem; align-items: stretch; width: 100%; min-width: 0; }
+  .cc-tel > select { flex: none; width: 6.4rem; max-width: 40%; cursor: pointer; text-overflow: ellipsis; }
+  .cc-tel > input { flex: 1 1 auto; min-width: 0; width: auto !important; }
 </style>
 
 <script>
-  import { normalizarTelefono, telefonoLegible, sugerenciasCorreo, correccionCorreo } from '../lib/contacto';
+  import { normalizarTelefono, sugerenciasCorreo, correccionCorreo } from '../lib/contacto';
+  import { PAISES, PAIS_DEFECTO, bandera, paisDeNumero, formatearNacional, type Pais } from '../data/paises';
 
   // Se inserta después del aviso de error propio del campo (si lo tiene), para
   // no cambiar el "nextElementSibling" que usan los formularios existentes.
-  function insertarDespues(input: HTMLElement, el: HTMLElement) {
-    let ref: Element = input;
+  function insertarDespues(campo: HTMLElement, el: HTMLElement) {
+    let ref: Element = campo;
     while (ref.nextElementSibling && /field-error|cc-/.test(ref.nextElementSibling.className)) ref = ref.nextElementSibling;
     ref.insertAdjacentElement('afterend', el);
   }
 
+  // Mantiene el cursor después del mismo dígito cuando se reformatea el valor.
+  function reformatear(input: HTMLInputElement, nuevo: string, cuenta: RegExp) {
+    if (input.value === nuevo) return;
+    const pos = input.selectionStart ?? input.value.length;
+    const antes = [...input.value.slice(0, pos)].filter(ch => cuenta.test(ch)).length;
+    input.value = nuevo;
+    if (document.activeElement !== input) return;
+    let i = 0, vistos = 0;
+    while (i < nuevo.length && vistos < antes) { if (cuenta.test(nuevo[i])) vistos++; i++; }
+    try { input.setSelectionRange(i, i); } catch { /* algunos tipos no lo permiten */ }
+  }
+
+  // ─── Correo ────────────────────────────────────────────────────────────────
   function prepararCorreo(input: HTMLInputElement) {
     if (input.dataset.ccListo) return;
     input.dataset.ccListo = '1';
@@ -65,35 +85,161 @@
     });
   }
 
+  // ─── Teléfono: país + número ───────────────────────────────────────────────
+  type Tel = { valor: () => { ok: boolean; valor: string } };
+  const telefonos = new WeakMap<HTMLInputElement, Tel>();
+  // Para los formularios que leen el teléfono con su propio código (agenda, cobros).
+  (window as any).telefonoDe = (input: HTMLInputElement | null) =>
+    (input && telefonos.get(input)?.valor().valor) || '';
+
+  const larga = (pa: Pais) => `${bandera(pa.iso)} ${pa.nombre} (+${pa.cc})`;
+  const corta = (pa: Pais) => `${bandera(pa.iso)} +${pa.cc}`;
+
   function prepararTelefono(input: HTMLInputElement) {
     if (input.dataset.ccListo) return;
     input.dataset.ccListo = '1';
+
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', 'País del teléfono');
+    PAISES.forEach((pa) => {
+      const o = document.createElement('option');
+      o.value = pa.iso;
+      o.textContent = larga(pa);
+      select.appendChild(o);
+    });
+    // Mismo aspecto que la casilla del número (cada formulario tiene su estilo).
+    select.className = input.className;
+    const cs = getComputedStyle(input);
+    for (const k of ['borderTop', 'borderRight', 'borderBottom', 'borderLeft', 'borderRadius', 'backgroundColor', 'fontSize', 'fontFamily', 'color', 'paddingTop', 'paddingBottom'] as const) {
+      (select.style as any)[k] = cs[k];
+    }
+    select.style.paddingLeft = '0.5rem';
+    select.style.paddingRight = '0.3rem';
+
+    const caja = document.createElement('div');
+    caja.className = 'cc-tel';
+    input.insertAdjacentElement('beforebegin', caja);
+    caja.append(select, input);
+    if (!input.placeholder || /\+|X/.test(input.placeholder)) input.placeholder = '9 1234 5678';
+    input.inputMode = 'tel';
+
     const aviso = document.createElement('p');
     aviso.className = 'cc-aviso';
     aviso.hidden = true;
-    aviso.textContent = 'Revisa el número: en Chile son 9 dígitos (ej. 9 1234 5678). Si es de otro país, escríbelo con + y el código (ej. +1 305 555 1234).';
-    insertarDespues(input, aviso);
+    insertarDespues(caja, aviso);
 
-    const revisar = (ordenar: boolean) => {
-      const v = input.value.trim();
-      // Un número ya guardado que no se tocó no se revisa (fichas antiguas).
-      const sinCambios = v === input.defaultValue.trim() && v !== '';
-      const ok = !v || sinCambios || normalizarTelefono(v) !== null;
-      aviso.hidden = ok;
-      if (ok && v && !sinCambios && ordenar) input.value = telefonoLegible(normalizarTelefono(v)!);
-      return ok;
+    let pais: Pais = PAIS_DEFECTO;
+    const ponerPais = (pa: Pais) => {
+      pais = pa;
+      select.value = pa.iso;
+      input.placeholder = pa.cc === '56' ? '9 1234 5678' : pa.cc === '1' ? '305 555 1234' : 'Número';
+      acortar();
     };
-    input.addEventListener('blur', () => revisar(true));
-    input.addEventListener('input', () => { if (!aviso.hidden) revisar(false); });
+    const acortar = () => [...select.options].forEach((o) => {
+      const pa = PAISES.find((x) => x.iso === o.value)!;
+      o.textContent = o.selected ? corta(pa) : larga(pa);
+    });
+    const alargar = () => [...select.options].forEach((o) => { o.textContent = larga(PAISES.find((x) => x.iso === o.value)!); });
+
+    // Número ya guardado ("+56912345678"): se separa en país + número.
+    const separar = (texto: string): boolean => {
+      const t = texto.trim();
+      let d = t.replace(/\D/g, '');
+      const conCodigo = t.startsWith('+') || d.startsWith('00') || (d.length === 11 && d.startsWith('56'));
+      if (!conCodigo) return false;
+      if (d.startsWith('00')) d = d.slice(2);
+      const pa = paisDeNumero(d);
+      if (!pa) return false;
+      ponerPais(pa);
+      input.value = formatearNacional(pa, d.slice(pa.cc.length));
+      return true;
+    };
+
+    const original = input.value.trim();
+    if (original && !separar(original)) {
+      const d = original.replace(/\D/g, '');
+      if (d.length === 9) input.value = formatearNacional(PAIS_DEFECTO, d);
+    }
+    ponerPais(pais);
+    const inicial = { texto: input.value, iso: pais.iso };
+
+    const formatear = () => {
+      if (separar(input.value)) return;
+      // Escribiendo "+44…" a mano: se deja tal cual hasta reconocer el país.
+      if (input.value.trim().startsWith('+')) { input.value = input.value.replace(/[^\d+\s]/g, ''); return; }
+      let d = input.value.replace(/\D/g, '');
+      // Pegado con el código pero sin "+" (ej. 56912345678).
+      if (d.length > pais.max && d.startsWith(pais.cc)) d = d.slice(pais.cc.length);
+      d = d.slice(0, pais.max + (d.startsWith('0') ? 1 : 0));
+      reformatear(input, formatearNacional(pais, d), /\d/);
+    };
+
+    const valor = () => {
+      const v = input.value.trim();
+      if (!v) return { ok: true, valor: '' };
+      // Dato guardado que no se tocó (fichas antiguas): queda tal cual.
+      if (original && v === inicial.texto && pais.iso === inicial.iso) return { ok: true, valor: original };
+      if (v.startsWith('+')) { const n = normalizarTelefono(v); return { ok: !!n, valor: n ?? '' }; }
+      let d = v.replace(/\D/g, '');
+      if (pais.cc !== '56') d = d.replace(/^0/, ''); // el 0 del prefijo nacional no va
+      const ok = d.length >= pais.min && d.length <= pais.max && pais.cc.length + d.length <= 15;
+      return { ok, valor: ok ? `+${pais.cc}${d}` : '' };
+    };
+    telefonos.set(input, { valor });
+
+    const revisar = () => {
+      const r = valor();
+      const n = pais.min === pais.max ? `${pais.min}` : `${pais.min} a ${pais.max}`;
+      aviso.textContent = pais.cc === '56'
+        ? 'Revisa el número: en Chile son 9 dígitos (ej. 9 1234 5678).'
+        : `Revisa el número: en ${pais.nombre} son ${n} dígitos, sin el código del país.`;
+      aviso.hidden = r.ok;
+      return r;
+    };
+
+    select.addEventListener('focus', alargar);
+    select.addEventListener('mousedown', alargar);
+    select.addEventListener('blur', acortar);
+    select.addEventListener('change', () => {
+      ponerPais(PAISES.find((x) => x.iso === select.value) ?? PAIS_DEFECTO);
+      if (input.value) { formatear(); if (!aviso.hidden) revisar(); }
+      input.focus();
+    });
+    input.addEventListener('input', () => { formatear(); if (!aviso.hidden) revisar(); });
+    input.addEventListener('blur', revisar);
+
     input.form?.addEventListener('submit', (e) => {
       // Un campo escondido (ej. paciente ya existente) no se revisa.
-      if (input.offsetParent !== null && !revisar(true)) { e.preventDefault(); e.stopImmediatePropagation(); input.focus(); }
+      if (caja.offsetParent === null) return;
+      const r = revisar();
+      if (!r.ok) { e.preventDefault(); e.stopImmediatePropagation(); input.focus(); return; }
+      // Se envía el número completo (+56…) y luego se vuelve a mostrar el local.
+      const mostrado = input.value;
+      input.value = r.valor;
+      setTimeout(() => { if (input.value === r.valor) input.value = mostrado; }, 0);
     }, true);
+  }
+
+  // ─── RUT: puntos y guion automáticos ───────────────────────────────────────
+  function formatearRut(texto: string): string {
+    let c = texto.replace(/[^0-9kK]/g, '').toUpperCase();
+    // La K solo puede ir al final (dígito verificador).
+    c = c.slice(0, -1).replace(/K/g, '') + c.slice(-1);
+    c = c.slice(0, 9);
+    if (c.length <= 1) return c;
+    const cuerpo = c.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return `${cuerpo}-${c.slice(-1)}`;
+  }
+  function prepararRut(input: HTMLInputElement) {
+    if (input.dataset.ccListo) return;
+    input.dataset.ccListo = '1';
+    input.addEventListener('input', () => reformatear(input, formatearRut(input.value), /[0-9kK]/));
   }
 
   function preparar() {
     document.querySelectorAll<HTMLInputElement>('input[type=email]:not([data-sin-sugerencias])').forEach(prepararCorreo);
     document.querySelectorAll<HTMLInputElement>('input[data-validar-telefono]').forEach(prepararTelefono);
+    document.querySelectorAll<HTMLInputElement>('input[data-rut]').forEach(prepararRut);
   }
   preparar();
   // Formularios que se arman después (modales del panel).

@@ -255,17 +255,12 @@ const { data: catalogServices } = await supabase
             </div>
             <div>
               <label class="label text-stone block mb-2" for="patient_phone">Teléfono *</label>
-              <div class="flex border border-dust focus-within:border-ink transition-colors bg-white">
-                <!-- Código de país editable (Valentina, 5 oct 2026): muchas pacientes
-                     chilenas usan números de otros países (ej. +1 de EE.UU.). -->
-                <input id="phone_cc" type="tel" value="+56" maxlength="5" aria-label="Código de país"
-                  autocomplete="tel-country-code" inputmode="tel"
-                  class="w-[4.5rem] px-3 font-body text-sm text-stone bg-warm border-r border-dust outline-none" />
-                <input id="patient_phone" name="patient_phone" type="tel" required
-                  placeholder="9 1234 5678" maxlength="20" autocomplete="tel-national" inputmode="tel"
-                  class="flex-1 min-w-0 px-3 py-2.5 font-body text-sm text-ink bg-white outline-none placeholder:text-stone/60" />
-              </div>
-              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Revisa el código de país y el número (en Chile, 9 dígitos).</p>
+              <!-- Casilla de país (Chile por defecto) + número: la agrega
+                   CamposContacto. Muchas pacientes chilenas usan números de otros
+                   países (ej. EE.UU.); solo eligen el país y escriben su número. -->
+              <input id="patient_phone" name="patient_phone" type="tel" required data-validar-telefono
+                placeholder="9 1234 5678" maxlength="20" autocomplete="tel-national" inputmode="tel" class="field" />
+              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Revisa el número (en Chile son 9 dígitos).</p>
             </div>
           </div>
           <div>
@@ -276,7 +271,7 @@ const { data: catalogServices } = await supabase
           </div>
           <div>
             <label class="label text-stone block mb-2" for="patient_rut">RUT *</label>
-            <input id="patient_rut" name="patient_rut" type="text" required autocomplete="off"
+            <input id="patient_rut" name="patient_rut" type="text" required autocomplete="off" data-rut maxlength="12"
               placeholder="12.345.678-9" class="field" />
             <p class="field-error hidden font-body text-xs text-red-500 mt-1">Revisa tu RUT (necesario para emitir tu boleta de honorarios).</p>
             <label class="flex items-center gap-2 mt-3 font-body text-xs text-stone cursor-pointer select-none">
@@ -1045,7 +1040,7 @@ const { data: catalogServices } = await supabase
       const primerError = document.querySelector('#patient-form .field-error:not(.hidden)');
       primerError?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const previo = primerError?.previousElementSibling;
-      const campo = previo?.matches('input,select,textarea') ? previo : previo?.querySelector('#patient_phone, input:not(#phone_cc), select, textarea');
+      const campo = previo?.matches('input,select,textarea') ? previo : previo?.querySelector('input, select, textarea');
       campo?.focus({ preventScroll: true });
       return;
     }
@@ -1230,42 +1225,11 @@ const { data: catalogServices } = await supabase
   // ─── Teléfono: código de país + número (cualquier país) ────────────────────
   // Si el número empieza con "+", se toma completo (internacional) e ignora el
   // código. Si se pegó o autocompletó con el código incluido, se quita.
+  // País + número: lo arma CamposContacto (Chile por defecto). Devuelve
+  // "+<código><número>" o '' si el número está mal escrito.
   function telefonoCompleto() {
-    const crudo = ($('patient_phone').value || '').trim();
-    if (crudo.startsWith('+')) {
-      const d = crudo.replace(/\D/g, '');
-      if (d.startsWith('56')) return d.length === 11 ? `+${d}` : '';
-      return d.length >= 8 && d.length <= 15 ? `+${d}` : '';
-    }
-    const cc = ($('phone_cc').value || '').replace(/\D/g, '');
-    let num = crudo.replace(/\D/g, '');
-    if (cc && num.startsWith(cc) && num.length > (cc === '56' ? 9 : 8)) num = num.slice(cc.length);
-    // Fuera de Chile se suele escribir el 0 del prefijo nacional (ej. 07911…):
-    // en formato internacional no va.
-    if (cc !== '56') num = num.replace(/^0/, '');
-    if (!/^\d{1,4}$/.test(cc)) return '';
-    if (cc === '56') return num.length === 9 ? `+56${num}` : '';
-    return num.length >= 6 && cc.length + num.length <= 15 ? `+${cc}${num}` : '';
+    return window.telefonoDe ? window.telefonoDe($('patient_phone')) : '';
   }
-  const phoneInput = $('patient_phone');
-  if (phoneInput) {
-    phoneInput.addEventListener('input', () => {
-      // Formato "9 1234 5678" solo para números chilenos escritos sin "+".
-      const cc = ($('phone_cc').value || '').replace(/\D/g, '');
-      if (cc !== '56' || phoneInput.value.trim().startsWith('+')) return;
-      let digits = phoneInput.value.replace(/\D/g, '');
-      if (digits.length > 9 && digits.startsWith('56')) digits = digits.slice(2); // pegado con +56
-      digits = digits.slice(0, 9);
-      if (digits.length <= 1) phoneInput.value = digits;
-      else if (digits.length <= 5) phoneInput.value = `${digits[0]} ${digits.slice(1)}`;
-      else phoneInput.value = `${digits[0]} ${digits.slice(1, 5)} ${digits.slice(5)}`;
-    });
-  }
-  $('phone_cc')?.addEventListener('input', (e) => {
-    const el = e.target;
-    const d = el.value.replace(/[^\d]/g, '').slice(0, 4);
-    el.value = '+' + d;
-  });
 
   // ─── RUT: formato + dígito verificador (mismo cálculo que src/lib/rut.ts) ──
   function rutValido(r) {
@@ -1304,15 +1268,14 @@ const { data: catalogServices } = await supabase
       const poner = (id, v) => { const el = $(id); if (el && v) el.value = v; };
       poner('patient_name', d.datos.nombre);
       poner('patient_email', d.datos.correo);
-      // Teléfono guardado completo (+56..., +1...): los chilenos van al formato
-      // de siempre; los de otros países se ponen completos con su "+".
       const telGuardado = String(d.datos.telefono || '');
-      if (telGuardado.startsWith('+56')) { $('phone_cc').value = '+56'; poner('patient_phone', telGuardado.slice(3)); $('patient_phone')?.dispatchEvent(new Event('input')); }
-      else poner('patient_phone', telGuardado);
+      // CamposContacto separa el país y el número al recibir "+<código>…".
+      if (telGuardado) { poner('patient_phone', telGuardado); $('patient_phone')?.dispatchEvent(new Event('input')); }
       poner('patient_address', d.datos.direccion);
       poner('patient_comuna', d.datos.comuna);
       poner('emergency_name', d.datos.emergNombre);
       poner('emergency_phone', d.datos.emergTelefono);
+      $('emergency_phone')?.dispatchEvent(new Event('input'));
       if (d.datos.sinRut) {
         if (!$('sin_rut').checked) $('sin_rut').click();
         poner('doc_tipo', d.datos.docTipo);
