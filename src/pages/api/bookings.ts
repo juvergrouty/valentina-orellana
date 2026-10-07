@@ -311,7 +311,7 @@ async function handleBooking(request: Request) {
 
   // Si la columna "origen" aún no existe (migración 0008 pendiente), se reserva
   // igual sin ella: el origen nunca debe impedir una reserva.
-  if (insertError && (insertError.code === '42703' || insertError.code === 'PGRST204' || /origen/i.test(insertError.message ?? ''))) {
+  if (insertError && /origen/i.test(insertError.message ?? '')) {
         await logWarn('bookings', 'No se pudo guardar el origen de la reserva, reintentando sin él', { error: insertError.message, code: insertError.code });
         delete bookingPayload.origen;
         ({ data: bookingData, error: insertError } = await tryInsert(bookingPayload));

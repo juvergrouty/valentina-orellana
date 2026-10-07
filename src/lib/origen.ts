@@ -34,12 +34,12 @@ export function calcularCanal(first: OrigenTouch | null, last: OrigenTouch | nul
   const ref = (t.referrer_host ?? '').toLowerCase();
   const hay = (re: RegExp) => re.test(src) || re.test(ref);
   if (t.gclid || t.gbraid || t.wbraid || (src === 'google' && ['cpc', 'ppc', 'paid'].includes(med))) return 'Google Ads';
-  if (hay(/instagram/)) return 'Instagram';
+  if (hay(/instagram|^ig$/)) return 'Instagram';
   if (hay(/facebook|^fb$/)) return 'Facebook';
   if (hay(/doctoralia/)) return 'Doctoralia';
   if (hay(/psychologytoday|psicologiahoy/)) return 'Psychology Today';
   if (hay(/linkedin/)) return 'LinkedIn';
-  if (/(^|\.)google\.[a-z.]+$/.test(ref) || src === 'google') return 'Google orgánico';
+  if (/^(www\.)?google\.[a-z.]+$|googlequicksearchbox/.test(ref) || src === 'google') return 'Google orgánico';
   if (hay(/bing|duckduckgo|yahoo/)) return 'Buscador (otro)';
   if (hay(/chatgpt|openai|perplexity|claude/)) return 'IA (ChatGPT u otra)';
   return t.referrer_host || t.utm_source || 'Directo / desconocido';
