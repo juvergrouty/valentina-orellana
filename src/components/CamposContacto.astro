@@ -24,6 +24,9 @@
   .cc-tel { display: flex; gap: 0.4rem; align-items: stretch; width: 100%; min-width: 0; }
   .cc-tel > select { flex: none; width: 6.4rem; max-width: 40%; cursor: pointer; text-overflow: ellipsis; }
   .cc-tel > input { flex: 1 1 auto; min-width: 0; width: auto !important; }
+  /* En celular, la celda del teléfono (país + número) ocupa la fila entera
+     en los formularios de dos columnas del panel. */
+  @media (max-width: 640px) { div:has(> .cc-tel) { grid-column: 1 / -1; } }
 </style>
 
 <script>
