@@ -125,7 +125,7 @@ async function handleBooking(request: Request) {
   if (patient_email.trim().length > 200 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(patient_email.trim())) {
         return json({ error: 'Revisa tu correo.' }, 400);
   }
-  // Lo que va después de la @ tiene que recibir correos (ej. "@gmial.com" no).
+  // Lo que va después de la @ tiene que recibir correos (ej. "@gmail.con" no).
   if (!(await dominioRecibeCorreo(patient_email))) {
         const dom = patient_email.trim().split('@').pop();
         return json({ error: `Revisa tu correo: "@${dom}" no recibe correos.`, errorType: 'email_dominio' }, 400);

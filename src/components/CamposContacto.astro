@@ -87,7 +87,7 @@
     aviso.className = 'cc-aviso';
     aviso.hidden = true;
     insertarDespues(caja, aviso);
-    let consultado = '';
+    const resultados = new Map<string, boolean>(); // dominio → recibe correos
 
     input.addEventListener('input', () => { aviso.hidden = true; });
     input.addEventListener('blur', async () => {
@@ -95,13 +95,16 @@
       mostrar(c ? [c] : [], (op) => `¿Quisiste decir ${op}?`);
       // ¿Lo que va después de la @ recibe correos? (solo avisa, no bloquea aquí)
       const v = input.value.trim();
-      if (c || v === consultado || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return;
-      consultado = v;
+      if (c || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return;
+      const dominio = v.split('@').pop()!.toLowerCase();
       try {
-        const r = await fetch(`/api/correo-dominio?correo=${encodeURIComponent(v)}`).then((x) => x.json());
+        if (!resultados.has(dominio)) {
+          const r = await fetch(`/api/correo-dominio?dominio=${encodeURIComponent(dominio)}`).then((x) => x.json());
+          resultados.set(dominio, r.ok !== false);
+        }
         if (input.value.trim() !== v) return;
-        aviso.textContent = `Revisa tu correo: "@${v.split('@').pop()}" no recibe correos.`;
-        aviso.hidden = r.ok !== false;
+        aviso.textContent = `Revisa tu correo: "@${dominio}" no recibe correos.`;
+        aviso.hidden = resultados.get(dominio) !== false;
       } catch { /* sin conexión: no se avisa */ }
     });
   }

@@ -1,8 +1,11 @@
 import { promises as dns } from 'node:dns';
+import { domainToASCII } from 'node:url';
 
 // ¿El dominio del correo (lo que va después de la @) recibe correos?
 // No confirma que la casilla exista (nadie puede, salvo enviando un correo),
-// pero sí detecta dominios inventados o mal escritos (ej. "@gmial.com").
+// pero sí detecta dominios que no existen o no reciben correos (ej.
+// "@gmail.con"). Los errores de tipeo que sí existen (ej. "@gmial.com") los
+// atrapa la sugerencia "¿Quisiste decir…?" del formulario.
 // Ante cualquier duda (DNS lento o caído) responde que sí: nunca debe
 // impedir una reserva por un problema de red.
 const cache = new Map<string, { ok: boolean; t: number }>();
@@ -37,8 +40,11 @@ async function consultar(dominio: string): Promise<boolean> {
 }
 
 export async function dominioRecibeCorreo(correo: string): Promise<boolean> {
-  const dominio = (correo.split('@').pop() ?? '').trim().toLowerCase().replace(/\.$/, '');
+  // Dominios con ñ, tildes, etc. se consultan en su forma ASCII (xn--…).
+  const dominio = domainToASCII((correo.split('@').pop() ?? '').trim().toLowerCase().replace(/\.$/, ''));
+  if (!dominio) return true; // no se pudo interpretar: ante la duda, no bloquear
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z0-9-]{2,}$/.test(dominio)) return false;
+  if (cache.size > 1000) cache.clear();
   const c = cache.get(dominio);
   if (c && Date.now() - c.t < UNA_HORA) return c.ok;
   const ok = await consultar(dominio);
