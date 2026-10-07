@@ -66,6 +66,21 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
     'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
     })(window,document,'script','dataLayer','GTM-WQHZZSPS');</script>}
     <!-- End Google Tag Manager -->
+    <!-- Origen de la visita (anuncio, Instagram, Google…): se guarda solo en
+         este navegador y viaja con la reserva (ver src/lib/origen.ts). -->
+    <script is:inline>(function(){try{
+      var q=new URLSearchParams(location.search),K=['gclid','gbraid','wbraid','utm_source','utm_medium','utm_campaign','utm_term','utm_content'],t={},hay=false,i,v;
+      for(i=0;i<K.length;i++){v=q.get(K[i]);if(v){t[K[i]]=v.slice(0,200);hay=true;}}
+      var r='';try{r=document.referrer?new URL(document.referrer).hostname:'';}catch(e){}
+      if(r&&r!==location.hostname&&!/(^|\.)(valentinaorellana\.cl|flow\.cl|webpay\.cl|transbank\.cl)$/.test(r)){t.referrer_host=r;hay=true;}
+      if(!hay)return;
+      t.landing_path=location.pathname.slice(0,200);t.ts=Date.now();
+      var o=null;try{o=JSON.parse(localStorage.getItem('vo_origen')||'null');}catch(e){}
+      if(!o||typeof o!=='object')o={};
+      if(!o.first||!(o.first.ts>Date.now()-7776e6))o.first=t;
+      o.last=t;
+      localStorage.setItem('vo_origen',JSON.stringify(o));
+    }catch(e){}})();</script>
     <meta name="description" content={description} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />

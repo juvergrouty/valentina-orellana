@@ -4,6 +4,7 @@ import AdminLayout from '../../../components/admin/AdminLayout.astro';
 import { supabase } from '../../../lib/supabase';
 import { nowCL } from '../../../lib/dateUtils';
 import { vigente, type ConsentRow } from '../../../lib/consent';
+import { origenTexto } from '../../../lib/origen';
 
 const { id } = Astro.params;
 
@@ -350,6 +351,7 @@ const faltanDatos = patient ? [
                           <p style="font-size:0.78rem;color:var(--stone);">{b.session_time.slice(0,5)} · {b.custom_title || (SESSION_LABELS[b.session_type] ?? b.session_type)}</p>
                         </>
                       )}
+                      {origenTexto(b.origen) && <p style="font-size:0.72rem;color:var(--stone);margin-top:0.15rem;">Origen: {origenTexto(b.origen)}</p>}
                     </div>
                     <button type="button" class="btn-rename-session" data-bid={b.id} data-title={b.custom_title ?? ''} title="Cambiar nombre de la sesión"
                       style="background:none;border:none;cursor:pointer;color:var(--stone);padding:2px;">

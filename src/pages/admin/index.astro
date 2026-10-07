@@ -4,6 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { SESSION_LABELS } from '../../data/services';
 import { nowCL, todayCL, hoursUntilSessionCL } from '../../lib/dateUtils';
+import { origenTexto } from '../../lib/origen';
 
 // Reservas del día de hoy
 const today = todayCL();
@@ -58,6 +59,27 @@ const { count: monthCount } = await supabase
   .eq('status', 'confirmed')
   .gte('session_date', monthStart);
 
+// Reservas por origen (últimos 90 días, por fecha en que se reservó): solo
+// confirmadas. select('*') para no fallar si la migración 0008 aún no corre.
+const hace90 = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+const { data: recientes } = await supabase
+  .from('bookings')
+  .select('*')
+  .eq('status', 'confirmed')
+  .gte('created_at', hace90)
+  .neq('session_date', '2099-12-31');
+const porCanal = new Map<string, { n: number; monto: number }>();
+let sinOrigen = 0;
+for (const b of recientes ?? []) {
+  const canal = b.origen?.canal as string | undefined;
+  if (!canal) { sinOrigen++; continue; }
+  const acc = porCanal.get(canal) ?? { n: 0, monto: 0 };
+  acc.n++; acc.monto += Number(b.amount) || 0;
+  porCanal.set(canal, acc);
+}
+const origenes = [...porCanal.entries()].sort((a, b) => b[1].n - a[1].n);
+const formatCLP = (n: number) => '$' + Math.round(n).toLocaleString('es-CL');
+
 const formatTime = (t: string) => t.slice(0, 5);
 const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const formatDate = (iso: string) => {
@@ -106,6 +128,7 @@ const formatDate = (iso: string) => {
                 <p style="font-size:0.78rem;color:var(--stone);margin-top:0.15rem;">
                   {SESSION_LABELS[b.session_type as keyof typeof SESSION_LABELS] ?? b.session_type}
                 </p>
+                {origenTexto(b.origen) && <p style="font-size:0.72rem;color:var(--stone);margin-top:0.1rem;">Origen: {origenTexto(b.origen)}</p>}
               </div>
               <div style="text-align:right;">
                 <p style="font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:400;">{formatTime(b.session_time)}</p>
@@ -140,7 +163,10 @@ const formatDate = (iso: string) => {
           <tbody>
             {upcoming.map((b) => (
               <tr>
-                <td style="font-weight:500;">{b.patient_name}</td>
+                <td style="font-weight:500;">
+                  {b.patient_name}
+                  {b.origen?.canal && <span style="display:block;font-size:0.72rem;font-weight:400;color:var(--stone);">{b.origen.canal}</span>}
+                </td>
                 <td>{formatDate(b.session_date)}</td>
                 <td style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;">{formatTime(b.session_time)}</td>
                 <td style="color:var(--stone);">
@@ -155,6 +181,40 @@ const formatDate = (iso: string) => {
       )}
     </div>
 
+  </div>
+
+  <!-- Reservas por origen -->
+  <div class="card" style="margin-top:1.5rem;">
+    <div class="section-header">
+      <p class="label">Reservas por origen (últimos 90 días)</p>
+    </div>
+    {!origenes.length ? (
+      <p style="font-size:0.875rem;color:var(--stone);padding:1rem 0;">Aún no hay reservas confirmadas con origen registrado.</p>
+    ) : (
+      <table>
+        <thead>
+          <tr>
+            <th>Origen</th>
+            <th>Reservas</th>
+            <th>Monto</th>
+          </tr>
+        </thead>
+        <tbody>
+          {origenes.map(([canal, v]) => (
+            <tr>
+              <td style="font-weight:500;">{canal}</td>
+              <td>{v.n}</td>
+              <td>{formatCLP(v.monto)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+    {sinOrigen > 0 && (
+      <p style="font-size:0.78rem;color:var(--stone);margin-top:0.75rem;">
+        {sinOrigen} {sinOrigen === 1 ? 'reserva confirmada' : 'reservas confirmadas'} sin origen registrado (creadas en el panel o antes de activar esto).
+      </p>
+    )}
   </div>
 
 </AdminLayout>

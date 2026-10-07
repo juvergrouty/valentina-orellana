@@ -11,6 +11,7 @@ import { expireStaleBookings } from '../../lib/expireBooking';
 import { tagBookingsWithPaymentToken } from '../../lib/debt';
 import { horaDisponible } from '../../lib/disponibilidad';
 import { limpiarRut, rutValido, RUT_EXTRANJERO_SII, TIPOS_DOCUMENTO } from '../../lib/rut';
+import { limpiarOrigen } from '../../lib/origen';
 
 export const prerender = false;
 
@@ -282,6 +283,8 @@ async function handleBooking(request: Request) {
         payment_method: 'flow',
         amount:         finalPrice,
         duration_min:   durationMin,
+        // De qué sitio/anuncio llegó (ver src/lib/origen.ts). Nunca bloquea la reserva.
+        origen:         limpiarOrigen((body as Record<string, unknown>).origen),
   };
 
   let booking: { id: string } | null = null;
@@ -305,6 +308,14 @@ async function handleBooking(request: Request) {
   };
 
   let { data: bookingData, error: insertError } = await tryInsert(bookingPayload);
+
+  // Si la columna "origen" aún no existe (migración 0008 pendiente), se reserva
+  // igual sin ella: el origen nunca debe impedir una reserva.
+  if (insertError && (insertError.code === '42703' || insertError.code === 'PGRST204' || /origen/i.test(insertError.message ?? ''))) {
+        await logWarn('bookings', 'No se pudo guardar el origen de la reserva, reintentando sin él', { error: insertError.message, code: insertError.code });
+        delete bookingPayload.origen;
+        ({ data: bookingData, error: insertError } = await tryInsert(bookingPayload));
+  }
 
   // Si falla por columna inexistente, reintentar quitando columnas opcionales una a una
   if (insertError?.code === '42703') {

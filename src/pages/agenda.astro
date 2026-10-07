@@ -636,7 +636,9 @@ const { data: catalogServices } = await supabase
   function voItem() {
     return {
       item_id:       String(state.serviceId || ''),
-      item_name:     String(state.sessionTitle || ''),
+      // Sin repetir la modalidad cuando el nombre del servicio ya la trae
+      // ("Terapia Individual Online" + " Online").
+      item_name:     String(state.sessionTitle || '').replace(/\s+(online|presencial)\s+\1$/i, ' $1'),
       item_category: state.modalityChoice === 'online' ? 'online' : 'presencial',
       price:         Number(state.sessionPrice) || 0,
       quantity:      1,
@@ -1097,6 +1099,7 @@ const { data: catalogServices } = await supabase
           emergency_phone: emergTel,
           notes,
           recaptcha_token: recaptchaToken,
+          origen:          (() => { try { return JSON.parse(localStorage.getItem('vo_origen') || 'null'); } catch (e) { return null; } })(),
         }),
       });
 
