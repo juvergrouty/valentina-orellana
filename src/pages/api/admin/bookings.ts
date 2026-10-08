@@ -353,8 +353,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       ? (svcModality === 'online' ? (svc.price_online ?? svc.price) : (svc.price_presencial ?? svc.price))
       : svc.price);
 
+    // Duración según la modalidad, igual que el precio (servicio "ambos" puede durar distinto online/presencial).
+    const durNueva = (svc.modality === 'ambos' ? (svcModality === 'online' ? svc.duration_min_online : svc.duration_min_presencial) : null) ?? svc.duration_min;
     const { error } = await supabase.from('bookings')
-      .update({ service_id: serviceId, session_type: sessionType, amount })
+      .update({ service_id: serviceId, session_type: sessionType, amount, ...(durNueva ? { duration_min: durNueva } : {}) })
       .eq('id', id);
     if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
     if (error) {

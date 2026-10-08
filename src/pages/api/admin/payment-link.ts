@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 import { upsertPatientFromBooking } from '../../../lib/patients';
+import { chocaConOtraSesion } from '../../../lib/disponibilidad';
 
 export const prerender = false;
 
@@ -81,6 +82,14 @@ export const POST: APIRoute = async ({ request }) => {
     // Si no se indica fecha, usar marcador 2099-12-31 (excluido del índice único)
     const finalDate = sessionDate ?? '2099-12-31';
     const finalTime = sessionTime ?? '00:00';
+
+    // Con fecha y hora, el cobro es una sesión real en la agenda: no puede
+    // cruzarse con otra (antes solo lo frenaba el índice de hora exacta, y un
+    // cobro a las 10:30 encima de una sesión de 10:00 pasaba — auditoría 8 oct 2026).
+    if (finalDate !== '2099-12-31') {
+      const choca = await chocaConOtraSesion(finalDate, finalTime, 50);
+      if (choca) return Response.json({ error: 'Ese horario se cruza con otra sesión agendada. Elige otra hora.' }, { status: 409 });
+    }
 
     const { error: bookingErr } = await supabase.from('bookings').insert({
       id:             bookingId,

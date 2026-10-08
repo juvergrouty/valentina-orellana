@@ -27,5 +27,6 @@ export function urlReagendar(bookingId: string): string {
 
 /** ¿Todavía se puede reagendar en línea esta sesión? */
 export function sePuedeReagendar(sessionDate: string, sessionTime: string): boolean {
+  if (String(sessionDate) === '2099-12-31') return false; // cobro manual sin fecha
   return hoursUntilSessionCL(sessionDate, sessionTime) >= REAGENDAR_HORAS_MIN;
 }

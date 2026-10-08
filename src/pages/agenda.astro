@@ -550,7 +550,12 @@ const { data: catalogServices } = await supabase
     if (sum) sum.style.display = n >= 2 ? 'flex' : 'none';
     const bar = document.getElementById('booking-bar');
     if (bar) {
-      const top = bar.getBoundingClientRect().top + window.scrollY - 1;
+      // La barra es sticky: una vez "pegada" su rect.top es siempre ~0, así que
+      // no sirve para calcular su lugar real (en celular, al pasar del formulario
+      // largo al pago la pantalla quedaba en el pie de página — prueba 8 oct 2026).
+      // Su lugar real es justo debajo del banner que la antecede.
+      const prev = bar.previousElementSibling;
+      const top = (prev ? prev.getBoundingClientRect().bottom : bar.getBoundingClientRect().top) + window.scrollY - 1;
       window.scrollTo({ top, behavior: 'smooth' });
     }
   }

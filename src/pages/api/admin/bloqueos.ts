@@ -78,17 +78,29 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const timeTo   = allDay ? null : (form.get('time_to')?.toString()   || null);
     const label    = form.get('label')?.toString() || null;
 
-    if (!dateFrom || !dateTo) return redirect(dest);
+    if (!dateFrom || !dateTo || dateTo < dateFrom) return redirect(dest);
+
+    // Cada fila de blocked_slots aplica su horario a TODOS los días de su rango.
+    // "Lun 15:00 → Mié 12:00" no es una ventana diaria: es lunes desde las
+    // 15:00, martes completo y miércoles hasta las 12:00. Antes se guardaba
+    // como una sola fila (15:00–12:00) que no bloqueaba nada (auditoría 8 oct 2026).
+    const masUnDia = (d: string) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
+    const menosUnDia = (d: string) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
+    type Fila = { date_from: string; date_to: string; time_from: string | null; time_to: string | null; all_day: boolean; label: string | null };
+    const filas: Fila[] = [];
+    if (allDay || (!timeFrom && !timeTo)) {
+      filas.push({ date_from: dateFrom, date_to: dateTo, time_from: null, time_to: null, all_day: true, label });
+    } else if (dateFrom === dateTo) {
+      if (timeFrom && timeTo && timeTo <= timeFrom) return redirect(dest + (dest.includes('?') ? '&' : '?') + 'error=bloqueo_horas');
+      filas.push({ date_from: dateFrom, date_to: dateTo, time_from: timeFrom ?? '00:00', time_to: timeTo ?? '23:59', all_day: false, label });
+    } else {
+      filas.push({ date_from: dateFrom, date_to: dateFrom, time_from: timeFrom ?? '00:00', time_to: '23:59', all_day: false, label });
+      if (masUnDia(dateFrom) <= menosUnDia(dateTo)) filas.push({ date_from: masUnDia(dateFrom), date_to: menosUnDia(dateTo), time_from: null, time_to: null, all_day: true, label });
+      filas.push({ date_from: dateTo, date_to: dateTo, time_from: '00:00', time_to: timeTo ?? '23:59', all_day: false, label });
+    }
 
     // Try blocked_slots first (supports time ranges)
-    const { error } = await supabase.from('blocked_slots' as any).insert({
-      date_from: dateFrom,
-      date_to:   dateTo,
-      time_from: timeFrom,
-      time_to:   timeTo,
-      all_day:   allDay,
-      label,
-    });
+    const { error } = await supabase.from('blocked_slots' as any).insert(filas);
 
     // Fallback: table doesn't exist → use blocked_dates (full-day blocks)
     if (error?.code === '42P01') {

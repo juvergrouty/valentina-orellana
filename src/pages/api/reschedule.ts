@@ -26,7 +26,7 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   // Verificar que la reserva existe y el email coincide
-  let bq = supabase.from('bookings').select('*').eq('id', bookingId).eq('status', 'confirmed');
+  let bq = supabase.from('bookings').select('*').eq('id', bookingId).eq('status', 'confirmed').neq('session_date', '2099-12-31');
   if (!conClave) bq = bq.eq('patient_email', String(email).trim().toLowerCase());
   const { data: booking } = await bq.single();
 

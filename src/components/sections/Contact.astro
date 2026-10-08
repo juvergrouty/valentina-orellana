@@ -137,6 +137,8 @@ import { DIRECCION, GOOGLE_MAPS_URL } from '../../data/consulta';
       const result = await res.json();
       if (result.ok) {
         status.textContent = 'Mensaje enviado — te responderé a la brevedad.';
+        // Medición (GTM): el envío del formulario es un contacto/lead.
+        try { (window.dataLayer = window.dataLayer || []).push({ event: 'contacto_formulario', page_path: location.pathname }); } catch (e) {}
         form.reset();
       } else {
         status.textContent = result.error || 'No se pudo enviar el mensaje. Intenta por WhatsApp.';

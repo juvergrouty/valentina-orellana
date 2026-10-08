@@ -301,12 +301,17 @@ export const POST: APIRoute = async ({ request }) => {
             };
             // AWAIT: es un webhook; si no esperamos, la función serverless
             // termina y mata la sincronización con Google Calendar / los correos.
+            // Cobro manual sin fecha (marcador 2099-12-31): no hay sesión que
+            // confirmar ni evento que crear — antes le llegaba a la paciente
+            // "sesión confirmada el 31 de diciembre de 2099" y una invitación
+            // de calendario en 2099 (auditoría 8 oct 2026). Recibe la boleta.
+            const sinFecha = String(updatedRow.session_date) === '2099-12-31';
             await Promise.all([
-              sendConfirmationToClient(emailData).catch(console.error),
+              sinFecha ? Promise.resolve() : sendConfirmationToClient(emailData).catch(console.error),
               sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
               // Crea el evento si no existía; si ya existía (reserva con link de pago),
               // lo pasa de "Por pagar" a pagado e invita al paciente.
-              syncBookingToCalendar(updatedRow).then(() => markBookingPaidInCalendar(updatedRow.id, true)).catch(console.error),
+              sinFecha ? Promise.resolve() : syncBookingToCalendar(updatedRow).then(() => markBookingPaidInCalendar(updatedRow.id, true)).catch(console.error),
               upsertPatientFromBooking({ ...emailData, rut: updatedRow.patient_rut }).catch(console.error),
             ]);
           }
@@ -317,7 +322,17 @@ export const POST: APIRoute = async ({ request }) => {
           // completo si la reserva no traía patient_rut, y solo quedaba un
           // console.warn invisible. emitBoletaParaReserva ya sabe buscar el RUT
           // en la ficha del paciente si la reserva no trae uno propio.
-          try {
+          // Interruptor "Emitir la boleta automáticamente" del servicio: si
+          // Valentina lo apagó, la boleta queda para emitirla ella a mano
+          // (antes el interruptor no tenía efecto — auditoría 8 oct 2026).
+          let boletaAuto = true;
+          if (updatedRow.service_id) {
+            const { data: svcB } = await supabase.from('services_catalog').select('boleta_auto').eq('id', updatedRow.service_id).maybeSingle();
+            if (svcB?.boleta_auto === false) boletaAuto = false;
+          }
+          if (!boletaAuto) {
+            await logWarn('flow/boleta-automatica', `Boleta no emitida automáticamente: el servicio tiene apagado "Emitir la boleta automáticamente". Emítela desde el calendario.`, { bookingId: updatedRow.id });
+          } else try {
             const boletaRes = await emitBoletaParaReserva(updatedRow.id, {
               rutOverride: updatedRow.patient_rut || undefined,
               enviarEmail: true,

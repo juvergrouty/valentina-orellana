@@ -85,7 +85,7 @@ export const POST: APIRoute = async ({ request }) => {
   if (action === 'update') {
     const id = form.get('id') as string;
     const d = datos();
-    const { data: actual } = await supabase.from('patients').select('phone, emergency_phone').eq('id', id).maybeSingle();
+    const { data: actual } = await supabase.from('patients').select('phone, emergency_phone, email').eq('id', id).maybeSingle();
     const guardados = { phone: actual?.phone ?? null, emergency_phone: actual?.emergency_phone ?? null };
     for (const k of ['phone', 'emergency_phone'] as const) {
       if (g(k) && g(k) === (guardados[k] ?? '').trim()) d[k] = guardados[k];
@@ -100,6 +100,16 @@ export const POST: APIRoute = async ({ request }) => {
       if (error) {
         console.error('[patients] update:', error.message);
         redirect = withParam(redirect, 'error', `No se pudo guardar: ${error.message}`);
+      } else {
+        // Las sesiones se vinculan a la ficha por correo: si se corrigió el
+        // correo, sus sesiones (y deudas, boletas) lo siguen. Antes la ficha
+        // quedaba "sin sesiones" tras corregir un correo (auditoría 8 oct 2026).
+        const viejo = String(actual?.email ?? '').trim().toLowerCase();
+        const nuevo = String(d.email ?? '').trim().toLowerCase();
+        if (viejo && nuevo && viejo !== nuevo) {
+          const { error: e2 } = await supabase.from('bookings').update({ patient_email: nuevo }).eq('patient_email', viejo);
+          if (e2) redirect = withParam(redirect, 'error', `Se guardó la ficha, pero no se pudieron mover sus sesiones al correo nuevo: ${e2.message}`);
+        }
       }
     }
   }

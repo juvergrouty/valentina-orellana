@@ -68,7 +68,7 @@ if (!token) {
     // cubrir varias a la vez — todas comparten el mismo mp_preference_id.
     const { data: rows } = await supabase
       .from('bookings')
-      .select('id, service_id, mp_payment_id, session_type, session_date, session_time, patient_name, amount, status')
+      .select('id, service_id, mp_payment_id, session_type, session_date, session_time, patient_name, amount, status, created_by_admin')
       .eq('mp_preference_id', token);
 
     allBookings = rows ?? [];
@@ -107,7 +107,11 @@ const porRevisar = pageState === 'paid' && allBookings.some(b => b.status === 'e
 const hoyCL = todayCL();
 const esCobro = allBookings.length > 1 || allBookings.some(b => String(b.session_date) === '2099-12-31' || String(b.session_date) < hoyCL);
 
-if (pageState === 'paid' && allBookings.length) {
+// Solo cuenta como conversión (Google Ads / Meta / GA4) una reserva nueva hecha
+// en la web: un cobro que Valentina generó o el pago de sesiones pasadas no es
+// un paciente nuevo que trajo el sitio (auditoría 8 oct 2026).
+const esReservaWeb = allBookings.some(b => !b.created_by_admin && String(b.session_date) !== '2099-12-31' && String(b.session_date) >= hoyCL);
+if (pageState === 'paid' && allBookings.length && esReservaWeb) {
   const items = [];
   for (const b of allBookings) {
     const sessionType = String(b.session_type ?? '');
@@ -127,7 +131,7 @@ if (pageState === 'paid' && allBookings.length) {
     });
   }
   purchase = {
-    transaction_id: String(booking?.mp_payment_id ?? token),
+    transaction_id: String(token), // siempre el token: mp_payment_id llega después con el aviso de Flow y duplicaba la compra al recargar
     value:          items.reduce((s, i) => s + i.price, 0),
     currency: 'CLP',
     coupon:   '', // no hay sistema de cupones aún → sin descuento

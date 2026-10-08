@@ -75,14 +75,14 @@ export const GET: APIRoute = async ({ request }) => {
     const q = await supabase
       .from('bookings')
       .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, notes, reminder_email_enabled, whatsapp_reminder_enabled')
-      .eq('status', 'confirmed')
+      .or('status.eq.confirmed,and(status.eq.pending_payment,created_by_admin.eq.true)')
       .gte('session_date', today)
       .lte('session_date', tomorrow);
     if (q.error?.code === '42703') {
       const retry = await supabase
         .from('bookings')
         .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, notes')
-        .eq('status', 'confirmed')
+        .or('status.eq.confirmed,and(status.eq.pending_payment,created_by_admin.eq.true)')
         .gte('session_date', today)
         .lte('session_date', tomorrow);
       bookings = retry.data;
