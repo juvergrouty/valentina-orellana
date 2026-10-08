@@ -818,9 +818,9 @@ export async function sendRescheduleAdminAlert(
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Email</td>
               <td style="padding:0.35rem 0;">${escapeHtml(data.patient_email)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Antes</td>
-              <td style="padding:0.35rem 0;text-decoration:line-through;color:#9B968C;">${formatDate(data.old_date)} ${data.old_time}</td></tr>
+              <td style="padding:0.35rem 0;text-decoration:line-through;color:#9B968C;">${formatDate(data.old_date)} ${String(data.old_time).slice(0, 5)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Ahora</td>
-              <td style="padding:0.35rem 0;font-weight:600;font-size:1rem;">${formatDate(data.new_date)} ${data.new_time}</td></tr>
+              <td style="padding:0.35rem 0;font-weight:600;font-size:1rem;">${formatDate(data.new_date)} ${String(data.new_time).slice(0, 5)}</td></tr>
         </table>
       </div>
     `,
@@ -881,7 +881,7 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Fecha</td>
               <td style="padding:0.35rem 0;font-weight:500;">${formatDate(data.session_date)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Hora</td>
-              <td style="padding:0.35rem 0;font-weight:600;font-size:1rem;">${data.session_time}</td></tr>
+              <td style="padding:0.35rem 0;font-weight:600;font-size:1rem;">${String(data.session_time).slice(0, 5)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Método de pago</td>
               <td style="padding:0.35rem 0;">${data.payment_method === 'manual' ? '💵 Pago en consulta' : '💳 Flow'}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Monto</td>

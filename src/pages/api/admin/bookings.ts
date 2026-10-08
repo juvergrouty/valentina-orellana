@@ -343,14 +343,21 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const wasOnline   = booking.session_type.includes('online');
     const svcModality = svc.modality === 'ambos' ? (wasOnline ? 'online' : 'presencial') : svc.modality;
     const sessionType = svc.type === 'pareja' ? `pareja-${svcModality}` : svcModality;
-    const amount = svc.modality === 'ambos'
+    // Si ya se pagó o ya hay un link de pago enviado, el monto queda como
+    // estaba: es lo que la paciente pagó (o va a pagar) y lo que va en la boleta.
+    const montoComprometido = !!booking.paid_at || !!booking.mp_preference_id;
+    const amount = montoComprometido ? booking.amount : (svc.modality === 'ambos'
       ? (svcModality === 'online' ? (svc.price_online ?? svc.price) : (svc.price_presencial ?? svc.price))
-      : svc.price;
+      : svc.price);
 
     const { error } = await supabase.from('bookings')
       .update({ service_id: serviceId, session_type: sessionType, amount })
       .eq('id', id);
     if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
+    if (error) {
+      await logWarn('admin/cambiar-servicio', 'No se pudo cambiar el servicio de la sesión', { bookingId: id, error: error.message });
+      return redirect(conParam(dest) + 'error=cambio_servicio');
+    }
 
     // Si el evento ya existe en Google Calendar, refleja el servicio nuevo ahí
     // también. Si la sesión tenía un nombre personalizado (custom_title), se
@@ -360,7 +367,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       try { await retitleBookingInCalendar(id, `${calendarLabel} — ${booking.patient_name}`); } catch (e) { console.error('[change_service] calendar:', e); }
     }
 
-    if (booking.patient_email) {
+    // Aviso a la paciente solo si la sesión sigue vigente y es de hoy en adelante.
+    const vigente = !['cancelled', 'expired'].includes(booking.status)
+      && booking.session_date !== '2099-12-31' && booking.session_date >= todayCL();
+    if (booking.patient_email && vigente) {
       try {
         await sendSessionUpdatedEmail({
           patient_name: booking.patient_name, patient_email: booking.patient_email,
@@ -571,6 +581,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Las que chocan se saltan y se AVISA (antes se saltaban en silencio). Cada
     // sesión creada lleva su parte del precio; el link cobra solo las creadas.
     let creadas = 0;           // sesiones insertadas con éxito
+    // Fecha de la primera sesión que SÍ se creó (si la primera chocaba y se
+    // saltó, los correos no deben anunciar esa fecha).
+    let primeraFecha = '';
     let totalCobrado = 0;      // suma real de lo insertado (lo que se cobra)
     for (let i = 0; i < sessions_count; i++) {
       const d = new Date(`${session_date}T00:00:00`);
@@ -623,6 +636,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         insErr  = retry.error;
       }
       if (booking) {
+        if (creadas === 0) primeraFecha = bDate;
         bookingIds.push(booking.id);
         creadas++;
         totalCobrado += montoSesion;
@@ -712,7 +726,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
             patientEmail: finalEmail,
             serviceName:  svc.name,
             amount:       totalCobrado,
-            sessionDate:  session_date,
+            sessionDate:  primeraFecha || session_date,
             sessionTime:  session_time,
             paymentUrl,
           });
@@ -757,7 +771,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
             patient_email:  finalEmail,
             patient_phone:  finalPhone,
             session_type:   sessionType,
-            session_date,
+            session_date:   primeraFecha || session_date,
             session_time,
             amount:         totalCobrado,
             payment_method: 'link',
@@ -797,7 +811,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         patient_email:  finalEmail,
         patient_phone:  finalPhone,
         session_type:   sessionType,
-        session_date,
+        session_date:   primeraFecha || session_date,
         session_time,
         amount:         totalCobrado,
         payment_method: 'manual',

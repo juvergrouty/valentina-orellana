@@ -66,9 +66,12 @@ export const POST: APIRoute = async ({ request }) => {
     if (waPhone.length === 9)     waPhone = '56' + waPhone;
     if (waPhone.length === 11 && waPhone.startsWith('0')) waPhone = waPhone.slice(1);
 
-    // session_type debe ser uno de los valores permitidos por el CHECK constraint
-    const validTypes = ['individual', 'pareja', 'grupal', 'paquete'];
-    const sessionType = validTypes.includes(serviceType) ? serviceType : 'individual';
+    // session_type igual que en el resto del sitio (online | presencial |
+    // pareja-online | pareja-presencial): los correos, recordatorios y el
+    // calendario deciden con él si la sesión es online. Antes se guardaba
+    // "individual"/"pareja" y una sesión online quedaba como presencial.
+    const mod = modality === 'online' ? 'online' : 'presencial';
+    const sessionType = serviceType === 'pareja' ? `pareja-${mod}` : mod;
 
     // Crear registro en bookings (para trazabilidad)
     // Usamos session_date = '2099-12-31' como marcador de cobro manual.
@@ -141,7 +144,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (isOnline && finalDate !== '2099-12-31') {
       const calResult = await syncBookingToCalendar({
         id:            bookingId,
-        session_type:  `${sessionType}-online`,   // solo para que syncBookingToCalendar active Meet
+        session_type:  sessionType,
         session_date:  finalDate,
         session_time:  finalTime,
         patient_name:  name.trim(),

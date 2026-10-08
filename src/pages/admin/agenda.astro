@@ -348,6 +348,9 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       {errorParam === 'telefono_invalido' && (
         <div class="cal-error-banner">⚠ Revisa el teléfono: en Chile son 9 dígitos (ej. 9 1234 5678); si es de otro país, escríbelo con + y el código (ej. +1 305 555 1234). No se agendó nada.</div>
       )}
+      {errorParam === 'cambio_servicio' && (
+        <div class="cal-error-banner">⚠ No se pudo cambiar el servicio de la sesión. No se le avisó nada a la paciente. Intenta de nuevo.</div>
+      )}
       {errorParam === 'rut_invalido' && (
         <div class="cal-error-banner">⚠ El RUT no es válido (revisa los números y el dígito verificador). No se agendó nada.</div>
       )}

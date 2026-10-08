@@ -7,6 +7,7 @@
 import { supabase } from './supabase';
 import { quitarPrefijoSiHayInvitados, refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle, setCalendarEventPaidState, UNPAID_PREFIX } from './googleCalendar';
 import { logError } from './logger';
+import { cambiarNotas } from './apigateway';
 
 const SESSION_LABELS: Record<string, string> = {
   'online':            'Sesión Individual Online',
@@ -198,14 +199,17 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
       calendarId:    cfg['google_calendar_id'] ?? 'primary',
     });
 
-    // Guardar event_id y Meet link en la reserva SIN pisar otras notas (ej. folio de boleta)
-    const updateData: Record<string, string> = { google_event_id: event.id };
+    // Guardar event_id y Meet link en la reserva SIN pisar otras notas (ej. el
+    // folio de la boleta): las notas se escriben con cambiarNotas, que no
+    // pierde una línea si otra parte del sistema las cambia al mismo tiempo.
+    await supabase.from('bookings').update({ google_event_id: event.id }).eq('id', booking.id);
     if (event.meetLink) {
-      const { data: cur } = await supabase.from('bookings').select('notes').eq('id', booking.id).single();
-      const prev = (cur?.notes ?? '').replace(/(^|\n)\s*Meet:\s*\S+/g, '').trim(); // quita Meet previo
-      updateData.notes = (prev ? prev + '\n' : '') + `Meet: ${event.meetLink}`;
+      const link = event.meetLink;
+      await cambiarNotas(booking.id, (n) => {
+        const prev = n.replace(/(^|\n)\s*Meet:\s*\S+/g, '').trim(); // quita Meet previo
+        return (prev ? prev + '\n' : '') + `Meet: ${link}`;
+      });
     }
-    await supabase.from('bookings').update(updateData).eq('id', booking.id);
 
     return { success: true, meetLink: event.meetLink, eventLink: event.htmlLink };
 

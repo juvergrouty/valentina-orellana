@@ -327,15 +327,18 @@ export const POST: APIRoute = async ({ request }) => {
       }
 
     } else if (status.status === 3 || status.status === 4) {
-      // ❌ Rechazado o anulado — cancelar SOLO si era una reserva nueva sin pagar
-      // (status='pending_payment'). Nunca tocar una reserva de deuda que ya
-      // estaba 'confirmed' (la sesión ya ocurrió) — cancelarla borraría una
-      // sesión real de su historial solo porque el reintento de pago falló.
+      // ❌ Rechazado o anulado — cancelar SOLO si era una reserva web nueva sin
+      // pagar (status='pending_payment'). Nunca tocar:
+      // - una reserva de deuda que ya estaba 'confirmed' (la sesión ya ocurrió);
+      // - una sesión o cobro que creó Valentina desde el panel (created_by_admin):
+      //   una tarjeta rechazada no debe borrarle la sesión agendada; la paciente
+      //   puede volver a intentar el pago con el mismo link.
       const { error } = await supabase
         .from('bookings')
         .update({ status: 'cancelled' })
         .eq('mp_preference_id', token)
-        .eq('status', 'pending_payment');
+        .eq('status', 'pending_payment')
+        .or('created_by_admin.is.null,created_by_admin.eq.false');
 
       if (error) {
         console.error('[Flow webhook] Error cancelando reserva:', error);

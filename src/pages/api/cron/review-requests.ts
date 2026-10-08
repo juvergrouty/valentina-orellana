@@ -51,7 +51,7 @@ export const GET: APIRoute = async ({ request }) => {
   {
     const q = await supabase
       .from('bookings')
-      .select('id, patient_name, patient_email, session_date, session_time, duration_min, notes, evaluation_email_enabled, review_email_enabled, created_by_admin')
+      .select('id, patient_name, patient_email, session_date, session_time, duration_min, notes, evaluation_email_enabled, review_email_enabled, created_by_admin, no_show')
       .eq('status', 'confirmed')
       .gte('session_date', fromDate)
       .lte('session_date', today)
@@ -69,6 +69,10 @@ export const GET: APIRoute = async ({ request }) => {
       bookings = q.data;
     }
   }
+
+  // A quien no asistió (marcado como inasistencia) no se le pregunta cómo le
+  // fue en la sesión ni se le pide reseña.
+  bookings = (bookings ?? []).filter((b) => b.no_show !== true);
 
   const { data: formRow } = await supabase.from('settings').select('value').eq('key', 'evaluation_form_url').maybeSingle();
   const formUrl = formRow?.value || undefined;
