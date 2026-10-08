@@ -18,3 +18,7 @@ create table if not exists public.tareas_envio (
 );
 create index if not exists tareas_envio_pendientes on public.tareas_envio (estado) where estado in ('pendiente','en_curso','error');
 alter table public.tareas_envio enable row level security;
+-- Este proyecto no da permisos por defecto a las tablas nuevas: sin esto el
+-- servidor (service_role) recibía "permission denied for table tareas_envio".
+grant select, insert, update, delete on public.tareas_envio to service_role;
+grant usage, select on sequence public.tareas_envio_id_seq to service_role;
