@@ -68,6 +68,7 @@ export interface CalendarEventInput {
   calendarId?:  string;   // default 'primary'
   unpaid?:      boolean;  // reserva aún sin pagar: prefijo + color rojo (ver UNPAID_PREFIX)
   paid?:        boolean;  // reserva ya pagada: color verde
+  eventId?:     string;   // id fijo (base32hex): un reintento no puede crear un segundo evento
 }
 
 /** Marca visual de una reserva que bloquea la hora pero todavía no está pagada. */
@@ -98,6 +99,7 @@ export async function createCalendarEvent(
     end:   { dateTime: toISO(endDate),   timeZone: TIMEZONE },
   };
 
+  if (event.eventId)   body.id = event.eventId;
   if (event.location)  body.location = event.location;
   if (event.unpaid)    body.colorId = UNPAID_COLOR_ID;
   else if (event.paid) body.colorId = PAID_COLOR_ID;
@@ -122,14 +124,33 @@ export async function createCalendarEvent(
   const url    = `${CALENDAR_API}/calendars/${encodeURIComponent(calId)}/events` +
                  (event.isOnline ? '?conferenceDataVersion=1&sendUpdates=all' : '?sendUpdates=all');
 
-  const res = await fetch(url, {
-    method:  'POST',
-    headers: {
-      Authorization:  `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+  let res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+
+  // 409 con id fijo: ese id ya existe. Si es un evento vigente, es el que creó
+  // un intento anterior que se cortó antes de guardar el id → se usa ese (no
+  // se crea otro). Si es un evento borrado (Google no deja reusar el id), se
+  // crea uno nuevo con id automático (8 oct 2026).
+  if (res.status === 409 && event.eventId) {
+    const prev = await fetch(`${CALENDAR_API}/calendars/${encodeURIComponent(calId)}/events/${event.eventId}`, { headers });
+    if (prev.ok) {
+      const p = await prev.json();
+      if (p.status !== 'cancelled') {
+        return {
+          id:       p.id,
+          meetLink: p.conferenceData?.entryPoints?.find((e: any) => e.entryPointType === 'video')?.uri,
+          htmlLink: p.htmlLink,
+        };
+      }
+    } else if (prev.status !== 404 && prev.status !== 410) {
+      // No se pudo comprobar (Google lento/caído): NO se crea otro evento; se
+      // reintenta más tarde (un evento duplicado sería una segunda invitación).
+      throw new Error(`Google Calendar get event failed (${prev.status}) tras 409`);
+    }
+    delete body.id;
+    if (body.conferenceData) body.conferenceData.createRequest.requestId = crypto.randomUUID();
+    res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+  }
 
   if (!res.ok) {
     const err = await res.text();
@@ -183,6 +204,7 @@ export async function updateCalendarEventTime(
   startTime: string,
   durationMin: number,
   location?: string,
+  notify = true, // false: Google no le avisa a la invitada (reagendar "sin aviso")
 ): Promise<void> {
   const startDate = new Date(`${date}T${startTime}:00`);
   const endDate   = new Date(startDate.getTime() + durationMin * 60_000);
@@ -190,8 +212,11 @@ export async function updateCalendarEventTime(
   const toISO = (d: Date) =>
     `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
 
+  // sendUpdates=all: la invitada recibe la hora nueva en su calendario (Outlook,
+  // Apple, etc.); sin esto Google no le avisaba del cambio (auditoría 8 oct 2026).
+  // Con notify=false (Valentina reagenda "sin aviso", o una sesión pasada) no.
   const res = await fetch(
-    `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
+    `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}?sendUpdates=${notify ? 'all' : 'none'}`,
     {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -248,6 +273,23 @@ export async function agregarMeetAEvento(accessToken: string, calendarId: string
   if (!res.ok) throw new Error(`Google Calendar no pudo agregar el Meet (${res.status}): ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
   return data.hangoutLink ?? data.conferenceData?.entryPoints?.find((e: any) => e.entryPointType === 'video')?.uri ?? null;
+}
+
+/** Deuda anulada (no se cobrará): sin "Por pagar" y en gris (Grafito), ni
+ *  rojo de deuda ni verde de pagado. No avisa a los invitados (8 oct 2026). */
+export const VOIDED_COLOR_ID = '8';
+export async function setCalendarEventVoided(accessToken: string, calendarId: string, eventId: string): Promise<void> {
+  const base = `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`;
+  const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+  const getRes = await fetch(base, { headers });
+  if (getRes.status === 404 || getRes.status === 410) return;
+  if (!getRes.ok) throw new Error(`Google Calendar get event failed (${getRes.status}): ${await getRes.text()}`);
+  const ev = await getRes.json();
+  const summary: string = ev.summary ?? '';
+  const body: Record<string, unknown> = { colorId: VOIDED_COLOR_ID };
+  if (summary.startsWith(UNPAID_PREFIX)) body.summary = summary.slice(UNPAID_PREFIX.length);
+  const res = await fetch(`${base}?sendUpdates=none`, { method: 'PATCH', headers, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`Google Calendar update voided failed (${res.status}): ${await res.text()}`);
 }
 
 export async function setCalendarEventPaidState(

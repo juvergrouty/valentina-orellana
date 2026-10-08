@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
-import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar } from '../../../lib/syncCalendar';
+import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar, markBookingDebtVoidedInCalendar } from '../../../lib/syncCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { getTotalOwedByEmail, tagBookingsWithPaymentToken } from '../../../lib/debt';
@@ -222,6 +222,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (!id) return redirect(dest);
     const { error } = await supabase.from('bookings').update({ debt_voided: true }).eq('id', id);
     if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
+    if (error) return redirect(conParam(dest) + 'error=anular_deuda&detail=' + encodeURIComponent(error.message.slice(0, 200)));
+    // El evento de Google deja de verse rojo "Por pagar" (8 oct 2026): antes
+    // seguía como deuda en el calendario. Queda gris (ni deuda ni pagada) y no
+    // se avisa a la paciente.
+    await markBookingDebtVoidedInCalendar(id);
     return redirect(dest);
   }
 
@@ -283,7 +288,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (updErr) return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(updErr.message.slice(0, 200)));
     // Nueva fecha: se borran las marcas de recordatorio para que le llegue uno para la fecha nueva.
     await quitarLineasNotas(id, ['RecordatorioEnviado', 'RecordatorioWhatsAppEnviado']);
-    try { await rescheduleBookingInCalendar(id, session_date, session_time, booking?.duration_min ?? undefined); } catch (e) { console.error('[reschedule] gcal:', e); }
+    // notifyPatient también decide si Google le manda la invitación actualizada.
+    try { await rescheduleBookingInCalendar(id, session_date, session_time, booking?.duration_min ?? undefined, notifyPatient); } catch (e) { console.error('[reschedule] gcal:', e); }
 
     if (notifyPatient && booking?.patient_email) {
       let svcName: string | undefined;
@@ -349,12 +355,23 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Si ya se pagó o ya hay un link de pago enviado, el monto queda como
     // estaba: es lo que la paciente pagó (o va a pagar) y lo que va en la boleta.
     const montoComprometido = !!booking.paid_at || !!booking.mp_preference_id;
+    // "||" y no "??" (8 oct 2026): un servicio "ambos" con un precio en blanco
+    // guarda 0 (no null) y la sesión quedaba en $0. Igual que create-admin.
     const amount = montoComprometido ? booking.amount : (svc.modality === 'ambos'
-      ? (svcModality === 'online' ? (svc.price_online ?? svc.price) : (svc.price_presencial ?? svc.price))
+      ? (svcModality === 'online' ? (svc.price_online || svc.price) : (svc.price_presencial || svc.price))
       : svc.price);
 
     // Duración según la modalidad, igual que el precio (servicio "ambos" puede durar distinto online/presencial).
     const durNueva = (svc.modality === 'ambos' ? (svcModality === 'online' ? svc.duration_min_online : svc.duration_min_presencial) : null) ?? svc.duration_min;
+    const cambiaDuracion = !!durNueva && Number(durNueva) !== Number(booking.duration_min ?? 50);
+    // Más larga, la sesión puede quedar encima de la siguiente (8 oct 2026):
+    // mismo control que "reagendar". No aplica a cobros sin fecha (2099) ni a
+    // sesiones canceladas/vencidas, que no ocupan horario.
+    const ocupaHorario = booking.session_date !== '2099-12-31' && !['cancelled', 'expired'].includes(booking.status);
+    if (cambiaDuracion && ocupaHorario) {
+      const conflict = await chocaConOtraSesion(booking.session_date, String(booking.session_time).slice(0, 5), Number(durNueva), id);
+      if (conflict) return redirect(conParam(dest) + 'error=conflict');
+    }
     const { error } = await supabase.from('bookings')
       .update({ service_id: serviceId, session_type: sessionType, amount, ...(durNueva ? { duration_min: durNueva } : {}) })
       .eq('id', id);
@@ -370,6 +387,13 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (booking.google_event_id) {
       const calendarLabel = booking.custom_title || svc.name;
       try { await retitleBookingInCalendar(id, `${calendarLabel} — ${booking.patient_name}`); } catch (e) { console.error('[change_service] calendar:', e); }
+      // Duración nueva: el evento termina a la hora correcta (8 oct 2026);
+      // antes quedaba con el largo del servicio anterior. Misma función que "reagendar".
+      if (cambiaDuracion && booking.session_date !== '2099-12-31') {
+        // Mismo criterio que el correo de abajo: solo se avisa si la sesión sigue vigente y es de hoy en adelante.
+        const avisarCal = !['cancelled', 'expired'].includes(booking.status) && booking.session_date >= todayCL();
+        try { await rescheduleBookingInCalendar(id, booking.session_date, String(booking.session_time).slice(0, 5), Number(durNueva), avisarCal); } catch (e) { console.error('[change_service] calendar duración:', e); }
+      }
     }
 
     // Aviso a la paciente solo si la sesión sigue vigente y es de hoy en adelante.
@@ -429,7 +453,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     let defaultAmount = 0;
     if (matchedSvc) {
       defaultAmount = matchedSvc.modality === 'ambos'
-        ? (svcModality === 'online' ? (matchedSvc.price_online ?? matchedSvc.price) : (matchedSvc.price_presencial ?? matchedSvc.price))
+        // "||": un precio en blanco de un servicio "ambos" se guarda como 0 (8 oct 2026).
+        ? (svcModality === 'online' ? (matchedSvc.price_online || matchedSvc.price) : (matchedSvc.price_presencial || matchedSvc.price))
         : matchedSvc.price;
     } else {
       // Fallback legacy, solo si no hay ningún servicio visible que calce (no debería pasar en operación normal).

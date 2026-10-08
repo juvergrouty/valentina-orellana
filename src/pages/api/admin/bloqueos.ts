@@ -11,6 +11,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   // Solo rutas internas del panel.
   const destRaw = form.get('_redirect')?.toString() ?? '';
   const dest    = /^\/admin(\/|$|\?)/.test(destRaw) && !destRaw.includes('//') ? destRaw : '/admin/horarios';
+  // Si no se guardó, se vuelve con un aviso visible y sin el "✓ bloqueada"
+  // (8 oct 2026): antes una falla de la base se veía igual que un éxito.
+  const conError = (detalle?: string) => {
+    const u = new URL(dest, 'http://local');
+    u.searchParams.delete('saved');
+    u.searchParams.set('error', 'bloqueo_guardar');
+    if (detalle) u.searchParams.set('detail', detalle.slice(0, 200));
+    return redirect(u.pathname + '?' + u.searchParams.toString());
+  };
 
   // ── Quitar bloqueo ────────────────────────────────────────────────────────
   if (action === 'delete') {
@@ -36,8 +45,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const reason = form.get('reason')?.toString() || null;
     if (date) {
       const { error } = await supabase.from('blocked_dates').upsert({ date, reason }, { onConflict: 'date' });
+      if (error) return conError(error.message);
       // El día cerrado queda anotado también en Google Calendar.
-      if (!error) await crearEventoCierre(date, reason ? `Cerrado · ${reason}` : 'Cerrado');
+      await crearEventoCierre(date, reason ? `Cerrado · ${reason}` : 'Cerrado');
     }
     return redirect(dest);
   }
@@ -56,14 +66,15 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         rows.push({ date: cursor.toISOString().slice(0, 10), reason });
         cursor.setDate(cursor.getDate() + 1);
       }
-      let ok = true;
+      let fallo: string | null = null;
       for (let i = 0; i < rows.length; i += 50) {
         const { error } = await supabase.from('blocked_dates').upsert(rows.slice(i, i + 50), { onConflict: 'date' });
-        if (error) ok = false;
+        if (error) fallo = error.message;
       }
+      if (fallo) return conError(fallo);
       // Igual que un día suelto: cada día cerrado queda anotado en Google Calendar
       // (hasta 62 días, para no pasarse del tiempo de la función).
-      if (ok) for (const r of rows.slice(0, 62)) await crearEventoCierre(r.date, reason ? `Cerrado · ${reason}` : 'Cerrado');
+      for (const r of rows.slice(0, 62)) await crearEventoCierre(r.date, reason ? `Cerrado · ${reason}` : 'Cerrado');
     }
     return redirect(dest);
   }
@@ -112,8 +123,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         cursor.setDate(cursor.getDate() + 1);
       }
       for (let i = 0; i < rows.length; i += 50) {
-        await supabase.from('blocked_dates').upsert(rows.slice(i, i + 50), { onConflict: 'date' });
+        const { error: e2 } = await supabase.from('blocked_dates').upsert(rows.slice(i, i + 50), { onConflict: 'date' });
+        if (e2) return conError(e2.message);
       }
+    } else if (error) {
+      return conError(error.message);
     }
 
     return redirect(dest);

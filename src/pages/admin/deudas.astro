@@ -133,6 +133,11 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
       ⚠ No se pudo enviar el correo{errorDetail ? `: ${errorDetail}` : '.'}
     </div>
   )}
+  {errorParam === 'anular_deuda' && (
+    <div class="card" style="background:#fef2f2;border-color:#fecaca;color:#dc2626;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ⚠ No se pudo anular la deuda{errorDetail ? `: ${errorDetail}` : ''}. Sigue como pendiente — intenta de nuevo.
+    </div>
+  )}
   {!debtors.length ? (
     <div class="card" style="text-align:center;padding:3rem;">
       <p style="color:var(--stone);font-size:0.9rem;">No hay deudas pendientes. 🎉</p>

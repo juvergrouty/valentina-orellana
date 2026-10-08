@@ -234,7 +234,9 @@ export async function calcularDisponibilidad(c: ConsultaDisponibilidad): Promise
       return true;
     });
 
-  return { slots: available };
+  // Sin service_id se juntan las horas de todos los servicios y la misma hora
+  // venía repetida (ej. "12:00" seis veces). Se deja una sola, en orden (8 oct 2026).
+  return { slots: [...new Set(available)].sort() };
 }
 
 /** ¿Esa hora exacta está disponible? null = no se pudo comprobar (error de base de datos). */

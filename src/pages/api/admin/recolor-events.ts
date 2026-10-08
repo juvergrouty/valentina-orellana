@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { getValidAccessToken } from '../../../lib/syncCalendar';
 import { setCalendarEventPaidState } from '../../../lib/googleCalendar';
+import { todayCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
 
@@ -13,7 +14,9 @@ export const POST: APIRoute = async () => {
   const auth = await getValidAccessToken();
   if (!auth) return json({ ok: false, error: 'Google Calendar no está conectado.' }, 400);
 
-  const today = new Date().toISOString().slice(0, 10);
+  // Fecha de Chile (8 oct 2026): con la de UTC, desde las 20:00/21:00 ya era
+  // "mañana" y quedaban fuera las sesiones del resto del día.
+  const today = todayCL();
   const { data: rows, error } = await supabase
     .from('bookings')
     .select('id, google_event_id, paid_at, debt_voided, status, session_date')

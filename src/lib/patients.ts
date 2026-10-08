@@ -119,18 +119,39 @@ export async function sendStepsOnFirstPayment(b: {
   patient_email?: string | null;
   patient_phone?: string | null;
   rut?: string | null;
-}, paidBookingIds: string[]): Promise<void> {
+}, paidBookingIds: string[], opts: { idempotencyKey?: string } = {}): Promise<boolean> {
+  // Devuelve true si quedó resuelto (enviado, ya enviado antes o no corresponde)
+  // y false si hay que reintentar (ver src/lib/tareasEnvio.ts).
   const email = b.patient_email?.trim().toLowerCase();
-  if (!email) return;
+  if (!email) return true;
   try {
     // ilike sin comodines: un "_" o "%" en el correo no debe calzar con otro.
     const { data: previos } = await supabase.from('bookings').select('id')
       .ilike('patient_email', email.replace(/[\\%_]/g, (c) => `\\${c}`)).not('paid_at', 'is', null)
       .neq('status', 'cancelled'); // un pago de una sesión cancelada no cuenta como primer pago
-    if ((previos ?? []).some(p => !paidBookingIds.includes(p.id))) return;
+    if ((previos ?? []).some(p => !paidBookingIds.includes(p.id))) return true;
 
     const patientId = await upsertPatientFromBooking(b);
-    if (!patientId) return;
+    if (!patientId) return false;
+
+    // Desde la cola de envíos (con llave de idempotencia): primero se envía y
+    // después se marca. Así, si el proceso se corta entre medio, el reintento
+    // lo vuelve a enviar con la MISMA llave (Resend no lo duplica) en vez de
+    // perderlo para siempre. La cola ya impide dos envíos simultáneos (8 oct 2026).
+    if (opts.idempotencyKey) {
+      const { data: pac } = await supabase.from('patients').select('name, steps_sent_at').eq('id', patientId).maybeSingle();
+      if (!pac) return false;
+      if (!pac.steps_sent_at) {
+        const { data: addrQ } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
+        const resQ = await sendStepsEmail({ patientName: pac.name, patientEmail: email, clinicAddress: addrQ?.value ?? '', idempotencyKey: `${opts.idempotencyKey}:pasos` });
+        if (!resQ.sent) {
+          await logError('email/pasos-automatico', `No se pudo enviar "Pasos a seguir" a ${email} tras su primer pago`, { email, error: resQ.reason });
+          return false;
+        }
+        await supabase.from('patients').update({ steps_sent_at: new Date().toISOString() }).eq('id', patientId).is('steps_sent_at', null);
+      }
+      return await enviarConsentimientoSiFalta(patientId, pac.name ?? b.patient_name ?? '', email, { idempotencyKey: `${opts.idempotencyKey}:consentimiento` });
+    }
 
     // Marcar antes de enviar (con guardia `is null`) evita un doble envío si
     // Flow reintenta el webhook al mismo tiempo.
@@ -142,43 +163,46 @@ export async function sendStepsOnFirstPayment(b: {
       // WhatsApp): igual corresponde el consentimiento en su primer pago.
       // Antes se saltaba y la paciente nunca lo recibía sola.
       const { data: p } = await supabase.from('patients').select('name').eq('id', patientId).maybeSingle();
-      await enviarConsentimientoSiFalta(patientId, p?.name ?? b.patient_name ?? '', email);
-      return;
+      return await enviarConsentimientoSiFalta(patientId, p?.name ?? b.patient_name ?? '', email, { idempotencyKey: opts.idempotencyKey && `${opts.idempotencyKey}:consentimiento` });
     }
 
     const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
-    const res = await sendStepsEmail({ patientName: marcado.name, patientEmail: email, clinicAddress: addr?.value ?? '' });
+    const res = await sendStepsEmail({ patientName: marcado.name, patientEmail: email, clinicAddress: addr?.value ?? '', idempotencyKey: opts.idempotencyKey && `${opts.idempotencyKey}:pasos` });
     if (!res.sent) {
       await supabase.from('patients').update({ steps_sent_at: null }).eq('id', patientId);
       await logError('email/pasos-automatico', `No se pudo enviar "Pasos a seguir" a ${email} tras su primer pago`, { email, error: res.reason });
-      return;
+      return false;
     }
     // "Pasos a seguir" promete "te llegará un link para firmar el
     // consentimiento": se manda junto, en el primer pago (Valentina, 3 oct 2026).
-    await enviarConsentimientoSiFalta(patientId, marcado.name, email);
+    return await enviarConsentimientoSiFalta(patientId, marcado.name, email, { idempotencyKey: opts.idempotencyKey && `${opts.idempotencyKey}:consentimiento` });
   } catch (err) {
     await logError('email/pasos-automatico', 'Error al enviar "Pasos a seguir" tras el primer pago', { email, error: err instanceof Error ? err.message : String(err) });
+    return false;
   }
 }
 
 // Manda por correo el link del consentimiento informado si el paciente no
 // tiene uno vigente firmado ni uno ya enviado esperando firma. Mismo link y
 // mismo registro (sent_at/sent_via) que el botón "Enviar por correo" de la ficha.
-export async function enviarConsentimientoSiFalta(patientId: string, name: string, email: string): Promise<void> {
+export async function enviarConsentimientoSiFalta(patientId: string, name: string, email: string, opts: { idempotencyKey?: string } = {}): Promise<boolean> {
   try {
-    const { data: rows } = await supabase.from('consents').select('*').eq('patient_id', patientId);
+    const { data: rows, error: errC } = await supabase.from('consents').select('*').eq('patient_id', patientId);
+    if (errC) return false;
     const lista = (rows ?? []) as ConsentRow[];
-    if (vigente(lista)) return;                                  // ya firmó
-    if (lista.some(r => !r.signed_at && r.sent_at)) return;      // ya se le mandó y está pendiente
+    if (vigente(lista)) return true;                                  // ya firmó
+    if (lista.some(r => !r.signed_at && r.sent_at)) return true;      // ya se le mandó y está pendiente
     const c = await getOrCreatePendingConsent(patientId);
     const url = consentUrl('https://www.valentinaorellana.cl', c.token);
-    const res = await sendConsentLinkEmail({ patientName: name, patientEmail: email, url });
+    const res = await sendConsentLinkEmail({ patientName: name, patientEmail: email, url, idempotencyKey: opts.idempotencyKey });
     if (!res.sent) {
       await logError('consentimiento/automatico', `No se pudo enviar el consentimiento a ${email} tras su primer pago`, { patientId, error: res.reason });
-      return;
+      return false;
     }
     await supabase.from('consents').update({ sent_at: new Date().toISOString(), sent_via: 'email' }).eq('id', c.id);
+    return true;
   } catch (e) {
     await logError('consentimiento/automatico', 'Error al enviar el consentimiento tras el primer pago', { patientId, error: e instanceof Error ? e.message : String(e) });
+    return false;
   }
 }

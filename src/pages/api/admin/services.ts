@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
+import { todayCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
 
@@ -9,6 +10,16 @@ export const POST: APIRoute = async ({ request }) => {
   const redirect = (form.get('redirect') as string) ?? '/admin/servicios';
 
   const get = (k: string) => (form.get(k) as string)?.trim() || null;
+
+  // Vuelta con aviso de error visible (8 oct 2026): antes una falla al
+  // guardar o eliminar volvía igual que un éxito ("✓ Servicio guardado").
+  const conError = (codigo: string, detalle?: string) => {
+    const u = new URL(redirect, 'http://local');
+    u.searchParams.delete('saved');
+    u.searchParams.set('error', codigo);
+    if (detalle) u.searchParams.set('detail', detalle.slice(0, 200));
+    return new Response(null, { status: 302, headers: { Location: u.pathname + '?' + u.searchParams.toString() } });
+  };
 
   if (action === 'create' || action === 'update') {
     const modality = get('modality') ?? 'presencial';
@@ -52,7 +63,8 @@ export const POST: APIRoute = async ({ request }) => {
                      'fonasa_description', 'boleta_auto', 'min_hours', 'waitlist', 'prepago', 'pago_requerido'];
     const basicData = Object.fromEntries(Object.entries(data).filter(([k]) => !newCols.includes(k)));
 
-    const saveRow = async (payload: Record<string, unknown>, id?: string) => {
+    // Devuelve el mensaje de error si no se pudo guardar (null = guardado).
+    const saveRow = async (payload: Record<string, unknown>, id?: string): Promise<string | null> => {
       const op = id
         ? supabase.from('services_catalog').update(payload).eq('id', id)
         : supabase.from('services_catalog').insert(payload);
@@ -64,26 +76,50 @@ export const POST: APIRoute = async ({ request }) => {
             ? supabase.from('services_catalog').update(basicData).eq('id', id)
             : supabase.from('services_catalog').insert(basicData);
           const { error: e2 } = await op2;
-          if (e2) console.error('[services] save fallback:', e2.message);
+          if (e2) { console.error('[services] save fallback:', e2.message); return e2.message; }
         } else {
           console.error('[services] save:', error.message);
+          return error.message;
         }
       }
+      return null;
     };
 
-    if (action === 'create') {
-      await saveRow(data);
-    } else {
-      await saveRow(data, get('id')!);
-    }
+    const fallo = action === 'create' ? await saveRow(data) : await saveRow(data, get('id')!);
+    if (fallo) return conError('servicio_guardar', fallo);
   }
 
   if (action === 'delete') {
     const id = get('id')!;
-    // Quitar la referencia en reservas para no violar el foreign key (conserva el historial)
-    await supabase.from('bookings').update({ service_id: null }).eq('service_id', id);
+    // Con sesiones futuras agendadas no se elimina (8 oct 2026): antes se les
+    // quitaba el servicio y quedaban sin precio/duración de referencia.
+    const { count: futuras, error: futErr } = await supabase.from('bookings')
+      .select('id', { count: 'exact', head: true })
+      .eq('service_id', id)
+      .gte('session_date', todayCL()).neq('session_date', '2099-12-31')
+      .not('status', 'in', '(cancelled,expired)');
+    if (futErr) return conError('servicio_eliminar', futErr.message);
+    if ((futuras ?? 0) > 0) return conError('servicio_con_sesiones');
+
+    // Quitar la referencia en reservas para no violar el foreign key (conserva el historial).
+    // Se guardan cuáles eran para devolverles el servicio si el borrado falla.
+    const { data: vinculadas, error: selErr } = await supabase.from('bookings').select('id').eq('service_id', id);
+    if (selErr) return conError('servicio_eliminar', selErr.message);
+    const ids = (vinculadas ?? []).map((b: { id: string }) => b.id);
+    if (ids.length) {
+      const { error: unlinkErr } = await supabase.from('bookings').update({ service_id: null }).eq('service_id', id);
+      if (unlinkErr) return conError('servicio_eliminar', unlinkErr.message);
+    }
     const { error } = await supabase.from('services_catalog').delete().eq('id', id);
-    if (error) console.error('[services] delete:', error.message, error.code);
+    if (error) {
+      console.error('[services] delete:', error.message, error.code);
+      // De a 100 para no armar una consulta demasiado larga.
+      for (let i = 0; i < ids.length; i += 100) {
+        const { error: restErr } = await supabase.from('bookings').update({ service_id: id }).in('id', ids.slice(i, i + 100));
+        if (restErr) console.error('[services] delete restaurar vínculos:', restErr.message);
+      }
+      return conError('servicio_eliminar', error.message);
+    }
   }
 
   if (action === 'toggle_visible') {

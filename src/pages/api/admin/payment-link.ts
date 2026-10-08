@@ -147,10 +147,14 @@ export const POST: APIRoute = async ({ request }) => {
       await supabase.from('bookings').update({ mp_preference_id: order.token }).eq('id', bookingId);
     }
 
-    // Si es online con fecha/hora → crear evento en Google Calendar y obtener Meet link ahora
+    // Con fecha/hora → evento en Google Calendar ("Por pagar", sin invitar).
+    // Online además trae el Meet link ahora. Presencial también lleva evento
+    // (8 oct 2026): antes solo online, y la sesión presencial cobrada no
+    // aparecía en el calendario de Valentina. syncBookingToCalendar pone la
+    // dirección de la consulta y no crea Meet cuando no es online.
     let meetLink: string | undefined;
     const isOnline = modality === 'online';
-    if (isOnline && finalDate !== '2099-12-31') {
+    if (finalDate !== '2099-12-31') {
       const calResult = await syncBookingToCalendar({
         id:            bookingId,
         session_type:  sessionType,

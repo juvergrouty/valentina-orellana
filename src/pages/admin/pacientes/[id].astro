@@ -51,6 +51,7 @@ const ERRORES_ACCION: Record<string, string> = {
   conflict: 'Esa sesión se cruza con otra reserva: no se guardó el cambio.',
   service_not_found: 'No se encontró ese servicio.',
   missing_migration: 'Falta actualizar la base de datos para hacer este cambio.',
+  anular_deuda: 'No se pudo anular la deuda. Sigue como pendiente — intenta de nuevo.',
 };
 const errorCrudo = Astro.url.searchParams.get('error') ?? '';
 const errorFicha = ERRORES_ACCION[errorCrudo] ?? errorCrudo;

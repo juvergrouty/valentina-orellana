@@ -62,7 +62,9 @@ export const POST: APIRoute = async ({ request, url }) => {
         const res = await sendReminderEmail(emailData);
         if (!res.sent) return json({ ok: false, error: res.reason ?? 'No se pudo enviar.' }, 500);
       } else {
-        await sendConfirmationToClient(emailData, { skipToggle: true });
+        // Antes respondía "ok" aunque Resend rechazara el correo (auditoría 8 oct 2026).
+        const res = await sendConfirmationToClient(emailData, { skipToggle: true });
+        if (!res.sent) return json({ ok: false, error: res.reason ?? 'No se pudo enviar.' }, 500);
       }
       return json({ ok: true });
     } catch (e) {

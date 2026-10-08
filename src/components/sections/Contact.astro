@@ -1,5 +1,13 @@
 ---
 import { DIRECCION, GOOGLE_MAPS_URL } from '../../data/consulta';
+import CamposContacto from '../CamposContacto.astro';
+import { supabase } from '../../lib/supabase';
+
+// reCAPTCHA v3 igual que en /agenda (8 oct 2026): el formulario de contacto
+// solo tenía el campo trampa y el tiempo mínimo. Si no hay clave configurada
+// en Configuración, no se carga nada y el servidor tampoco lo exige.
+const { data: recaptchaRow } = await supabase.from('settings').select('value').eq('key', 'recaptcha_site_key').maybeSingle();
+const recaptchaSiteKey = recaptchaRow?.value ?? '';
 ---
 
 <section class="py-14 md:py-section bg-white">
@@ -55,7 +63,9 @@ import { DIRECCION, GOOGLE_MAPS_URL } from '../../data/consulta';
     </div>
 
     <!-- Formulario -->
-    <form id="contact-form" class="flex flex-col gap-8" novalidate>
+    <!-- method="post": si el JavaScript falla, el navegador nunca pone nombre y
+         correo en la dirección de la página (8 oct 2026). -->
+    <form id="contact-form" method="post" class="flex flex-col gap-8" novalidate>
       <!-- Campo trampa anti-spam: las personas no lo ven ni lo llenan -->
       <div aria-hidden="true" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;">
         <label for="website">No completar</label>
@@ -106,10 +116,21 @@ import { DIRECCION, GOOGLE_MAPS_URL } from '../../data/consulta';
   </div>
 </section>
 
+<!-- Sugerencias de dominio y aviso "no recibe correos" en el campo correo, igual que en la agenda -->
+<CamposContacto />
+
+<script is:inline define:vars={{ recaptchaSiteKey }}>
+  window.__RECAPTCHA_SITE_KEY__ = recaptchaSiteKey;
+</script>
+{recaptchaSiteKey && (
+  <script src={`https://www.google.com/recaptcha/api.js?render=${recaptchaSiteKey}`} is:inline async defer></script>
+)}
+
 <script>
   const form   = document.getElementById('contact-form') as HTMLFormElement;
-  // Momento en que se abrió el formulario: un bot lo envía al instante.
-  const abiertoEn = Date.now();
+  // Desde la carga de la página: una persona nunca envía en menos de 3 s
+  // (medirlo desde el primer foco descartaba a quien usa el autocompletado).
+  let abiertoEn = Date.now();
   const status = document.getElementById('form-status');
   const button = form?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
 
@@ -128,11 +149,35 @@ import { DIRECCION, GOOGLE_MAPS_URL } from '../../data/consulta';
     status.textContent = 'Enviando...';
     status.classList.remove('hidden');
 
+    // reCAPTCHA v3 (si está configurado): mismo patrón que /agenda.
+    let recaptchaToken = '';
+    const w = window as any;
+    if (w.__RECAPTCHA_SITE_KEY__ && w.grecaptcha) {
+      try {
+        // Con tope de 6 s: si el script de Google está bloqueado o lento, se
+        // envía igual sin token en vez de quedar "Enviando..." para siempre.
+        recaptchaToken = await Promise.race([
+          new Promise<string>((resolve, reject) => {
+            w.grecaptcha.ready(() => {
+              w.grecaptcha.execute(w.__RECAPTCHA_SITE_KEY__, { action: 'submit_contact' }).then(resolve).catch(reject);
+            });
+          }),
+          new Promise<string>((resolve) => setTimeout(() => resolve(''), 6000)),
+        ]);
+      } catch (err) {
+        console.error('[recaptcha] error obteniendo token', err);
+      }
+    }
+
     try {
       const res = await fetch('/api/contacto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...Object.fromEntries(data), t: Date.now() - abiertoEn }),
+        body: JSON.stringify({
+          ...Object.fromEntries(data),
+          t: Date.now() - abiertoEn,
+          recaptcha_token: recaptchaToken,
+        }),
       });
       const result = await res.json();
       if (result.ok) {
@@ -140,6 +185,7 @@ import { DIRECCION, GOOGLE_MAPS_URL } from '../../data/consulta';
         // Medición (GTM): el envío del formulario es un contacto/lead.
         try { (window.dataLayer = window.dataLayer || []).push({ event: 'contacto_formulario', page_path: location.pathname }); } catch (e) {}
         form.reset();
+        abiertoEn = Date.now();
       } else {
         status.textContent = result.error || 'No se pudo enviar el mensaje. Intenta por WhatsApp.';
       }

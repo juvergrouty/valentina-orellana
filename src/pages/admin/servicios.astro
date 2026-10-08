@@ -6,6 +6,8 @@ import { supabase } from '../../lib/supabase';
 const filtro = Astro.url.searchParams.get('filtro') ?? 'todos';
 const saved  = Astro.url.searchParams.get('saved') === '1';
 const editId = Astro.url.searchParams.get('edit') ?? null;
+const errorParam  = Astro.url.searchParams.get('error');
+const errorDetail = Astro.url.searchParams.get('detail') ?? '';
 
 let query = supabase.from('services_catalog').select('*').order('sort_order').order('created_at');
 if (filtro === 'visibles')  query = query.eq('visible', true);
@@ -34,6 +36,9 @@ const TYPE_ICON: Record<string, string> = {
 <AdminLayout title="Servicios" current="/admin/servicios">
 
   {saved && <div class="alert-success">✓ Servicio guardado correctamente.</div>}
+  {errorParam === 'servicio_guardar' && <div class="alert-error">⚠ No se guardó el servicio{errorDetail ? `: ${errorDetail}` : ''}. Intenta de nuevo.</div>}
+  {errorParam === 'servicio_eliminar' && <div class="alert-error">⚠ No se pudo eliminar el servicio{errorDetail ? `: ${errorDetail}` : ''}. Quedó tal como estaba.</div>}
+  {errorParam === 'servicio_con_sesiones' && <div class="alert-error">⚠ Tiene sesiones futuras agendadas con este servicio; cámbiales el servicio antes de eliminarlo.</div>}
 
   <!-- Cabecera -->
   <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">

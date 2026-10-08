@@ -494,10 +494,20 @@ async function handleBooking(request: Request) {
     }
 
   // Guardar el token de Flow en la reserva (para luego recuperarla desde el webhook/confirmación)
-  await supabase
+  const { error: tokenErr } = await supabase
       .from('bookings')
       .update({ mp_preference_id: flowOrder.token })
       .eq('id', booking.id);
+  // Sin el token, el aviso de pago de Flow no encontraría la reserva: se
+  // cancela y se pide reintentar, para que nunca quede una reserva cobrable
+  // que no se pueda confirmar (8 oct 2026; antes el error se ignoraba).
+  if (tokenErr) {
+        await logError('bookings/token', 'No se pudo guardar el token de Flow en la reserva; se cancela', { bookingId: booking.id, token: flowOrder.token, error: tokenErr.message });
+        const { error: cancelErr } = await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', booking.id);
+        if (cancelErr) await logError('bookings/token', 'Tampoco se pudo cancelar la reserva sin token', { bookingId: booking.id, error: cancelErr.message });
+        await restaurarLiberadas();
+        return json({ error: 'No pudimos preparar el pago de tu reserva. Intenta de nuevo en unos segundos; no se te cobró nada.', errorType: 'flow_error' }, 500);
+  }
   try { await tagBookingsWithPaymentToken([booking.id], flowOrder.token); } catch (e) {
     await logError('bookings/token-historial', 'No se pudo guardar el historial de token de pago (no bloquea la reserva)', { bookingId: booking.id, error: e instanceof Error ? e.message : String(e) });
   }

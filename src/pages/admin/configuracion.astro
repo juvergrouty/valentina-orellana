@@ -23,6 +23,8 @@ const googleConnected = !!googleEmail;
 
 const googleStatus = Astro.url.searchParams.get('google');
 const saved = Astro.url.searchParams.get('saved') === '1';
+const errorParam  = Astro.url.searchParams.get('error');
+const errorDetail = Astro.url.searchParams.get('detail') ?? '';
 
 // Instagram — token por variable de entorno o por panel
 const igTokenEnv = !!import.meta.env.INSTAGRAM_ACCESS_TOKEN;
@@ -41,6 +43,7 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
 <AdminLayout title="Configuración" current="/admin/configuracion">
 
   {saved && <div class="alert-success">✓ Configuración guardada correctamente.</div>}
+  {errorParam === 'settings_guardar' && <div class="alert-error">⚠ No se guardó la configuración{errorDetail ? ` (${errorDetail})` : ''}. Intenta de nuevo.</div>}
   {googleStatus === 'connected'    && <div class="alert-success">✓ Google Calendar conectado correctamente.</div>}
   {googleStatus === 'disconnected' && <div class="alert-success">Google Calendar desconectado.</div>}
   {googleStatus === 'error'        && <div class="alert-error">Error al conectar con Google. Intenta nuevamente.</div>}

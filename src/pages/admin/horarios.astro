@@ -142,6 +142,16 @@ const feriados = await estadoFeriados().catch(() => []);
       {errorMsg === 'extra-fecha' ? 'Elige una fecha de hoy en adelante.' : errorMsg === 'extra-hora' ? 'Elige una hora válida.' : errorMsg === 'extra-modalidad' ? 'Elige la modalidad.' : 'No se pudo guardar la hora extra. Intenta de nuevo.'}
     </div>
   )}
+  {errorMsg === 'bloqueo_guardar' && (
+    <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
+      ⚠ No se guardó el bloqueo{Astro.url.searchParams.get('detail') ? `: ${Astro.url.searchParams.get('detail')}` : ''}. Esas fechas siguen abiertas en la agenda web — intenta de nuevo.
+    </div>
+  )}
+  {errorMsg === 'settings_guardar' && (
+    <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
+      ⚠ No se guardó la configuración{Astro.url.searchParams.get('detail') ? ` (${Astro.url.searchParams.get('detail')})` : ''}. Intenta de nuevo.
+    </div>
+  )}
   {savedMsg === 'cfg' && (
     <div style="background:#f0fdf4;border:1px solid #86efac;color:#15803d;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
       ✓ Configuración de sesiones guardada.

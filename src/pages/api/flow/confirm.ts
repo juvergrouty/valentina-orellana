@@ -20,11 +20,8 @@ import type { APIRoute } from 'astro';
 import { getPaymentStatus } from '../../../lib/flow';
 import { horaDisponible } from '../../../lib/disponibilidad';
 import { supabase } from '../../../lib/supabase';
-import { sendConfirmationToClient, sendNotificationToAdmin } from '../../../lib/email';
-import { syncBookingToCalendar, markBookingPaidInCalendar } from '../../../lib/syncCalendar';
-import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
-import { emitBoletaParaReserva } from '../../../lib/apigateway';
-import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
+import { upsertPatientFromBooking } from '../../../lib/patients';
+import { encolarTareas, procesarTareas, ejecutarTarea, nombreTarea, type TareaPago } from '../../../lib/tareasEnvio';
 import { logInfo, logError, logWarn } from '../../../lib/logger';
 import { tagBookingsWithPaymentToken } from '../../../lib/debt';
 
@@ -103,6 +100,7 @@ export const POST: APIRoute = async ({ request }) => {
       // queda huérfano — si el paciente paga con ESE link viejo, no aparece acá.
       // Se busca en el historial guardado en notes (ver tagBookingsWithPaymentToken)
       // antes de darlo por "ya procesado" o "huérfano de verdad".
+      let porHistorial = false;
       if (!selErr && (!candidates || !candidates.length)) {
         const likeToken = token.replace(/[%_]/g, c => `\\${c}`);
         const { data: historicos } = await supabase
@@ -116,9 +114,24 @@ export const POST: APIRoute = async ({ request }) => {
           const suma = historicos.reduce((t: number, h: { amount?: number | null }) => t + (Number(h.amount) || 0), 0);
           if (Number(status.amount) === suma) {
             candidates = historicos;
+            porHistorial = true;
           } else {
             await logError('flow/monto-no-coincide', 'Pago de Flow encontrado por el historial de links, pero el monto no coincide con las sesiones: no se confirmó. Revisar en Flow.', { token, flowOrder: status.flowOrder, pagado: status.amount, esperado: suma, ids: historicos.map((h: { id: string }) => h.id) });
           }
+        }
+      }
+
+      // Monto pagado vs. lo que se cobra (camino normal, por token). Si no
+      // calza (p. ej. la paciente pagó un "Cobrar todo" con una sesión que
+      // Valentina ya había marcado pagada en efectivo), se confirma igual —el
+      // pago es real— pero queda un error visible para devolver la diferencia
+      // (auditoría 8 oct 2026).
+      if (!selErr && candidates?.length && !porHistorial) {
+        const esperado = candidates.reduce((t: number, h: { amount?: number | null }) => t + (Number(h.amount) || 0), 0);
+        if (Number(status.amount) !== esperado) {
+          await logError('flow/monto-distinto',
+            `El pago de Flow (${status.amount}) no coincide con lo que se cobraba (${esperado}). Revisa si hay que devolver una diferencia o cobrar lo que falta.`,
+            { token, flowOrder: status.flowOrder, pagado: status.amount, esperado, ids: candidates.map((c: { id: string }) => c.id) });
         }
       }
 
@@ -263,100 +276,40 @@ export const POST: APIRoute = async ({ request }) => {
           await logError('flow/confirmar-reserva', 'Pago recibido pero la(s) reserva(s) no se pudieron marcar como confirmadas', { token, flowOrder: status.flowOrder, ids, error: error.message });
         }
 
-        for (const updatedRow of updated ?? []) {
-          // Solo las reservas nuevas (pending_payment → confirmed) llevan el
-          // flujo completo de "tu sesión quedó agendada" — correo de
-          // confirmación, aviso a Valentina, evento en Google Calendar. Una
-          // reserva de deuda (ya estaba 'confirmed', la sesión ya ocurrió) solo
-          // necesita quedar marcada como pagada y con su boleta — el correo de
-          // la boleta ya cumple el rol de "recibo de tu pago".
-          if (wasNew.has(updatedRow.id)) {
-            const adminEmail = cfg['notification_email'] || ADMIN_EMAIL_FALLBACK;
-            // Nombre real del servicio y si es su primera sesión pagada (el
-            // correo muestra las condiciones del servicio a pacientes nuevas).
-            // Antes el correo salía con el nombre genérico y nunca las mostraba.
-            let serviceName: string | undefined;
-            if (updatedRow.service_id) {
-              const { data: svc } = await supabase.from('services_catalog').select('name').eq('id', updatedRow.service_id).maybeSingle();
-              serviceName = svc?.name ?? undefined;
-            }
-            const { count: pagadasAntes } = await supabase.from('bookings')
-              .select('id', { count: 'exact', head: true })
-              .eq('patient_email', String(updatedRow.patient_email ?? '').toLowerCase())
-              .not('paid_at', 'is', null)
-              .neq('status', 'cancelled') // un pago de una sesión cancelada no cuenta como "ya pagó antes"
-              .not('id', 'in', `(${ids.join(',')})`);
-            const emailData = {
-              patient_name:   updatedRow.patient_name,
-              patient_email:  updatedRow.patient_email,
-              patient_phone:  updatedRow.patient_phone,
-              session_type:   updatedRow.session_type,
-              session_date:   updatedRow.session_date,
-              session_time:   String(updatedRow.session_time ?? '').slice(0, 5),
-              amount:         updatedRow.amount,
-              payment_method: 'flow',
-              booking_id:     updatedRow.id,
-              service_name:   serviceName,
-              is_new_patient: (pagadasAntes ?? 0) === 0,
-            };
-            // AWAIT: es un webhook; si no esperamos, la función serverless
-            // termina y mata la sincronización con Google Calendar / los correos.
-            // Cobro manual sin fecha (marcador 2099-12-31): no hay sesión que
-            // confirmar ni evento que crear — antes le llegaba a la paciente
-            // "sesión confirmada el 31 de diciembre de 2099" y una invitación
-            // de calendario en 2099 (auditoría 8 oct 2026). Recibe la boleta.
-            const sinFecha = String(updatedRow.session_date) === '2099-12-31';
-            await Promise.all([
-              sinFecha ? Promise.resolve() : sendConfirmationToClient(emailData).catch(console.error),
-              sendNotificationToAdmin(emailData, adminEmail).catch(console.error),
-              // Crea el evento si no existía; si ya existía (reserva con link de pago),
-              // lo pasa de "Por pagar" a pagado e invita al paciente.
-              sinFecha ? Promise.resolve() : syncBookingToCalendar(updatedRow).then(() => markBookingPaidInCalendar(updatedRow.id, true)).catch(console.error),
-              upsertPatientFromBooking({ ...emailData, rut: updatedRow.patient_rut }).catch(console.error),
-            ]);
-          }
-
-          // Boleta de honorarios automática al confirmarse el pago online, una
-          // por reserva (si el pago cubrió 2 sesiones, salen 2 boletas — igual
-          // que Encuadrado). IMPORTANTE (corregido): antes esto se saltaba por
-          // completo si la reserva no traía patient_rut, y solo quedaba un
-          // console.warn invisible. emitBoletaParaReserva ya sabe buscar el RUT
-          // en la ficha del paciente si la reserva no trae uno propio.
-          // Interruptor "Emitir la boleta automáticamente" del servicio: si
-          // Valentina lo apagó, la boleta queda para emitirla ella a mano
-          // (antes el interruptor no tenía efecto — auditoría 8 oct 2026).
-          let boletaAuto = true;
-          if (updatedRow.service_id) {
-            const { data: svcB } = await supabase.from('services_catalog').select('boleta_auto').eq('id', updatedRow.service_id).maybeSingle();
-            if (svcB?.boleta_auto === false) boletaAuto = false;
-          }
-          if (!boletaAuto) {
-            await logWarn('flow/boleta-automatica', `Boleta no emitida automáticamente: el servicio tiene apagado "Emitir la boleta automáticamente". Emítela desde el calendario.`, { bookingId: updatedRow.id });
-          } else try {
-            const boletaRes = await emitBoletaParaReserva(updatedRow.id, {
-              rutOverride: updatedRow.patient_rut || undefined,
-              enviarEmail: true,
-            });
-            if (!boletaRes.ok) {
-              const esFaltaRut = (boletaRes.error ?? '').toLowerCase().includes('rut');
-              await logWarn('flow/boleta-automatica', esFaltaRut
-                ? `Boleta no emitida: falta el RUT de ${updatedRow.patient_name} (${updatedRow.patient_email}). Agrégalo en su ficha y emite la boleta manualmente desde el calendario.`
-                : `Boleta no emitida automáticamente: ${boletaRes.error}`,
-                { bookingId: updatedRow.id, patientEmail: updatedRow.patient_email, error: boletaRes.error });
-            }
-          } catch (e) {
-            console.error('[Flow webhook] boleta automática:', e);
-            await logError('flow/boleta-automatica', 'Excepción al emitir la boleta automática tras el pago', { bookingId: updatedRow.id, error: e instanceof Error ? e.message : String(e) });
-          }
+        // Envíos que siguen al pago — "sí o sí, pero una sola vez" (Valentina,
+        // 8 oct 2026). Antes corrían aquí mismo uno tras otro: si la función se
+        // cortaba (p. ej. con la boleta), lo que venía después se perdía para
+        // siempre. Ahora cada envío queda registrado en tareas_envio y es
+        // independiente: se intenta ya, y lo que falle o no alcance lo
+        // reintenta el cron cada 5 min, sin repetir nunca un envío hecho
+        // (ver src/lib/tareasEnvio.ts).
+        //   - Reserva nueva (agendar y pagar): confirmación a la paciente, aviso
+        //     a Valentina, evento en Google Calendar (con Meet) y boleta.
+        //   - Pago de deuda (la sesión ya estaba agendada/confirmada): solo la
+        //     boleta — su correo hace de recibo.
+        //   - "Pasos a seguir" + consentimiento: una vez por paciente por pago
+        //     (sendStepsOnFirstPayment decide si es su primer pago).
+        const tareasPorReserva = new Map<string, TareaPago[]>();
+        const conPasos = new Set<string>();
+        for (const r of updated ?? []) {
+          const t: TareaPago[] = wasNew.has(r.id) ? ['confirmacion', 'aviso_admin', 'calendario', 'boleta'] : ['boleta'];
+          const em = String(r.patient_email ?? '').toLowerCase();
+          if (em && !conPasos.has(em)) { conPasos.add(em); t.push('pasos'); }
+          tareasPorReserva.set(r.id, t);
+          // La ficha de la paciente (solo datos; idempotente).
+          await upsertPatientFromBooking({ patient_name: r.patient_name, patient_email: r.patient_email, patient_phone: r.patient_phone, rut: r.patient_rut }).catch(console.error);
         }
-
-        // "Pasos a seguir" automático si este es el primer pago del paciente
-        // (una vez por paciente, aunque el pago cubra varias reservas).
-        const paidIds = (updated ?? []).map((r: { id: string }) => r.id);
-        const porEmail = new Map<string, any>();
-        for (const r of updated ?? []) if (r.patient_email) porEmail.set(String(r.patient_email).toLowerCase(), r);
-        for (const r of porEmail.values()) {
-          await sendStepsOnFirstPayment({ patient_name: r.patient_name, patient_email: r.patient_email, patient_phone: r.patient_phone, rut: r.patient_rut }, paidIds);
+        const sinCola: string[] = [];
+        const pago = String(status.flowOrder);
+        for (const [id, t] of tareasPorReserva) {
+          if (!(await encolarTareas(id, t, pago))) sinCola.push(id);
+        }
+        // Lo registrado se procesa ya (con plazo, para responderle a Flow a tiempo).
+        await procesarTareas({ bookingIds: [...tareasPorReserva.keys()].filter(id => !sinCola.includes(id)), hastaMs: Date.now() + 20_000 });
+        // Respaldo si no se pudo registrar (base de datos con problemas): se
+        // intenta directo, como antes. Las llaves de idempotencia evitan duplicar.
+        for (const id of sinCola) {
+          for (const t of tareasPorReserva.get(id) ?? []) await ejecutarTarea(id, nombreTarea(t, pago));
         }
       } else {
         // candidates vacío: puede ser (a) un reintento de Flow sobre un pago ya

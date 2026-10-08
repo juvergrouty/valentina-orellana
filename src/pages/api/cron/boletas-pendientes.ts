@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { cronAutorizado } from '../../../lib/cronAuth';
 import { supabase } from '../../../lib/supabase';
+import { procesarTareas } from '../../../lib/tareasEnvio';
 import { enviarBoletaDeReserva, emitBoletaParaReserva, folioVigente, MARCA_PENDIENTE, MARCA_PENDIENTE_EMISION } from '../../../lib/apigateway';
 
 export const prerender = false;
@@ -17,6 +18,11 @@ function json(data: unknown, status = 200) {
 export const GET: APIRoute = async ({ request }) => {
   // Falla cerrado: CRON_SECRET o la clave interna de Supabase (ver cronAuth.ts).
   if (!(await cronAutorizado(request))) return new Response('Unauthorized', { status: 401 });
+
+  // Primero, los envíos que siguen a un pago y quedaron pendientes o fallaron
+  // (confirmación, aviso, calendario, boleta, pasos a seguir): se reintentan
+  // aquí cada 5 min sin repetir los ya hechos (src/lib/tareasEnvio.ts).
+  const envios = await procesarTareas({ hastaMs: Date.now() + 25_000 });
 
   const { data: rows, error } = await supabase
     .from('bookings').select('id, notes').ilike('notes', `%${MARCA_PENDIENTE}%`)
@@ -62,5 +68,5 @@ export const GET: APIRoute = async ({ request }) => {
     emisiones.push({ id: r.id, ok: res.ok, folio: res.folio, error: res.error });
   }
 
-  return json({ ok: true, pending: results.length, sent: results.filter(r => r.sent).length, results, emisiones });
+  return json({ ok: true, envios, pending: results.length, sent: results.filter(r => r.sent).length, results, emisiones });
 };

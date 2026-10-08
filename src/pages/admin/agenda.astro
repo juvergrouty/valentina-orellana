@@ -372,6 +372,12 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       {errorParam === 'insert_failed' && (
         <div class="cal-error-banner">⚠ No se pudo guardar la reserva en la base de datos{errorDetail ? `: ${errorDetail}` : ''}. No se cobró ni se envió nada — intenta de nuevo o avisa a soporte.</div>
       )}
+      {errorParam === 'anular_deuda' && (
+        <div class="cal-error-banner">⚠ No se pudo anular la deuda{errorDetail ? `: ${errorDetail}` : ''}. Sigue como pendiente — intenta de nuevo.</div>
+      )}
+      {errorParam === 'bloqueo_guardar' && (
+        <div class="cal-error-banner">⚠ No se guardó el bloqueo{errorDetail ? `: ${errorDetail}` : ''}. Esas horas siguen abiertas en la agenda web — intenta de nuevo.</div>
+      )}
       {errorParam === 'unknown_no_booking' && (
         <div class="cal-error-banner">⚠ No se creó ninguna sesión por un motivo desconocido. Intenta de nuevo — si vuelve a pasar, avisa a soporte.</div>
       )}

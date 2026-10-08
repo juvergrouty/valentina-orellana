@@ -5,6 +5,7 @@ import { supabase } from '../../../lib/supabase';
 import { sendReminderEmail, emailTypeEnabled, deDiaRelativo } from '../../../lib/email';
 import { sendWhatsappText, sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { nowCL, hoursUntilSessionCL } from '../../../lib/dateUtils';
+import { reservarEnvioUnico, terminarEnvioUnico } from '../../../lib/tareasEnvio';
 
 export const prerender = false;
 
@@ -116,6 +117,12 @@ export const GET: APIRoute = async ({ request }) => {
       const objetivoCorreo = Math.min(Math.max(minutosDe(time), CORREO_DESDE), CORREO_HASTA);
       if (ahoraMin < objetivoCorreo || ahoraMin > CORREO_HASTA + 10) { skipped++; break doEmail; }
 
+      // Registro "una sola vez" por sesión y hora (si se reagenda, la hora
+      // nueva tiene su propio recordatorio). Si la marca en notas no se pudo
+      // guardar, este registro igual impide reenviarlo cada 5 min (8 oct 2026).
+      const tareaCorreo = `recordatorio-correo-${b.session_date}-${time.replace(':', '')}`;
+      if (!(await reservarEnvioUnico(b.id, tareaCorreo))) { skipped++; break doEmail; }
+
       let serviceName: string | undefined;
       if (b.service_id) {
         const { data: svc } = await supabase.from('services_catalog').select('name').eq('id', b.service_id).maybeSingle();
@@ -132,7 +139,8 @@ export const GET: APIRoute = async ({ request }) => {
         amount:         b.amount ?? 0,
         payment_method: b.payment_method ?? 'manual',
         service_name:   serviceName,
-      });
+      }, { idempotencyKey: `${b.id}:${tareaCorreo}` });
+      await terminarEnvioUnico(b.id, tareaCorreo, res.sent, res.reason);
 
       if (res.sent) {
         sent++;
@@ -162,11 +170,17 @@ export const GET: APIRoute = async ({ request }) => {
         if (b.session_date !== today || ahoraMin < objetivoWa) { waSkipped++; break doWhatsapp; }
       }
 
+      const tareaWa = `recordatorio-whatsapp-${b.session_date}-${time.replace(':', '')}`;
+      // Hasta 60 intentos (≈5 h, toda la ventana del recordatorio): si WhatsApp se
+      // conecta o Meta aprueba la plantilla durante el día, igual alcanza a salir.
+      if (!(await reservarEnvioUnico(b.id, tareaWa, 60))) { waSkipped++; break doWhatsapp; }
+
       const firstName = (b.patient_name ?? '').split(' ')[0] || 'hola';
 
       const res = templateName
         ? await sendWhatsappTemplate(b.patient_phone, templateName, templateLang, [firstName, `${deDiaRelativo(b.session_date)} a las ${time} hrs`])
         : await sendWhatsappText(b.patient_phone, `Hola ${firstName}, te recuerdo tu hora ${deDiaRelativo(b.session_date)} a las ${time} hrs. — Valentina Orellana`);
+      await terminarEnvioUnico(b.id, tareaWa, res.sent, res.reason);
       if (res.sent) {
         waSent++;
         liveNotes = `${liveNotes ? liveNotes + '\n' : ''}${WA_MARKER} ${today}`;

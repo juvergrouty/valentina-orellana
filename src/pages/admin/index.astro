@@ -53,11 +53,15 @@ const { count: pendingCount } = await supabase
 // Reservas confirmadas totales del mes
 const monthStartD = nowCL();
 const monthStart = new Date(monthStartD.getFullYear(), monthStartD.getMonth(), 1).toISOString().slice(0, 10);
+// Último día del mes (8 oct 2026): sin tope se contaban también las sesiones
+// de meses siguientes y los cobros sin fecha (2099-12-31).
+const monthEnd = new Date(monthStartD.getFullYear(), monthStartD.getMonth() + 1, 0).toISOString().slice(0, 10);
 const { count: monthCount } = await supabase
   .from('bookings')
   .select('*', { count: 'exact', head: true })
   .eq('status', 'confirmed')
-  .gte('session_date', monthStart);
+  .gte('session_date', monthStart)
+  .lte('session_date', monthEnd);
 
 // Reservas por origen (últimos 90 días, por fecha en que se reservó): solo
 // confirmadas. select('*') para no fallar si la migración 0008 aún no corre.

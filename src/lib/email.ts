@@ -75,14 +75,16 @@ async function lugarSesion(sessionType: string | null | undefined): Promise<stri
   return addr?.value?.trim() ? `Presencial · ${addr.value.trim()}` : 'Presencial en la consulta';
 }
 
-export async function sendConfirmationToClient(data: BookingEmailData, opts: { skipToggle?: boolean } = {}) {
+// opts.idempotencyKey: Resend rechaza un segundo envío con la misma llave (24 h),
+// así un reintento nunca duplica el correo (ver src/lib/tareasEnvio.ts).
+export async function sendConfirmationToClient(data: BookingEmailData, opts: { skipToggle?: boolean; idempotencyKey?: string } = {}): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
-  if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
+  if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return { sent: false, reason: 'RESEND_API_KEY no configurado' }; }
 
   // Envío automático: respeta el interruptor de Configuración. El reenvío manual lo omite.
   if (!opts.skipToggle && !(await emailTypeEnabled('confirmation'))) {
     await logEmail('email/confirmacion', data.patient_email, 'Confirmación (desactivada en Configuración)', false, 'Envío automático desactivado');
-    return;
+    return { sent: true, reason: 'desactivado' }; // nada que enviar: no es un error que reintentar
   }
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
@@ -188,8 +190,12 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
         </p>
       </div>
     `,
-  });
+  }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+  // Misma llave con otro contenido = ese correo YA se envió en un intento anterior
+  // (Resend lo rechaza para no duplicar): cuenta como enviado, no como falla.
+  if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
   await logEmail('email/confirmacion', data.patient_email, subject, !res.error, res.error?.message);
+  return res.error ? { sent: false, reason: res.error.message } : { sent: true };
 }
 
 // ─── Email al cliente: su sesión cambió (reagendada o cambio de servicio) ───
@@ -380,7 +386,7 @@ export function deDiaRelativo(sessionDate: string): string {
 }
 
 // ─── Email al cliente: recordatorio de sesión ────────────────────────────────
-export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent: boolean; reason?: string }> {
+export async function sendReminderEmail(data: BookingEmailData, opts: { idempotencyKey?: string } = {}): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
 
@@ -422,7 +428,10 @@ export async function sendReminderEmail(data: BookingEmailData): Promise<{ sent:
         </p>
       </div>
     `,
-  });
+  }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+  // Misma llave con otro contenido = ese correo YA se envió en un intento anterior
+  // (Resend lo rechaza para no duplicar): cuenta como enviado, no como falla.
+  if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
   await logEmail('email/recordatorio', data.patient_email, subject, !res.error, res.error?.message);
   if (res.error) return { sent: false, reason: res.error.message };
   return { sent: true };
@@ -662,6 +671,7 @@ export async function sendStepsEmail(opts: {
   patientName:   string;
   patientEmail:  string;
   clinicAddress?: string;
+  idempotencyKey?: string;
 }): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
@@ -670,7 +680,10 @@ export async function sendStepsEmail(opts: {
     to:   opts.patientEmail,
     subject: 'Pasos a seguir para tu proceso — Ps. Valentina Orellana',
     html: stepsEmailHtml(opts),
-  });
+  }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+  // Misma llave con otro contenido = ese correo YA se envió en un intento anterior
+  // (Resend lo rechaza para no duplicar): cuenta como enviado, no como falla.
+  if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
   await logEmail('email/pasos', opts.patientEmail, 'Pasos a seguir', !res.error, res.error?.message);
   if (res.error) return { sent: false, reason: res.error.message };
   return { sent: true };
@@ -829,9 +842,9 @@ export async function sendRescheduleAdminAlert(
 }
 
 // ─── Email al admin: nueva reserva ───────────────────────────────────────────
-export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail: string, pendingPayment = false) {
+export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail: string, pendingPayment = false, opts: { idempotencyKey?: string } = {}): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
-  if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return; }
+  if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return { sent: false, reason: 'RESEND_API_KEY no configurado' }; }
 
   const sessionLabel = SESSION_LABELS[data.session_type] ?? data.session_type;
   // La oficina donde subarrienda usa Reservo para el registro de horas
@@ -896,8 +909,12 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
         </a>
       </div>
     `,
-  });
+  }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+  // Misma llave con otro contenido = ese correo YA se envió en un intento anterior
+  // (Resend lo rechaza para no duplicar): cuenta como enviado, no como falla.
+  if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
   await logEmail('email/notif-admin', adminEmail, 'Nueva reserva', !res.error, res.error?.message);
+  return res.error ? { sent: false, reason: res.error.message } : { sent: true };
 }
 
 function escapeHtml(s: string | null | undefined) {
@@ -958,6 +975,7 @@ export async function sendConsentLinkEmail(opts: {
   patientName:  string;
   patientEmail: string;
   url:          string;
+  idempotencyKey?: string;
 }): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
@@ -986,7 +1004,10 @@ export async function sendConsentLinkEmail(opts: {
         </p>
       </div>
     `,
-  });
+  }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+  // Misma llave con otro contenido = ese correo YA se envió en un intento anterior
+  // (Resend lo rechaza para no duplicar): cuenta como enviado, no como falla.
+  if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
   await logEmail('email/consentimiento', opts.patientEmail, subject, !res.error, res.error?.message);
   if (res.error) return { sent: false, reason: res.error.message };
   return { sent: true };

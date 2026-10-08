@@ -5,7 +5,7 @@
  */
 
 import { supabase } from './supabase';
-import { quitarPrefijoSiHayInvitados, refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle, setCalendarEventPaidState, UNPAID_PREFIX } from './googleCalendar';
+import { quitarPrefijoSiHayInvitados, refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle, setCalendarEventPaidState, setCalendarEventVoided, UNPAID_PREFIX } from './googleCalendar';
 import { logError } from './logger';
 import { cambiarNotas } from './apigateway';
 
@@ -76,7 +76,7 @@ export async function deleteBookingFromCalendar(bookingId: string): Promise<void
 }
 
 /** Actualiza fecha/hora del evento en Google Calendar al reagendar */
-export async function rescheduleBookingInCalendar(bookingId: string, date: string, time: string, durationMin = 55): Promise<void> {
+export async function rescheduleBookingInCalendar(bookingId: string, date: string, time: string, durationMin = 55, notify = true): Promise<void> {
   try {
     const { data: booking } = await supabase.from('bookings').select('google_event_id, session_type').eq('id', bookingId).single();
     if (!booking?.google_event_id) return;
@@ -85,7 +85,7 @@ export async function rescheduleBookingInCalendar(bookingId: string, date: strin
     // Presencial: la invitación lleva la dirección (también corrige eventos
     // antiguos que se crearon sin ella).
     const location = (booking.session_type ?? '').includes('online') ? undefined : await direccionConsulta();
-    await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin, location);
+    await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin, location, notify);
   } catch (e) {
     await logError('calendar/reagendar', 'No se pudo actualizar el evento de Google Calendar', { bookingId, date, time, error: e instanceof Error ? e.message : String(e) });
   }
@@ -197,6 +197,10 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
       paid,
       isOnline,
       calendarId:    cfg['google_calendar_id'] ?? 'primary',
+      // Id fijo derivado de la reserva (hex sin guiones = base32hex válido):
+      // si un intento se corta tras crear el evento y antes de guardar su id,
+      // el reintento encuentra ese mismo evento en vez de duplicarlo.
+      eventId:       booking.id.replace(/-/g, '').toLowerCase(),
     });
 
     // Guardar event_id y Meet link en la reserva SIN pisar otras notas (ej. el
@@ -224,15 +228,33 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
 /** Cambia el evento de la reserva a "pagado" (quita "Por pagar" y lo pone en verde, e
  *  invita al paciente) o de vuelta a "por pagar" (al anular un pago). Mejor
  *  esfuerzo: si falla, queda en /admin/logs y no interrumpe el flujo. */
-export async function markBookingPaidInCalendar(bookingId: string, paid: boolean, opts: { invitar?: boolean } = {}): Promise<void> {
+export async function markBookingPaidInCalendar(bookingId: string, paid: boolean, opts: { invitar?: boolean } = {}): Promise<boolean> {
+  // true = quedó hecho (o no hay evento/Google que actualizar); false = falló y conviene reintentar.
   try {
     const { data: booking } = await supabase.from('bookings').select('google_event_id, patient_email').eq('id', bookingId).single();
-    if (!booking?.google_event_id) return;
+    if (!booking?.google_event_id) return true;
     const auth = await getValidAccessToken();
-    if (!auth) return;
+    if (!auth) return true;
     await setCalendarEventPaidState(auth.token, auth.calendarId, booking.google_event_id, paid, paid && opts.invitar !== false ? (booking.patient_email || undefined) : undefined);
+    return true;
   } catch (e) {
     await logError('calendar/estado-pago', 'No se pudo actualizar el estado de pago del evento de Google Calendar', { bookingId, paid, error: e instanceof Error ? e.message : String(e) });
+    return false;
+  }
+}
+
+/** Deuda anulada: el evento deja de verse como deuda (gris, sin "Por pagar"), sin avisar a la paciente. */
+export async function markBookingDebtVoidedInCalendar(bookingId: string): Promise<boolean> {
+  try {
+    const { data: booking } = await supabase.from('bookings').select('google_event_id').eq('id', bookingId).single();
+    if (!booking?.google_event_id) return true;
+    const auth = await getValidAccessToken();
+    if (!auth) return true;
+    await setCalendarEventVoided(auth.token, auth.calendarId, booking.google_event_id);
+    return true;
+  } catch (e) {
+    await logError('calendar/deuda-anulada', 'No se pudo actualizar el evento de Google Calendar de una deuda anulada', { bookingId, error: e instanceof Error ? e.message : String(e) });
+    return false;
   }
 }
 

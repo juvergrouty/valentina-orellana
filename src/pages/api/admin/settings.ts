@@ -49,6 +49,10 @@ export const POST: APIRoute = async ({ request }) => {
 
   const existingKeys = new Set((existing ?? []).map((r: { key: string }) => r.key));
 
+  // Claves que no se pudieron guardar: se avisa en la página (8 oct 2026);
+  // antes se volvía con "✓ guardada" aunque la base hubiera fallado.
+  const fallidas: string[] = [];
+  let primerError = '';
   for (const [key, value] of Object.entries(updates)) {
     if (existingKeys.has(key)) {
       // UPDATE
@@ -56,14 +60,22 @@ export const POST: APIRoute = async ({ request }) => {
         .from('settings')
         .update({ value, updated_at: new Date().toISOString() })
         .eq('key', key);
-      if (error) console.error(`[settings] UPDATE ${key}:`, error.message, error.code);
+      if (error) { console.error(`[settings] UPDATE ${key}:`, error.message, error.code); fallidas.push(key); primerError ||= error.message; }
     } else {
       // INSERT
       const { error } = await supabase
         .from('settings')
         .insert({ key, value });
-      if (error) console.error(`[settings] INSERT ${key}:`, error.message, error.code);
+      if (error) { console.error(`[settings] INSERT ${key}:`, error.message, error.code); fallidas.push(key); primerError ||= error.message; }
     }
+  }
+
+  if (fallidas.length) {
+    const u = new URL(redirect, 'http://local');
+    u.searchParams.delete('saved');
+    u.searchParams.set('error', 'settings_guardar');
+    u.searchParams.set('detail', `${fallidas.length} de ${Object.keys(updates).length} ajustes: ${primerError}`.slice(0, 200));
+    return new Response(null, { status: 302, headers: { Location: u.pathname + '?' + u.searchParams.toString() } });
   }
 
   return new Response(null, { status: 302, headers: { Location: redirect } });

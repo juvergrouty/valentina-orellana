@@ -140,7 +140,12 @@ export const POST: APIRoute = async ({ request }) => {
       session_type: form.get('session_type') as string,
       content:      (form.get('content') as string)?.trim(),
     });
-    if (error) console.error('[session_notes] add:', error.message);
+    // Sin guardar, se avisa en la ficha (8 oct 2026): antes volvía como si la
+    // nota hubiera quedado guardada y se perdía lo escrito sin saberlo.
+    if (error) {
+      console.error('[session_notes] add:', error.message);
+      redirect = withParam(redirect, 'error', `La nota NO quedó guardada (${error.message}). Escríbela de nuevo e inténtalo otra vez.`);
+    }
   }
 
   // ── Editar nota: se guarda la versión anterior (nunca se pisa) ──────────────

@@ -1070,13 +1070,18 @@ const { data: catalogServices } = await supabase
     let recaptchaToken = '';
     if (window.__RECAPTCHA_SITE_KEY__ && window.grecaptcha) {
       try {
-        recaptchaToken = await new Promise((resolve, reject) => {
-          grecaptcha.ready(() => {
-            grecaptcha.execute(window.__RECAPTCHA_SITE_KEY__, { action: 'submit_booking' })
-              .then(resolve)
-              .catch(reject);
-          });
-        });
+        // Con tope de 8 s: si el script de Google está bloqueado o lento, la
+        // reserva no queda en "Procesando..." para siempre (8 oct 2026).
+        recaptchaToken = await Promise.race([
+          new Promise((resolve, reject) => {
+            grecaptcha.ready(() => {
+              grecaptcha.execute(window.__RECAPTCHA_SITE_KEY__, { action: 'submit_booking' })
+                .then(resolve)
+                .catch(reject);
+            });
+          }),
+          new Promise((resolve) => setTimeout(() => resolve(''), 8000)),
+        ]);
       } catch (err) {
         console.error('[recaptcha] error obteniendo token', err);
       }
