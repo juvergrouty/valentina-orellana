@@ -9,19 +9,20 @@ const items = [
 // Bordes izquierdos por índice:
 // i=1,3: siempre (segunda columna en cualquier layout)
 // i=2:   solo en md+ (primera columna de fila 2 en mobile no lleva borde)
-const borderClass = ['', 'border-l border-dust', 'md:border-l md:border-dust', 'border-l border-dust'];
+// i=2,3: línea arriba solo en mobile (separa las dos filas del 2x2)
+const borderClass = ['', 'border-l border-dust', 'border-t md:border-t-0 md:border-l border-dust', 'border-l border-t md:border-t-0 border-dust'];
 ---
 
 <section class="bg-warm border-b border-dust">
   <div class="container-site">
     <div class="grid grid-cols-2 md:grid-cols-4">
       {items.map((item, i) => (
-        <div class={`flex flex-col items-center text-center py-14 px-4 gap-4 ${borderClass[i]}`}>
+        <div class={`flex flex-col items-center text-center py-8 md:py-14 px-3 md:px-4 gap-3 md:gap-4 ${borderClass[i]}`}>
           <img
             src={item.icon}
             alt=""
             aria-hidden="true"
-            class="w-12 h-12 opacity-60"
+            class="w-10 h-10 md:w-12 md:h-12 opacity-60"
             style="filter: brightness(0) saturate(100%) invert(33%) sepia(13%) saturate(587%) hue-rotate(93deg) brightness(94%) contrast(85%);"
           />
           <div>

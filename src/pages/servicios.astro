@@ -85,7 +85,7 @@ const modalityLabel = (m: string) =>
             </div>
 
             <!-- Contenido sobre la imagen -->
-            <div class="relative z-10 p-8 md:p-10">
+            <div class="relative z-10 px-6 pb-6 pt-16 sm:p-8 md:p-10">
               <p class="label text-white/50 mb-3">{String(i + 1).padStart(2, '0')}</p>
               <h2 class="font-heading font-light text-3xl md:text-4xl text-white leading-tight mb-3">
                 {service.name}
@@ -96,10 +96,10 @@ const modalityLabel = (m: string) =>
               {service.location && (
                 <p class="font-body text-xs text-white/50 mb-4">📍 {service.location}</p>
               )}
-              <div class="flex items-center justify-between pt-5 border-t border-white/20">
+              <div class="flex flex-wrap items-end justify-between gap-4 pt-5 border-t border-white/20">
                 <div>
                   <p class="label text-white/40 mb-0.5">Duración · Valor</p>
-                  <p class="font-heading font-light text-lg text-white">
+                  <p class="font-heading font-light text-lg text-white whitespace-nowrap">
                     {service.duration_min} min · {formatCLP(service.price)}
                   </p>
                 </div>

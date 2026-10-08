@@ -32,8 +32,9 @@ export default {
         site: '1600px',
       },
       spacing: {
-        section:    '7rem',
-        'section-sm': '4rem',
+        // Proporcional al ancho: 3.5rem en celular (antes 7rem fijo dejaba un hueco enorme bajo el banner), ~4.3rem en tablet y 7rem desde ~1245px.
+        section:    'clamp(3.5rem, 9vw, 7rem)',
+        'section-sm': 'clamp(3rem, 6vw, 4rem)',
       },
       borderRadius: {
         btn: '4px',
