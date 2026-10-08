@@ -75,7 +75,7 @@ create table if not exists settings (
 
 insert into settings (key, value) values
   ('manual_payment_enabled', 'true'),
-  ('notification_email',     'juver@grouty.cl'),
+  ('notification_email',     'vinculosquesostienen@gmail.com'),
   ('email_from',             '')
 on conflict (key) do nothing;
 
