@@ -132,6 +132,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (error?.code === '42703') {
       return redirect(conParam(dest) + 'error=missing_migration');
     }
+    // Revivir una sesión vencida/cancelada cuya hora ya se cruza con otra.
+    if (error?.code === '23505' || error?.code === '23P01') return redirect(conParam(dest) + 'error=conflict');
     if (error) {
       return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(error.message.slice(0, 200)));
     }
@@ -641,6 +643,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         bookingIds.push(booking.id);
         creadas++;
         totalCobrado += montoSesion;
+      } else if (insErr?.code === '23505' || insErr?.code === '23P01') {
+        conflictCount++; // alguien tomó esa hora (o una que se cruza) justo ahora: se salta como las demás
       } else if (insErr) {
         // No silenciar el error: antes esto se perdía por completo y la admin
         // no tenía forma de saber por qué "no pasó nada" al agendar.

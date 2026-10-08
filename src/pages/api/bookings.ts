@@ -192,7 +192,7 @@ async function handleBooking(request: Request) {
         } catch { /* sin respuesta: se trata como no pagada */ }
         if (pagada) {
           if (b.session_date === session_date && String(b.session_time).slice(0, 5) === session_time) {
-            return json({ error: 'Ya pagaste esta hora: en unos minutos te llega el correo de confirmación. Si no llega, escríbeme por WhatsApp.' }, 409);
+            return json({ error: 'Ya pagaste esta hora: en unos minutos te llega el correo de confirmación. Si no llega, escríbeme por WhatsApp.', errorType: 'ya_pagada' }, 409);
           }
           continue; // pagada: no se toca
         }

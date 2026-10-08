@@ -1053,6 +1053,7 @@ const { data: catalogServices } = await supabase
     show('payment-loading');
     hide('payment-ready');
     hide('payment-error');
+    $('payment-error-wa').href = 'https://wa.me/56972735696'; // sin el texto de un intento anterior
 
     voPush('begin_checkout'); // el paciente inicia el pago
 
@@ -1125,11 +1126,15 @@ const { data: catalogServices } = await supabase
         }
         // La hora se ocupó mientras completaba sus datos: se recargan los
         // horarios para que vea los que siguen libres.
+        // Ya había pagado esta misma hora: no es "hora ocupada".
+        if (data.errorType === 'ya_pagada') throw new Error(data.error);
         if (res.status === 409) {
           state.loadedSlots = {};
           // WhatsApp con el servicio y el día ya escritos, para que Valentina
           // le busque una hora personalmente.
-          const waTxt = `Hola Valentina, quería agendar ${state.sessionTitle || 'una sesión'} el ${formatDateEs(state.selectedDate)} a las ${state.selectedTime}, pero esa hora se acaba de ocupar. ¿Me ayudas a encontrar otra?`;
+          let cuando = '';
+          try { cuando = state.selectedDate ? ` el ${formatDateEs(state.selectedDate)}${state.selectedTime ? ` a las ${state.selectedTime}` : ''}` : ''; } catch (e) { cuando = ''; }
+          const waTxt = `Hola Valentina, quería agendar ${state.sessionTitle || 'una sesión'}${cuando}, pero esa hora se acaba de ocupar. ¿Me ayudas a encontrar otra?`;
           $('payment-error-wa').href = `https://wa.me/56972735696?text=${encodeURIComponent(waTxt)}`;
           throw new Error('Justo alguien acaba de tomar esa hora mientras completabas tus datos. No te preocupes: no se te cobró nada. Puedes elegir otra en los horarios disponibles o escribirme por WhatsApp y te ayudo personalmente a encontrar una.');
         }

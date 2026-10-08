@@ -238,6 +238,22 @@ export const POST: APIRoute = async ({ request }) => {
           error   = retry.error;
         }
 
+        // Una de las sesiones se cruza con otra reserva (regla bookings_sin_cruces
+        // o misma hora): se confirman una por una para no dejar sin confirmar
+        // las que no tienen problema; la que choca queda en el error de abajo.
+        if (error?.code === '23P01' || error?.code === '23505') {
+          const ok: any[] = [];
+          const fallidas: string[] = [];
+          for (const id of ids) {
+            const r = await supabase.from('bookings')
+              .update({ status: 'confirmed', mp_payment_id: String(status.flowOrder), paid_at: new Date().toISOString(), payment_note: 'Flow' })
+              .eq('id', id).is('paid_at', null).select();
+            if (r.error) fallidas.push(id); else ok.push(...(r.data ?? []));
+          }
+          updated = ok;
+          error = fallidas.length ? { ...error, message: `Se cruza con otra reserva: ${fallidas.join(', ')}` } : null;
+        }
+
         if (error) {
           // Crítico: el pago llegó de verdad (Flow ya confirmó status=2) pero
           // la(s) reserva(s) no quedaron marcadas como pagadas — antes esto solo
