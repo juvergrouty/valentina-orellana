@@ -12,9 +12,12 @@ name: Frequent cron (reminders + expiración de pagos)
 # reales usar un pinger externo gratuito (ej. cron-job.org) que llame a estos
 # mismos endpoints con el header Authorization: Bearer <CRON_SECRET>.
 
+# 8 oct 2026: la frecuencia real la da Supabase (pg_cron + pg_net, cada 5 min,
+# job "tareas-cada-5-min", con la clave interna de settings.cron_interno_secret;
+# ver src/lib/cronAuth.ts). Este workflow queda SOLO como respaldo manual
+# (Actions → Run workflow): con los dos programados a la vez se podían
+# duplicar recordatorios.
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch: {}
 
 jobs:

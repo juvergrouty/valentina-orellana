@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { cronAutorizado } from '../../../lib/cronAuth';
 import { agregarLineaNotas } from '../../../lib/apigateway';
 import { supabase } from '../../../lib/supabase';
 import { sendReminderEmail, emailTypeEnabled, deDiaRelativo } from '../../../lib/email';
@@ -15,17 +16,13 @@ function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-// Se llama cada 5 min vía GitHub Actions (.github/workflows/frequent-cron.yml —
-// Vercel Hobby solo permite cron diario, así que la frecuencia real la da GH Actions,
-// gratis en repos públicos). Envía el recordatorio por correo a los pacientes cuya
+// Se llama cada 5 min desde Supabase (pg_cron + pg_net, ver src/lib/cronAuth.ts).
+// Antes lo hacía GitHub Actions, que en la práctica corría cada 4-6 horas: el
+// recordatorio de WhatsApp (4 h antes) podía no salir nunca. Envía el recordatorio por correo a los pacientes cuya
 // sesión empieza dentro de la ventana configurada (reminder_window_hours, default 24h).
 export const GET: APIRoute = async ({ request }) => {
-  const secret = import.meta.env.CRON_SECRET;
-  // Falla cerrado: si CRON_SECRET no está configurado, nadie puede llamar al cron.
-  {
-    const auth = request.headers.get('authorization');
-    if (!secret || auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
-  }
+  // Falla cerrado: CRON_SECRET o la clave interna de Supabase (ver cronAuth.ts).
+  if (!(await cronAutorizado(request))) return new Response('Unauthorized', { status: 401 });
 
   // Interruptor global de correo (Configuración). Es independiente del de
   // WhatsApp: si ella apaga los recordatorios por correo, los de WhatsApp

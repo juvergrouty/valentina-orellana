@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { cronAutorizado } from '../../../lib/cronAuth';
 import { expireStaleBookings } from '../../../lib/expireBooking';
 
 export const prerender = false;
@@ -14,12 +15,8 @@ function json(data: unknown, status = 200) {
 // y en cada intento de reserva (bookings.ts) — ambos llaman a la misma
 // expireStaleBookings() de este cron, así que casi siempre se adelantan a este.
 export const GET: APIRoute = async ({ request }) => {
-  const secret = import.meta.env.CRON_SECRET;
-  // Falla cerrado: si CRON_SECRET no está configurado, nadie puede llamar al cron.
-  {
-    const auth = request.headers.get('authorization');
-    if (!secret || auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
-  }
+  // Falla cerrado: CRON_SECRET o la clave interna de Supabase (ver cronAuth.ts).
+  if (!(await cronAutorizado(request))) return new Response('Unauthorized', { status: 401 });
 
   // El link "Pagar y mantener mi hora" se arma con el dominio real de esta
   // petición (www.valentinaorellana.cl). Sin esto usaba PUBLIC_SITE_URL, que en

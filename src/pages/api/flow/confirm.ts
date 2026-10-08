@@ -197,6 +197,23 @@ export const POST: APIRoute = async ({ request }) => {
         }
       }
 
+      // Pago de una sesión que Valentina ya había CANCELADO (la paciente tenía
+      // Flow abierto desde antes). No se revive sola: la cancelación fue a
+      // propósito. Se registra el pago en esa sesión (para no perder el dinero
+      // en Finanzas) y queda un error visible en el panel para reembolsar o
+      // reagendar con la paciente.
+      if (!selErr && candidates?.length) {
+        for (const c of candidates.filter((x: { status: string }) => x.status === 'cancelled')) {
+          candidates = candidates.filter((x: { id: string }) => x.id !== c.id);
+          await supabase.from('bookings')
+            .update({ mp_payment_id: String(status.flowOrder), paid_at: new Date().toISOString(), payment_note: 'Flow (sesión cancelada)' })
+            .eq('id', c.id).is('paid_at', null);
+          await logError('flow/pago-sesion-cancelada',
+            `Pago recibido de ${c.patient_name} (${c.patient_email}) por la sesión del ${c.session_date} a las ${String(c.session_time).slice(0, 5)}, que habías cancelado. La sesión sigue cancelada: hay que reembolsar o reagendar con la paciente.`,
+            { bookingId: c.id, token, flowOrder: status.flowOrder, amount: c.amount });
+        }
+      }
+
       if (selErr) {
         console.error('[Flow webhook] Error buscando reservas:', selErr);
         await logError('flow/confirmar-reserva', 'Pago recibido pero no se pudo buscar la(s) reserva(s) a marcar', { token, flowOrder: status.flowOrder, error: selErr.message });

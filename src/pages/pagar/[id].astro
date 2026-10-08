@@ -36,6 +36,19 @@ function formatDate(iso: string) {
 
 const pendingJson = JSON.stringify({ patientId: patient?.id ?? null });
 
+// Horas que Valentina canceló (de hoy en adelante, sin pagar): se avisa en vez
+// de mostrar "no tienes pagos pendientes", con opciones para seguir.
+const hoyCL = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+const { data: canceladasRaw } = patient?.email
+  ? await supabase.from('bookings').select('id, session_date, session_time')
+      .eq('patient_email', patient.email.toLowerCase())
+      .eq('status', 'cancelled').is('paid_at', null)
+      .gte('session_date', hoyCL).neq('session_date', '2099-12-31')
+      .order('session_date', { ascending: true }).limit(5)
+  : { data: [] };
+const canceladas = (canceladasRaw ?? []) as { id: string; session_date: string; session_time: string }[];
+const waCancelada = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valentina, vi que mi hora fue cancelada. ¿Podemos buscar otra?')}`;
+
 // Datos para transferir (Configuración → Pagos). Transferencia = excepción
 // para quien no puede pagar con tarjeta: sube su comprobante y Valentina lo
 // confirma desde el panel (ver src/lib/comprobantes.ts).
@@ -55,6 +68,21 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
 
 <Layout title="Pagar sesiones pendientes" description="Revisa y paga tus sesiones pendientes con Ps. Valentina Orellana." noindex>
   <section class="max-w-xl mx-auto px-5 py-16 md:py-24">
+    {patient && canceladas.length > 0 && (
+      <div class="border border-dust rounded-lg bg-sand px-5 py-5 mb-8 text-left">
+        <p class="font-medium mb-1">{canceladas.length === 1 ? 'Tu hora fue cancelada' : 'Algunas de tus horas fueron canceladas'}</p>
+        <ul class="text-sm text-stone mb-3">
+          {canceladas.map((c) => (
+            <li>{formatDate(c.session_date)} a las {String(c.session_time).slice(0, 5)}</li>
+          ))}
+        </ul>
+        <p class="text-sm text-stone mb-4">No necesitas pagarla. Si quieres, puedes elegir otra hora en la agenda o escribirme y buscamos una que te acomode.</p>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <a href="/agenda" class="btn-dark justify-center text-center">Agendar otra hora</a>
+          <a href={waCancelada} target="_blank" rel="noopener" class="btn-outline justify-center text-center">Escribirle a Valentina por WhatsApp</a>
+        </div>
+      </div>
+    )}
     {!patient ? (
       <div class="text-center">
         <p class="font-heading text-2xl mb-3">Link no válido</p>
@@ -65,7 +93,7 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
         <p class="font-heading text-2xl mb-3">Hola {patient.name.split(' ')[0]}</p>
         <p class="text-stone">Recibí tu comprobante de transferencia por {formatCLP(totalRevision)} y lo estoy revisando. Apenas lo confirme te llegará la boleta a tu correo. No necesitas pagar de nuevo.</p>
       </div>
-    ) : !pending.length ? (
+    ) : !pending.length && canceladas.length ? null : !pending.length ? (
       <div class="text-center">
         <p class="font-heading text-2xl mb-3">Hola {patient.name.split(' ')[0]} 🎉</p>
         <p class="text-stone">No tienes pagos pendientes en este momento.</p>

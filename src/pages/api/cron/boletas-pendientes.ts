@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { cronAutorizado } from '../../../lib/cronAuth';
 import { supabase } from '../../../lib/supabase';
 import { enviarBoletaDeReserva, emitBoletaParaReserva, folioVigente, MARCA_PENDIENTE, MARCA_PENDIENTE_EMISION } from '../../../lib/apigateway';
 
@@ -14,11 +15,8 @@ function json(data: unknown, status = 200) {
 // caído, etc.). Solo toca reservas con esa marca — nunca reenvía boletas que
 // ya salieron. Lo llama .github/workflows/frequent-cron.yml.
 export const GET: APIRoute = async ({ request }) => {
-  const secret = import.meta.env.CRON_SECRET;
-  {
-    const auth = request.headers.get('authorization');
-    if (!secret || auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
-  }
+  // Falla cerrado: CRON_SECRET o la clave interna de Supabase (ver cronAuth.ts).
+  if (!(await cronAutorizado(request))) return new Response('Unauthorized', { status: 401 });
 
   const { data: rows, error } = await supabase
     .from('bookings').select('id, notes').ilike('notes', `%${MARCA_PENDIENTE}%`)
