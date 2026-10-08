@@ -394,13 +394,13 @@ const { data: catalogServices } = await supabase
             </p>
           </div>
           <div id="payment-error" class="hidden w-full">
-            <p class="font-body text-sm text-red-500 mb-5" id="payment-error-msg"></p>
+            <p class="font-body text-sm text-ink mb-5 leading-relaxed" id="payment-error-msg"></p>
             <div class="flex flex-col items-center gap-3">
               <button type="button" id="payment-back" class="btn-dark text-[10px] py-3 px-6">
-                Elegir otra hora
+                Ver horarios disponibles
               </button>
-              <a href="https://wa.me/56972735696" target="_blank" rel="noopener noreferrer" class="btn-outline text-[10px] py-3 px-6">
-                Coordinar por WhatsApp
+              <a id="payment-error-wa" href="https://wa.me/56972735696" target="_blank" rel="noopener noreferrer" class="btn-outline text-[10px] py-3 px-6">
+                Escribirle a Valentina por WhatsApp
               </a>
             </div>
           </div>
@@ -1127,7 +1127,11 @@ const { data: catalogServices } = await supabase
         // horarios para que vea los que siguen libres.
         if (res.status === 409) {
           state.loadedSlots = {};
-          throw new Error('Esa hora se acaba de ocupar. Elige otra hora, por favor.');
+          // WhatsApp con el servicio y el día ya escritos, para que Valentina
+          // le busque una hora personalmente.
+          const waTxt = `Hola Valentina, quería agendar ${state.sessionTitle || 'una sesión'} el ${formatDateEs(state.selectedDate)} a las ${state.selectedTime}, pero esa hora se acaba de ocupar. ¿Me ayudas a encontrar otra?`;
+          $('payment-error-wa').href = `https://wa.me/56972735696?text=${encodeURIComponent(waTxt)}`;
+          throw new Error('Justo alguien acaba de tomar esa hora mientras completabas tus datos. No te preocupes: no se te cobró nada. Puedes elegir otra en los horarios disponibles o escribirme por WhatsApp y te ayudo personalmente a encontrar una.');
         }
         // El detalle técnico queda en la consola, no a la vista de la paciente.
         if (data.detail) console.error('[agenda] reserva:', data.detail);

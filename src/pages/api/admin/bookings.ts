@@ -277,6 +277,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     const { error: updErr } = await supabase.from('bookings').update({ session_date, session_time }).eq('id', id);
     // Si no se guardó, no se toca el calendario ni se avisa a la paciente.
+    if (updErr?.code === '23505' || updErr?.code === '23P01') return redirect(conParam(dest) + 'error=conflict');
     if (updErr) return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(updErr.message.slice(0, 200)));
     // Nueva fecha: se borran las marcas de recordatorio para que le llegue uno para la fecha nueva.
     await quitarLineasNotas(id, ['RecordatorioEnviado', 'RecordatorioWhatsAppEnviado']);

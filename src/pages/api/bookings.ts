@@ -338,8 +338,9 @@ async function handleBooking(request: Request) {
         insertError = retry.error;
   }
 
-  if (insertError?.code === '23505') {
-        // Otra persona tomó la misma hora en el mismo instante (índice único).
+  // 23505: misma hora exacta (índice único). 23P01: horas que se cruzan
+  // (regla bookings_sin_cruces). Otra persona la tomó en el mismo instante.
+  if (insertError?.code === '23505' || insertError?.code === '23P01') {
         await restaurarLiberadas();
         return json({ error: 'Ese horario ya fue reservado. Por favor elige otro.' }, 409);
   }

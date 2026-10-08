@@ -185,8 +185,9 @@ if (outcome === 'ok' && redirectUrl) {
       <>
         <h1 style="font-family:'Domine',serif;font-size:1.5rem;font-weight:500;">Horario no disponible</h1>
         <p style="color:#6B6860;line-height:1.6;margin:1rem 0 2rem;">
-          Alguien más tomó ese horario mientras tanto. Elige un nuevo horario para el mismo servicio: tus datos ya quedan completos, no tienes que escribirlos de nuevo.
+          Alguien más tomó ese horario mientras tanto. Elige un nuevo horario para el mismo servicio: tus datos ya quedan completos, no tienes que escribirlos de nuevo. Si prefieres, escríbeme por WhatsApp y te ayudo personalmente a encontrar una hora.
         </p>
+        <p style="margin:-1rem 0 1.5rem;"><a href={`https://wa.me/56972735696?text=${encodeURIComponent('Hola Valentina, mi hora se liberó y ya la tomaron. ¿Me ayudas a encontrar otra?')}`} target="_blank" rel="noopener" style="color:#576352;text-decoration:underline;">Escribirle a Valentina por WhatsApp</a></p>
       </>
     )}
     {outcome === 'flow_error' && (

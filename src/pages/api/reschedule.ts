@@ -98,7 +98,8 @@ export const POST: APIRoute = async ({ request }) => {
     .update({ session_date, session_time })
     .eq('id', bookingId);
   if (updErr) {
-    return json({ error: updErr.code === '23505' ? 'Ese horario ya no está disponible. Por favor elige otro.' : 'No se pudo guardar el cambio. Intenta de nuevo.' }, updErr.code === '23505' ? 409 : 500);
+    const ocupado = updErr.code === '23505' || updErr.code === '23P01'; // misma hora o se cruza con otra
+    return json({ error: ocupado ? 'Ese horario se acaba de ocupar. Por favor elige otro, o escríbeme por WhatsApp y te ayudo a encontrar uno.' : 'No se pudo guardar el cambio. Intenta de nuevo.' }, ocupado ? 409 : 500);
   }
   // Nueva fecha: se borran las marcas de recordatorio para que llegue uno nuevo.
   await quitarLineasNotas(bookingId, ['RecordatorioEnviado', 'RecordatorioWhatsAppEnviado']);
