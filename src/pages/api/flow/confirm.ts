@@ -305,7 +305,8 @@ export const POST: APIRoute = async ({ request }) => {
           if (!(await encolarTareas(id, t, pago))) sinCola.push(id);
         }
         // Lo registrado se procesa ya (con plazo, para responderle a Flow a tiempo).
-        await procesarTareas({ bookingIds: [...tareasPorReserva.keys()].filter(id => !sinCola.includes(id)), hastaMs: Date.now() + 20_000 });
+        const enCola = [...tareasPorReserva.keys()].filter(id => !sinCola.includes(id));
+        if (enCola.length) await procesarTareas({ bookingIds: enCola, hastaMs: Date.now() + 20_000 });
         // Respaldo si no se pudo registrar (base de datos con problemas): se
         // intenta directo, como antes. Las llaves de idempotencia evitan duplicar.
         for (const id of sinCola) {

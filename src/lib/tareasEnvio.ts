@@ -171,7 +171,7 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
       case 'pasos': {
         const ok = await sendStepsOnFirstPayment(
           { patient_name: b.patient_name, patient_email: b.patient_email, patient_phone: b.patient_phone, rut: b.patient_rut },
-          await mismoPago(), { idempotencyKey: llave });
+          await mismoPago(), { idempotencyKey: llave, pagadoEn: b.paid_at });
         return ok ? { ok: true } : { ok: false, error: 'no se pudo enviar pasos a seguir / consentimiento' };
       }
     }

@@ -13,10 +13,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   const dest    = /^\/admin(\/|$|\?)/.test(destRaw) && !destRaw.includes('//') ? destRaw : '/admin/horarios';
   // Si no se guardó, se vuelve con un aviso visible y sin el "✓ bloqueada"
   // (8 oct 2026): antes una falla de la base se veía igual que un éxito.
-  const conError = (detalle?: string) => {
+  const conError = (detalle?: string, codigo = 'bloqueo_guardar') => {
     const u = new URL(dest, 'http://local');
     u.searchParams.delete('saved');
-    u.searchParams.set('error', 'bloqueo_guardar');
+    u.searchParams.set('error', codigo);
     if (detalle) u.searchParams.set('detail', detalle.slice(0, 200));
     return redirect(u.pathname + '?' + u.searchParams.toString());
   };
@@ -58,6 +58,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const dateTo   = form.get('date_to')?.toString();
     const reason   = form.get('reason')?.toString() || null;
 
+    // Fechas al revés: antes volvía con "✓ bloqueada" sin bloquear nada (8 oct 2026).
+    if (dateFrom && dateTo && dateFrom > dateTo) return conError(undefined, 'bloqueo_horas');
     if (dateFrom && dateTo && dateFrom <= dateTo) {
       const rows: { date: string; reason: string | null }[] = [];
       const cursor = new Date(dateFrom + 'T00:00:00');
@@ -89,7 +91,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const timeTo   = allDay ? null : (form.get('time_to')?.toString()   || null);
     const label    = form.get('label')?.toString() || null;
 
-    if (!dateFrom || !dateTo || dateTo < dateFrom) return redirect(dest);
+    if (!dateFrom || !dateTo) return redirect(dest);
+    if (dateTo < dateFrom) return conError(undefined, 'bloqueo_horas');
 
     // Cada fila de blocked_slots aplica su horario a TODOS los días de su rango.
     // "Lun 15:00 → Mié 12:00" no es una ventana diaria: es lunes desde las
@@ -102,7 +105,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (allDay || (!timeFrom && !timeTo)) {
       filas.push({ date_from: dateFrom, date_to: dateTo, time_from: null, time_to: null, all_day: true, label });
     } else if (dateFrom === dateTo) {
-      if (timeFrom && timeTo && timeTo <= timeFrom) return redirect(dest + (dest.includes('?') ? '&' : '?') + 'error=bloqueo_horas');
+      if (timeFrom && timeTo && timeTo <= timeFrom) return conError(undefined, 'bloqueo_horas');
       filas.push({ date_from: dateFrom, date_to: dateTo, time_from: timeFrom ?? '00:00', time_to: timeTo ?? '23:59', all_day: false, label });
     } else {
       filas.push({ date_from: dateFrom, date_to: dateFrom, time_from: timeFrom ?? '00:00', time_to: '23:59', all_day: false, label });

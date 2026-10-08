@@ -119,16 +119,21 @@ export async function sendStepsOnFirstPayment(b: {
   patient_email?: string | null;
   patient_phone?: string | null;
   rut?: string | null;
-}, paidBookingIds: string[], opts: { idempotencyKey?: string } = {}): Promise<boolean> {
+}, paidBookingIds: string[], opts: { idempotencyKey?: string; pagadoEn?: string | null } = {}): Promise<boolean> {
   // Devuelve true si quedó resuelto (enviado, ya enviado antes o no corresponde)
   // y false si hay que reintentar (ver src/lib/tareasEnvio.ts).
   const email = b.patient_email?.trim().toLowerCase();
   if (!email) return true;
   try {
     // ilike sin comodines: un "_" o "%" en el correo no debe calzar con otro.
-    const { data: previos } = await supabase.from('bookings').select('id')
+    let qPrevios = supabase.from('bookings').select('id')
       .ilike('patient_email', email.replace(/[\\%_]/g, (c) => `\\${c}`)).not('paid_at', 'is', null)
       .neq('status', 'cancelled'); // un pago de una sesión cancelada no cuenta como primer pago
+    // Desde la cola: solo cuentan los pagos ANTERIORES a este. Si el envío se
+    // reintenta después de que la paciente pagó otra sesión, ese pago nuevo no
+    // debe hacer creer que este no era el primero (8 oct 2026).
+    if (opts.pagadoEn) qPrevios = qPrevios.lt('paid_at', opts.pagadoEn);
+    const { data: previos } = await qPrevios;
     if ((previos ?? []).some(p => !paidBookingIds.includes(p.id))) return true;
 
     const patientId = await upsertPatientFromBooking(b);
