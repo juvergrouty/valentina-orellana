@@ -45,7 +45,12 @@ const faq = [
   },
   {
     q: '¿Atiendes con Fonasa o Isapre?',
-    a: 'La atención es particular. La boleta emitida te permite reembolsar el costo del servicio en tu Isapre o en tu seguro complementario de salud, según tu plan.',
+    a: 'La atención es particular. No tengo convenio con Fonasa, por lo que no es posible usar bono Fonasa. Por cada sesión te entrego boleta de honorarios para que pidas reembolso en tu Isapre o en tu seguro complementario de salud, según tu plan.',
+  },
+  {
+    q: '¿Mi Isapre me reembolsa las sesiones?',
+    a: 'Puede que la terapia esté más a tu alcance de lo que crees. Por cada sesión te entrego boleta de honorarios para que pidas reembolso en tu Isapre. La Ley 21.331 de Salud Mental prohíbe que las Isapres discriminen la salud mental en sus coberturas, así que tu plan no debería cubrir una sesión de psicoterapia peor que una atención de salud física.\n\nCuánto te devuelven depende de tu plan: antes de empezar, revisa en tu Isapre la cobertura de "consulta psicológica". En terapia de pareja, consulta en tu Isapre cómo la cubre.\n\nSi te rechazan el reembolso o te pagan menos de lo que corresponde, reclama por escrito en tu Isapre. Si no responde en 15 días hábiles o no estás de acuerdo con su respuesta, puedes reclamar en la Superintendencia de Salud.',
+    link: { href: 'https://www.superdesalud.gob.cl/tramites/reclamo-contra-fonasa-o-isapres/', label: 'Reclamar en la Superintendencia de Salud' },
   },
   {
     q: '¿La sesión online es igual de efectiva?',
@@ -80,7 +85,7 @@ const faq = [
   <section class="py-section bg-sand">
     <div class="container-site">
       <div class="divide-y divide-dust">
-        {faq.map(({ q, a }) => (
+        {faq.map(({ q, a, link }) => (
           <details class="group py-7 cursor-pointer">
             <summary class="font-heading font-semibold text-card text-ink list-none [&::-webkit-details-marker]:hidden flex justify-between items-start gap-6">
               <span>{q}</span>
@@ -100,6 +105,11 @@ const faq = [
                     </ul>
                   )
                   : <p class="body-text">{block}</p>
+              )}
+              {link && (
+                <p class="body-text">
+                  <a href={link.href} target="_blank" rel="noopener noreferrer" class="text-forest underline underline-offset-4">{link.label}</a>
+                </p>
               )}
             </div>
           </details>
