@@ -199,9 +199,9 @@ export const POST: APIRoute = async ({ request }) => {
 
       // Pago de una sesión que Valentina ya había CANCELADO (la paciente tenía
       // Flow abierto desde antes). No se revive sola: la cancelación fue a
-      // propósito. Se registra el pago en esa sesión (para no perder el dinero
-      // en Finanzas) y queda un error visible en el panel para reembolsar o
-      // reagendar con la paciente.
+      // propósito. Se registra el pago en esa sesión (queda la constancia del
+      // pago de Flow; no suma en Finanzas mientras siga cancelada) y queda un
+      // error visible en el panel para reembolsar o reagendar con la paciente.
       if (!selErr && candidates?.length) {
         for (const c of candidates.filter((x: { status: string }) => x.status === 'cancelled')) {
           candidates = candidates.filter((x: { id: string }) => x.id !== c.id);
@@ -209,7 +209,7 @@ export const POST: APIRoute = async ({ request }) => {
             .update({ mp_payment_id: String(status.flowOrder), paid_at: new Date().toISOString(), payment_note: 'Flow (sesión cancelada)' })
             .eq('id', c.id).is('paid_at', null);
           await logError('flow/pago-sesion-cancelada',
-            `Pago recibido de ${c.patient_name} (${c.patient_email}) por la sesión del ${c.session_date} a las ${String(c.session_time).slice(0, 5)}, que habías cancelado. La sesión sigue cancelada: hay que reembolsar o reagendar con la paciente.`,
+            `Pago recibido de ${c.patient_name} (${c.patient_email}) por la sesión del ${c.session_date} a las ${String(c.session_time).slice(0, 5)}, que estaba cancelada. La sesión sigue cancelada: hay que reembolsar o reagendar con la paciente (si la reagendas, marca la sesión nueva como pagada).`,
             { bookingId: c.id, token, flowOrder: status.flowOrder, amount: c.amount });
         }
       }
@@ -268,6 +268,7 @@ export const POST: APIRoute = async ({ request }) => {
               .select('id', { count: 'exact', head: true })
               .eq('patient_email', String(updatedRow.patient_email ?? '').toLowerCase())
               .not('paid_at', 'is', null)
+              .neq('status', 'cancelled') // un pago de una sesión cancelada no cuenta como "ya pagó antes"
               .not('id', 'in', `(${ids.join(',')})`);
             const emailData = {
               patient_name:   updatedRow.patient_name,

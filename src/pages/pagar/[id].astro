@@ -46,7 +46,14 @@ const { data: canceladasRaw } = patient?.email
       .gte('session_date', hoyCL).neq('session_date', '2099-12-31')
       .order('session_date', { ascending: true }).limit(5)
   : { data: [] };
-const canceladas = (canceladasRaw ?? []) as { id: string; session_date: string; session_time: string }[];
+// Si ya tiene otra hora agendada (ej. Valentina la reagendó), no se muestra.
+const { count: horasVigentes } = patient?.email
+  ? await supabase.from('bookings').select('id', { count: 'exact', head: true })
+      .eq('patient_email', patient.email.toLowerCase())
+      .in('status', ['confirmed', 'pending_payment'])
+      .gte('session_date', hoyCL).neq('session_date', '2099-12-31')
+  : { count: 0 };
+const canceladas = horasVigentes ? [] : (canceladasRaw ?? []) as { id: string; session_date: string; session_time: string }[];
 const waCancelada = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valentina, vi que mi hora fue cancelada. ¿Podemos buscar otra?')}`;
 
 // Datos para transferir (Configuración → Pagos). Transferencia = excepción

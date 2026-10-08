@@ -9,7 +9,7 @@ function json(data: unknown, status = 200) {
 }
 
 // Se llama cada pocos minutos (ver .github/workflows/frequent-cron.yml — Vercel Hobby
-// solo permite cron diario, así que la frecuencia real la da GitHub Actions, gratis).
+// solo permite cron diario, así que la frecuencia real la da Supabase (pg_cron cada 5 min; GitHub Actions queda de respaldo manual), gratis).
 // En la práctica este cron es solo una red de seguridad: la limpieza real de reservas
 // `pending_payment` vencidas ya ocurre en cada carga del calendario (availability.ts)
 // y en cada intento de reserva (bookings.ts) — ambos llaman a la misma

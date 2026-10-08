@@ -125,7 +125,8 @@ export async function sendStepsOnFirstPayment(b: {
   try {
     // ilike sin comodines: un "_" o "%" en el correo no debe calzar con otro.
     const { data: previos } = await supabase.from('bookings').select('id')
-      .ilike('patient_email', email.replace(/[\\%_]/g, (c) => `\\${c}`)).not('paid_at', 'is', null);
+      .ilike('patient_email', email.replace(/[\\%_]/g, (c) => `\\${c}`)).not('paid_at', 'is', null)
+      .neq('status', 'cancelled'); // un pago de una sesión cancelada no cuenta como primer pago
     if ((previos ?? []).some(p => !paidBookingIds.includes(p.id))) return;
 
     const patientId = await upsertPatientFromBooking(b);
