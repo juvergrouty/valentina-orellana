@@ -47,7 +47,7 @@ const jsonLd = esPublica ? {
       '@type': ['MedicalBusiness', 'ProfessionalService'],
       '@id': `${SITIO}/#consulta`,
       name: 'Ps. Valentina Orellana – Psicóloga',
-      description,
+      description: 'Psicóloga clínica de adultos y parejas. Atención presencial en Las Condes y online para todo Chile.',
       url: `${SITIO}/`,
       image: new URL('/images/og-default.jpg', Astro.site).href,
       telephone: '+56972735696',
@@ -171,7 +171,7 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
     {noindex && <meta name="robots" content="noindex, nofollow" />}
-    {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
+    {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, '\\u003c')} />}
     <link rel="canonical" href={canonicalURL} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{title} | Ps. Valentina Orellana</title>

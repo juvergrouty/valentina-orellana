@@ -27,7 +27,7 @@ const jsonLd = {
   headline: articulo.titulo,
   description: descripcion,
   image: new URL(imagen, Astro.site).href,
-  author: { '@type': 'Person', name: 'Valentina Orellana', jobTitle: 'Psicóloga clínica' },
+  author: { '@type': 'Person', '@id': 'https://www.valentinaorellana.cl/#valentina', name: 'Valentina Orellana', jobTitle: 'Psicóloga clínica' },
   publisher: { '@type': 'Organization', name: 'Ps. Valentina Orellana' },
   mainEntityOfPage: new URL(`/blog/${slug}`, Astro.site).href,
   inLanguage: 'es-CL',
