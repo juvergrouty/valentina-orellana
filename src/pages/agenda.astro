@@ -1197,9 +1197,15 @@ const { data: catalogServices } = await supabase
     $('payment-error-wa').href = `https://wa.me/56972735696?text=${encodeURIComponent(waTxt)}`;
     $('payment-error-msg').textContent = estado === 'tomada'
       ? 'Justo alguien acaba de tomar esa hora mientras completabas tus datos. No te preocupes: no se te cobró nada. Puedes elegir otra en los horarios disponibles o escribirme por WhatsApp y te ayudo personalmente a encontrar una.'
-      : 'Pasó el tiempo para pagar y la hora se liberó. No te preocupes: no se te cobró nada. Puedes volver a elegirla en los horarios disponibles o escribirme por WhatsApp y te ayudo personalmente.';
+      : 'Pasó el tiempo para pagar y la hora se está liberando. No te preocupes: no se te cobró nada. En unos minutos vuelve a aparecer en los horarios disponibles, o escríbeme por WhatsApp y te ayudo personalmente.';
     hide('payment-ready');
     show('payment-error');
+  });
+
+  // Al volver desde Flow con "Atrás", el botón no debe quedar en "Abriendo el pago…".
+  window.addEventListener('pageshow', () => {
+    const b = document.getElementById('mp-checkout-btn');
+    if (b && b.textContent.includes('Abriendo')) b.textContent = 'Pagar con Flow';
   });
 
   // ─── Volver a elegir hora (si la hora se ocupó o algo falló en el paso 4) ──
