@@ -48,6 +48,7 @@ const saved = Astro.url.searchParams.get('saved') === '1';
 // Códigos de error que llegan desde acciones de la agenda → texto legible.
 const ERRORES_ACCION: Record<string, string> = {
   cambio_servicio: 'No se pudo cambiar el servicio de la sesión. No se le avisó nada a la paciente. Intenta de nuevo.',
+  conflict: 'Esa sesión se cruza con otra reserva: no se guardó el cambio.',
   service_not_found: 'No se encontró ese servicio.',
   missing_migration: 'Falta actualizar la base de datos para hacer este cambio.',
 };
