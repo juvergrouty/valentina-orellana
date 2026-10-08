@@ -655,7 +655,10 @@ const { data: catalogServices } = await supabase
     state.modalityChoice  = modality;
     state.sessionPrice    = price;
     state.sessionDuration = duration;
-    state.sessionTitle    = name + (modality === 'online' ? ' Online' : ' Presencial');
+    // Sin repetir la modalidad si el nombre del servicio ya la trae
+    // ("Terapia Individual Online" + " Online").
+    const sufijo = modality === 'online' ? 'Online' : 'Presencial';
+    state.sessionTitle    = new RegExp(`\\b${sufijo}\\b`, 'i').test(name) ? name : `${name} ${sufijo}`;
     state.loadedSlots     = {};
 
     // Poblar el resumen del servicio (nombre + modalidad + precio + duración)
