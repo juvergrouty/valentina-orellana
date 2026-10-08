@@ -17,9 +17,11 @@ const WA_WINDOW_HOURS = 4; // fijo, tal como se describe en el panel "Agendar ho
 //   siempre entre las 8:00 y las 21:00 ("Tu sesión es mañana"). Si esa hora ya
 //   pasó (agendó tarde), sale apenas se pueda, nunca después de las 21:00.
 // - WhatsApp: el MISMO DÍA, 4 h antes; si eso cae antes de las 7:00, sale a las
-//   7:00 ("tu sesión de hoy"). Así el texto de la plantilla siempre es correcto.
+//   7:00, siempre que quede al menos 1 h antes de la sesión. Si ni eso alcanza
+//   (sesiones antes de las 8:00), sale la NOCHE ANTERIOR a las 21:00. El día va
+//   como variable ("de hoy a las…" / "de mañana a las…"), así el texto calza.
 const CORREO_DESDE = 8 * 60, CORREO_HASTA = 21 * 60;
-const WA_DESDE = 7 * 60;
+const WA_DESDE = 7 * 60, WA_NOCHE_ANTERIOR = 21 * 60;
 const minutosDe = (t: string) => { const [h, m] = t.slice(0, 5).split(':').map(Number); return (h || 0) * 60 + (m || 0); };
 
 function json(data: unknown, status = 200) {
@@ -149,16 +151,21 @@ export const GET: APIRoute = async ({ request }) => {
       if (b.whatsapp_reminder_enabled !== true) { waSkipped++; break doWhatsapp; }
       if (!b.patient_phone) { waSkipped++; break doWhatsapp; }
       if (liveNotes.includes(WA_MARKER)) { waSkipped++; break doWhatsapp; }
-      // Mismo día: 4 h antes, nunca antes de las 7:00, y siempre antes de que empiece.
-      if (b.session_date !== today || isNaN(hoursUntil) || hoursUntil <= 0) { waSkipped++; break doWhatsapp; }
-      // (Sesiones de 7:00–7:30: 30 min antes, para no llegar a la hora justa.)
-      const objetivoWa = Math.max(minutosDe(time) - WA_WINDOW_HOURS * 60, Math.min(WA_DESDE, minutosDe(time) - 30));
-      if (ahoraMin < objetivoWa) { waSkipped++; break doWhatsapp; }
+      if (isNaN(hoursUntil) || hoursUntil <= 0) { waSkipped++; break doWhatsapp; }
+      const objetivoWa = Math.max(minutosDe(time) - WA_WINDOW_HOURS * 60, WA_DESDE);
+      const nocheAnterior = objetivoWa > minutosDe(time) - 60; // ni 1 h antes alcanza desde las 7:00
+      if (nocheAnterior) {
+        // Sesión muy temprano: la noche anterior a las 21:00 ("de mañana a las…").
+        if (b.session_date !== manana || ahoraMin < WA_NOCHE_ANTERIOR || ahoraMin > WA_NOCHE_ANTERIOR + 30) { waSkipped++; break doWhatsapp; }
+      } else {
+        // Mismo día: 4 h antes, nunca antes de las 7:00.
+        if (b.session_date !== today || ahoraMin < objetivoWa) { waSkipped++; break doWhatsapp; }
+      }
 
       const firstName = (b.patient_name ?? '').split(' ')[0] || 'hola';
 
       const res = templateName
-        ? await sendWhatsappTemplate(b.patient_phone, templateName, templateLang, [firstName, time])
+        ? await sendWhatsappTemplate(b.patient_phone, templateName, templateLang, [firstName, `${deDiaRelativo(b.session_date)} a las ${time} hrs`])
         : await sendWhatsappText(b.patient_phone, `Hola ${firstName}, te recuerdo tu hora ${deDiaRelativo(b.session_date)} a las ${time} hrs. — Valentina Orellana`);
       if (res.sent) {
         waSent++;

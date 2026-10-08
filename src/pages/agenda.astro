@@ -1170,6 +1170,39 @@ const { data: catalogServices } = await supabase
     }
   });
 
+  // ─── Revisión justo al apretar "Pagar con Flow" (Valentina, 8 oct 2026) ──
+  // Antes de mandar a Flow se confirma que la hora sigue apartada para esta
+  // paciente. Si se liberó (pasó el plazo) o la tomó otra persona, no se le
+  // cobra nada y se le ofrecen horarios y WhatsApp.
+  document.getElementById('mp-checkout-btn')?.addEventListener('click', async (e) => {
+    const link = e.currentTarget;
+    const url = link.href;
+    if (!state.bookingId || !url || url.endsWith('#')) return; // sin reserva: comportamiento normal
+    e.preventDefault();
+    // La pestaña se abre ya (dentro del clic) para que el navegador no la bloquee.
+    const pestana = window.open('', '_blank');
+    let estado = 'ok';
+    try {
+      const r = await fetch(`/api/bookings/estado?id=${encodeURIComponent(state.bookingId)}`, { cache: 'no-store' });
+      estado = (await r.json()).estado || 'ok';
+    } catch (err) { estado = 'ok'; } // sin conexión con el sitio: se deja pagar (Flow igual valida)
+    if (estado === 'ok') {
+      if (pestana) pestana.location.href = url; else window.location.href = url;
+      return;
+    }
+    if (pestana) pestana.close();
+    state.loadedSlots = {};
+    let cuando = '';
+    try { cuando = state.selectedDate ? ` el ${formatDateEs(state.selectedDate)}${state.selectedTime ? ` a las ${state.selectedTime}` : ''}` : ''; } catch (err2) { cuando = ''; }
+    const waTxt = `Hola Valentina, quería agendar ${state.sessionTitle || 'una sesión'}${cuando}, pero esa hora ya no está disponible. ¿Me ayudas a encontrar otra?`;
+    $('payment-error-wa').href = `https://wa.me/56972735696?text=${encodeURIComponent(waTxt)}`;
+    $('payment-error-msg').textContent = estado === 'tomada'
+      ? 'Justo alguien acaba de tomar esa hora mientras completabas tus datos. No te preocupes: no se te cobró nada. Puedes elegir otra en los horarios disponibles o escribirme por WhatsApp y te ayudo personalmente a encontrar una.'
+      : 'Pasó el tiempo para pagar y la hora se liberó. No te preocupes: no se te cobró nada. Puedes volver a elegirla en los horarios disponibles o escribirme por WhatsApp y te ayudo personalmente.';
+    hide('payment-ready');
+    show('payment-error');
+  });
+
   // ─── Volver a elegir hora (si la hora se ocupó o algo falló en el paso 4) ──
   document.getElementById('payment-back')?.addEventListener('click', () => {
     state.loadedSlots = {};

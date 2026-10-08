@@ -65,19 +65,19 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
         <div style="display:flex;flex-direction:column;gap:0.85rem;">
           <label class="tpl-opt" style="display:flex;gap:0.6rem;align-items:flex-start;cursor:pointer;">
             <input type="radio" name="tpl-choice" value="0" checked style="margin-top:3px;">
-            <span style="font-size:0.85rem;">Hola {'{{1}}'}, te recordamos tu hora de hoy a las {'{{2}}'} hrs. Cualquier cambio, respóndenos por este medio (necesitamos al menos 24 horas de anticipación). — Ps. Valentina Orellana</span>
+            <span style="font-size:0.85rem;">Hola {'{{1}}'}, te recordamos tu hora {'{{2}}'}. Cualquier cambio, respóndenos por este medio (necesitamos al menos 24 horas de anticipación). — Ps. Valentina Orellana</span>
           </label>
           <label class="tpl-opt" style="display:flex;gap:0.6rem;align-items:flex-start;cursor:pointer;">
             <input type="radio" name="tpl-choice" value="1" style="margin-top:3px;">
-            <span style="font-size:0.85rem;">Hola {'{{1}}'}, te recordamos tu sesión de hoy a las {'{{2}}'} hrs. Cualquier cambio, respóndenos por este medio; necesitamos al menos 24 horas de anticipación para reagendar. — Ps. Valentina Orellana</span>
+            <span style="font-size:0.85rem;">Hola {'{{1}}'}, te recordamos tu sesión {'{{2}}'}. Cualquier cambio, respóndenos por este medio; necesitamos al menos 24 horas de anticipación para reagendar. — Ps. Valentina Orellana</span>
           </label>
           <label class="tpl-opt" style="display:flex;gap:0.6rem;align-items:flex-start;cursor:pointer;">
             <input type="radio" name="tpl-choice" value="2" style="margin-top:3px;">
-            <span style="font-size:0.85rem;">Hola {'{{1}}'}, este es un recordatorio de tu hora de hoy a las {'{{2}}'} hrs. Si necesitas reagendar o cancelar, respóndenos por este medio (con al menos 24 horas de anticipación). — Ps. Valentina Orellana</span>
+            <span style="font-size:0.85rem;">Hola {'{{1}}'}, este es un recordatorio de tu hora {'{{2}}'}. Si necesitas reagendar o cancelar, respóndenos por este medio (con al menos 24 horas de anticipación). — Ps. Valentina Orellana</span>
           </label>
           <label class="tpl-opt" style="display:flex;gap:0.6rem;align-items:flex-start;cursor:pointer;">
             <input type="radio" name="tpl-choice" value="custom" style="margin-top:3px;">
-            <span style="font-size:0.85rem;">Otro texto (usa {'{{1}}'} para el nombre y {'{{2}}'} para la hora):</span>
+            <span style="font-size:0.85rem;">Otro texto (usa {'{{1}}'} para el nombre y {'{{2}}'} para el día y la hora, por ejemplo "de hoy a las 16:00 hrs"):</span>
           </label>
           <textarea id="tpl-custom" rows="2" placeholder="Escribe tu propio texto con {{1}} y {{2}}…" style="font-size:0.85rem;padding:0.6rem;border:1px solid var(--dust);border-radius:6px;resize:vertical;"></textarea>
 
@@ -209,9 +209,9 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
 
   // ── Crear plantilla de recordatorio ───────────────────────────────────────
   const TPL_TEXTS = [
-    'Hola {{1}}, te recordamos tu hora de hoy a las {{2}} hrs. Cualquier cambio, respóndenos por este medio (necesitamos al menos 24 horas de anticipación). — Ps. Valentina Orellana',
-    'Hola {{1}}, te recordamos tu sesión de hoy a las {{2}} hrs. Cualquier cambio, respóndenos por este medio; necesitamos al menos 24 horas de anticipación para reagendar. — Ps. Valentina Orellana',
-    'Hola {{1}}, este es un recordatorio de tu hora de hoy a las {{2}} hrs. Si necesitas reagendar o cancelar, respóndenos por este medio (con al menos 24 horas de anticipación). — Ps. Valentina Orellana',
+    'Hola {{1}}, te recordamos tu hora {{2}}. Cualquier cambio, respóndenos por este medio (necesitamos al menos 24 horas de anticipación). — Ps. Valentina Orellana',
+    'Hola {{1}}, te recordamos tu sesión {{2}}. Cualquier cambio, respóndenos por este medio; necesitamos al menos 24 horas de anticipación para reagendar. — Ps. Valentina Orellana',
+    'Hola {{1}}, este es un recordatorio de tu hora {{2}}. Si necesitas reagendar o cancelar, respóndenos por este medio (con al menos 24 horas de anticipación). — Ps. Valentina Orellana',
   ];
 
   const TPL_PAY_TEXT = 'Hola {{1}}, aquí tienes tu link de pago para completar la reserva de tu {{2}} el {{3}}. Modalidad: {{4}}. Valor: {{5}}. En cuanto se registre el pago, tu hora queda confirmada automáticamente. Link de pago: {{6}} ¡Gracias! — Ps. Valentina Orellana';
@@ -264,7 +264,7 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
     const bodyText = choice === 'custom'
       ? (document.getElementById('tpl-custom')?.value ?? '').trim()
       : TPL_TEXTS[Number(choice)];
-    submitTemplate({ kind: 'reminder', name: 'recordatorio_sesion', bodyText, sampleValues: ['María', '16:00'], minVars: 2, showFn: showTplStatus });
+    submitTemplate({ kind: 'reminder', name: 'recordatorio_sesion', bodyText, sampleValues: ['María', 'de hoy a las 16:00 hrs'], minVars: 2, showFn: showTplStatus });
   });
 
   document.getElementById('btn-create-tpl-pay')?.addEventListener('click', () => {
