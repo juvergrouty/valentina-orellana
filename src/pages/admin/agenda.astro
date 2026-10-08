@@ -804,7 +804,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
               <input type="checkbox" name="reminder_email_enabled" value="on" checked>
               <div>
                 <div class="bp-comm-name">Correo de recordatorio</div>
-                <div class="bp-comm-desc">Se enviará 24 horas antes de la sesión</div>
+                <div class="bp-comm-desc">Se enviará el día anterior, a la hora de la sesión (entre 8:00 y 21:00)</div>
               </div>
             </label>
           </div>
@@ -813,7 +813,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
               <input type="checkbox" name="whatsapp_reminder_enabled" value="on">
               <div>
                 <div class="bp-comm-name">WhatsApp de recordatorio <span class="bp-soon-chip">Requiere WhatsApp conectado</span></div>
-                <div class="bp-comm-desc">Se enviará 4 horas antes. No se enviará hasta que conectes WhatsApp Business en Configuración.</div>
+                <div class="bp-comm-desc">Se enviará el mismo día, 4 horas antes (nunca antes de las 7:00). No se enviará hasta que conectes WhatsApp Business en Configuración.</div>
               </div>
             </label>
           </div>
@@ -1183,7 +1183,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       <div class="sp-section">
         <p class="label" style="margin-bottom:0.5rem;">Recordatorio automático</p>
         <label style="display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;padding:0.3rem 0;cursor:pointer;">
-          <span>Email 24h antes</span>
+          <span>Email el día anterior</span>
           <input type="checkbox" id="sp-rem-email" data-field="reminder_email_enabled">
         </label>
         <label style="display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;padding:0.3rem 0;cursor:pointer;">
