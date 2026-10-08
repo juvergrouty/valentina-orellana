@@ -45,7 +45,14 @@ const fmtCL = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone:
 
 const tab  = Astro.url.searchParams.get('tab') ?? 'info';
 const saved = Astro.url.searchParams.get('saved') === '1';
-const errorFicha = Astro.url.searchParams.get('error') ?? '';
+// Códigos de error que llegan desde acciones de la agenda → texto legible.
+const ERRORES_ACCION: Record<string, string> = {
+  cambio_servicio: 'No se pudo cambiar el servicio de la sesión. No se le avisó nada a la paciente. Intenta de nuevo.',
+  service_not_found: 'No se encontró ese servicio.',
+  missing_migration: 'Falta actualizar la base de datos para hacer este cambio.',
+};
+const errorCrudo = Astro.url.searchParams.get('error') ?? '';
+const errorFicha = ERRORES_ACCION[errorCrudo] ?? errorCrudo;
 
 function formatDate(iso: string) {
   return new Date(iso + 'T00:00:00').toLocaleDateString('es-CL', { day:'2-digit', month:'long', year:'numeric' });

@@ -747,7 +747,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
               const { data: addrRow } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
               const isOnline = sessionType.includes('online');
               const modalidad = isOnline ? 'Online (por videollamada)' : (addrRow?.value?.trim() || 'Presencial en consulta');
-              const fechaHora = `${session_date} a las ${session_time}`;
+              const fechaHora = `${primeraFecha || session_date} a las ${session_time}`;
               const valorTxt  = `$${totalCobrado.toLocaleString('es-CL')}`;
               const res = await sendWhatsappTemplate(
                 finalPhone,
