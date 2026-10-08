@@ -1179,18 +1179,17 @@ const { data: catalogServices } = await supabase
     const url = link.href;
     if (!state.bookingId || !url || url.endsWith('#')) return; // sin reserva: comportamiento normal
     e.preventDefault();
-    // La pestaña se abre ya (dentro del clic) para que el navegador no la bloquee.
-    const pestana = window.open('', '_blank');
+    // Flow se abre en esta misma pestaña (abrir una nueva y después llenarla
+    // falla en iPhone y en el navegador de Instagram). Flow devuelve a la
+    // página de confirmación al terminar.
+    link.textContent = 'Abriendo el pago…';
     let estado = 'ok';
     try {
-      const r = await fetch(`/api/bookings/estado?id=${encodeURIComponent(state.bookingId)}`, { cache: 'no-store' });
+      const r = await fetch(`/api/bookings/estado?id=${encodeURIComponent(state.bookingId)}`, { cache: 'no-store', signal: AbortSignal.timeout(4000) });
       estado = (await r.json()).estado || 'ok';
-    } catch (err) { estado = 'ok'; } // sin conexión con el sitio: se deja pagar (Flow igual valida)
-    if (estado === 'ok') {
-      if (pestana) pestana.location.href = url; else window.location.href = url;
-      return;
-    }
-    if (pestana) pestana.close();
+    } catch (err) { estado = 'ok'; } // lento o sin conexión: se deja pagar (Flow igual valida)
+    if (estado === 'ok') { window.location.href = url; return; }
+    link.textContent = 'Pagar con Flow';
     state.loadedSlots = {};
     let cuando = '';
     try { cuando = state.selectedDate ? ` el ${formatDateEs(state.selectedDate)}${state.selectedTime ? ` a las ${state.selectedTime}` : ''}` : ''; } catch (err2) { cuando = ''; }
