@@ -12,6 +12,16 @@ const MARKER = 'RecordatorioEnviado';
 const WA_MARKER = 'RecordatorioWhatsAppEnviado';
 const WA_WINDOW_HOURS = 4; // fijo, tal como se describe en el panel "Agendar hora"
 
+// Horarios de envío (Valentina, 8 oct 2026), hora de Chile:
+// - Correo: el DÍA ANTERIOR, a la misma hora de la sesión (24 h antes), pero
+//   siempre entre las 8:00 y las 21:00 ("Tu sesión es mañana"). Si esa hora ya
+//   pasó (agendó tarde), sale apenas se pueda, nunca después de las 21:00.
+// - WhatsApp: el MISMO DÍA, 4 h antes; si eso cae antes de las 7:00, sale a las
+//   7:00 ("tu sesión de hoy"). Así el texto de la plantilla siempre es correcto.
+const CORREO_DESDE = 8 * 60, CORREO_HASTA = 21 * 60;
+const WA_DESDE = 7 * 60;
+const minutosDe = (t: string) => { const [h, m] = t.slice(0, 5).split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -48,6 +58,11 @@ export const GET: APIRoute = async ({ request }) => {
   // "hoy"/"mañana" en la fecha calendario de Chile (no UTC — ver src/lib/dateUtils.ts)
   const today    = nowCL(new Date(now)).toISOString().slice(0, 10);
   const tomorrow = nowCL(new Date(now + 2 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+  // Mañana (día siguiente exacto) y la hora actual de Chile en minutos.
+  const [ty, tm, td] = today.split('-').map(Number);
+  const manana   = new Date(Date.UTC(ty, tm - 1, td + 1)).toISOString().slice(0, 10);
+  const ahoraCL  = nowCL(new Date(now));
+  const ahoraMin = ahoraCL.getHours() * 60 + ahoraCL.getMinutes(); // nowCL arma la fecha con la hora de Chile en campos locales
 
   // Sesiones confirmadas de hoy/mañana, aún sin recordatorio enviado. Se piden
   // aunque no tengan correo (para poder mandar el recordatorio de WhatsApp igual).
@@ -94,7 +109,10 @@ export const GET: APIRoute = async ({ request }) => {
       if (!b.patient_email) { skipped++; break doEmail; }
       if (b.reminder_email_enabled === false) { skipped++; break doEmail; }
       if (liveNotes.includes(MARKER)) { skipped++; break doEmail; }
-      if (isNaN(hoursUntil) || hoursUntil <= 0 || hoursUntil > windowHours) { skipped++; break doEmail; }
+      // Solo el día anterior, desde la hora de la sesión (acotada a 8:00–21:00) hasta las 21:00.
+      if (b.session_date !== manana) { skipped++; break doEmail; }
+      const objetivoCorreo = Math.min(Math.max(minutosDe(time), CORREO_DESDE), CORREO_HASTA);
+      if (ahoraMin < objetivoCorreo || ahoraMin > CORREO_HASTA + 10) { skipped++; break doEmail; }
 
       let serviceName: string | undefined;
       if (b.service_id) {
@@ -131,7 +149,11 @@ export const GET: APIRoute = async ({ request }) => {
       if (b.whatsapp_reminder_enabled !== true) { waSkipped++; break doWhatsapp; }
       if (!b.patient_phone) { waSkipped++; break doWhatsapp; }
       if (liveNotes.includes(WA_MARKER)) { waSkipped++; break doWhatsapp; }
-      if (isNaN(hoursUntil) || hoursUntil <= 0 || hoursUntil > WA_WINDOW_HOURS) { waSkipped++; break doWhatsapp; }
+      // Mismo día: 4 h antes, nunca antes de las 7:00, y siempre antes de que empiece.
+      if (b.session_date !== today || isNaN(hoursUntil) || hoursUntil <= 0) { waSkipped++; break doWhatsapp; }
+      // (Sesiones de 7:00–7:30: 30 min antes, para no llegar a la hora justa.)
+      const objetivoWa = Math.max(minutosDe(time) - WA_WINDOW_HOURS * 60, Math.min(WA_DESDE, minutosDe(time) - 30));
+      if (ahoraMin < objetivoWa) { waSkipped++; break doWhatsapp; }
 
       const firstName = (b.patient_name ?? '').split(' ')[0] || 'hola';
 
