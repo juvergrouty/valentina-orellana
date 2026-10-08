@@ -413,13 +413,15 @@ const { data: catalogServices } = await supabase
   <!-- Garantías -->
   <section class="bg-warm border-t border-dust">
     <div class="container-site">
-      <div class="grid grid-cols-3 divide-x divide-dust">
+      <!-- En celular, una debajo de otra: en 3 columnas no cabían "Reprogramación"
+           ni "Confidencialidad" y se montaban. -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-dust">
         {[
           ['Pago seguro', 'Flow · SSL'],
           ['Reprogramación', 'Hasta 24 h antes'],
           ['Confidencialidad', '100% privado'],
         ].map(([title, sub]) => (
-          <div class="text-center py-7 px-4">
+          <div class="text-center py-4 sm:py-7 px-4 min-w-0">
             <p class="font-heading font-light text-sm text-ink">{title}</p>
             <p class="label text-stone mt-1">{sub}</p>
           </div>
