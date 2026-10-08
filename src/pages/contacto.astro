@@ -2,12 +2,45 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
 import Contact    from '../components/sections/Contact.astro';
+import { DIRECCION, GOOGLE_MAPS_URL, GOOGLE_MAPS_EMBED } from '../data/consulta';
 ---
 
-<BaseLayout title="Contacto · Consulta en Las Condes" description="Escríbele a la Ps. Valentina Orellana por WhatsApp o formulario. Consulta presencial en Las Condes y sesiones online para todo Chile.">
+<BaseLayout title="Contacto · Consulta en Las Condes" description="Escríbele a la Ps. Valentina Orellana por WhatsApp o formulario. Consulta presencial en Lo Fontecilla 201, Las Condes, y sesiones online para todo Chile.">
 
   <PageHero label="Hablemos" title="Contacto" image="/images/banner-contacto.jpg" imageMobile="/images/banner-contacto-mobile.jpg" />
 
   <Contact />
+
+  <!-- Cómo llegar: mapa de la consulta -->
+  <section class="py-14 md:py-section bg-warm">
+    <div class="container-site">
+      <p class="label text-stone mb-4">Cómo llegar</p>
+      <div class="divider mb-6"></div>
+      <h2 class="section-title mb-6">Consulta en Las Condes</h2>
+
+      <address class="not-italic body-text mb-2">
+        {DIRECCION.calle}, {DIRECCION.detalle}, {DIRECCION.comuna}, {DIRECCION.region}.
+      </address>
+      <p class="body-text mb-8 max-w-xl">
+        Al confirmar tu hora presencial te envío las indicaciones para llegar.
+      </p>
+
+      <div class="relative w-full overflow-hidden border border-dust aspect-[4/3] md:aspect-[16/7]">
+        <iframe
+          src={GOOGLE_MAPS_EMBED}
+          title="Mapa: consulta de la Ps. Valentina Orellana en Lo Fontecilla 201, Las Condes"
+          class="absolute inset-0 w-full h-full"
+          style="border:0;"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade"
+          allowfullscreen
+        ></iframe>
+      </div>
+
+      <a href={GOOGLE_MAPS_URL} target="_blank" rel="noopener" class="btn-dark text-[10px] py-3 px-6 mt-8 inline-flex">
+        Ver en Google Maps
+      </a>
+    </div>
+  </section>
 
 </BaseLayout>

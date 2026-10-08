@@ -1,4 +1,5 @@
 ---
+import { DIRECCION, GOOGLE_MAPS_URL } from '../../data/consulta';
 ---
 
 <section class="py-14 md:py-section bg-white">
@@ -23,9 +24,20 @@
           </a>
         </li>
         <li>
-          <p class="label text-stone mb-1">Ubicaciones</p>
+          <p class="label text-stone mb-1">Consulta presencial</p>
+          <address class="not-italic font-body text-sm font-light text-stone leading-relaxed">
+            {DIRECCION.calle}, {DIRECCION.detalle}<br />
+            {DIRECCION.comuna}, {DIRECCION.region}
+          </address>
+          <a href={GOOGLE_MAPS_URL} target="_blank" rel="noopener"
+             class="inline-block mt-2 font-body text-sm text-forest underline underline-offset-4 hover:text-gold transition-colors">
+            Ver en Google Maps
+          </a>
+        </li>
+        <li>
+          <p class="label text-stone mb-1">Online</p>
           <p class="font-body text-sm font-light text-stone leading-relaxed">
-            Las Condes · Online para todo Chile
+            Sesiones por videollamada para todo Chile
           </p>
         </li>
         <li>

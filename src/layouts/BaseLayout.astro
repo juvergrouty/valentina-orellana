@@ -2,6 +2,8 @@
 import '../styles/global.css';
 import Header from '../components/layout/Header.astro';
 import Footer from '../components/layout/Footer.astro';
+import { DIRECCION, GOOGLE_MAPS_URL, PERFILES } from '../data/consulta';
+import { pricingPlans, SESSION_LABELS, type SessionType } from '../data/services';
 
 interface Props {
   title: string;
@@ -24,20 +26,93 @@ const canonicalURL = new URL(canonicalPath, Astro.site);
 // WhatsApp, Facebook y LinkedIn exigen una URL absoluta para la imagen de vista previa.
 const ogImage = new URL(image, Astro.site).href;
 
-// Datos estructurados (Google): solo en la portada.
-const jsonLd = Astro.url.pathname === '/' ? {
+// Datos estructurados (Google): consulta + persona, en todas las páginas
+// públicas (no en flujos privados ni noindex). Sin aggregateRating.
+const rutaLd = Astro.url.pathname.replace(/\/$/, '') || '/';
+const esPublica = !noindex
+  && !['/reagendar', '/recuperar', '/confirmacion'].includes(rutaLd)
+  && !/^\/(pagar|consentimiento|pasos-a-seguir|admin)(\/|$)/.test(rutaLd);
+const SITIO = 'https://www.valentinaorellana.cl';
+const sameAs = [
+  GOOGLE_MAPS_URL,
+  PERFILES.instagram,
+  PERFILES.doctoralia,
+  PERFILES.psychologyToday,
+  PERFILES.encuadrado,
+];
+const jsonLd = esPublica ? {
   '@context': 'https://schema.org',
-  '@type': 'ProfessionalService',
-  name: 'Ps. Valentina Orellana — Psicóloga Clínica',
-  description,
-  url: 'https://www.valentinaorellana.cl/',
-  image: ogImage,
-  telephone: '+56972735696',
-  areaServed: [{ '@type': 'City', name: 'Las Condes' }, { '@type': 'Country', name: 'Chile' }],
-  address: { '@type': 'PostalAddress', addressLocality: 'Las Condes', addressRegion: 'Región Metropolitana', addressCountry: 'CL' },
-  priceRange: '$65.000 – $75.000',
-  sameAs: ['https://www.instagram.com/psicologa.valentinaorellana/'],
-  availableLanguage: 'es',
+  '@graph': [
+    {
+      '@type': ['MedicalBusiness', 'ProfessionalService'],
+      '@id': `${SITIO}/#consulta`,
+      name: 'Ps. Valentina Orellana – Psicóloga',
+      description,
+      url: `${SITIO}/`,
+      image: new URL('/images/og-default.jpg', Astro.site).href,
+      telephone: '+56972735696',
+      address: {
+        '@type': 'PostalAddress',
+        streetAddress: `${DIRECCION.calle}, ${DIRECCION.detalle}`,
+        addressLocality: DIRECCION.comuna,
+        addressRegion: DIRECCION.region,
+        postalCode: DIRECCION.codigoPostal,
+        addressCountry: DIRECCION.pais,
+      },
+      geo: { '@type': 'GeoCoordinates', latitude: DIRECCION.lat, longitude: DIRECCION.lng },
+      hasMap: GOOGLE_MAPS_URL,
+      priceRange: '$65.000 – $75.000',
+      areaServed: [
+        { '@type': 'City', name: 'Las Condes' },
+        { '@type': 'City', name: 'Santiago' },
+        { '@type': 'Country', name: 'Chile' },
+      ],
+      availableLanguage: 'es',
+      founder: { '@id': `${SITIO}/#valentina` },
+      sameAs,
+      hasOfferCatalog: {
+        '@type': 'OfferCatalog',
+        name: 'Sesiones de psicoterapia',
+        itemListElement: pricingPlans.map((plan) => ({
+          '@type': 'Offer',
+          price: plan.price,
+          priceCurrency: plan.currency,
+          url: `${SITIO}/agenda`,
+          itemOffered: {
+            '@type': 'Service',
+            name: SESSION_LABELS[plan.id as SessionType] ?? plan.title,
+            description: `${plan.duration} · ${plan.modality}`,
+          },
+        })),
+      },
+    },
+    {
+      '@type': 'Person',
+      '@id': `${SITIO}/#valentina`,
+      name: 'Valentina Orellana',
+      jobTitle: 'Psicóloga clínica',
+      url: `${SITIO}/sobre-mi`,
+      telephone: '+56972735696',
+      alumniOf: { '@type': 'CollegeOrUniversity', name: 'Universidad del Desarrollo' },
+      hasCredential: {
+        '@type': 'EducationalOccupationalCredential',
+        name: 'Registro Superintendencia de Salud N° 360070',
+        credentialCategory: 'Registro Nacional de Prestadores Individuales de Salud',
+        recognizedBy: { '@type': 'GovernmentOrganization', name: 'Superintendencia de Salud de Chile' },
+      },
+      knowsAbout: [
+        'Terapia de pareja',
+        'Terapia individual de adultos',
+        'Terapia sistémica',
+        'Trauma',
+        'Personas Altamente Sensibles (PAS)',
+        'Parentalidad y apego',
+      ],
+      worksFor: { '@id': `${SITIO}/#consulta` },
+      address: { '@type': 'PostalAddress', addressLocality: DIRECCION.comuna, addressRegion: DIRECCION.region, addressCountry: DIRECCION.pais },
+      sameAs,
+    },
+  ],
 } : null;
 // Botones flotantes: en /agenda el de WhatsApp sube para no tapar el sello de
 // reCAPTCHA; el de "Agendar sesión" (solo celular) no aparece en el flujo de
