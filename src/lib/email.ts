@@ -14,7 +14,13 @@ function getResend(): Resend | null {
   return _resend;
 }
 
-const FROM = import.meta.env.EMAIL_FROM ?? 'onboarding@resend.dev';
+// El nombre visible del remitente se fija aquí (no en la variable de entorno)
+// para que todos los correos automáticos digan "Ps. Valentina Orellana".
+// EMAIL_FROM solo aporta la dirección; acepta "Nombre <correo>" o el correo solo.
+const FROM_NAME = 'Ps. Valentina Orellana';
+const FROM_RAW = (import.meta.env.EMAIL_FROM ?? 'onboarding@resend.dev').trim();
+const FROM_ADDR = FROM_RAW.match(/<([^>]+)>/)?.[1]?.trim() ?? FROM_RAW;
+const FROM = `${FROM_NAME} <${FROM_ADDR}>`;
 
 // Si un paciente responde un correo automático, la respuesta va a consulta@
 // (reenvía a Gmail vía ImprovMX y Gmail responde "como" consulta@ vía Resend).
@@ -682,7 +688,7 @@ export function stepsEmailHtml(opts: { patientName: string; clinicAddress?: stri
         <p style="margin:0;font-family:'Inter',Arial,sans-serif;font-size:12px;color:#6B6860;">Revisa también las <a href="${SITE}/condiciones" style="color:#6B6860;">condiciones del servicio y la política de privacidad</a>.</p>
       </td></tr>
       <tr><td class="pad" style="background:#1A1A18;padding:28px 32px;">
-        <p style="margin:0 0 4px;font-family:'Domine',Georgia,serif;font-size:17px;color:#FAF7F4;">Valentina Orellana</p>
+        <p style="margin:0 0 4px;font-family:'Domine',Georgia,serif;font-size:17px;color:#FAF7F4;">Ps. Valentina Orellana</p>
         <p style="margin:0;font-family:'Inter',Arial,sans-serif;font-size:12px;color:rgba(250,247,244,0.5);">Psicóloga · Reg. Superintendencia de Salud N° 360070 · Santiago, Chile</p>
       </td></tr>
     </table>
