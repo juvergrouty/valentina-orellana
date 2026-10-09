@@ -2,7 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../../components/admin/AdminLayout.astro';
 import { supabase } from '../../../lib/supabase';
-import { nowCL } from '../../../lib/dateUtils';
+import { nowCL, todayCL } from '../../../lib/dateUtils';
 import { vigente, type ConsentRow } from '../../../lib/consent';
 import { origenTexto } from '../../../lib/origen';
 
@@ -64,6 +64,12 @@ const ERRORES_ACCION: Record<string, string> = {
 };
 const errorCrudo = Astro.url.searchParams.get('error') ?? '';
 const errorFicha = ERRORES_ACCION[errorCrudo] ?? errorCrudo;
+// Sesión futura pagada por adelantado: la boleta sale sola ese día (8 oct 2026).
+const boletaProgramadaParam = Astro.url.searchParams.get('boleta_programada') ?? '';
+const boletaProgramadaMsg = /^\d{4}-\d{2}-\d{2}$/.test(boletaProgramadaParam)
+  ? `Pago registrado. La boleta se emitirá automáticamente el día de la sesión (${boletaProgramadaParam.slice(8, 10)}-${boletaProgramadaParam.slice(5, 7)}).`
+  : '';
+const hoyCL = todayCL();
 
 function formatDate(iso: string) {
   return new Date(iso + 'T00:00:00').toLocaleDateString('es-CL', { day:'2-digit', month:'long', year:'numeric' });
@@ -117,6 +123,7 @@ const faltanDatos = patient ? [
 <AdminLayout title={patient.name} current="/admin/pacientes">
 
   {saved && !errorFicha && <div class="alert-success">✓ Cambios guardados.</div>}
+  {boletaProgramadaMsg && !errorFicha && <div class="alert-success">✓ {boletaProgramadaMsg}</div>}
   {errorFicha && <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.65rem 1rem;border-radius:6px;font-size:0.85rem;margin-bottom:1rem;">✕ {errorFicha}</div>}
 
   <!-- Header paciente -->
@@ -342,6 +349,9 @@ const faltanDatos = patient ? [
             const lastBoleta   = boletaLines.length ? boletaLines[boletaLines.length - 1] : null;
             const boletaFolio  = lastBoleta ? lastBoleta[1] : null;
             const boletaAnulada = lastBoleta ? /ANULADA/i.test(lastBoleta[0]) : false;
+            // Pagada por adelantado y sin boleta: sale sola el día de la sesión (8 oct 2026).
+            const boletaProgramada = !boletaFolio && !!b.paid_at && /BoletaProgramada/.test(b.notes ?? '')
+              && b.session_date !== '2099-12-31' && b.session_date > hoyCL;
             // Estado de pago real, separado del estado de la reserva (ver migración
             // 0001, sección 5): una reserva puede estar "Confirmada" sin haber sido
             // pagada todavía (ej. "Pago en consulta").
@@ -415,6 +425,8 @@ const faltanDatos = patient ? [
                           </button>
                         )}
                       </>
+                    ) : boletaProgramada ? (
+                      <span class="badge badge-pending" title="La boleta se emite el día de la sesión, con esa fecha.">🗓 Boleta el {b.session_date.slice(8, 10)}-{b.session_date.slice(5, 7)}</span>
                     ) : isPaid ? (
                       <button type="button" class="btn btn-outline btn-sm bol-emitir" data-bid={b.id} data-rut={patient.rut ?? (sinRutFicha ? '44444446-0' : '')}>
                         Emitir boleta
@@ -788,7 +800,11 @@ const faltanDatos = patient ? [
             confirm('Una emisión anterior de esta boleta se interrumpió.\n\n¿Revisaste en el SII y la boleta NO está emitida? Aceptar emite una boleta nueva.')) {
           d = await bolPost({ action: 'emitir', booking_id: bid, rut, forzar: true });
         }
-        if (d.ok) {
+        if (d.ok && d.programada) {
+          // Sesión futura: no se emitió aún, sale sola el día de la sesión (8 oct 2026).
+          bolStatus(bid, `🗓 ${d.mensaje}`, '#1d4ed8');
+        }
+        else if (d.ok) {
           if (d.enviada) { bolStatus(bid, `✓ Emitida (Folio ${d.folio ?? ''}) y enviada a ${d.enviadaA}`, '#15803d'); setTimeout(() => location.reload(), 2500); }
           else { bolStatus(bid, `⚠ Emitida (Folio ${d.folio ?? ''}) pero el correo no salió: ${d.errorEnvio ?? 'error'}. Se reintentará solo.`, '#b45309'); }
         }

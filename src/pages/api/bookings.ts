@@ -98,17 +98,19 @@ async function handleBooking(request: Request) {
   }
 
   // ── Límite por conexión ──────────────────────────────────────────────────────
-  // Máximo 6 reservas por hora desde la misma conexión (8 oct 2026; mismo
+  // Máximo 3 reservas por hora desde la misma conexión (8 oct 2026; mismo
   // mecanismo que /api/contacto). Antes no había límite: alguien podía bloquear
   // la agenda con reservas sin pagar o pre-crear fichas con correos ajenos.
+  // Bajado de 6 a 3 (8 oct 2026): una paciente real agenda 1 o 2 horas; 6 sin
+  // pagar alcanzaban para bloquear media mañana de agenda.
   const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'desconocida';
   {
     const desde = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { count } = await supabase.from('admin_logs').select('id', { count: 'exact', head: true })
       .eq('context', 'bookings/creada').gt('created_at', desde).eq('data->>ip', ip);
-    if ((count ?? 0) >= 6) {
+    if ((count ?? 0) >= 3) {
       await logWarn('bookings/limite', 'Demasiadas reservas desde la misma conexión en una hora: se rechazó', { ip });
-      return json({ error: 'Recibí varias reservas seguidas desde tu conexión. Escríbeme por WhatsApp y te ayudo a agendar, por favor.', errorType: 'limite' }, 429);
+      return json({ error: 'Ya recibí 3 reservas desde tu conexión en la última hora. Si necesitas agendar otra, escríbeme por WhatsApp y te ayudo, por favor.', errorType: 'limite' }, 429);
     }
   }
     // Si recaptcha_secret_key no está configurada en settings, no se exige nada —

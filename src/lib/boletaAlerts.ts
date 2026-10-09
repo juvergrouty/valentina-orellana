@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
-import { folioVigente, mensajeErrorSii, MARCA_PENDIENTE, MARCA_PENDIENTE_EMISION, MARCA_EMITIENDO, EMISION_CANDADO_MS } from './apigateway';
+import { folioVigente, mensajeErrorSii, MARCA_PENDIENTE, MARCA_PENDIENTE_EMISION, MARCA_EMITIENDO, MARCA_PROGRAMADA, EMISION_CANDADO_MS } from './apigateway';
+import { todayCL } from './dateUtils';
 
 // Aviso rojo de boletas en todas las páginas del admin — a pedido de
 // Valentina (3 oct 2026): si el envío o la emisión automática de una boleta
@@ -67,6 +68,7 @@ export async function getBoletaAlerts(): Promise<BoletaAlert[]> {
   const fichaDe = new Map((patients ?? []).map(p => [String(p.email).toLowerCase(), p.id]));
 
   const alerts: BoletaAlert[] = [];
+  const hoy = todayCL();
   for (const b of bookings ?? []) {
     if (b.status === 'cancelled' || b.status === 'expired') continue;
     const vigente = folioVigente(b.notes);
@@ -76,6 +78,13 @@ export async function getBoletaAlerts(): Promise<BoletaAlert[]> {
     const emitiendo = new RegExp(`${MARCA_EMITIENDO} (\\S+)`).exec(b.notes ?? '');
     const pendEm = new RegExp(`${MARCA_PENDIENTE_EMISION} (\\S+)`).exec(b.notes ?? '');
 
+    // Boleta programada (8 oct 2026): sesión futura pagada por adelantado; se
+    // emite sola el día de la sesión. Pagada y sin folio es lo esperado, no un
+    // problema — ni siquiera si antes hubo un fallo (p. ej. faltaba el RUT y
+    // Valentina ya lo corrigió). Si falla ese día, el cron deja su propio aviso.
+    const programadaFutura = !!b.session_date && b.session_date !== '2099-12-31' && b.session_date > hoy
+      && (b.notes ?? '').includes(MARCA_PROGRAMADA);
+
     let registrarFolio: BoletaAlert['registrarFolio'];
     if (!vigente && f?.ctx === 'boleta/folio-no-guardado') {
       message = `La boleta Folio ${f.folio ?? '?'} SÍ se emitió en el SII, pero no quedó registrada en la sesión. No la emitas de nuevo: usa "Registrar folio".`;
@@ -83,6 +92,8 @@ export async function getBoletaAlerts(): Promise<BoletaAlert[]> {
     } else if (!vigente && emitiendo && Date.now() - Date.parse(emitiendo[1]) > EMISION_CANDADO_MS) {
       message = 'La emisión de la boleta se interrumpió. Revisa en el SII si quedó emitida: si está, usa "Registrar folio"; si no, emítela desde el calendario (te pedirá confirmar).';
       registrarFolio = { sugerido: null };
+    } else if (!vigente && programadaFutura) {
+      message = null;
     } else if (!vigente && pendEm) {
       const dias = (Date.now() - Date.parse(pendEm[1])) / 86400000;
       message = dias > 7

@@ -295,6 +295,9 @@ const plPhoneRaw   = (Astro.url.searchParams.get('pl_phone') ?? '').replace(/\D/
 // 9 dígitos = celular chileno sin código; si no, ya trae el código de país.
 const plPhoneWa    = plPhoneRaw.length === 9 ? '56' + plPhoneRaw : plPhoneRaw;
 const plWaSent     = Astro.url.searchParams.get('pl_wa_sent') === '1';
+// Sesión futura marcada pagada: la boleta sale sola ese día (8 oct 2026).
+const boletaProgramada   = Astro.url.searchParams.get('boleta_programada') ?? '';
+const boletaProgramadaOk = /^\d{4}-\d{2}-\d{2}$/.test(boletaProgramada);
 const plWaMsg      = paymentLink ? `Hola 👋 Te comparto el enlace de pago para tu sesión: ${paymentLink}` : '';
 // El botón manual de WhatsApp solo se muestra si el envío automático (plantilla
 // de Meta) no se hizo — para no mandar el mensaje duplicado.
@@ -404,6 +407,10 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       )}
       {errorParam === 'boleta_failed' && (
         <div class="cal-error-banner">⚠ El pago se registró, pero la boleta NO se emitió{errorDetail ? `: ${errorDetail}` : ''}. Emítela manualmente desde el calendario.</div>
+      )}
+      {/* Sesión futura pagada por adelantado: la boleta sale sola ese día (8 oct 2026). */}
+      {boletaProgramadaOk && (
+        <div class="cal-error-banner" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;">✓ Pago registrado. La boleta se emitirá automáticamente el día de la sesión ({boletaProgramada.slice(8, 10)}-{boletaProgramada.slice(5, 7)}).</div>
       )}
       {errorParam === 'patient_no_email' && (
         <div class="cal-error-banner">⚠ Este paciente no tiene correo guardado en su ficha — no se pudo enviar el link.</div>
@@ -2642,6 +2649,14 @@ function openSessionDetail(b) {
   } else {
     const emitBtn = document.getElementById('sp-btn-emitir');
     if (emitBtn) emitBtn.style.display = '';
+    // Pagada por adelantado: la boleta ya quedó programada para el día de la sesión (8 oct 2026).
+    const hoyCL = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+    if (b.paid_at && /BoletaProgramada/.test(b.notes ?? '') && b.session_date && b.session_date !== '2099-12-31' && b.session_date > hoyCL && boletaResult) {
+      boletaResult.textContent = `🗓 La boleta se emitirá automáticamente el día de la sesión (${b.session_date.slice(8, 10)}-${b.session_date.slice(5, 7)}).`;
+      boletaResult.style.color = '#1d4ed8';
+      document.getElementById('sp-boleta-form').style.display = 'block';
+      if (emitBtn) emitBtn.style.display = 'none';
+    }
   }
 
   openSessionPanel();
@@ -2955,7 +2970,10 @@ document.getElementById('sp-btn-emitir')?.addEventListener('click', async () => 
         confirm('Una emisión anterior de esta boleta se interrumpió.\n\n¿Revisaste en el SII y la boleta NO está emitida? Aceptar emite una boleta nueva.')) {
       data = await emitirPost(true);
     }
-    if (data.ok) {
+    if (data.ok && data.programada) {
+      // Sesión futura: no se emitió aún, sale sola el día de la sesión (8 oct 2026).
+      result.textContent = `🗓 ${data.mensaje}`; result.style.color = '#1d4ed8';
+    } else if (data.ok) {
       const folio = data.folio ? ` · Folio ${data.folio}` : '';
       if (data.enviada) {
         result.textContent = `✓ Boleta emitida${folio} y enviada a ${data.enviadaA}`; result.style.color = '#15803d';

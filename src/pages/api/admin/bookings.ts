@@ -5,9 +5,9 @@ import { pricingPlans } from '../../../data/services';
 import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar, markBookingDebtVoidedInCalendar } from '../../../lib/syncCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
-import { getTotalOwedByEmail, tagBookingsWithPaymentToken } from '../../../lib/debt';
+import { getTotalOwedByEmail, tagBookingsWithPaymentToken, totalACobrarPorEmail } from '../../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
-import { quitarLineasNotas } from '../../../lib/apigateway';
+import { quitarLineasNotas, MARCA_PROGRAMADA } from '../../../lib/apigateway';
 import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { logWarn } from '../../../lib/logger';
@@ -76,7 +76,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
           // antes de su propio fix. Ahora, si falla, queda visible en /admin/logs.
           if (svc?.boleta_auto) {
             const boletaRes = await emitBoletaParaReserva(id, { enviarEmail: true });
-            if (!boletaRes.ok) {
+            // Sesión futura: queda programada para su día (8 oct 2026) — no es un fallo.
+            if (!boletaRes.ok && !boletaRes.programada) {
               await logWarn('boleta/confirmar-manual', `Boleta no emitida al confirmar manualmente: ${boletaRes.error}`, { bookingId: id, error: boletaRes.error });
             }
           }
@@ -176,6 +177,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (emitir) {
       try {
         const boletaRes = await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true, rutDesdePanel: !!rut && form.get('rut_editado') === '1' });
+        // Sesión futura pagada por adelantado: la boleta sale sola el día de la
+        // sesión; se avisa en la pantalla, sin error (8 oct 2026).
+        if (boletaRes.programada && boletaRes.fechaProgramada) {
+          return redirect(conParam(dest) + 'boleta_programada=' + encodeURIComponent(boletaRes.fechaProgramada));
+        }
         if (!boletaRes.ok) {
           await logWarn('boleta/marcar-pagado', `Boleta no emitida al marcar como pagado: ${boletaRes.error}`, { bookingId: id, error: boletaRes.error });
           return redirect(conParam(dest) + 'error=boleta_failed&detail=' + encodeURIComponent(boletaRes.error ?? ''));
@@ -247,6 +253,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // "Por pagar" en Google mientras la base la seguía teniendo pagada.
     if (error) return redirect(conParam(dest) + 'error=guardar_reserva&detail=' + encodeURIComponent(error.message.slice(0, 200)));
     try { await markBookingPaidInCalendar(id, false); } catch (e) { console.error('[unmark_paid] calendar:', e); }
+    // Sin pago no hay boleta programada (8 oct 2026): si se vuelve a marcar
+    // pagada, se decide de nuevo con "Emitir boleta".
+    await quitarLineasNotas(id, [MARCA_PROGRAMADA]);
     return redirect(dest);
   }
 
@@ -759,8 +768,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         });
 
         let paymentUrl: string;
+        // Lo que la paciente va a pagar al abrir el link. /pagar/[id] cobra TODO
+        // lo que debe, no solo estas sesiones: el correo y el WhatsApp dicen ese
+        // total (8 oct 2026). Con la orden de Flow de respaldo se cobra solo esto.
+        let totalAPagar = totalCobrado;
         if (patientId) {
           paymentUrl = `${siteUrl}/pagar/${patientId}`;
+          try { totalAPagar = Math.max(await totalACobrarPorEmail(finalEmail), totalCobrado); }
+          catch (e) { console.error('[create-admin] total a pagar:', e); }
         } else {
           // Respaldo si por algún motivo no se pudo crear/encontrar la ficha del
           // paciente: genera una orden de Flow puntual para esta reserva, como
@@ -797,6 +812,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
             patientEmail: finalEmail,
             serviceName:  svc.name,
             amount:       totalCobrado,
+            totalAPagar,
             sessionDate:  primeraFecha || session_date,
             sessionTime:  session_time,
             paymentUrl,
@@ -819,7 +835,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
               const isOnline = sessionType.includes('online');
               const modalidad = isOnline ? 'Online (por videollamada)' : (addrRow?.value?.trim() || 'Presencial en consulta');
               const fechaHora = `${primeraFecha || session_date} a las ${session_time}`;
-              const valorTxt  = `$${totalCobrado.toLocaleString('es-CL')}`;
+              // La plantilla de Meta es fija (una sola línea por dato): si el
+              // total incluye otras sesiones, se dice ahí mismo (8 oct 2026).
+              const valorTxt  = totalAPagar > totalCobrado
+                ? `$${totalAPagar.toLocaleString('es-CL')} (incluye otras sesiones pendientes de pago)`
+                : `$${totalCobrado.toLocaleString('es-CL')}`;
               const res = await sendWhatsappTemplate(
                 finalPhone,
                 templateName,

@@ -91,6 +91,9 @@ function formatDate(iso: string) {
 }
 
 const debtEmailSent = Astro.url.searchParams.get('debt_email_sent') === '1';
+// Sesión futura marcada pagada: la boleta sale sola ese día (8 oct 2026).
+const boletaProgramada = Astro.url.searchParams.get('boleta_programada') ?? '';
+const boletaProgramadaOk = /^\d{4}-\d{2}-\d{2}$/.test(boletaProgramada);
 const errorParam    = Astro.url.searchParams.get('error');
 const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
 
@@ -116,6 +119,11 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
   {debtEmailSent && (
     <div class="card" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
       ✓ Link de pago enviado por correo al paciente.
+    </div>
+  )}
+  {boletaProgramadaOk && (
+    <div class="card" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ✓ Pago registrado. La boleta se emitirá automáticamente el día de la sesión ({boletaProgramada.slice(8, 10)}-{boletaProgramada.slice(5, 7)}).
     </div>
   )}
   {errorParam === 'patient_no_email' && (

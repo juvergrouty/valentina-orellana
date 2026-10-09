@@ -46,6 +46,17 @@ export const GET: APIRoute = async ({ request }) => {
     if (j.access_token) {
       await supabase.from('settings')
         .upsert({ key: 'instagram_access_token', value: j.access_token }, { onConflict: 'key' });
+      // Fecha de renovación y de vencimiento para el aviso del panel (8 oct 2026,
+      // ver src/lib/saludSitio.ts): si el cron deja de renovar, Valentina se entera
+      // antes de que las fotos de Instagram desaparezcan de la página.
+      const ahora = new Date();
+      const filas = [{ key: 'instagram_token_renovado', value: ahora.toISOString(), updated_at: ahora.toISOString() }];
+      const segundos = Number(j.expires_in);
+      if (Number.isFinite(segundos) && segundos > 0) {
+        filas.push({ key: 'instagram_token_expira', value: new Date(ahora.getTime() + segundos * 1000).toISOString(), updated_at: ahora.toISOString() });
+      }
+      const { error: errFechas } = await supabase.from('settings').upsert(filas, { onConflict: 'key' });
+      if (errFechas) await logWarn('instagram/refresh-token', 'Token renovado, pero no se pudo guardar la fecha de renovación', { error: errFechas.message });
       return json({ ok: true, expires_in: j.expires_in });
     }
 

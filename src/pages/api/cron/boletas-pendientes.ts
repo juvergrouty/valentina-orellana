@@ -2,7 +2,10 @@ import type { APIRoute } from 'astro';
 import { cronAutorizado } from '../../../lib/cronAuth';
 import { supabase } from '../../../lib/supabase';
 import { procesarTareas } from '../../../lib/tareasEnvio';
-import { enviarBoletaDeReserva, emitBoletaParaReserva, folioVigente, MARCA_PENDIENTE, MARCA_PENDIENTE_EMISION } from '../../../lib/apigateway';
+import { registrarLatido, revisarSaludSiToca } from '../../../lib/saludSitio';
+import { enviarBoletaDeReserva, emitBoletaParaReserva, folioVigente, MARCA_PENDIENTE, MARCA_PENDIENTE_EMISION, MARCA_PROGRAMADA, quitarLineasNotas } from '../../../lib/apigateway';
+import { logWarn } from '../../../lib/logger';
+import { todayCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
 
@@ -22,6 +25,11 @@ export const GET: APIRoute = async ({ request }) => {
   // Primero, los envíos que siguen a un pago y quedaron pendientes o fallaron
   // (confirmación, aviso, calendario, boleta, pasos a seguir): se reintentan
   // aquí cada 5 min sin repetir los ya hechos (src/lib/tareasEnvio.ts).
+  // Latido: si deja de llegar, el panel avisa que las tareas automáticas se
+  // detuvieron. Y, cada 12 h, la revisión de lo que puede vencer (dominio,
+  // correos, WhatsApp) para el aviso "Mantención de la página" (9 oct 2026).
+  await registrarLatido();
+  await revisarSaludSiToca();
   const envios = await procesarTareas({ hastaMs: Date.now() + 25_000 });
 
   const { data: rows, error } = await supabase
@@ -68,5 +76,35 @@ export const GET: APIRoute = async ({ request }) => {
     emisiones.push({ id: r.id, ok: res.ok, folio: res.folio, error: res.error });
   }
 
-  return json({ ok: true, envios, pending: results.length, sent: results.filter(r => r.sent).length, results, emisiones });
+  // Boletas programadas (8 oct 2026): sesiones pagadas por adelantado cuya
+  // boleta se emite EL DÍA de la sesión y con esa fecha (marca BoletaProgramada).
+  // Se mira la fecha ACTUAL de la sesión: si se reagendó, espera a la nueva; si
+  // se canceló o venció, nunca se emite. Las más antiguas primero (una que se
+  // atrasó no queda detrás de las de hoy). Máximo 5 por pasada, como arriba.
+  const { data: progRows, error: progErr } = await supabase
+    .from('bookings').select('id, notes, status, paid_at, session_date, patient_rut').ilike('notes', `%${MARCA_PROGRAMADA}%`)
+    .not('paid_at', 'is', null)
+    .not('status', 'in', '(cancelled,expired)')
+    .lte('session_date', todayCL())
+    .order('session_date', { ascending: true }).limit(20);
+  if (progErr) console.error('[boletas-pendientes] programadas:', progErr.message);
+  const programadas: Array<{ id: string; ok: boolean; folio?: number | null; error?: string }> = [];
+  for (const r of progRows ?? []) {
+    if (r.status === 'cancelled' || r.status === 'expired' || !r.paid_at) continue;
+    if (folioVigente(r.notes)) continue;
+    if (programadas.length >= 5) break;
+    // patient_rut como en la tarea 'boleta' de tareasEnvio (mismo orden de RUT).
+    const res = await emitBoletaParaReserva(r.id, { rutOverride: r.patient_rut || undefined, enviarEmail: true });
+    programadas.push({ id: r.id, ok: res.ok, folio: res.folio, error: res.error });
+    if (!res.ok) {
+      // Si falla, sale de esta cola (no se reintenta cada 5 min para siempre):
+      // si fue el SII, emitBoletaParaReserva ya la dejó en la cola de reintento
+      // (BoletaPendienteEmision, 7 días); si no, queda el aviso rojo del panel
+      // para emitirla a mano.
+      await quitarLineasNotas(r.id, [MARCA_PROGRAMADA]);
+      await logWarn('boleta/emision', `Boleta programada del día de la sesión no emitida: ${res.error ?? 'error desconocido'}`, { bookingId: r.id, error: res.error });
+    }
+  }
+
+  return json({ ok: true, envios, pending: results.length, sent: results.filter(r => r.sent).length, results, emisiones, programadas });
 };

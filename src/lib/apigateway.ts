@@ -239,6 +239,19 @@ export const MARCA_EMITIENDO = 'BoletaEmitiendo';
 // cron boletas-pendientes la reintenta sola.
 export const MARCA_PENDIENTE_EMISION = 'BoletaPendienteEmision';
 export const EMISION_CANDADO_MS = 10 * 60 * 1000;
+// `BoletaProgramada <YYYY-MM-DD>`: sesión pagada por adelantado. La boleta se
+// emite EL DÍA de la sesión y con esa fecha (regla de Valentina, 8 oct 2026):
+// antes un pack pagado de una vez salía con todas sus boletas fechadas el día
+// del pago. El cron boletas-pendientes la emite cuando llega la fecha ACTUAL
+// de la sesión (si se reagenda, espera a la nueva; si se cancela, nunca sale).
+export const PROGRAMAR_BOLETAS_FUTURAS = false;
+export const MARCA_PROGRAMADA = 'BoletaProgramada';
+
+/** "La boleta se emitirá automáticamente el día de la sesión (DD-MM)." */
+export function mensajeBoletaProgramada(sessionDate: string): string {
+  const [, m, d] = sessionDate.split('-');
+  return `La boleta se emitirá automáticamente el día de la sesión (${d}-${m}).`;
+}
 
 /** Errores en que el SII/API Gateway rechazó ANTES de emitir: es seguro reintentar.
  *  Solo se mira el código HTTP del inicio del mensaje ("API Gateway 401: …"),
@@ -329,7 +342,8 @@ export async function registrarFolioManual(bookingId: string, folio: number, env
   const r = await cambiarNotas(bookingId, (n) => {
     const v = folioVigente(n);
     if (v) { yaTenia = v.folio; return null; }
-    const base = sinLineas(sinLineas(n, MARCA_EMITIENDO), MARCA_PENDIENTE_EMISION);
+    // Sin la marca programada: si después se anula, el cron no la re-emite solo (8 oct 2026).
+    const base = sinLineas(sinLineas(sinLineas(n, MARCA_EMITIENDO), MARCA_PENDIENTE_EMISION), MARCA_PROGRAMADA);
     const pendiente = enviar ? `\n${MARCA_PENDIENTE} ${new Date().toISOString()}` : '';
     return `${base ? base + '\n' : ''}Boleta Folio ${folio}${pendiente}`;
   });
@@ -358,7 +372,7 @@ export async function enviarBoletaDeReserva(bookingId: string): Promise<{ sent: 
   if (!cfg) return { sent: false, error: 'API Gateway no configurado.' };
 
   const { data: b } = await supabase
-    .from('bookings').select('patient_name, patient_email, session_date, notes').eq('id', bookingId).single();
+    .from('bookings').select('patient_name, patient_email, session_date, paid_at, notes').eq('id', bookingId).single();
   if (!b) return { sent: false, error: 'Reserva no encontrada.' };
 
   const marcarPendiente = async (error: string) => {
@@ -389,7 +403,15 @@ export async function enviarBoletaDeReserva(bookingId: string): Promise<{ sent: 
   let codigo = vigente.codigo;
   if (!codigo) {
     try {
-      codigo = await codigoDeFolioConReintentos(cfg.siiRut, periodoDeFecha(fechaBoletaDesdeSesion(b.session_date)), folio, cfg);
+      // Reintentos (el SII tarda en listar un folio recién emitido) solo en el
+      // período de emisión; en los demás, una sola consulta, cada una con su
+      // propio manejo de error, para no alargar el cron (9 oct 2026).
+      const [principal, ...otros] = periodosBoleta(b);
+      try { codigo = await codigoDeFolioConReintentos(cfg.siiRut, principal, folio, cfg); } catch { /* se prueban los demás */ }
+      for (const periodo of otros) {
+        if (codigo) break;
+        try { codigo = await codigoDeFolio(cfg.siiRut, periodo, folio, cfg); } catch { /* siguiente */ }
+      }
     } catch (e) {
       return marcarPendiente(`No se pudo resolver el código de la boleta: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -477,7 +499,53 @@ function periodoDeFecha(ymd: string): string {
  * Usa la fecha de la sesión para que el reembolso en la isapre calce con el día
  * de atención. El SII NO acepta fechas futuras, así que si la sesión aún no
  * ocurre (o es el marcador 2099 de un cobro sin fecha), cae a la fecha de hoy.
+ * Desde el 9 oct 2026 la boleta de una sesión pagada usa fechaEmisionBoleta
+ * (fecha del pago); esta queda para emisiones sin pago registrado.
  */
+/**
+ * Fecha de emisión (FchEmis) de una boleta, igual que Encuadrado y como pide el
+ * SII (9 oct 2026): la boleta de honorarios se emite al PERCIBIR el pago (art.
+ * 68 LIR), así que lleva la fecha del pago (paid_at, hora de Chile). La fecha
+ * de la sesión va en la glosa (glosaConFecha). Verificado en el SII: el pack de
+ * Mauricio pagado el 03/02/2026 tiene sus 4 boletas (146-149) con fecha
+ * 03/02/2026 y la glosa "… (04/02/2026)", "… (11/02/2026)", etc.
+ * El SII acepta fechas del mes anterior: un pago más antiguo que eso (registrado
+ * tarde) se emite con la fecha de hoy. Sin pago registrado (emisión manual), se
+ * usa la fecha de la sesión como antes.
+ */
+export function fechaEmisionBoleta(b: { session_date?: string | null; paid_at?: string | null }): string {
+  const hoy = todayCL();
+  if (!b.paid_at) return fechaBoletaDesdeSesion(b.session_date);
+  const pagado = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(b.paid_at));
+  const [y, m] = hoy.split('-').map(Number);
+  const minimo = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 10); // 1° del mes anterior
+  return pagado >= minimo && pagado <= hoy ? pagado : hoy;
+}
+
+/** Períodos (YYYYMM) donde buscar el código de una boleta ya emitida: el de su
+ *  fecha de emisión y, por si se emitió con otra regla o en otro día, el actual
+ *  y el anterior. Sin duplicados, en ese orden. */
+export function periodosBoleta(b: { session_date?: string | null; paid_at?: string | null }): string[] {
+  const hoy = todayCL();
+  const [y, m] = hoy.split('-').map(Number);
+  const anterior = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 10);
+  // El mes real del pago va primero aunque tenga más de un mes (una boleta
+  // emitida en su día quedó en ese período; el tope al mes anterior solo aplica
+  // a emisiones nuevas).
+  const mesPago = b.paid_at
+    ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(b.paid_at))
+    : null;
+  const lista = [...(mesPago ? [mesPago] : []), fechaEmisionBoleta(b), fechaBoletaDesdeSesion(b.session_date), hoy, anterior].map(f => f.slice(0, 7).replace('-', ''));
+  return [...new Set(lista)];
+}
+
+/** Glosa con la fecha de la sesión entre paréntesis, como Encuadrado. */
+export function glosaConFecha(glosa: string, sessionDate?: string | null): string {
+  if (!sessionDate || sessionDate === '2099-12-31' || !/^\d{4}-\d{2}-\d{2}$/.test(sessionDate)) return glosa;
+  const [y, mo, d] = sessionDate.split('-');
+  return `${glosa} (${d}/${mo}/${y})`;
+}
+
 export function fechaBoletaDesdeSesion(sessionDate?: string | null): string {
   const hoy = todayCL();
   if (!sessionDate) return hoy;
@@ -498,7 +566,10 @@ export async function emitBoletaParaReserva(
   // rutDesdePanel: el RUT lo escribió Valentina en el panel → corrige la ficha.
   // Si viene de la reserva (Flow, transferencia), solo completa la ficha si estaba vacía.
   opts: { rutOverride?: string; enviarEmail?: boolean; forzar?: boolean; rutDesdePanel?: boolean } = {},
-): Promise<{ ok: boolean; folio?: number | null; codigo?: string | null; error?: string; alreadyEmitted?: boolean; enviada?: boolean; enviadaA?: string; errorEnvio?: string }> {
+  // programada: la sesión es futura → no se emitió AÚN (no es error): queda la
+  // marca BoletaProgramada y el cron la emite ese día. `mensaje` es el texto
+  // para mostrarle a Valentina (8 oct 2026).
+): Promise<{ ok: boolean; folio?: number | null; codigo?: string | null; error?: string; alreadyEmitted?: boolean; enviada?: boolean; enviadaA?: string; errorEnvio?: string; programada?: boolean; fechaProgramada?: string; mensaje?: string }> {
   const cfg = await getAgwConfig();
   if (!cfg) return { ok: false, error: 'API Gateway no configurado.' };
 
@@ -554,6 +625,39 @@ export async function emitBoletaParaReserva(
     }
   }
 
+  // Sesión futura pagada por adelantado: la boleta NO se emite hoy, sino el día
+  // de la sesión y con su fecha (8 oct 2026). Antes fechaBoletaDesdeSesion la
+  // bajaba a hoy (el SII no acepta fechas futuras) y salía fechada el día del
+  // pago. El RUT y el monto ya se validaron arriba, así que un problema de
+  // datos se ve ahora y no recién el día de la sesión. Idempotente: si la
+  // marca ya está, no se repite.
+  const sesionConFecha = !!b.session_date && b.session_date !== '2099-12-31' && /^\d{4}-\d{2}-\d{2}$/.test(b.session_date);
+  // DESACTIVADO (9 oct 2026): según el SII la boleta de honorarios se emite al
+  // PERCIBIR el pago (art. 68 LIR), no el día de la sesión — Encuadrado emitía
+  // las 4 boletas de un pack el mismo día del pago. Queda listo por si Valentina
+  // (con su contadora) decide otra cosa; con false se emite al pagar.
+  if (PROGRAMAR_BOLETAS_FUTURAS && sesionConFecha && b.session_date > todayCL()) {
+    // RUT corregido en el panel en una reserva pagada por Flow: el día de la
+    // sesión manda el RUT de la reserva (1b), así que se corrige ahí también.
+    if (corregidoEnPanel && rutReservaFlow && rutReservaFlow !== limpiarRut(normalizeRut(rutRaw))) {
+      const { error: rutErr } = await supabase.from('bookings').update({ patient_rut: normalizeRut(rutRaw) }).eq('id', bookingId);
+      if (rutErr) await logError('boleta/programada', 'No se pudo guardar el RUT corregido en la sesión programada', { bookingId, error: rutErr.message });
+    }
+    const linea = `${MARCA_PROGRAMADA} ${b.session_date}`;
+    const marca = await cambiarNotas(bookingId, (n) => {
+      if (folioVigente(n)) return null;
+      // Una sola marca (la fecha vigente); la cola de reintento del SII no aplica a una sesión futura.
+      const base = sinLineas(sinLineas(n, MARCA_PROGRAMADA), MARCA_PENDIENTE_EMISION);
+      const nuevo = `${base ? base + '\n' : ''}${linea}`;
+      return nuevo === n ? null : nuevo;
+    });
+    if (!marca.ok && !marca.aborted) {
+      await logError('boleta/programada', 'No se pudo dejar programada la boleta de una sesión futura', { bookingId, error: marca.error });
+      return { ok: false, error: `No se pudo programar la boleta: ${marca.error ?? 'error al guardar'}` };
+    }
+    return { ok: true, folio: null, programada: true, fechaProgramada: b.session_date, mensaje: mensajeBoletaProgramada(b.session_date) };
+  }
+
   let glosa = 'Atención psicológica';
   if (b.service_id) {
     const { data: svc } = await supabase
@@ -561,8 +665,8 @@ export async function emitBoletaParaReserva(
     if (svc?.fonasa_description) glosa = svc.fonasa_description as string;
   }
 
-  // FchEmis = fecha de la sesión (para que el reembolso calce con el día de atención)
-  const fecha = fechaBoletaDesdeSesion(b.session_date);
+  // FchEmis = fecha del pago (SII: al percibir); la sesión va en la glosa.
+  const fecha = fechaEmisionBoleta(b);
 
   // Candado: solo UNA emisión a la vez por sesión. Antes, dos llamadas
   // simultáneas (doble clic, o Flow y el panel al mismo tiempo) veían la
@@ -597,7 +701,7 @@ export async function emitBoletaParaReserva(
     const result = await emitirBHE({
       fecha,
       receptor: { rut: normalizeRut(rutRaw), razonSocial: usaDatosReserva ? b.patient_name : (p?.name ?? b.patient_name), direccion: p?.address ?? '', comuna: p?.comuna ?? '' },
-      detalle:  [{ nombre: glosa, monto: b.amount }],
+      detalle:  [{ nombre: glosaConFecha(glosa, b.session_date), monto: b.amount }],
     }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
 
     const folio = result?.data?.Encabezado?.IdDoc?.Folio ?? null;
@@ -625,7 +729,9 @@ export async function emitBoletaParaReserva(
     {
       const pendiente = opts.enviarEmail ? `\n${MARCA_PENDIENTE} ${new Date().toISOString()}` : '';
       const guardado = await cambiarNotas(bookingId, (n) => {
-        const base = sinLineas(sinLineas(n, MARCA_EMITIENDO), MARCA_PENDIENTE_EMISION);
+        // También sale la marca programada: si esta boleta se anula después, el
+        // cron no debe volver a emitirla solo (8 oct 2026).
+        const base = sinLineas(sinLineas(sinLineas(n, MARCA_EMITIENDO), MARCA_PENDIENTE_EMISION), MARCA_PROGRAMADA);
         return `${base ? base + '\n' : ''}Boleta Folio ${folio}${pendiente}`;
       });
       if (!guardado.ok) {

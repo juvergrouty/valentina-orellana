@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { agregarLineaNotas } from './apigateway';
+import { comprobanteEnRevision } from './comprobantes';
 
 // "Deuda real" = misma definición usada en el calendario (agenda.astro, evClass)
 // y en /admin/deudas: reserva CONFIRMADA (la sesión se dio o se va a dar) sin
@@ -76,4 +77,13 @@ export async function getTotalOwedByEmail(email: string): Promise<DebtBooking[]>
       .then(r => r.data ?? []),
   ]);
   return [...deuda, ...porCobrar].sort((a, b) => a.session_date.localeCompare(b.session_date));
+}
+
+/** Monto que /pagar/[id] le cobra HOY a la paciente: todo lo que debe
+ *  (getTotalOwedByEmail) menos lo que tiene un comprobante de transferencia en
+ *  revisión — el mismo cálculo de /pagar y pagar-deuda.ts. Lo usan los mensajes
+ *  del link de pago, para que digan el total real y no solo el cobro nuevo (8 oct 2026). */
+export async function totalACobrarPorEmail(email: string): Promise<number> {
+  const todo = await getTotalOwedByEmail(email);
+  return todo.filter(b => !comprobanteEnRevision(b.notes)).reduce((s, b) => s + (b.amount ?? 0), 0);
 }

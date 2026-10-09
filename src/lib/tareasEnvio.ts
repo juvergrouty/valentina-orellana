@@ -191,6 +191,9 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
         // emitBoletaParaReserva tiene candado y folio: repetirla nunca emite una segunda boleta.
         // Si el SII falla, la deja en su propia cola (BoletaPendienteEmision) y avisa en el panel.
         const res = await emitBoletaParaReserva(bookingId, { rutOverride: b.patient_rut || undefined, enviarEmail: true });
+        // Sesión futura pagada por adelantado: queda programada para el día de
+        // la sesión (cron boletas-pendientes). No es error ni aviso (8 oct 2026).
+        if (res.programada) return { ok: true, nota: res.mensaje };
         if (!res.ok) {
           const esFaltaRut = (res.error ?? '').toLowerCase().includes('rut');
           await logWarn('flow/boleta-automatica', esFaltaRut

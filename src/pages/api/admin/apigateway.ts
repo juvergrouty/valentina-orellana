@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { getAgwConfig, bheEmitidas, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion, emitBoletaParaReserva, enviarBoletaDeReserva, folioVigente, mensajeErrorSii, MARCA_PENDIENTE, registrarFolioManual, cambiarNotas } from '../../../lib/apigateway';
+import { getAgwConfig, bheEmitidas, bhePdf, bheEmail, bheAnular, codigoDeFolio, clearAgwCache, fechaBoletaDesdeSesion, periodosBoleta, emitBoletaParaReserva, enviarBoletaDeReserva, folioVigente, mensajeErrorSii, MARCA_PENDIENTE, registrarFolioManual, cambiarNotas } from '../../../lib/apigateway';
 import type { BheCausal } from '../../../lib/apigateway';
 import { logError } from '../../../lib/logger';
 import { ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
@@ -64,6 +64,8 @@ export const POST: APIRoute = async ({ request }) => {
     const bookingId = body.booking_id;
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
     const r = await emitBoletaParaReserva(bookingId, { rutOverride: body.rut, enviarEmail: true, forzar: body.forzar === true, rutDesdePanel: !!body.rut && body.rut_editado === true });
+    // Sesión futura: queda programada para su día (8 oct 2026). No es error.
+    if (r.programada) return json({ ok: true, programada: true, fechaProgramada: r.fechaProgramada, mensaje: r.mensaje });
     if (!r.ok) return json({ ok: false, error: r.error ?? 'Error al emitir' }, 502);
     if (r.alreadyEmitted) return json({ ok: false, error: `Esta sesión ya tiene la boleta Folio ${r.folio}. Usa "Enviar por email" para reenviarla.` }, 400);
     return json({ ok: true, folio: r.folio, codigo: r.codigo, enviada: r.enviada, enviadaA: r.enviadaA, errorEnvio: r.errorEnvio });
@@ -89,7 +91,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
 
     const { data: b } = await supabase
-      .from('bookings').select('patient_name, patient_email, session_date, notes').eq('id', bookingId).single();
+      .from('bookings').select('patient_name, patient_email, session_date, paid_at, notes').eq('id', bookingId).single();
     if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
 
     const email = (body.email ?? '').trim() || (b.patient_email ?? '');
@@ -123,7 +125,11 @@ export const POST: APIRoute = async ({ request }) => {
     let { folio, codigo } = parseBoleta(b.notes);
     if (!folio) return json({ ok: false, error: 'Esta sesión no tiene una boleta vigente.' }, 400);
     if (!codigo) {
-      try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeSesion(b.session_date), folio, cfg); } catch { /* */ }
+      // Fecha de emisión = fecha del pago (9 oct 2026): se prueba su período y, por si acaso, el actual y el anterior.
+      for (const periodo of periodosBoleta(b)) {
+        try { codigo = await codigoDeFolio(cfg.siiRut, periodo, folio, cfg); } catch { /* */ }
+        if (codigo) break;
+      }
     }
     if (!codigo) return json({ ok: false, error: 'No se pudo resolver el código de la boleta (folio ' + folio + ').' }, 502);
 
@@ -159,13 +165,17 @@ export const POST: APIRoute = async ({ request }) => {
     if (!bookingId) return json({ ok: false, error: 'Falta booking_id.' }, 400);
 
     const { data: b } = await supabase
-      .from('bookings').select('session_date, notes').eq('id', bookingId).single();
+      .from('bookings').select('session_date, paid_at, notes').eq('id', bookingId).single();
     if (!b) return json({ ok: false, error: 'Reserva no encontrada.' }, 404);
 
     let { folio, codigo } = parseBoleta(b.notes);
     if (!folio) return json({ ok: false, error: 'Esta sesión aún no tiene boleta emitida.' }, 400);
     if (!codigo) {
-      try { codigo = await codigoDeFolio(cfg.siiRut, periodoDeSesion(b.session_date), folio, cfg); } catch { /* */ }
+      // Fecha de emisión = fecha del pago (9 oct 2026): se prueba su período y, por si acaso, el actual y el anterior.
+      for (const periodo of periodosBoleta(b)) {
+        try { codigo = await codigoDeFolio(cfg.siiRut, periodo, folio, cfg); } catch { /* */ }
+        if (codigo) break;
+      }
     }
     if (!codigo) return json({ ok: false, error: 'No se pudo resolver el código de la boleta.' }, 502);
 

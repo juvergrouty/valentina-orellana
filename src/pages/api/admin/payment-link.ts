@@ -4,7 +4,7 @@ import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { chocaConOtraSesion } from '../../../lib/disponibilidad';
-import { tagBookingsWithPaymentToken } from '../../../lib/debt';
+import { tagBookingsWithPaymentToken, totalACobrarPorEmail } from '../../../lib/debt';
 
 export const prerender = false;
 
@@ -142,8 +142,14 @@ export const POST: APIRoute = async ({ request }) => {
     });
 
     let paymentUrl: string;
+    // Lo que la paciente paga al abrir el link: /pagar/[id] cobra TODO lo que
+    // debe, no solo este cobro, así que el mensaje dice ese total (8 oct 2026).
+    // Con la orden de Flow de respaldo se cobra solo este monto.
+    let totalAPagar = amountInt;
     if (patientId) {
       paymentUrl = `${siteUrl}/pagar/${patientId}`;
+      try { totalAPagar = Math.max(await totalACobrarPorEmail(email.trim().toLowerCase()), amountInt); }
+      catch (e) { console.error('[payment-link] total a pagar:', e); }
     } else {
       // Respaldo si no se pudo crear/encontrar la ficha del paciente: orden de Flow directa.
       const order = await createPaymentOrder({
@@ -187,7 +193,8 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Construir mensaje de WhatsApp
     const firstName = name.trim().split(' ')[0];
-    const amountFmt = new Intl.NumberFormat('es-CL').format(amountInt);
+    const amountFmt = new Intl.NumberFormat('es-CL').format(totalAPagar);
+    const incluyeOtras = totalAPagar > amountInt;
     const months    = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
     let dateLine = '';
@@ -201,7 +208,7 @@ export const POST: APIRoute = async ({ request }) => {
     const modalityLine = isOnline ? '🎥 Sesión online\n' : '📍 Sesión presencial\n';
     const meetLine     = meetLink  ? `\n🔗 Google Meet: ${meetLink}` : '';
 
-    const waMessage = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n${modalityLine}${dateLine}💰 $${amountFmt} CLP\n\n💳 Enlace de pago: ${paymentUrl}${meetLine}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
+    const waMessage = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n${modalityLine}${dateLine}💰 ${incluyeOtras ? `Total a pagar: $${amountFmt} CLP\nIncluye otras sesiones que tienes pendientes de pago.` : `$${amountFmt} CLP`}\n\n💳 Enlace de pago: ${paymentUrl}${meetLine}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
 
     const whatsappUrl = waPhone.length >= 10
       ? `https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}`
@@ -214,6 +221,7 @@ export const POST: APIRoute = async ({ request }) => {
       bookingId,
       waPhone,
       waMessage,
+      totalAPagar,
       meetLink:     meetLink ?? null,
     });
 

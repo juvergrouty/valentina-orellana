@@ -281,10 +281,16 @@ export async function sendPaymentLinkEmail(opts: {
   sessionDate?: string;
   sessionTime?: string;
   paymentUrl:   string;
+  // Lo que /pagar/[id] cobra de verdad: este cobro MÁS lo que la paciente ya
+  // debía. Antes el correo decía solo el valor de esta sesión y al abrir el
+  // link aparecía un monto mayor (8 oct 2026). Sin él, se muestra `amount`.
+  totalAPagar?: number;
 }): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
 
+  const total = Math.max(opts.totalAPagar ?? 0, opts.amount);
+  const incluyeOtras = total > opts.amount;
   const subject = `Enlace de pago para tu sesión — Ps. Valentina Orellana`;
   const dateLine = opts.sessionDate
     ? `<tr><td style="padding:0.4rem 0;color:#6B6860;width:40%;">Fecha</td><td style="padding:0.4rem 0;font-weight:500;">${formatDate(opts.sessionDate)}${opts.sessionTime ? ' · ' + opts.sessionTime : ''}</td></tr>`
@@ -305,8 +311,12 @@ export async function sendPaymentLinkEmail(opts: {
           <table style="width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:0.85rem;">
             <tr><td style="padding:0.4rem 0;color:#6B6860;width:40%;">Servicio</td><td style="padding:0.4rem 0;font-weight:500;">${opts.serviceName}</td></tr>
             ${dateLine}
-            <tr><td style="padding:0.4rem 0;color:#6B6860;">Valor</td><td style="padding:0.4rem 0;font-weight:500;">${formatCLP(opts.amount)}</td></tr>
+            ${incluyeOtras
+              ? `<tr><td style="padding:0.4rem 0;color:#6B6860;">Valor de esta sesión</td><td style="padding:0.4rem 0;">${formatCLP(opts.amount)}</td></tr>
+            <tr><td style="padding:0.4rem 0;color:#6B6860;">Total a pagar</td><td style="padding:0.4rem 0;font-weight:500;">${formatCLP(total)}</td></tr>`
+              : `<tr><td style="padding:0.4rem 0;color:#6B6860;">Valor</td><td style="padding:0.4rem 0;font-weight:500;">${formatCLP(opts.amount)}</td></tr>`}
           </table>
+          ${incluyeOtras ? `<p style="font-family:'Inter',sans-serif;font-size:0.8rem;color:#6B6860;margin:0.75rem 0 0;">El total incluye otras sesiones que tienes pendientes de pago, para que quede todo al día en un solo pago.</p>` : ''}
         </div>
         <a href="${opts.paymentUrl}"
            style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;
