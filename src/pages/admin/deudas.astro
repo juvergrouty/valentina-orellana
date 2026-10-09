@@ -187,7 +187,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
               const waMsg = encodeURIComponent(
                 payUrl
                   ? `Hola ${firstName}, tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores. Puedes revisarlo y pagarlo aquí: ${payUrl}`
-                  : `Hola ${firstName}, te escribo de la consulta de Valentina Orellana — tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores. ¿Me confirmas cuándo podrías regularizarlo?`
+                  : `Hola ${firstName}, te escribo de la consulta de Ps. Valentina Orellana — tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores. ¿Me confirmas cuándo podrías regularizarlo?`
               );
               const waUrl = waNumber.length >= 10 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
               return (

@@ -18,7 +18,7 @@ function getResend(): Resend | null {
 // para que todos los correos automáticos digan "Ps. Valentina Orellana".
 // EMAIL_FROM solo aporta la dirección; acepta "Nombre <correo>" o el correo solo.
 const FROM_NAME = 'Ps. Valentina Orellana';
-const FROM_RAW = (import.meta.env.EMAIL_FROM ?? 'onboarding@resend.dev').trim();
+const FROM_RAW = (import.meta.env.EMAIL_FROM || 'onboarding@resend.dev').trim();
 const FROM_ADDR = FROM_RAW.match(/<([^>]+)>/)?.[1]?.trim() ?? FROM_RAW;
 const FROM = `${FROM_NAME} <${FROM_ADDR}>`;
 

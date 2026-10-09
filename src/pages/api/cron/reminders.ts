@@ -179,7 +179,7 @@ export const GET: APIRoute = async ({ request }) => {
 
       const res = templateName
         ? await sendWhatsappTemplate(b.patient_phone, templateName, templateLang, [firstName, `${deDiaRelativo(b.session_date)} a las ${time} hrs`])
-        : await sendWhatsappText(b.patient_phone, `Hola ${firstName}, te recuerdo tu hora ${deDiaRelativo(b.session_date)} a las ${time} hrs. — Valentina Orellana`);
+        : await sendWhatsappText(b.patient_phone, `Hola ${firstName}, te recuerdo tu hora ${deDiaRelativo(b.session_date)} a las ${time} hrs. — Ps. Valentina Orellana`);
       await terminarEnvioUnico(b.id, tareaWa, res.sent, res.reason);
       if (res.sent) {
         waSent++;
