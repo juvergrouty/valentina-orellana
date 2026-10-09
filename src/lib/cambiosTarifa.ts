@@ -56,7 +56,10 @@ export async function avisosCambioTarifa(): Promise<AvisoTarifa[]> {
     let fase: AvisoTarifa['fase'] | null = null;
     if (hoy >= c.desde) fase = c.aplicado ? null : 'vigente';
     else if (!c.avisado) fase = 'avisar';                    // desde ya, hasta que avise
-    else if (hoy >= sumarDias(c.desde, -3)) fase = 'proxima'; // los 3 días previos
+    // Desde el lunes de la semana anterior: Valentina agenda con una semana de
+    // anticipación, así que lo que agende desde ese día para la fecha nueva ya
+    // va con el monto nuevo (pedido explícito, 8 oct 2026).
+    else if (hoy >= sumarDias(c.desde, -7)) fase = 'proxima';
     if (!fase) continue;
 
     // Sesiones agendadas en la página desde la fecha nueva que siguen con el monto antiguo.

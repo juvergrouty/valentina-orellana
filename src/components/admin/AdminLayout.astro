@@ -956,7 +956,7 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
             <li style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
               <span>
                 {t.fase === 'avisar' && <>Falta avisarle a <strong>{t.nombre}</strong> que su tarifa {t.anterior ? `pasa de ${clp(t.anterior)} a` : 'sube a'} <strong>{clp(t.nuevo)}</strong> desde el {fechaLarga(t.desde)}.</>}
-                {t.fase === 'proxima' && <>El {fechaLarga(t.desde)} empieza la tarifa nueva de <strong>{t.nombre}</strong>: <strong>{clp(t.nuevo)}</strong>{t.anterior ? ` (antes ${clp(t.anterior)})` : ''}. Desde esa semana, agéndalo con el monto nuevo.</>}
+                {t.fase === 'proxima' && <>Desde el {fechaLarga(t.desde)} rige la tarifa nueva de <strong>{t.nombre}</strong>: <strong>{clp(t.nuevo)}</strong>{t.anterior ? ` (antes ${clp(t.anterior)})` : ''}. Las sesiones que le agendes desde ahora para esa fecha en adelante van con el monto nuevo.</>}
                 {t.fase === 'vigente' && <>Desde el {fechaLarga(t.desde)} rige la tarifa nueva de <strong>{t.nombre}</strong>: <strong>{clp(t.nuevo)}</strong>{t.anterior ? ` (antes ${clp(t.anterior)})` : ''}. Al agendarle (aquí o en Encuadrado) usa el monto nuevo.</>}
                 {t.sesionesConMontoAntiguo > 0 && <> ⚠ Tiene {t.sesionesConMontoAntiguo} {t.sesionesConMontoAntiguo === 1 ? 'sesión agendada' : 'sesiones agendadas'} desde esa fecha con el monto antiguo: cámbiale el monto.</>}
               </span>
