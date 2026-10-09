@@ -26,6 +26,10 @@ const FROM = `${FROM_NAME} <${FROM_ADDR}>`;
 // (reenvía a Gmail vía ImprovMX y Gmail responde "como" consulta@ vía Resend).
 // Sin esto, la respuesta iba a notificaciones@ y Valentina contestaba desde su
 // Gmail personal.
+// Logo (la V de la marca) arriba de los correos. Imagen chica con fondo crema
+// igual al del correo; alojada en el sitio (public/firma/v.png).
+const LOGO_HEADER = `<img src="https://www.valentinaorellana.cl/firma/v.png" width="44" height="44" alt="Ps. Valentina Orellana" style="display:block;border:0;width:44px;height:44px;margin:0 0 1.25rem;">`;
+
 const PATIENT_REPLY_TO = 'Ps. Valentina Orellana <consulta@valentinaorellana.cl>';
 
 // Respaldo si el setting `notification_email` no está configurado — el correo
@@ -119,6 +123,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
     subject,
     html: `
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h1 style="font-size:1.6rem;font-weight:400;margin-bottom:0.5rem;color:#1A1A18;">
           Tu sesión está confirmada
         </h1>
@@ -244,6 +249,7 @@ export async function sendSessionUpdatedEmail(data: {
     subject,
     html: `
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">${data.reason}</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(data.patient_name)}, así queda tu sesión ahora.
@@ -309,6 +315,7 @@ export async function sendPaymentLinkEmail(opts: {
     subject,
     html: `
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Enlace de pago de tu sesión</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(opts.patientName)}, para confirmar tu reserva realiza el pago con el siguiente enlace seguro.
@@ -367,6 +374,7 @@ export async function sendDebtReminderEmail(opts: {
     subject,
     html: `
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Tienes un saldo pendiente</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(opts.patientName)}, tienes un saldo pendiente de ${formatCLP(opts.amount)}
@@ -431,6 +439,7 @@ export async function sendReminderEmail(data: BookingEmailData, opts: { idempote
     subject,
     html: `
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Te espero pronto 🌿</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(data.patient_name)}, te recuerdo tu sesión ${deDiaRelativo(data.session_date)}.
@@ -498,6 +507,7 @@ export async function sendPendingExpiredEmail(data: {
     subject,
     html: `
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Tu horario fue liberado</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;line-height:1.6;">
           Hola ${escapeHtml(data.patient_name)}, habías reservado el <strong>${formatDate(data.session_date)} a las ${data.session_time}</strong>,
@@ -547,6 +557,7 @@ export async function sendReviewRequestEmail(opts: {
     subject: 'Tu opinión me ayudaría mucho 🌿',
     html: `
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Gracias por confiar en este proceso</h1>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.25rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(opts.patientName)}, luego del proceso que has vivido en terapia, me encantaría poder
@@ -609,6 +620,7 @@ export async function sendEvaluationEmail(opts: {
     subject: '¿Cómo te sentiste con tu sesión?',
     html: `
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Un momento para ti</h1>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(opts.patientName)}, quería saber cómo te sentiste después de nuestra última sesión.
@@ -663,7 +675,7 @@ export function stepsEmailHtml(opts: { patientName: string; clinicAddress?: stri
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FAF7F4;">
   <tr><td align="center">
     <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;">
-      <tr><td class="pad" style="background:#F5F1EC;padding:22px 32px;border-bottom:1px solid #DDD8CF;font-family:'Domine',Georgia,serif;font-size:20px;color:#1A1A18;">Ps. Valentina Orellana</td></tr>
+      <tr><td class="pad" style="background:#F5F1EC;padding:22px 32px;border-bottom:1px solid #DDD8CF;font-family:'Domine',Georgia,serif;font-size:20px;color:#1A1A18;"><img src="https://www.valentinaorellana.cl/firma/v.png" width="36" height="36" alt="" style="display:inline-block;vertical-align:middle;border:0;width:36px;height:36px;margin-right:10px;">Ps. Valentina Orellana</td></tr>
       <tr><td style="padding:0;line-height:0;font-size:0;">
         <img src="${SITE}/images/hero-paginas.jpg" width="640" alt="" style="display:block;width:100%;max-width:640px;height:auto;max-height:230px;object-fit:cover;object-position:50% 25%;border:0;">
       </td></tr>
@@ -738,6 +750,7 @@ export async function sendBoletaEmail(opts: {
     subject: `Tu boleta de honorarios${folioTxt} — Ps. Valentina Orellana`,
     html: `
       <div style="font-family:'Inter',sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <p style="font-size:0.95rem;color:#6B6860;margin-bottom:1.25rem;">Hola ${escapeHtml(opts.patientName)},</p>
         <p style="font-size:0.92rem;line-height:1.7;">
           Gracias por tu pago. Te adjunto tu <strong>boleta de honorarios electrónica${folioTxt}</strong>
@@ -776,6 +789,7 @@ export async function sendBulkEmail(
     if (!r.email) { skipped++; continue; }
     const html = `
       <div style="font-family:'Inter',sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <p style="font-size:0.9rem;color:#6B6860;margin-bottom:1.5rem;">Hola ${escapeHtml(r.name)},</p>
         <div style="font-size:0.92rem;line-height:1.7;color:#1A1A18;">${bodyHtml}</div>
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
@@ -980,6 +994,7 @@ export async function sendContactFormEmail(data: {
     subject:  `Nuevo mensaje de contacto — ${data.nombre}`,
     html: `
       <div style="font-family:'Inter',sans-serif;max-width:480px;margin:0 auto;padding:1.5rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h2 style="font-size:1rem;font-weight:600;margin-bottom:1.25rem;border-bottom:2px solid #576352;padding-bottom:0.5rem;">
           Nuevo mensaje desde el sitio
         </h2>
@@ -1019,6 +1034,7 @@ export async function sendConsentLinkEmail(opts: {
     subject,
     html: `
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Consentimiento informado</h1>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(opts.patientName.split(' ')[0])}, te comparto el consentimiento para el tratamiento de tus datos
@@ -1065,6 +1081,7 @@ export async function sendConsentSignedCopy(opts: {
     subject,
     html: `
       <div style="font-family:'Inter',sans-serif;max-width:600px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;font-size:0.85rem;line-height:1.6;">
+        ${LOGO_HEADER}
         <p style="margin-bottom:1rem;">Copia del consentimiento firmado electrónicamente por <strong>${escapeHtml(opts.signerName)}</strong>
           (RUT ${escapeHtml(opts.signerRut)}) el ${escapeHtml(opts.signedAt)}.</p>
         <p style="margin-bottom:0.25rem;"><strong>Autorizaciones marcadas:</strong></p>
@@ -1101,6 +1118,7 @@ export async function sendTransferReceiptAdmin(opts: {
     subject,
     html: `
       <div style="font-family:'Inter',Arial,sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
         <h1 style="font-family:Georgia,serif;font-size:1.35rem;font-weight:400;margin:0 0 0.75rem;">Comprobante de transferencia por confirmar</h1>
         <p style="font-size:0.9rem;line-height:1.6;color:#4A4840;margin:0 0 1rem;">
           <strong>${escapeHtml(opts.patientName)}</strong> (${escapeHtml(opts.patientEmail)}) subió el comprobante adjunto.
