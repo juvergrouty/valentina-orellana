@@ -138,6 +138,12 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
       ⚠ No se pudo anular la deuda{errorDetail ? `: ${errorDetail}` : ''}. Sigue como pendiente — intenta de nuevo.
     </div>
   )}
+  {/* Cualquier otro error (ej. al marcar pagado) también se ve (8 oct 2026): antes volvía sin aviso. */}
+  {errorParam && !['patient_no_email', 'no_debt', 'email_failed', 'anular_deuda', 'tarifa_guardar', 'rebote_guardar', 'feriado'].includes(errorParam) && (
+    <div class="card" style="background:#fef2f2;border-color:#fecaca;color:#dc2626;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ⚠ {errorParam === 'boleta_failed' ? 'El pago se registró, pero la boleta NO se emitió' : 'No se pudo guardar el cambio'}{errorDetail ? `: ${errorDetail}` : ''}{errorParam === 'boleta_failed' ? '.' : ' — intenta de nuevo.'}
+    </div>
+  )}
   {!debtors.length ? (
     <div class="card" style="text-align:center;padding:3rem;">
       <p style="color:var(--stone);font-size:0.9rem;">No hay deudas pendientes. 🎉</p>

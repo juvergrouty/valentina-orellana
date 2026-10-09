@@ -53,7 +53,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   if (action === 'confirm') {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
-    await supabase.from('bookings').update({ status: 'confirmed' }).eq('id', id);
+    // Si no se guardó, no se sincroniza ni se avisa a nadie (8 oct 2026): antes
+    // el error se ignoraba y la paciente recibía "reserva confirmada" igual.
+    const { error: confErr } = await supabase.from('bookings').update({ status: 'confirmed' }).eq('id', id);
+    if (confErr?.code === '23505' || confErr?.code === '23P01') return redirect(conParam(dest) + 'error=conflict');
+    if (confErr) return redirect(conParam(dest) + 'error=guardar_reserva&detail=' + encodeURIComponent(confErr.message.slice(0, 200)));
     const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
     if (booking) {
       // AWAIT: en serverless (Vercel) la función se termina al responder, matando
@@ -137,7 +141,6 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (error) {
       return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(error.message.slice(0, 200)));
     }
-
     // El evento de Google Calendar deja de verse como "Por pagar". Si la sesión
     // no tenía evento (reserva con link de pago que nunca lo tuvo, o un sync
     // que falló), se crea primero; antes quedaba pagada y fuera del calendario.
@@ -240,6 +243,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       .update({ paid_at: null, payment_note: null })
       .eq('id', id);
     if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
+    // Si no se guardó, el calendario no se pone rojo (8 oct 2026): antes quedaba
+    // "Por pagar" en Google mientras la base la seguía teniendo pagada.
+    if (error) return redirect(conParam(dest) + 'error=guardar_reserva&detail=' + encodeURIComponent(error.message.slice(0, 200)));
     try { await markBookingPaidInCalendar(id, false); } catch (e) { console.error('[unmark_paid] calendar:', e); }
     return redirect(dest);
   }
@@ -253,6 +259,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       .update({ no_show: action === 'mark_no_show' })
       .eq('id', id);
     if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
+    // Error visible (8 oct 2026): antes volvía igual que si se hubiera guardado.
+    if (error) return redirect(conParam(dest) + 'error=guardar_reserva&detail=' + encodeURIComponent(error.message.slice(0, 200)));
     return redirect(dest);
   }
 
@@ -260,7 +268,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   if (action === 'cancel') {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
-    await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', id);
+    // Si la base no la canceló, NO se borra el evento de Google (8 oct 2026):
+    // antes la sesión seguía activa (ocupando la hora) pero sin evento.
+    const { error: cancelErr } = await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', id);
+    if (cancelErr) return redirect(conParam(dest) + 'error=cancelar&detail=' + encodeURIComponent(cancelErr.message.slice(0, 200)));
     try { await deleteBookingFromCalendar(id); } catch (e) { console.error('[cancel] gcal:', e); }
     return redirect(dest);
   }
@@ -316,6 +327,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const { data: booking } = await supabase.from('bookings').select('patient_name, google_event_id').eq('id', id).maybeSingle();
     const { error } = await supabase.from('bookings').update({ custom_title: title || null }).eq('id', id);
     if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
+    // Si no se guardó, no se cambia el título en Google (8 oct 2026).
+    if (error) return redirect(conParam(dest) + 'error=guardar_reserva&detail=' + encodeURIComponent(error.message.slice(0, 200)));
     // Si el evento ya existe en Google Calendar, refleja el nombre nuevo ahí
     // también — antes esto solo quedaba guardado en la base de datos.
     if (title && booking?.google_event_id) {
@@ -329,7 +342,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const id     = form.get('id')?.toString();
     const amount = parseInt(form.get('amount')?.toString() ?? '');
     if (!id || isNaN(amount) || amount <= 0) return redirect(conParam(dest) + 'error=invalid_amount');
-    await supabase.from('bookings').update({ amount }).eq('id', id);
+    // Error visible (8 oct 2026): antes volvía como si el monto se hubiera guardado.
+    const { error: amtErr } = await supabase.from('bookings').update({ amount }).eq('id', id);
+    if (amtErr) return redirect(conParam(dest) + 'error=guardar_reserva&detail=' + encodeURIComponent(amtErr.message.slice(0, 200)));
     return redirect(dest);
   }
 
@@ -355,11 +370,17 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Si ya se pagó o ya hay un link de pago enviado, el monto queda como
     // estaba: es lo que la paciente pagó (o va a pagar) y lo que va en la boleta.
     const montoComprometido = !!booking.paid_at || !!booking.mp_preference_id;
+    // Pack (8 oct 2026): el precio del servicio es el total del pack y antes
+    // quedaba entero en esta única sesión. Se usa la parte por sesión, igual
+    // que create-admin (total / N, redondeado hacia abajo).
+    const packRaw  = parseInt(form.get('pack_sessions')?.toString() ?? '1');
+    const packN    = Math.min(Math.max(isNaN(packRaw) ? 1 : packRaw, 1), 52);
     // "||" y no "??" (8 oct 2026): un servicio "ambos" con un precio en blanco
     // guarda 0 (no null) y la sesión quedaba en $0. Igual que create-admin.
-    const amount = montoComprometido ? booking.amount : (svc.modality === 'ambos'
+    const precioSvc = svc.modality === 'ambos'
       ? (svcModality === 'online' ? (svc.price_online || svc.price) : (svc.price_presencial || svc.price))
-      : svc.price);
+      : svc.price;
+    const amount = montoComprometido ? booking.amount : (precioSvc == null ? precioSvc : Math.floor(Number(precioSvc) / packN));
 
     // Duración según la modalidad, igual que el precio (servicio "ambos" puede durar distinto online/presencial).
     const durNueva = (svc.modality === 'ambos' ? (svcModality === 'online' ? svc.duration_min_online : svc.duration_min_presencial) : null) ?? svc.duration_min;
@@ -705,13 +726,29 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // tener su id) y se manda el link a /pagar/[id], que crea la orden de
     // Flow recién cuando el paciente aprieta "Ir a pagar".
     if (payment_mode === 'link') {
-      if (!finalEmail) return redirect(conParam(dest) + 'error=need_email');
+      // Si algo falla antes de mandar el link (ficha, Flow), las reservas recién
+      // creadas se cancelan (8 oct 2026): antes quedaban "esperando pago" para
+      // siempre (created_by_admin no vence) y bloqueaban esa hora al reintentar.
+      let linkEnviado = false;
+      // Devuelve true si quedaron canceladas (para decirlo en el aviso).
+      const deshacerReservas = async (motivo: string): Promise<boolean> => {
+        if (linkEnviado) return false; // la paciente ya tiene el link: no se le anula
+        const { error: undoErr } = await supabase.from('bookings').update({ status: 'cancelled' }).in('id', bookingIds);
+        if (undoErr) {
+          await logWarn('bookings/create-admin', 'No se pudieron cancelar las reservas de un link de pago fallido', { bookingIds, motivo, error: undoErr.message });
+          return false;
+        }
+        // Eventos de Google: solo existen si se alcanzó a sincronizar (borrar no hace nada si no hay).
+        for (const bid of bookingIds) { try { await deleteBookingFromCalendar(bid); } catch (e) { console.error('[create-admin] undo gcal:', e); } }
+        return true;
+      };
+      if (!finalEmail) { await deshacerReservas('sin correo'); return redirect(conParam(dest) + 'error=need_email'); }
       try {
         // Config de Flow desde settings
         const { data: flowRows } = await supabase.from('settings').select('key, value').in('key', ['flow_env', 'flow_enabled']);
         const fcfg: Record<string, string> = {};
         (flowRows ?? []).forEach((r: { key: string; value: string }) => { fcfg[r.key] = r.value; });
-        if (fcfg['flow_enabled'] === 'false') return redirect(conParam(dest) + 'error=flow_disabled');
+        if (fcfg['flow_enabled'] === 'false') { await deshacerReservas('flow deshabilitado'); return redirect(conParam(dest) + 'error=flow_disabled'); }
 
         const reqUrl  = new URL(request.url);
         const siteUrl = `${reqUrl.protocol}//${reqUrl.host}`;
@@ -751,6 +788,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
           }
         }
 
+        // Desde aquí el link puede llegarle a la paciente: ya no se deshace.
+        linkEnviado = true;
         // Enviar el link por correo al paciente
         try {
           await sendPaymentLinkEmail({
@@ -826,7 +865,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         return redirect(conParam(dest) + `payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}&pl_wa_sent=${waSent ? '1' : '0'}${avisoPack}`);
       } catch (e) {
         console.error('[create-admin] flow order:', e);
-        return redirect(conParam(dest) + 'error=flow_error');
+        const msg = e instanceof Error ? e.message : String(e);
+        const canceladas = await deshacerReservas(msg);
+        return redirect(conParam(dest) + 'error=flow_error&detail=' + encodeURIComponent(msg.slice(0, 200)) + (canceladas ? '&canceladas=1' : ''));
       }
     }
 

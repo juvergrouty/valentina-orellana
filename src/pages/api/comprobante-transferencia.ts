@@ -18,6 +18,25 @@ const TIPOS: Record<string, string> = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
   'image/heic': 'heic', 'image/heif': 'heif', 'application/pdf': 'pdf',
 };
+
+// El tipo real se saca de los primeros bytes del archivo, no de file.type, que
+// lo manda el navegador y se puede falsear (8 oct 2026). Solo JPG, PNG, WEBP,
+// HEIC/HEIF (fotos de iPhone) y PDF; cualquier otra cosa se rechaza.
+const ASCII = (b: Uint8Array, i: number, n: number) => String.fromCharCode(...b.subarray(i, i + n));
+const MARCAS_HEIC = new Set(['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx']);
+const MARCAS_HEIF = new Set(['mif1', 'msf1', 'heif']);
+function tipoReal(b: Uint8Array): string | null {
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b.length >= 4 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b.length >= 4 && ASCII(b, 0, 4) === '%PDF') return 'application/pdf';
+  if (b.length >= 12 && ASCII(b, 0, 4) === 'RIFF' && ASCII(b, 8, 4) === 'WEBP') return 'image/webp';
+  if (b.length >= 12 && ASCII(b, 4, 4) === 'ftyp') {
+    const marca = ASCII(b, 8, 4);
+    if (MARCAS_HEIC.has(marca)) return 'image/heic';
+    if (MARCAS_HEIF.has(marca)) return 'image/heif';
+  }
+  return null;
+}
 const SESSION_LABELS: Record<string, string> = {
   'online': 'Sesión individual online', 'presencial': 'Sesión individual presencial',
   'pareja-online': 'Sesión de pareja online', 'pareja-presencial': 'Sesión de pareja presencial',
@@ -37,8 +56,10 @@ export const POST: APIRoute = async ({ request }) => {
   if (!patientId) return json({ error: 'Link no válido.' }, 400);
   if (!file || !file.size) return json({ error: 'Adjunta la foto o captura de tu comprobante.' }, 400);
   if (file.size > MAX_SIZE) return json({ error: 'El archivo es muy grande (máximo 4 MB). Prueba con una captura de pantalla.' }, 400);
-  const ext = TIPOS[file.type];
-  if (!ext) return json({ error: 'Sube una foto (JPG o PNG) o un PDF del comprobante.' }, 400);
+  const bytes = await file.arrayBuffer();
+  const tipo = tipoReal(new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 16)));
+  const ext = tipo ? TIPOS[tipo] : undefined;
+  if (!tipo || !ext) return json({ error: 'Sube una foto (JPG o PNG) o un PDF del comprobante.' }, 400);
 
   const { data: patient } = await supabase.from('patients').select('id, name, email').eq('id', patientId).maybeSingle();
   if (!patient?.email) return json({ error: 'Link no válido. Escríbele a Valentina para que te mande uno nuevo.' }, 404);
@@ -51,13 +72,12 @@ export const POST: APIRoute = async ({ request }) => {
   if (!pending.length) return json({ error: 'Ya recibí tu comprobante y lo estoy revisando. Si necesitas cambiarlo, escríbeme por WhatsApp.' }, 400);
   const total = pending.reduce((s, b) => s + b.amount, 0);
 
-  // Guardar el comprobante en un bucket privado.
-  const bytes = await file.arrayBuffer();
+  // Guardar el comprobante en un bucket privado (con el tipo detectado).
   const path = `${patient.id}/${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID()}.${ext}`;
   {
     const { error: bErr } = await supabase.storage.getBucket(BUCKET_COMPROBANTES);
     if (bErr) await supabase.storage.createBucket(BUCKET_COMPROBANTES, { public: false });
-    const { error: upErr } = await supabase.storage.from(BUCKET_COMPROBANTES).upload(path, bytes, { contentType: file.type, upsert: false });
+    const { error: upErr } = await supabase.storage.from(BUCKET_COMPROBANTES).upload(path, bytes, { contentType: tipo, upsert: false });
     if (upErr) {
       await logError('transferencia/comprobante', 'No se pudo guardar un comprobante de transferencia', { patientId, error: upErr.message });
       return json({ error: 'No se pudo subir el comprobante. Intenta de nuevo en unos minutos o escríbele a Valentina.' }, 500);

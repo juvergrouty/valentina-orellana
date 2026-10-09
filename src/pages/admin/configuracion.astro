@@ -614,14 +614,17 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
         body: JSON.stringify({ action: 'find', query: q }),
       });
       const data = await res.json();
-      if (!data.ok) { if (findOut) findOut.innerHTML = `<span style="font-size:0.8rem;color:#dc2626;">✕ ${data.error ?? 'Error'}</span>`; return; }
+      // Los datos de Google Places (nombre, dirección) se escapan antes de ir
+      // al HTML (8 oct 2026): antes un nombre con "<" se insertaba como código.
+      const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+      if (!data.ok) { if (findOut) findOut.innerHTML = `<span style="font-size:0.8rem;color:#dc2626;">✕ ${esc(data.error ?? 'Error')}</span>`; return; }
       if (!data.results?.length) { if (findOut) findOut.innerHTML = '<span style="font-size:0.8rem;color:#b45309;">Sin resultados. Prueba con otro texto.</span>'; return; }
       if (findOut) findOut.innerHTML = data.results.map(r => `
-        <button type="button" class="agw-place-opt" data-pid="${r.place_id}"
+        <button type="button" class="agw-place-opt" data-pid="${esc(r.place_id)}"
           style="text-align:left;background:white;border:1px solid var(--dust);border-radius:6px;padding:0.5rem 0.6rem;cursor:pointer;">
-          <div style="font-size:0.82rem;font-weight:600;color:#111827;">${r.name}${r.rating != null ? ` · ⭐ ${r.rating} (${r.total ?? 0})` : ' · sin reseñas'}</div>
-          <div style="font-size:0.72rem;color:#6b7280;">${r.address}</div>
-          <div style="font-size:0.68rem;color:#9ca3af;margin-top:2px;">${r.place_id}</div>
+          <div style="font-size:0.82rem;font-weight:600;color:#111827;">${esc(r.name)}${r.rating != null ? ` · ⭐ ${esc(r.rating)} (${esc(r.total ?? 0)})` : ' · sin reseñas'}</div>
+          <div style="font-size:0.72rem;color:#6b7280;">${esc(r.address)}</div>
+          <div style="font-size:0.68rem;color:#9ca3af;margin-top:2px;">${esc(r.place_id)}</div>
         </button>`).join('');
       findOut.querySelectorAll('.agw-place-opt').forEach(btn => {
         btn.addEventListener('click', () => {

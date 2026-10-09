@@ -3,7 +3,7 @@ import { sendBoletaEmail, ADMIN_EMAIL_FALLBACK } from './email';
 import { todayCL } from './dateUtils';
 import { logError, logWarn } from './logger';
 import { upsertPatientFromBooking } from './patients';
-import { RUT_EXTRANJERO_SII } from './rut';
+import { RUT_EXTRANJERO_SII, rutValido, limpiarRut } from './rut';
 
 /**
  * Integración con API Gateway (apigateway.cl) — Boletas de Honorarios Electrónicas (BHE).
@@ -503,7 +503,7 @@ export async function emitBoletaParaReserva(
   if (!cfg) return { ok: false, error: 'API Gateway no configurado.' };
 
   const { data: b } = await supabase
-    .from('bookings').select('patient_name, patient_email, patient_rut, amount, session_type, session_date, notes, service_id, paid_at').eq('id', bookingId).single();
+    .from('bookings').select('patient_name, patient_email, patient_rut, amount, session_type, session_date, notes, service_id, paid_at, payment_note').eq('id', bookingId).single();
   if (!b) return { ok: false, error: 'Reserva no encontrada.' };
 
   // Una boleta anulada no cuenta: se puede emitir una nueva para esa sesión.
@@ -515,6 +515,7 @@ export async function emitBoletaParaReserva(
     .from('patients').select('*').eq('email', (b.patient_email ?? '').toLowerCase()).maybeSingle();
   // De dónde sale el RUT (una sola regla, re-auditoría 4 oct 2026):
   //   1. el que Valentina escribe al emitir desde el panel (corrección explícita);
+  //   1b. si se pagó por Flow, el de la propia reserva pagada (8 oct 2026);
   //   2. el de la ficha; si la ficha dice "sin RUT" (extranjera/o), el RUT
   //      genérico del SII para extranjeros sin RUT, con su nombre;
   //   3. el que vino en la reserva.
@@ -525,7 +526,15 @@ export async function emitBoletaParaReserva(
   // viene precargado; el panel avisa solo si ella lo editó). Re-auditoría 5 oct:
   // antes un RUT precargado de la reserva pisaba el RUT correcto de la ficha.
   const corregidoEnPanel = !!opts.rutDesdePanel && !!(opts.rutOverride ?? '').trim();
-  const rutRaw = (corregidoEnPanel ? (opts.rutOverride ?? '').trim() : '') || rutFicha || (opts.rutOverride ?? '').trim() || '';
+  // Pago por Flow (8 oct 2026): manda el RUT de la propia reserva pagada, antes
+  // que el de la ficha. La ficha pudo haberla llenado otra persona que reservó
+  // (sin pagar) con el mismo correo. Se lee de la reserva (no de rutOverride)
+  // para que el primer intento y los reintentos del cron usen el mismo RUT.
+  const rutReservaFlow = b.payment_note === 'Flow' && rutValido(b.patient_rut) ? limpiarRut(b.patient_rut) : '';
+  const rutRaw = (corregidoEnPanel ? (opts.rutOverride ?? '').trim() : '') || rutReservaFlow || rutFicha || (opts.rutOverride ?? '').trim() || '';
+  // Si la boleta sale con el RUT de la reserva y no es el de la ficha, también
+  // va con el nombre de la reserva (nombre y RUT de la misma persona).
+  const usaDatosReserva = !corregidoEnPanel && !!rutReservaFlow && limpiarRut(p?.rut) !== rutReservaFlow;
   if (!rutRaw) return { ok: false, error: 'Falta el RUT del paciente.' };
   if (!b.amount) return { ok: false, error: 'La reserva no tiene monto.' };
 
@@ -587,7 +596,7 @@ export async function emitBoletaParaReserva(
   try {
     const result = await emitirBHE({
       fecha,
-      receptor: { rut: normalizeRut(rutRaw), razonSocial: p?.name ?? b.patient_name, direccion: p?.address ?? '', comuna: p?.comuna ?? '' },
+      receptor: { rut: normalizeRut(rutRaw), razonSocial: usaDatosReserva ? b.patient_name : (p?.name ?? b.patient_name), direccion: p?.address ?? '', comuna: p?.comuna ?? '' },
       detalle:  [{ nombre: glosa, monto: b.amount }],
     }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
 

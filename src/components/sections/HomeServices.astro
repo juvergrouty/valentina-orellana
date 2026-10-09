@@ -1,5 +1,6 @@
 ---
 import { supabase } from '../../lib/supabase';
+import { imagenUrl, imagenSrcset } from '../../lib/imagenOptimizada';
 
 const SELECT = 'id, name, description, modality, location, image_url, type, price, duration_min';
 
@@ -70,8 +71,14 @@ const cards = (dbServices ?? []).map(s => ({
 
           <!-- Imagen -->
           <div class="relative h-[340px] overflow-hidden">
+            <!-- Optimizada por Vercel y diferida: el carrusel está bajo el hero, no es
+                 lo primero que se ve (8 oct 2026). -->
             <img
-              src={card.image_url ?? '/images/consultorio-individual.jpg'}
+              src={imagenUrl(card.image_url ?? '/images/consultorio-individual.jpg', 828)}
+              srcset={imagenSrcset(card.image_url ?? '/images/consultorio-individual.jpg', [384, 640, 828])}
+              sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 80vw"
+              width="1200" height="1200"
+              loading="lazy" decoding="async"
               alt={card.name}
               class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
             />

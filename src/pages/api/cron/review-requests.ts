@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { APIRoute } from 'astro';
 import { agregarLineaNotas } from '../../../lib/apigateway';
 import { supabase } from '../../../lib/supabase';
@@ -6,6 +7,14 @@ import { reviewRequestUrl } from '../../../lib/googleReviews';
 import { nowCL, hoursUntilSessionCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
+
+// Comparación en tiempo constante (8 oct 2026): con !== el tiempo de respuesta
+// delataba cuántos caracteres del secreto calzaban. Sin secreto, falla cerrado.
+function secretoValido(auth: string | null, secret: string | undefined): boolean {
+  if (!secret || !auth) return false;
+  const dado = Buffer.from(auth), esperado = Buffer.from(`Bearer ${secret}`);
+  return dado.length === esperado.length && timingSafeEqual(dado, esperado);
+}
 
 // Marcador que se guarda en bookings.notes para no reenviar la misma sesión.
 const MARKER = 'ReseñaSolicitada';
@@ -25,7 +34,7 @@ export const GET: APIRoute = async ({ request }) => {
   // Falla cerrado: si CRON_SECRET no está configurado, nadie puede llamar al cron.
   {
     const auth = request.headers.get('authorization');
-    if (!secret || auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
+    if (!secretoValido(auth, secret)) return new Response('Unauthorized', { status: 401 });
   }
 
   // Config: toggle + link de reseña (google_review_url; si no está configurado

@@ -920,6 +920,17 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
         {Astro.url.searchParams.get('saved') === 'feriado-cerrar' ? '✓ Feriado cerrado en la agenda web y anotado en tu Google Calendar.' : '✓ Listo: ese feriado queda abierto y atiendes normal.'}
       </div>
     )}
+    {/* Botones "Ya le avisé"/"Listo" y "Listo" de rebotes que no se guardaron (8 oct 2026): antes no había aviso. */}
+    {Astro.url.searchParams.get('error') === 'tarifa_guardar' && (
+      <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        ✕ No se pudo guardar el cambio de tarifa. El aviso sigue igual: intenta de nuevo.
+      </div>
+    )}
+    {Astro.url.searchParams.get('error') === 'rebote_guardar' && (
+      <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        ✕ No se pudo quitar el aviso del correo rebotado. Intenta de nuevo.
+      </div>
+    )}
     {Astro.url.searchParams.get('error') === 'feriado' && (
       <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
         ✕ No se pudo guardar la decisión del feriado. Intenta de nuevo.
@@ -955,7 +966,9 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
           {tarifas.map(t => (
             <li style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
               <span>
-                {t.fase === 'avisar' && <>Falta avisarle a <strong>{t.nombre}</strong> que su tarifa {t.anterior ? `pasa de ${clp(t.anterior)} a` : 'sube a'} <strong>{clp(t.nuevo)}</strong> desde el {fechaLarga(t.desde)}.</>}
+                {t.fase === 'avisar' && !t.atrasado && <>Falta avisarle a <strong>{t.nombre}</strong> que su tarifa {t.anterior ? `pasa de ${clp(t.anterior)} a` : 'sube a'} <strong>{clp(t.nuevo)}</strong> desde el {fechaLarga(t.desde)}.</>}
+                {/* Fecha ya cumplida sin haberle avisado: urgente (8 oct 2026). */}
+                {t.fase === 'avisar' && t.atrasado && <>⚠ <strong>Urgente:</strong> falta avisarle a <strong>{t.nombre}</strong> que su tarifa {t.anterior ? `pasó de ${clp(t.anterior)} a` : 'subió a'} <strong>{clp(t.nuevo)}</strong>: ya rige desde el {fechaLarga(t.desde)} y todavía no se le ha avisado. Avísale antes de cobrarle el monto nuevo.</>}
                 {t.fase === 'proxima' && <>Desde el {fechaLarga(t.desde)} rige la tarifa nueva de <strong>{t.nombre}</strong>: <strong>{clp(t.nuevo)}</strong>{t.anterior ? ` (antes ${clp(t.anterior)})` : ''}. Las sesiones que le agendes desde ahora para esa fecha en adelante van con el monto nuevo.</>}
                 {t.fase === 'vigente' && <>Desde el {fechaLarga(t.desde)} rige la tarifa nueva de <strong>{t.nombre}</strong>: <strong>{clp(t.nuevo)}</strong>{t.anterior ? ` (antes ${clp(t.anterior)})` : ''}. Al agendarle (aquí o en Encuadrado) usa el monto nuevo.</>}
                 {t.sesionesConMontoAntiguo > 0 && <> ⚠ Tiene {t.sesionesConMontoAntiguo} {t.sesionesConMontoAntiguo === 1 ? 'sesión agendada' : 'sesiones agendadas'} desde esa fecha con el monto antiguo: cámbiale el monto.</>}
@@ -1384,7 +1397,7 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'descartar', ids }),
       }).then(r => r.json()).catch(() => ({ ok: false }));
-      if (res.ok) li.remove(); else { estado.textContent = '⚠ No se pudo quitar el aviso'; botones.forEach(b => (b.disabled = false)); }
+      if (res.ok) li.remove(); else { estado.textContent = `⚠ ${res.error || 'No se pudo quitar el aviso'}`; botones.forEach(b => (b.disabled = false)); }
     });
   });
 </script>

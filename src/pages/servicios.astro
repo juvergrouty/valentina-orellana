@@ -3,6 +3,7 @@ export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
 import { supabase } from '../lib/supabase';
+import { imagenUrl, imagenSrcset } from '../lib/imagenOptimizada';
 
 // Leer servicios visibles desde la base de datos
 const { data: dbServices } = await supabase
@@ -68,8 +69,14 @@ const modalityLabel = (m: string) =>
           <div class="relative overflow-hidden rounded-[10px] group min-h-[420px] flex flex-col justify-end">
 
             <!-- Imagen de fondo -->
+            <!-- Optimizada por Vercel y diferida: va bajo el banner, el LCP es el
+                 banner de PageHero (8 oct 2026). -->
             <img
-              src={service.image_url ?? '/images/consultorio-individual.jpg'}
+              src={imagenUrl(service.image_url ?? '/images/consultorio-individual.jpg', 1200)}
+              srcset={imagenSrcset(service.image_url ?? '/images/consultorio-individual.jpg', [640, 828, 1200])}
+              sizes="(min-width: 768px) 50vw, 100vw"
+              width="1200" height="1200"
+              loading="lazy" decoding="async"
               alt={service.name}
               class="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
             />

@@ -23,6 +23,13 @@ export const POST: APIRoute = async ({ request }) => {
   const body = await request.json().catch(() => ({}));
   const ids: string[] = Array.isArray(body.ids) ? body.ids.filter((x: unknown) => typeof x === 'string') : [];
   if (body.action !== 'descartar' || !ids.length) return Response.json({ ok: false, error: 'Solicitud inválida.' }, { status: 400 });
-  for (const id of ids) await quitarLineasNotas(id, [MARCA_COMPROBANTE]);
+  // Se revisa cada resultado (8 oct 2026): antes respondía ok aunque no se
+  // hubiera quitado la marca, y el aviso volvía a aparecer al recargar.
+  const fallidas: string[] = [];
+  for (const id of ids) {
+    const ok = await quitarLineasNotas(id, [MARCA_COMPROBANTE]).catch(() => false);
+    if (!ok) fallidas.push(id);
+  }
+  if (fallidas.length) return Response.json({ ok: false, error: `No se pudo quitar el aviso en ${fallidas.length} de ${ids.length} sesión(es). Intenta de nuevo.` }, { status: 500 });
   return Response.json({ ok: true });
 };

@@ -86,6 +86,30 @@ async function handleBooking(request: Request) {
               await logWarn('bookings', 'reCAPTCHA rechazado', { score: verifyData.score, errors: verifyData['error-codes'] });
               return json({ error: 'No pudimos verificar que eres una persona. Intenta nuevamente.' }, 400);
       }
+      // El token tiene que ser de ESTE formulario y de ESTE sitio (8 oct 2026):
+      // antes servía un token de reCAPTCHA sacado de otra acción u otro sitio
+      // con la misma clave. localhost se acepta para pruebas locales.
+      const host = String(verifyData.hostname ?? '').toLowerCase();
+      const hostOk = !host || host === 'valentinaorellana.cl' || host.endsWith('.valentinaorellana.cl') || host === 'localhost' || host === '127.0.0.1';
+      if ((verifyData.action && verifyData.action !== 'submit_booking') || !hostOk) {
+              await logWarn('bookings', 'reCAPTCHA de otra acción o de otro sitio', { action: verifyData.action, hostname: verifyData.hostname });
+              return json({ error: 'No pudimos verificar que eres una persona. Recarga la página e intenta nuevamente.' }, 400);
+      }
+  }
+
+  // ── Límite por conexión ──────────────────────────────────────────────────────
+  // Máximo 6 reservas por hora desde la misma conexión (8 oct 2026; mismo
+  // mecanismo que /api/contacto). Antes no había límite: alguien podía bloquear
+  // la agenda con reservas sin pagar o pre-crear fichas con correos ajenos.
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'desconocida';
+  {
+    const desde = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { count } = await supabase.from('admin_logs').select('id', { count: 'exact', head: true })
+      .eq('context', 'bookings/creada').gt('created_at', desde).eq('data->>ip', ip);
+    if ((count ?? 0) >= 6) {
+      await logWarn('bookings/limite', 'Demasiadas reservas desde la misma conexión en una hora: se rechazó', { ip });
+      return json({ error: 'Recibí varias reservas seguidas desde tu conexión. Escríbeme por WhatsApp y te ayudo a agendar, por favor.', errorType: 'limite' }, 429);
+    }
   }
     // Si recaptcha_secret_key no está configurada en settings, no se exige nada —
   // mismo comportamiento que hoy, para no romper el flujo mientras no esté activo.
@@ -351,10 +375,16 @@ async function handleBooking(request: Request) {
         return json({ error: 'Error al crear la reserva. Intenta nuevamente.' }, 500);
   }
     booking = bookingData;
+  // Cuenta para el límite de reservas por conexión (ver arriba).
+  await logInfo('bookings/creada', `Reserva creada para el ${session_date} a las ${session_time}`, { ip, bookingId: booking.id });
 
   // Guardar al paciente ni bien llena el formulario, no solo cuando paga — así
   // su nombre/correo/teléfono/RUT quedan en la ficha aunque abandone antes de
   // pagar o su hora expire, y Valentina puede rescatarlo manualmente.
+  // Solo completa campos vacíos: un formulario sin pagar nunca reemplaza datos
+  // de una ficha (pueden ser los que Valentina cargó a mano, p. ej. pacientes
+  // migradas desde Encuadrado). Los datos de quien PAGA se aplican en su primer
+  // pago (fichaDesdePrimerPago, flow/confirm.ts) — 8 oct 2026.
   await upsertPatientFromBooking({
     patient_name:  patient_name.trim(),
     patient_email: patient_email.trim().toLowerCase(),
@@ -482,15 +512,16 @@ async function handleBooking(request: Request) {
               if (delErr) await logError('bookings', 'Error eliminando reserva fallida', { bookingId: booking.id, error: delErr.message });
       }
 
+      // El detalle técnico de Flow queda solo en el registro de arriba, no en
+      // la respuesta a la página (8 oct 2026).
       if (isEmailError) {
               return json({
                         error: 'El correo electrónico no es válido para el sistema de pago. Por favor usa un correo real.',
-                        detail: errMsg,
                         errorType: 'invalid_email',
               }, 400);
       }
 
-      return json({ error: 'Error al conectar con el sistema de pago.', detail: errMsg, errorType: 'flow_error' }, 502);
+      return json({ error: 'Error al conectar con el sistema de pago. Intenta de nuevo en un momento o escríbeme por WhatsApp.', errorType: 'flow_error' }, 502);
     }
 
   // Guardar el token de Flow en la reserva (para luego recuperarla desde el webhook/confirmación)

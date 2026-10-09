@@ -2,7 +2,11 @@
 /**
  * /confirmacion
  *
- * Flow redirige aquí después del pago con ?token=XXXXX
+ * Flow vuelve a /api/flow/return, que guarda el token en la cookie vo_pago
+ * y redirige aquí sin nada en la URL (8 oct 2026: con ?token= en la URL, GTM
+ * —GA4, Google Ads, Meta— recibía un enlace que mostraba los datos de la
+ * paciente). Un ?token= antiguo se acepta igual, pero se pasa a la cookie y se
+ * redirige a la URL limpia antes de mostrar nada.
  * Esta página consulta el estado real a la API de Flow y muestra el resultado.
  */
 export const prerender = false;
@@ -11,10 +15,21 @@ import Icon from '../components/ui/Icon.astro';
 import { supabase } from '../lib/supabase';
 import { getPaymentStatus } from '../lib/flow';
 import { todayCL } from '../lib/dateUtils';
+import { createHash } from 'node:crypto';
 
 // Los antiguos ?manual=1 / ?transferencia=1 (pago en consulta / transferencia
 // desde la agenda) ya no existen: esta página solo muestra pagos de Flow.
-const token        = Astro.url.searchParams.get('token') ?? '';
+const COOKIE_PAGO  = 'vo_pago'; // la misma que escribe src/pages/api/flow/return.ts
+const tokenUrl     = Astro.url.searchParams.get('token') ?? '';
+if (tokenUrl) {
+  Astro.cookies.set(COOKIE_PAGO, tokenUrl, {
+    path: '/confirmacion', httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', maxAge: 60 * 60,
+  });
+  return Astro.redirect('/confirmacion', 302);
+}
+const token        = Astro.cookies.get(COOKIE_PAGO)?.value ?? '';
+// Depende de una cookie: que ningún caché la guarde ni la muestre a otra persona.
+Astro.response.headers.set('Cache-Control', 'private, no-store');
 
 const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
@@ -131,13 +146,20 @@ if (pageState === 'paid' && allBookings.length && esReservaWeb) {
     });
   }
   purchase = {
-    transaction_id: String(token), // siempre el token: mp_payment_id llega después con el aviso de Flow y duplicaba la compra al recargar
+    // Huella del token (no el token): estable para no duplicar la compra al
+    // recargar, pero no sirve para abrir esta página desde los datos de
+    // Google/Meta (auditoría de privacidad 8 oct 2026).
+    transaction_id: createHash('sha256').update(String(token)).digest('hex').slice(0, 32),
     value:          items.reduce((s, i) => s + i.price, 0),
     currency: 'CLP',
     coupon:   '', // no hay sistema de cupones aún → sin descuento
     items,
   };
 }
+
+// Solo el primer nombre de la paciente (8 oct 2026): en esta página cargan
+// GTM / GA4 / Google Ads / Meta; no hace falta mostrar su nombre completo.
+const primerNombre = String(booking?.patient_name ?? '').trim().split(/\s+/)[0];
 
 const titles: Record<PageState, string> = {
   paid:     porRevisar || esCobro ? 'Pago recibido' : '¡Reserva confirmada!',
@@ -196,7 +218,7 @@ const titles: Record<PageState, string> = {
           ) : booking && (
             <div class="w-full bg-white border border-dust p-6 md:p-8 text-left space-y-3">
               {([
-                ['Paciente',  booking.patient_name],
+                ['Paciente',  primerNombre],
                 ['Sesión',    SESSION_LABELS[booking.session_type as string] ?? booking.session_type],
                 ...(String(booking.session_date) === '2099-12-31' ? [] : [
                   ['Fecha',   formatDateEs(booking.session_date as string)],

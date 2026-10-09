@@ -20,8 +20,8 @@ import type { APIRoute } from 'astro';
 import { getPaymentStatus } from '../../../lib/flow';
 import { horaDisponible } from '../../../lib/disponibilidad';
 import { supabase } from '../../../lib/supabase';
-import { upsertPatientFromBooking } from '../../../lib/patients';
-import { encolarTareas, procesarTareas, ejecutarTarea, nombreTarea, type TareaPago } from '../../../lib/tareasEnvio';
+import { upsertPatientFromBooking, fichaDesdePrimerPago } from '../../../lib/patients';
+import { encolarTareas, procesarTareas, ejecutarTarea, nombreTarea, tareasDePago, sesionVigente, type TareaPago } from '../../../lib/tareasEnvio';
 import { logInfo, logError, logWarn } from '../../../lib/logger';
 import { tagBookingsWithPaymentToken } from '../../../lib/debt';
 
@@ -134,6 +134,16 @@ export const POST: APIRoute = async ({ request }) => {
           candidates = [porOrden];
           porHistorial = true; // el monto ya se comprobó aquí
           await logInfo('flow/pago-link-antiguo', `Pago de ${porOrden.patient_name} reconocido por la orden de Flow (link antiguo)`, { bookingId: porOrden.id, token, flowOrder: status.flowOrder });
+        } else if (porOrden?.paid_at && !porOrden.mp_payment_id && (
+          porOrden.mp_preference_id === token
+          || String(porOrden.notes ?? '').includes(token)
+          || String(porOrden.notes ?? '').includes('PagoSinAviso'))) {
+          // Es ESTE mismo pago: Valentina marcó la sesión pagada a mano (p. ej.
+          // una PagoSinAviso) antes de que llegara el aviso de Flow. No es un
+          // pago doble: solo se anota la orden de Flow (8 oct 2026; antes salía
+          // una falsa alarma de "posible pago doble").
+          await supabase.from('bookings').update({ mp_payment_id: String(status.flowOrder) }).eq('id', porOrden.id).is('mp_payment_id', null);
+          await logInfo('flow/pago-ya-marcado', `El aviso de Flow de ${porOrden.patient_name} llegó después de que la sesión se marcó pagada a mano: se anotó la orden de Flow.`, { bookingId: porOrden.id, token, flowOrder: status.flowOrder });
         } else if (porOrden?.paid_at && String(porOrden.mp_payment_id ?? '') !== String(status.flowOrder)) {
           await logError('flow/posible-pago-doble',
             `${porOrden.patient_name} pagó por Flow (${status.amount}) la sesión del ${porOrden.session_date} a las ${String(porOrden.session_time).slice(0, 5)}, que ya figuraba pagada (${porOrden.payment_note ?? 'otro medio'}). Revisa si hay que devolver el pago o asignarlo a otra sesión.`,
@@ -252,7 +262,13 @@ export const POST: APIRoute = async ({ request }) => {
         await logError('flow/confirmar-reserva', 'Pago recibido pero no se pudo buscar la(s) reserva(s) a marcar', { token, flowOrder: status.flowOrder, error: selErr.message });
       } else if (candidates && candidates.length) {
         const ids = candidates.map((c: { id: string }) => c.id);
-        const wasNew = new Set(candidates.filter((c: { status: string }) => c.status === 'pending_payment' || c.status === 'expired').map((c: { id: string }) => c.id));
+        // "Nueva" = esperaba pago Y la sesión es de hoy en adelante en Chile (o
+        // el cobro sin fecha 2099). Un link de pago de Valentina pagado DESPUÉS
+        // de la fecha de la sesión se trata como deuda: sin "sesión confirmada",
+        // sin aviso de "Nueva reserva" ni invitación a un evento pasado (8 oct 2026).
+        const wasNew = new Set(candidates
+          .filter((c: { status: string; session_date: string }) => (c.status === 'pending_payment' || c.status === 'expired') && sesionVigente(c.session_date))
+          .map((c: { id: string }) => c.id));
 
         let { data: updated, error } = await supabase
           .from('bookings')
@@ -305,32 +321,50 @@ export const POST: APIRoute = async ({ request }) => {
         // (ver src/lib/tareasEnvio.ts).
         //   - Reserva nueva (agendar y pagar): confirmación a la paciente, aviso
         //     a Valentina, evento en Google Calendar (con Meet) y boleta.
-        //   - Pago de deuda (la sesión ya estaba agendada/confirmada): solo la
-        //     boleta — su correo hace de recibo.
+        //   - Pago de deuda o de una sesión ya pasada: la boleta (su correo hace
+        //     de recibo) y el evento de Calendar pasa de "Por pagar" a pagado.
         //   - "Pasos a seguir" + consentimiento: una vez por paciente por pago
         //     (sendStepsOnFirstPayment decide si es su primer pago).
+        // La misma regla usa el barrido de respaldo del cron (tareasDePago).
         const tareasPorReserva = new Map<string, TareaPago[]>();
         const conPasos = new Set<string>();
         for (const r of updated ?? []) {
-          const t: TareaPago[] = wasNew.has(r.id) ? ['confirmacion', 'aviso_admin', 'calendario', 'boleta'] : ['boleta'];
+          const t = tareasDePago(wasNew.has(r.id));
           const em = String(r.patient_email ?? '').toLowerCase();
           if (em && !conPasos.has(em)) { conPasos.add(em); t.push('pasos'); }
           tareasPorReserva.set(r.id, t);
-          // La ficha de la paciente (solo datos; idempotente).
-          await upsertPatientFromBooking({ patient_name: r.patient_name, patient_email: r.patient_email, patient_phone: r.patient_phone, rut: r.patient_rut }).catch(console.error);
         }
         const sinCola: string[] = [];
         const pago = String(status.flowOrder);
         for (const [id, t] of tareasPorReserva) {
           if (!(await encolarTareas(id, t, pago))) sinCola.push(id);
         }
+        // La ficha de la paciente, DESPUÉS de registrar los envíos: si la
+        // función se corta aquí, los envíos ya quedaron y el cron los hace
+        // (8 oct 2026). En su primer pago, nombre/teléfono/RUT de la ficha se
+        // toman de la reserva pagada (fichaDesdePrimerPago), antes de la boleta
+        // y del consentimiento.
+        const idsPagadas = (updated ?? []).map((r: { id: string }) => r.id);
+        for (const r of updated ?? []) {
+          await upsertPatientFromBooking({ patient_name: r.patient_name, patient_email: r.patient_email, patient_phone: r.patient_phone, rut: r.patient_rut }).catch(console.error);
+          await fichaDesdePrimerPago(r, idsPagadas).catch(console.error);
+        }
         // Lo registrado se procesa ya (con plazo, para responderle a Flow a tiempo).
+        const plazo = Date.now() + 20_000;
         const enCola = [...tareasPorReserva.keys()].filter(id => !sinCola.includes(id));
-        if (enCola.length) await procesarTareas({ bookingIds: enCola, hastaMs: Date.now() + 20_000 });
+        if (enCola.length) await procesarTareas({ bookingIds: enCola, hastaMs: plazo });
         // Respaldo si no se pudo registrar (base de datos con problemas): se
         // intenta directo, como antes. Las llaves de idempotencia evitan duplicar.
-        for (const id of sinCola) {
-          for (const t of tareasPorReserva.get(id) ?? []) await ejecutarTarea(id, nombreTarea(t, pago));
+        // Con el mismo plazo: lo que no alcance lo registra y hace el barrido
+        // del cron (no hay filas de este pago para esas reservas) (8 oct 2026).
+        directos: for (const id of sinCola) {
+          for (const t of tareasPorReserva.get(id) ?? []) {
+            if (Date.now() > plazo) {
+              await logWarn('flow/envios-directos', 'Se acabó el plazo para los envíos directos tras el pago; el cron los retoma en unos minutos.', { token, flowOrder: status.flowOrder, pendientes: sinCola });
+              break directos;
+            }
+            await ejecutarTarea(id, nombreTarea(t, pago));
+          }
         }
       } else {
         // candidates vacío: puede ser (a) un reintento de Flow sobre un pago ya
@@ -342,9 +376,11 @@ export const POST: APIRoute = async ({ request }) => {
         // correo o WhatsApp). Se distingue viendo si este pago exacto ya quedó
         // registrado; si no, se avisa para revisar manualmente en Flow — mejor
         // que asumir en silencio que "no es nada".
-        const { data: yaRegistrado } = await supabase
-          .from('bookings').select('id').eq('mp_payment_id', String(status.flowOrder)).maybeSingle();
-        if (!yaRegistrado) {
+        // limit(1) y no maybeSingle(): un pago combinado tiene varias filas con
+        // la misma orden y maybeSingle() fallaba → falso "pago huérfano" (8 oct 2026).
+        const { data: yaRegistrado, error: errReg } = await supabase
+          .from('bookings').select('id').eq('mp_payment_id', String(status.flowOrder)).limit(1);
+        if (!errReg && !(yaRegistrado ?? []).length) {
           await logWarn('flow/pago-huerfano', 'Flow confirmó un pago pero ninguna reserva coincide con ese token — puede ser un link de pago antiguo que ya fue reemplazado por uno nuevo. Revisar en Flow y conciliar manualmente.', { token, flowOrder: status.flowOrder, amount: status.amount, payer: status.payer });
         }
       }

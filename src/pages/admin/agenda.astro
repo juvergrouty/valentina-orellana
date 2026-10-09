@@ -9,7 +9,9 @@ import { reviewRequestUrl } from '../../lib/googleReviews';
 import { nowCL } from '../../lib/dateUtils';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
-const weekOffset = parseInt(Astro.url.searchParams.get('w') ?? '0');
+// ?w=abc daba NaN y la página se caía al armar las fechas (8 oct 2026): si no es un número, semana actual.
+const weekOffsetRaw = parseInt(Astro.url.searchParams.get('w') ?? '0');
+const weekOffset = Number.isFinite(weekOffsetRaw) ? weekOffsetRaw : 0;
 
 const NOW = nowCL();
 NOW.setHours(0, 0, 0, 0);
@@ -340,7 +342,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
         <div class="cal-error-banner">⚠ Flow está deshabilitado en Configuración.</div>
       )}
       {errorParam === 'flow_error' && (
-        <div class="cal-error-banner">⚠ No se pudo generar el link de pago. Revisa la configuración de Flow.</div>
+        <div class="cal-error-banner">⚠ No se pudo generar el link de pago{errorDetail ? `: ${errorDetail}` : ''}.{Astro.url.searchParams.get('canceladas') === '1' ? ' Las sesiones de este intento se cancelaron, así que la hora queda libre para reintentar.' : ' Revisa en la agenda si las sesiones quedaron creadas "esperando pago" y cancélalas antes de reintentar.'} Revisa la configuración de Flow.</div>
       )}
       {errorParam === 'missing_patient_data' && (
         <div class="cal-error-banner">⚠ Para crear una paciente nueva faltan datos: correo, teléfono, dirección, comuna, contacto de emergencia y RUT (o documento si no tiene RUT). No se agendó nada.</div>
@@ -350,6 +352,19 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       )}
       {errorParam === 'cambio_servicio' && (
         <div class="cal-error-banner">⚠ No se pudo cambiar el servicio de la sesión. No se le avisó nada a la paciente. Intenta de nuevo.</div>
+      )}
+      {/* Errores que antes no tenían aviso o volvían como si se hubiera guardado (8 oct 2026). */}
+      {errorParam === 'invalid_amount' && (
+        <div class="cal-error-banner">⚠ El monto no es válido (debe ser un número mayor que 0). No se cambió nada.</div>
+      )}
+      {errorParam === 'service_not_found' && (
+        <div class="cal-error-banner">⚠ No se encontró ese servicio (puede que se haya eliminado). No se cambió nada.</div>
+      )}
+      {errorParam === 'guardar_reserva' && (
+        <div class="cal-error-banner">⚠ No se pudo guardar el cambio en la sesión{errorDetail ? `: ${errorDetail}` : ''}. No se tocó el calendario ni se avisó a nadie — intenta de nuevo.</div>
+      )}
+      {errorParam === 'cancelar' && (
+        <div class="cal-error-banner">⚠ No se pudo cancelar la sesión{errorDetail ? `: ${errorDetail}` : ''}. Sigue agendada (y su evento en Google Calendar también) — intenta de nuevo.</div>
       )}
       {errorParam === 'bloqueo_horas' && (
         <div class="cal-error-banner">⚠ No se bloqueó nada: la fecha y hora "Hasta" deben ser posteriores a "Desde".</div>
@@ -377,6 +392,9 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       )}
       {errorParam === 'bloqueo_guardar' && (
         <div class="cal-error-banner">⚠ No se guardó el bloqueo{errorDetail ? `: ${errorDetail}` : ''}. Esas horas siguen abiertas en la agenda web — intenta de nuevo.</div>
+      )}
+      {(errorParam === 'feriados_guardar' || errorParam === 'bloqueo_quitar') && (
+        <div class="cal-error-banner">⚠ {errorParam === 'feriados_guardar' ? 'No se bloquearon todos los feriados' : 'No se quitó el bloqueo'}{errorDetail ? `: ${errorDetail}` : ''}. Intenta de nuevo.</div>
       )}
       {errorParam === 'unknown_no_booking' && (
         <div class="cal-error-banner">⚠ No se creó ninguna sesión por un motivo desconocido. Intenta de nuevo — si vuelve a pasar, avisa a soporte.</div>
@@ -1298,6 +1316,18 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
               <label style="font-size:0.68rem;">Nuevo servicio</label>
               <select name="service_id" id="sp-svc-select" required>
                 {allServices.map((s: any) => <option value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <!-- Pack (8 oct 2026): el precio de un pack es el total; la sesión
+                 queda con su parte, igual que al agendar el pack desde "Agendar hora". -->
+            <div class="bp-field">
+              <label style="font-size:0.68rem;">Si el servicio es un pack, ¿de cuántas sesiones?</label>
+              <select name="pack_sessions" id="sp-svc-pack">
+                <option value="1">No es pack (precio de una sesión)</option>
+                <option value="4">Pack de 4 sesiones</option>
+                <option value="6">Pack de 6 sesiones</option>
+                <option value="8">Pack de 8 sesiones</option>
+                <option value="12">Pack de 12 sesiones</option>
               </select>
             </div>
             <p style="font-size:0.72rem;color:var(--stone);margin:0;">
@@ -2263,14 +2293,24 @@ document.getElementById('bp-btn-feriados')?.addEventListener('click', async () =
     fd.set('action', 'block-feriados');
     fd.set('_redirect', window.location.pathname + window.location.search);
     const res = await fetch('/api/admin/bloqueos', { method: 'POST', body: fd });
-    if (res.ok || res.redirected) {
-      btn.textContent = '✓ Feriados bloqueados';
-      btn.style.color = '#15803d';
-      btn.style.borderColor = '#86efac';
+    // Éxito solo si volvió a esta página sin ?error= (8 oct 2026): antes una
+    // falla de la base o una sesión vencida (401) se veían como éxito o el
+    // botón quedaba pegado en "Bloqueando…".
+    const vuelta = new URL(res.url || location.href, location.href);
+    const err = vuelta.searchParams.get('error');
+    if (res.status === 401 || vuelta.pathname === '/admin/login') {
+      throw new Error('Tu sesión venció: vuelve a entrar al panel e intenta de nuevo.');
     }
-  } catch {
+    if (!res.ok || err) {
+      throw new Error(vuelta.searchParams.get('detail') || `No se pudieron bloquear los feriados (${err || 'HTTP ' + res.status}).`);
+    }
+    btn.textContent = '✓ Feriados bloqueados';
+    btn.style.color = '#15803d';
+    btn.style.borderColor = '#86efac';
+  } catch (e) {
     btn.textContent = 'Error — intenta de nuevo';
     btn.disabled    = false;
+    alert('⚠ ' + (e instanceof Error && e.message ? e.message : 'Error de conexión. Intenta de nuevo.'));
   }
 });
 
@@ -2547,6 +2587,8 @@ function openSessionDetail(b) {
   document.getElementById('sp-svc-id').value = b.id;
   const svcSelect = document.getElementById('sp-svc-select');
   if (svcSelect && b.service_id) svcSelect.value = b.service_id;
+  const packSel = document.getElementById('sp-svc-pack');
+  if (packSel) packSel.value = '1';
   document.getElementById('sp-svc-form').style.display = 'none';
 
   // Renombrar / editar monto — guardan el id de la reserva actual
@@ -2756,6 +2798,16 @@ document.getElementById('sp-toggle-rsc')?.addEventListener('click', () => {
 document.getElementById('sp-toggle-svc')?.addEventListener('click', () => {
   const form = document.getElementById('sp-svc-form');
   form.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+// Si el nombre del servicio dice "N sesiones" (ej. "Pack 4 sesiones"), se
+// propone ese número de sesiones del pack; se puede cambiar a mano (8 oct 2026).
+document.getElementById('sp-svc-select')?.addEventListener('change', (e) => {
+  const nombre = e.target.selectedOptions?.[0]?.textContent ?? '';
+  const m = nombre.match(/(\d+)\s*sesi/i);
+  const packSel = document.getElementById('sp-svc-pack');
+  if (!packSel) return;
+  const opcion = m && Array.from(packSel.options).find(o => o.value === m[1]);
+  packSel.value = opcion ? m[1] : '1';
 });
 
 // ── Renombrar sesión ───────────────────────────────────────────────────────────

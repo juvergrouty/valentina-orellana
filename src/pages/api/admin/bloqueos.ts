@@ -33,7 +33,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       const { data: row } = table === 'blocked_dates'
         ? await supabase.from('blocked_dates').select('date').eq('id', id).maybeSingle()
         : { data: null };
-      await supabase.from(table as 'blocked_dates' | 'blocked_slots').delete().eq('id', id);
+      // Si no se borró de la base, el evento de Google se deja (8 oct 2026):
+      // antes el día seguía cerrado en la agenda pero sin su anotación.
+      const { error: delErr } = await supabase.from(table as 'blocked_dates' | 'blocked_slots').delete().eq('id', id);
+      if (delErr) return conError(delErr.message, 'bloqueo_quitar');
       if (row?.date) await borrarEventoCierre(row.date);
     }
     return redirect(dest);
@@ -143,11 +146,16 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   // Google Calendar.
   if (action === 'block-feriados') {
     const hoy = todayCL();
+    // Se informan los feriados que no se guardaron (8 oct 2026): antes volvía
+    // como éxito aunque la base rechazara todos.
+    const fallidos: string[] = [];
     for (const f of (await listaFeriados()).filter(f => f.fecha >= hoy)) {
       const titulo = `Feriado · ${f.nombre}`;
       const { error } = await supabase.from('blocked_dates').upsert({ date: f.fecha, reason: titulo }, { onConflict: 'date' });
-      if (!error) await crearEventoCierre(f.fecha, titulo);
+      if (error) { fallidos.push(`${f.fecha} (${error.message})`); continue; }
+      await crearEventoCierre(f.fecha, titulo);
     }
+    if (fallidos.length) return conError(`No se bloquearon: ${fallidos.join(', ')}`, 'feriados_guardar');
     return redirect(dest);
   }
 

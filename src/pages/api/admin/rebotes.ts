@@ -8,6 +8,13 @@ export const prerender = false;
 export const POST: APIRoute = async ({ request, redirect }) => {
   const form = await request.formData();
   const correo = String(form.get('correo') ?? '');
-  if (correo) await quitarRebote(correo);
-  return redirect(rutaInterna(form.get('redirect'), '/admin'), 303);
+  const destino = rutaInterna(form.get('redirect'), '/admin');
+  try {
+    if (correo) await quitarRebote(correo);
+  } catch {
+    // No se guardó (8 oct 2026): antes era un 500 crudo. El aviso sigue
+    // visible; se puede volver a apretar "Listo".
+    return redirect(destino + (destino.includes('?') ? '&' : '?') + 'error=rebote_guardar', 303);
+  }
+  return redirect(destino, 303);
 };

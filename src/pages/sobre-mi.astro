@@ -14,8 +14,12 @@ import PageHero   from '../components/sections/PageHero.astro';
       <!-- Imagen sticky -->
       <div class="md:sticky md:top-28">
         <div class="aspect-[3/4] bg-warm overflow-hidden">
+          <!-- Medidas reales para reservar el espacio; diferida porque va bajo el
+               banner (el LCP es PageHero) (8 oct 2026). -->
           <img
             src="/images/sobre-mi-2.jpg"
+            width="960" height="1280"
+            loading="lazy" decoding="async"
             alt="Ps. Valentina Orellana"
             class="w-full h-full object-cover object-top"
             onerror="this.style.display='none'"

@@ -1,13 +1,15 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { todayCL } from '../../../lib/dateUtils';
+import { rutaInterna } from '../../../lib/rutaInterna';
 
 export const prerender = false;
 
 export const POST: APIRoute = async ({ request }) => {
   const form     = await request.formData();
   const action   = form.get('action') as string;
-  const redirect = (form.get('redirect') as string) ?? '/admin/servicios';
+  // Solo rutas internas (8 oct 2026): antes se usaba tal cual venía del formulario.
+  const redirect = rutaInterna(form.get('redirect'), '/admin/servicios');
 
   const get = (k: string) => (form.get(k) as string)?.trim() || null;
 
@@ -125,13 +127,16 @@ export const POST: APIRoute = async ({ request }) => {
   if (action === 'toggle_visible') {
     const id      = get('id')!;
     const current = form.get('current') === 'true';
-    await supabase.from('services_catalog').update({ visible: !current }).eq('id', id);
+    // Error visible (8 oct 2026): antes volvía como si se hubiera cambiado.
+    const { error } = await supabase.from('services_catalog').update({ visible: !current }).eq('id', id);
+    if (error) return conError('servicio_guardar', error.message);
   }
 
   if (action === 'toggle_home') {
     const id      = get('id')!;
     const current = form.get('current') === 'true';
-    await supabase.from('services_catalog').update({ show_home: !current }).eq('id', id);
+    const { error } = await supabase.from('services_catalog').update({ show_home: !current }).eq('id', id);
+    if (error) return conError('servicio_guardar', error.message);
   }
 
   if (action === 'duplicate') {
@@ -165,7 +170,10 @@ export const POST: APIRoute = async ({ request }) => {
       sort_order:              (orig.sort_order ?? 0) + 1,
     });
 
-    if (insertErr) console.error('[services] duplicate insert:', insertErr.message, insertErr.code);
+    if (insertErr) {
+      console.error('[services] duplicate insert:', insertErr.message, insertErr.code);
+      return conError('servicio_guardar', insertErr.message); // visible (8 oct 2026)
+    }
   }
 
   return new Response(null, { status: 302, headers: { Location: redirect } });

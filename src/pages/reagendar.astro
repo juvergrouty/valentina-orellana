@@ -4,21 +4,39 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import { supabase } from '../lib/supabase';
 import { claveReagendarValida, sePuedeReagendar, REAGENDAR_TEXTO } from '../lib/rescheduleLink';
 
-const bookingId = Astro.url.searchParams.get('id') ?? '';
+// Los datos de la reserva (nombre, fecha, hora) solo se muestran con el link
+// firmado del correo (?id=…&k=…) o si la paciente escribió su correo y el ID en
+// el formulario de esta página (POST, el correo no viaja en la URL). Antes
+// bastaba el ?id= para ver el nombre de la paciente (8 oct 2026).
+let bookingId = Astro.url.searchParams.get('id') ?? '';
+const clave = Astro.url.searchParams.get('k') ?? '';
+let emailVerificado = '';
+if (Astro.request.method === 'POST') {
+  try {
+    const f = await Astro.request.formData();
+    bookingId = String(f.get('id') ?? '').trim();
+    emailVerificado = String(f.get('email') ?? '').trim().toLowerCase();
+  } catch { /* formulario ilegible: se trata como link inválido */ }
+}
+const conClave = !!bookingId && claveReagendarValida(bookingId, clave);
+const puedeVer = conClave || (!!bookingId && !!emailVerificado);
 
-// Cargar datos de la reserva si viene con ID
+// Cargar datos de la reserva solo si hay clave válida o correo + ID.
 let booking: Record<string, string | number> | null = null;
-if (bookingId) {
-  const { data } = await supabase
+if (puedeVer) {
+  let q = supabase
     .from('bookings')
     .select('id, patient_name, session_type, session_date, session_time, status, service_id, duration_min')
     .eq('id', bookingId)
-    .eq('status', 'confirmed')
-    .single();
+    .eq('status', 'confirmed');
+  // Sin clave, el correo tiene que calzar (igual que /api/reschedule).
+  if (!conClave) q = q.eq('patient_email', emailVerificado);
+  const { data } = await q.maybeSingle();
   booking = data;
 }
-const clave = Astro.url.searchParams.get('k') ?? '';
-const conClave = claveReagendarValida(bookingId, clave);
+// Sin clave válida ni correo que calce: mensaje neutro, sin decir si la reserva existe.
+const linkInvalido = !!bookingId && !booking;
+if (!booking) emailVerificado = '';
 // El enlace caduca cuando faltan menos de 24 h para la sesión.
 const caducado = !!booking && !sePuedeReagendar(booking.session_date as string, booking.session_time as string);
 const waAyuda = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valentina, necesito cambiar la hora de mi sesión.')}`;
@@ -52,30 +70,33 @@ const SESSION_LABELS: Record<string, string> = {
     <div class="container-site max-w-2xl">
 
       {!bookingId && (
-        <!-- Sin ID: pedir correo + ID manual -->
+        <!-- Sin ID: pedir correo + ID manual (POST: el correo no va en la URL) -->
         <div class="bg-white border border-dust p-8 md:p-10">
           <p class="body-text mb-6">Usa el botón <strong>Reagendar mi sesión</strong> del correo de confirmación de tu hora. Si no lo encuentras, <a href={waAyuda} target="_blank" rel="noopener" class="underline">escríbeme por WhatsApp</a>. También puedes ingresar tu correo y el código de tu reserva:</p>
-          <div class="flex flex-col gap-5">
+          <form id="form-buscar" method="post" action="/reagendar" class="flex flex-col gap-5">
             <div>
-              <label class="label text-stone block mb-2">Correo electrónico</label>
-              <input id="input-email" type="email" placeholder="tu@correo.cl" class="field" />
+              <label for="input-email" class="label text-stone block mb-2">Correo electrónico</label>
+              <input id="input-email" name="email" type="email" required placeholder="tu@correo.cl" class="field" />
             </div>
             <div>
-              <label class="label text-stone block mb-2">ID de reserva</label>
-              <input id="input-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="field" />
+              <label for="input-id" class="label text-stone block mb-2">ID de reserva</label>
+              <input id="input-id" name="id" type="text" required placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="field" />
             </div>
-            <button id="btn-buscar" class="btn-dark py-3.5 px-7 w-fit">
+            <button id="btn-buscar" type="submit" class="btn-dark py-3.5 px-7 w-fit">
               Buscar mi reserva
             </button>
-            <p id="buscar-error" class="hidden body-sm text-red-500"></p>
-          </div>
+          </form>
         </div>
       )}
 
-      {bookingId && !booking && (
+      {linkInvalido && (
         <div class="bg-white border border-dust p-8 text-center">
-          <p class="body-text text-stone mb-4">No encontramos una reserva confirmada con ese ID.</p>
-          <a href="/reagendar" class="btn-dark py-3 px-6">Intentar nuevamente</a>
+          <p class="font-heading font-light text-2xl text-ink mb-3">Link inválido o vencido</p>
+          <p class="body-text text-stone mb-6">No pudimos abrir esta reserva. Si necesitas cambiar tu hora, escríbeme y lo vemos.</p>
+          <div class="flex flex-col sm:flex-row gap-3 justify-center">
+            <a href={waAyuda} target="_blank" rel="noopener" class="btn-dark py-3 px-6">Escribir por WhatsApp</a>
+            <a href="/reagendar" class="btn-outline py-3 px-6">Buscar con mi correo</a>
+          </div>
         </div>
       )}
 
@@ -135,12 +156,6 @@ const SESSION_LABELS: Record<string, string> = {
 
             <!-- Email verificación + botón -->
             <div class="mt-6 flex flex-col gap-4">
-              {!conClave && (
-                <div>
-                  <label class="label text-stone block mb-2">Confirma tu correo *</label>
-                  <input id="verify-email" type="email" placeholder="tu@correo.cl" class="field" />
-                </div>
-              )}
               <p class="body-sm text-stone">{REAGENDAR_TEXTO}</p>
               <button id="btn-reagendar" disabled
                 class="btn-dark py-3.5 px-7 w-full opacity-50 cursor-not-allowed">
@@ -182,7 +197,7 @@ const SESSION_LABELS: Record<string, string> = {
   #reschedule-form-wrap .slot-selected:hover { @apply bg-ink text-sand border-ink font-semibold; }
 </style>
 
-<script define:vars={{ bookingId, serviceId: booking?.service_id ?? '', durationMin: booking?.duration_min ?? '', clave: conClave ? clave : '', modalidad: String(booking?.session_type ?? '').includes('online') ? 'online' : 'presencial' }}>
+<script define:vars={{ bookingId, emailVerificado, serviceId: booking?.service_id ?? '', durationMin: booking?.duration_min ?? '', clave: conClave ? clave : '', modalidad: String(booking?.session_type ?? '').includes('online') ? 'online' : 'presencial' }}>
   const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const $ = id => document.getElementById(id);
 
@@ -203,18 +218,6 @@ const SESSION_LABELS: Record<string, string> = {
     const [y,m,d] = iso.split('-');
     return `${parseInt(d)} de ${MONTHS_ES[parseInt(m)-1]} de ${y}`;
   }
-
-  // ── Buscar reserva sin ID ──────────────────────────────────────────────────
-  document.getElementById('btn-buscar')?.addEventListener('click', () => {
-    const email = document.getElementById('input-email')?.value.trim();
-    const id    = document.getElementById('input-id')?.value.trim();
-    if (!email || !id) {
-      const err = document.getElementById('buscar-error');
-      if (err) { err.textContent = 'Completa ambos campos.'; err.classList.remove('hidden'); }
-      return;
-    }
-    window.location.href = `/reagendar?id=${encodeURIComponent(id)}&email_hint=${encodeURIComponent(email)}`;
-  });
 
   // ── Calendario ─────────────────────────────────────────────────────────────
   if (bookingId && document.getElementById('calendar-grid')) {
@@ -348,7 +351,8 @@ const SESSION_LABELS: Record<string, string> = {
 
   // ── Confirmar reagendamiento ───────────────────────────────────────────────
   $('btn-reagendar')?.addEventListener('click', async () => {
-    const email = $('verify-email')?.value?.trim()?.toLowerCase();
+    // Con link firmado basta la clave; sin ella, el correo ya verificado en el servidor.
+    const email = emailVerificado || undefined;
     const errEl = $('reschedule-error');
 
     if (!email && !clave) {
@@ -387,8 +391,4 @@ const SESSION_LABELS: Record<string, string> = {
       btn.disabled = false;
     }
   });
-
-  // Pre-fill email hint si viene en URL
-  const emailHint = new URLSearchParams(window.location.search).get('email_hint');
-  if (emailHint && $('verify-email')) $('verify-email').value = emailHint;
 </script>

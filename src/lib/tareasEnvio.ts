@@ -22,12 +22,34 @@ import { supabase } from './supabase';
 import { logError, logWarn } from './logger';
 import { sendConfirmationToClient, sendNotificationToAdmin, ADMIN_EMAIL_FALLBACK } from './email';
 import { syncBookingToCalendar, markBookingPaidInCalendar } from './syncCalendar';
-import { sendStepsOnFirstPayment } from './patients';
+import { sendStepsOnFirstPayment, upsertPatientFromBooking, fichaDesdePrimerPago } from './patients';
 import { emitBoletaParaReserva } from './apigateway';
+import { todayCL } from './dateUtils';
 
-export type TareaPago = 'confirmacion' | 'aviso_admin' | 'calendario' | 'boleta' | 'pasos';
+// calendario_pagado: pago de una sesión que ya estaba agendada (deuda o sesión
+// ya pasada): el evento existente pasa de rojo "Por pagar" a pagado (8 oct 2026).
+export type TareaPago = 'confirmacion' | 'aviso_admin' | 'calendario' | 'calendario_pagado' | 'boleta' | 'pasos';
 // Orden en que se ejecutan las de una misma reserva (todas independientes).
-const ORDEN: TareaPago[] = ['confirmacion', 'aviso_admin', 'calendario', 'boleta', 'pasos'];
+const ORDEN: TareaPago[] = ['confirmacion', 'aviso_admin', 'calendario', 'calendario_pagado', 'boleta', 'pasos'];
+
+/**
+ * Qué envíos corresponden a una reserva recién pagada por Flow. Una sola regla
+ * para el aviso de Flow y el barrido de respaldo (8 oct 2026):
+ *   - reserva nueva con fecha de hoy en adelante (o cobro sin fecha 2099):
+ *     confirmación, aviso a Valentina, evento de Calendar y boleta;
+ *   - pago de deuda o de una sesión que ya pasó: boleta y marcar pagado el
+ *     evento que ya existe (sin "sesión confirmada" ni invitación a una fecha pasada).
+ * "pasos" se agrega aparte, una vez por correo por pago.
+ */
+export function tareasDePago(esNueva: boolean): TareaPago[] {
+  return esNueva ? ['confirmacion', 'aviso_admin', 'calendario', 'boleta'] : ['boleta', 'calendario_pagado'];
+}
+
+/** ¿La sesión es de hoy en adelante (hora de Chile)? El cobro sin fecha (2099) cuenta como vigente. */
+export function sesionVigente(sessionDate: string | null | undefined): boolean {
+  const d = String(sessionDate ?? '');
+  return d === '2099-12-31' || d >= todayCL();
+}
 const MAX_INTENTOS = 12;          // ≈ 1 hora de reintentos cada 5 min
 const TOMA_VENCIDA_MS = 10 * 60_000; // una toma "en curso" más vieja se dio por cortada
 
@@ -133,6 +155,8 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
         return r.sent ? { ok: true, nota: r.reason } : { ok: false, error: r.reason };
       }
       case 'aviso_admin': {
+        // Cobro sin fecha: no es una "Nueva reserva" que avisar (8 oct 2026).
+        if (sinFecha) return { ok: true, descartada: true, nota: 'cobro sin fecha' };
         const { data: cfg } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
         const r = await sendNotificationToAdmin(await datosCorreo(), cfg?.value || ADMIN_EMAIL_FALLBACK, false, { idempotencyKey: llave });
         return r.sent ? { ok: true } : { ok: false, error: r.reason };
@@ -146,6 +170,14 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
         }
         // Si el evento ya existía (sesión agendada con link de pago): pasa a pagado e invita a la paciente.
         return (await markBookingPaidInCalendar(bookingId, true)) ? { ok: true } : { ok: false, error: 'no se pudo marcar pagado en el calendario' };
+      }
+      case 'calendario_pagado': {
+        // Pago de deuda: el evento que ya existe deja de verse rojo "Por pagar".
+        // Sin evento no hay nada que hacer. Se invita a la paciente solo si la
+        // sesión es de hoy en adelante (8 oct 2026).
+        if (sinFecha || !b.google_event_id) return { ok: true, descartada: true, nota: 'sin evento de Calendar' };
+        const invitar = String(b.session_date) >= todayCL();
+        return (await markBookingPaidInCalendar(bookingId, true, { invitar })) ? { ok: true } : { ok: false, error: 'no se pudo marcar pagado en el calendario' };
       }
       case 'boleta': {
         // Interruptor "Emitir la boleta automáticamente" del servicio.
@@ -188,6 +220,13 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
 export async function procesarTareas(opts: { bookingIds?: string[]; hastaMs?: number } = {}): Promise<{ hechas: number; fallidas: number; pendientes: number }> {
   const hasta = opts.hastaMs ?? Date.now() + 40_000;
   const vencida = new Date(Date.now() - TOMA_VENCIDA_MS).toISOString();
+
+  // Desde el cron (sin bookingIds): primero se recuperan los pagos que
+  // quedaron sin envíos registrados (ver barrerPagosSinTareas).
+  if (!opts.bookingIds?.length) {
+    try { await barrerPagosSinTareas(); }
+    catch (e) { console.error('[envios] barrido de pagos sin envíos:', e); }
+  }
 
   // Último intento cortado a la mitad (quedó "en curso" con el tope de
   // intentos): no se reintenta más, pero se cierra y se avisa (antes quedaba
@@ -232,6 +271,79 @@ export async function procesarTareas(opts: { bookingIds?: string[]; hastaMs?: nu
     if (r.ok) hechas++; else fallidas++;
   }
   return { hechas, fallidas, pendientes };
+}
+
+/**
+ * Red de seguridad (8 oct 2026): si la función del aviso de Flow se corta
+ * entre marcar la reserva pagada (paid_at) y registrar sus envíos, Flow no
+ * reintenta (ya respondió o el pago ya figura procesado) y esos envíos se
+ * perdían. Cada pasada del cron busca reservas pagadas por Flow en los últimos
+ * 3 días que no tengan NINGÚN envío de ese pago ("<tarea>#<orden de Flow>") y
+ * los registra con la misma regla que flow/confirm.ts (tareasDePago). Los
+ * nombres son los mismos que habría creado el aviso, así que nunca duplica.
+ *
+ * Diferencia inevitable: aquí ya no se sabe si la reserva estaba sin pagar
+ * (nueva) o era una deuda ya confirmada; se decide por la fecha (de hoy en
+ * adelante = nueva, pasada = deuda).
+ */
+async function barrerPagosSinTareas(): Promise<void> {
+  // Solo pagos posteriores al primer envío registrado con este sistema: los
+  // pagos anteriores se procesaron con el código viejo (sin filas) y NO deben
+  // volver a recibir confirmación ni aviso.
+  const { data: primera } = await supabase.from('tareas_envio')
+    .select('creada_en').like('tarea', '%#%').order('creada_en', { ascending: true }).limit(1);
+  const inicioSistema = (primera ?? [])[0]?.creada_en as string | undefined;
+  if (!inicioSistema) return;
+  const hace3dias = new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString();
+  const desde = inicioSistema > hace3dias ? inicioSistema : hace3dias;
+  // Margen de 2 min: el aviso de Flow puede estar registrándolos en este momento.
+  const hasta = new Date(Date.now() - 2 * 60_000).toISOString();
+
+  const { data: pagadas, error } = await supabase.from('bookings')
+    .select('id, patient_name, patient_email, patient_phone, patient_rut, session_date, status, mp_payment_id, created_by_admin')
+    .eq('payment_note', 'Flow')
+    .not('mp_payment_id', 'is', null)
+    .gte('paid_at', desde).lt('paid_at', hasta)
+    .not('status', 'in', '(cancelled,expired)')
+    .order('paid_at', { ascending: true })
+    .limit(200);
+  if (error) { console.error('[envios] barrido: no se pudieron leer las reservas pagadas:', error.message); return; }
+  if (!pagadas?.length) return;
+
+  type Pagada = { id: string; patient_name: string | null; patient_email: string | null; patient_phone: string | null; patient_rut: string | null; session_date: string | null; status: string; mp_payment_id: string; created_by_admin: boolean | null };
+  const porPago = new Map<string, Pagada[]>();
+  for (const r of pagadas as Pagada[]) {
+    const k = String(r.mp_payment_id);
+    porPago.set(k, [...(porPago.get(k) ?? []), r]);
+  }
+
+  for (const [pago, filas] of porPago) {
+    const ids = filas.map(f => f.id);
+    const { data: existentes, error: errEx } = await supabase.from('tareas_envio')
+      .select('booking_id, tarea').in('booking_id', ids).like('tarea', `%#${pago}`);
+    if (errEx) continue; // ante la duda no se registra nada (nunca dos veces)
+    const conFilas = new Set((existentes ?? []).map((e: { booking_id: string }) => e.booking_id));
+    const faltan = filas.filter(f => !conFilas.has(f.id));
+    if (!faltan.length) continue;
+    // "Pasos a seguir": una vez por correo por pago (si otra reserva de este
+    // mismo pago ya lo tiene registrado, no se agrega de nuevo).
+    const conPasos = new Set<string>();
+    for (const e of (existentes ?? []) as { booking_id: string; tarea: string }[]) {
+      if (baseTarea(e.tarea) !== 'pasos') continue;
+      const em = String(filas.find(f => f.id === e.booking_id)?.patient_email ?? '').toLowerCase();
+      if (em) conPasos.add(em);
+    }
+    for (const r of faltan) {
+      const t = tareasDePago(sesionVigente(r.session_date));
+      const em = String(r.patient_email ?? '').toLowerCase();
+      if (em && !conPasos.has(em)) { conPasos.add(em); t.push('pasos'); }
+      if (!(await encolarTareas(r.id, t, pago))) continue;
+      await logWarn('envios/recuperados', `Pago de ${r.patient_name ?? 'una paciente'} sin envíos registrados (la función se cortó): se registraron ahora.`, { bookingId: r.id, pago, tareas: t });
+      // Lo mismo que hace el aviso de Flow después de registrar los envíos.
+      await upsertPatientFromBooking({ patient_name: r.patient_name, patient_email: r.patient_email, patient_phone: r.patient_phone, rut: r.patient_rut }).catch(console.error);
+      await fichaDesdePrimerPago(r, ids).catch(console.error);
+    }
+  }
 }
 
 /**

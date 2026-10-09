@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { APIRoute } from 'astro';
 import { refreshGoogleReviewsCache } from '../../../lib/googleReviews';
 import { logError } from '../../../lib/logger';
@@ -5,13 +6,21 @@ import { actualizarFeriadosAutomaticos } from '../../../lib/feriados';
 
 export const prerender = false;
 
+// Comparación en tiempo constante (8 oct 2026): con !== el tiempo de respuesta
+// delataba cuántos caracteres del secreto calzaban. Sin secreto, falla cerrado.
+function secretoValido(auth: string | null, secret: string | undefined): boolean {
+  if (!secret || !auth) return false;
+  const dado = Buffer.from(auth), esperado = Buffer.from(`Bearer ${secret}`);
+  return dado.length === esperado.length && timingSafeEqual(dado, esperado);
+}
+
 // Vercel Cron lo llama a diario con cabecera Authorization: Bearer <CRON_SECRET>.
 export const GET: APIRoute = async ({ request }) => {
   const secret = import.meta.env.CRON_SECRET;
   // Falla cerrado: si CRON_SECRET no está configurado, nadie puede llamar al cron.
   {
     const auth = request.headers.get('authorization');
-    if (!secret || auth !== `Bearer ${secret}`) return new Response('Unauthorized', { status: 401 });
+    if (!secretoValido(auth, secret)) return new Response('Unauthorized', { status: 401 });
   }
   // Feriados del año y del siguiente, descargados a diario (src/lib/feriados.ts).
   // No cierra nada: solo alimenta el aviso del panel para que Valentina decida.

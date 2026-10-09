@@ -52,6 +52,15 @@ const ERRORES_ACCION: Record<string, string> = {
   service_not_found: 'No se encontró ese servicio.',
   missing_migration: 'Falta actualizar la base de datos para hacer este cambio.',
   anular_deuda: 'No se pudo anular la deuda. Sigue como pendiente — intenta de nuevo.',
+  // Errores que antes volvían como si se hubiera guardado (8 oct 2026).
+  invalid_amount: 'El monto no es válido (debe ser un número mayor que 0). No se cambió nada.',
+  guardar_reserva: 'No se pudo guardar el cambio en la sesión. No se tocó el calendario ni se avisó a nadie — intenta de nuevo.',
+  cancelar: 'No se pudo cancelar la sesión. Sigue agendada — intenta de nuevo.',
+  // Estos ya los muestra el AdminLayout arriba: aquí van vacíos para no repetirlos.
+  tarifa_guardar: '', rebote_guardar: '', feriado: '',
+  insert_failed: 'No se pudo guardar en la base de datos. Intenta de nuevo.',
+  boleta_failed: 'El pago se registró, pero la boleta NO se emitió. Emítela manualmente.',
+  flow_error: 'No se pudo generar el link de pago. Revisa en la agenda que no hayan quedado sesiones "esperando pago" de este intento antes de reintentar.',
 };
 const errorCrudo = Astro.url.searchParams.get('error') ?? '';
 const errorFicha = ERRORES_ACCION[errorCrudo] ?? errorCrudo;

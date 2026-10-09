@@ -80,7 +80,11 @@ insert into settings (key, value) values
 on conflict (key) do nothing;
 
 grant all on settings to service_role;
-grant select on settings to anon, authenticated;
+-- settings guarda secretos (tokens de Google, reCAPTCHA, clave interna del cron):
+-- nunca legible desde afuera. Producción: permisos de anon/authenticated revocados
+-- y RLS activo sin políticas (auditoría de seguridad 8 oct 2026).
+revoke all on settings from anon, authenticated;
+alter table settings enable row level security;
 
 
 -- ─── 5. Row Level Security ───────────────────────────────────────────────────

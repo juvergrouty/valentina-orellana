@@ -33,7 +33,7 @@ const { data: catalogServices } = await supabase
 
 <BaseLayout
   title="Psicóloga Las Condes | Adultos y Parejas"
-  description="Reserva tu hora con Ps. Valentina Orellana: terapia para adultos y parejas, presencial en Las Condes u online. Agenda y paga en línea de forma simple y segura."
+  description="Reserva tu hora con Ps. Valentina Orellana: terapia para adultos y parejas, presencial en Las Condes u online. Agenda y paga en línea, simple y seguro."
 >
   <section class="relative overflow-hidden min-h-[300px] md:min-h-[360px] flex items-end border-b border-dust">
     <img src="/images/hero-paginas.jpg" alt="" class="absolute inset-0 w-full h-full object-cover object-center" aria-hidden="true" />
@@ -476,7 +476,10 @@ const { data: catalogServices } = await supabase
   window.__RECAPTCHA_SITE_KEY__ = recaptchaSiteKey;
 </script>
 {recaptchaSiteKey && (
-  <script src={`https://www.google.com/recaptcha/api.js?render=${recaptchaSiteKey}`} is:inline></script>
+  <!-- async defer (8 oct 2026): sin esto el script de Google bloqueaba el resto
+       de la página de reserva mientras cargaba. Solo se usa al confirmar, con
+       window.grecaptcha revisado antes y tope de 8 s. -->
+  <script src={`https://www.google.com/recaptcha/api.js?render=${recaptchaSiteKey}`} is:inline async defer></script>
 )}
 
 <script define:vars={{ catalogServicesRaw: JSON.stringify(catalogServices ?? []), preselectedGroup: grupoParam, preselectedServicioId: servicioParam }}>

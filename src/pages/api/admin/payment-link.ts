@@ -92,7 +92,7 @@ export const POST: APIRoute = async ({ request }) => {
       if (choca) return Response.json({ error: 'Ese horario se cruza con otra sesión agendada. Elige otra hora.' }, { status: 409 });
     }
 
-    const { error: bookingErr } = await supabase.from('bookings').insert({
+    const filaCobro: Record<string, unknown> = {
       id:             bookingId,
       session_type:   sessionType,
       session_date:   finalDate,
@@ -109,7 +109,18 @@ export const POST: APIRoute = async ({ request }) => {
       // el cobro caducaba, le llegaba a la paciente "tu reserva expiró" y el
       // link /pagar decía que no debía nada.
       created_by_admin: true,
-    });
+      // Duración guardada (8 oct 2026): sin ella el calendario usaba 55 min
+      // (settings) y el control de choques 50. serviceType aquí es solo
+      // 'individual'/'pareja' (no un servicio del catálogo), así que va 50,
+      // lo mismo que se usó arriba para revisar choques.
+      duration_min:   50,
+    };
+    let { error: bookingErr } = await supabase.from('bookings').insert(filaCobro);
+    if (bookingErr?.code === '42703') {
+      // Base sin la columna (migración vieja): se guarda sin ella, como antes.
+      const { duration_min: _d, ...sinDuracion } = filaCobro;
+      ({ error: bookingErr } = await supabase.from('bookings').insert(sinDuracion));
+    }
 
     if (bookingErr) {
       console.error('[payment-link] booking insert:', bookingErr.message);

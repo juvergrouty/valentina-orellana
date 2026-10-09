@@ -1,8 +1,17 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { logError, logWarn } from '../../../lib/logger';
 
 export const prerender = false;
+
+// Comparación en tiempo constante (8 oct 2026): con !== el tiempo de respuesta
+// delataba cuántos caracteres del secreto calzaban. Sin secreto, falla cerrado.
+function secretoValido(auth: string | null, secret: string | undefined): boolean {
+  if (!secret || !auth) return false;
+  const dado = Buffer.from(auth), esperado = Buffer.from(`Bearer ${secret}`);
+  return dado.length === esperado.length && timingSafeEqual(dado, esperado);
+}
 
 // Renueva el token de larga duración de Instagram (válido 60 días).
 // Vercel Cron lo llama mensualmente con cabecera Authorization: Bearer <CRON_SECRET>.
@@ -11,7 +20,7 @@ export const GET: APIRoute = async ({ request }) => {
   // Falla cerrado: si CRON_SECRET no está configurado, nadie puede llamar al cron.
   {
     const auth = request.headers.get('authorization');
-    if (!secret || auth !== `Bearer ${secret}`) {
+    if (!secretoValido(auth, secret)) {
       return new Response('Unauthorized', { status: 401 });
     }
   }

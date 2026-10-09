@@ -10,6 +10,10 @@ function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+// Correo para .ilike() sin comodines: calza solo con ese mismo correo, sin
+// distinguir mayúsculas (8 oct 2026). Antes un "_" calzaba con cualquier letra.
+const emailExacto = (e: string) => e.trim().replace(/[\\%_]/g, (c) => `\\${c}`);
+
 // POST /api/admin/send-email
 // Acciones: 'review_request' (reseña), 'steps' (pasos a seguir),
 //           'confirmation' y 'reminder' (por sesión, vía booking_id).
@@ -98,7 +102,9 @@ export const POST: APIRoute = async ({ request, url }) => {
     if (phone.length < 10) return json({ ok: false, error: 'El paciente no tiene un teléfono válido.' }, 400);
     const text = stepsWhatsappText(b.patient_name ?? '', await stepsPageUrl(url.origin));
     if (b.patient_email) {
-      await supabase.from('patients').update({ steps_sent_at: new Date().toISOString() }).ilike('email', b.patient_email.trim());
+      // Igual exacto sin distinguir mayúsculas: "_" y "%" escapados para que no
+      // calcen con el correo de otra paciente (8 oct 2026; mismo patrón que patients.ts).
+      await supabase.from('patients').update({ steps_sent_at: new Date().toISOString() }).ilike('email', emailExacto(b.patient_email));
     }
     return json({ ok: true, waUrl: `https://wa.me/${phone}?text=${encodeURIComponent(text)}` });
   }
@@ -126,7 +132,7 @@ export const POST: APIRoute = async ({ request, url }) => {
     });
     if (!res.sent) return json({ ok: false, error: res.reason ?? 'No se pudo enviar el correo.' }, 500);
     // Queda registrado como enviado: si aún no pagó su primera sesión, ya no sale el automático.
-    await supabase.from('patients').update({ steps_sent_at: new Date().toISOString() }).ilike('email', email);
+    await supabase.from('patients').update({ steps_sent_at: new Date().toISOString() }).ilike('email', emailExacto(email));
     return json({ ok: true });
   }
 

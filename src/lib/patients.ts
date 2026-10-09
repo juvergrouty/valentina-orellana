@@ -30,7 +30,10 @@ export interface DatosFicha {
 
 const NUEVAS = ['comuna', 'sin_rut', 'doc_tipo', 'doc_numero', 'doc_pais'];
 
-export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizarRut?: boolean } = {}): Promise<string | null> {
+// sobrescribir (8 oct 2026): los datos que vienen reemplazan los de la ficha
+// (los vacíos no borran nada). Solo para una ficha sin ninguna sesión pagada
+// (ver fichaDesdePrimerPago y /api/bookings).
+export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizarRut?: boolean; sobrescribir?: boolean } = {}): Promise<string | null> {
   const email = b.patient_email?.trim().toLowerCase();
   const name  = b.patient_name?.trim();
   if (!email || !name) return null;
@@ -57,10 +60,39 @@ export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizar
       // correcciones hechas a mano en la ficha. Solo se completan datos vacíos.
       // Excepción: el RUT que Valentina escribe al emitir una boleta
       // (actualizarRut), que es una corrección explícita suya.
-      const cambios: Record<string, string | boolean> = {};
+      const cambios: Record<string, string | boolean | null> = {};
       // Paciente dada de baja que vuelve a reservar: se reactiva (si no, no
       // aparecía en la agenda del panel ni en los avisos de consentimiento).
       if (existing.active === false) cambios.active = true;
+      if (opts.sobrescribir) {
+        // Ficha que nadie ha pagado todavía: la creó o la completó una reserva
+        // SIN PAGAR, y cualquiera puede reservar con el correo de otra persona.
+        // Se reemplaza con estos datos (8 oct 2026; antes quien reservaba
+        // primero fijaba el RUT de la boleta, la dirección y el contacto de
+        // emergencia para siempre).
+        if (name !== existing.name) cambios.name = name;
+        if (t(b.patient_phone)) cambios.phone = t(b.patient_phone);
+        if (rut) {
+          cambios.rut = rut;
+          if ('comuna' in existing && existing.sin_rut) cambios.sin_rut = false;
+        } else if (sinRut && 'comuna' in existing) {
+          cambios.rut = null;
+          cambios.sin_rut = true;
+        }
+        if (t(b.address)) cambios.address = t(b.address);
+        if (t(b.emergency_name)) cambios.emergency_name = t(b.emergency_name);
+        if (t(b.emergency_phone)) cambios.emergency_phone = t(b.emergency_phone);
+        if ('comuna' in existing) {
+          if (t(b.comuna)) cambios.comuna = t(b.comuna);
+          if (t(b.doc_numero)) {
+            cambios.doc_numero = t(b.doc_numero);
+            cambios.doc_tipo = t(b.doc_tipo) || null;
+            cambios.doc_pais = t(b.doc_pais) || null;
+          }
+        }
+        if (Object.keys(cambios).length) await supabase.from('patients').update(cambios).eq('id', existing.id);
+        return existing.id;
+      }
       if (!existing.name?.trim()) cambios.name = name;
       if (!existing.phone?.trim() && t(b.patient_phone)) cambios.phone = t(b.patient_phone);
       if (rut && (opts.actualizarRut || !existing.rut?.trim())) cambios.rut = rut;
@@ -107,6 +139,45 @@ export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizar
     await logError('patients/upsert', 'No se pudo crear/actualizar la ficha del paciente tras su reserva', { email, name, error: err instanceof Error ? err.message : String(err) });
     return null;
   }
+}
+
+/** ¿La paciente tiene alguna sesión pagada (no cancelada) fuera de `excluirIds`? null = no se pudo saber. */
+export async function tieneSesionesPagadas(email: string, excluirIds: string[] = []): Promise<boolean | null> {
+  const em = email.trim().toLowerCase();
+  if (!em) return null;
+  // ilike sin comodines: un "_" o "%" en el correo no debe calzar con otro.
+  const { data, error } = await supabase.from('bookings').select('id')
+    .ilike('patient_email', em.replace(/[\\%_]/g, (c) => `\\${c}`))
+    .not('paid_at', 'is', null)
+    .neq('status', 'cancelled');
+  if (error) return null;
+  return (data ?? []).some((r: { id: string }) => !excluirIds.includes(r.id));
+}
+
+/**
+ * Primer pago de la paciente (8 oct 2026): la ficha pudo haberla creado o
+ * completado cualquiera que reservó (sin pagar) con su correo, y esos datos
+ * después se usan en la boleta y en el consentimiento. En su PRIMERA sesión
+ * pagada, nombre, teléfono y RUT se toman de la reserva pagada. Nunca se toca
+ * la ficha de quien ya tenía sesiones pagadas, ni con reservas creadas por
+ * Valentina desde el panel (sus datos de la ficha mandan).
+ * `idsDeEstePago`: las reservas cubiertas por este mismo pago.
+ */
+export async function fichaDesdePrimerPago(b: {
+  patient_name?: string | null;
+  patient_email?: string | null;
+  patient_phone?: string | null;
+  patient_rut?: string | null;
+  created_by_admin?: boolean | null;
+}, idsDeEstePago: string[]): Promise<void> {
+  if (b.created_by_admin) return;
+  const email = b.patient_email?.trim().toLowerCase();
+  if (!email || !b.patient_name?.trim()) return;
+  const otras = await tieneSesionesPagadas(email, idsDeEstePago);
+  if (otras !== false) return; // ya pagó antes, o no se pudo comprobar: no se toca
+  await upsertPatientFromBooking(
+    { patient_name: b.patient_name, patient_email: email, patient_phone: b.patient_phone, rut: b.patient_rut },
+    { sobrescribir: true });
 }
 
 // "Pasos a seguir": se envía solo una vez por paciente, automático cuando paga

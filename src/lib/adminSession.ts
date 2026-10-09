@@ -64,11 +64,20 @@ export async function revocarTokenAdmin(token: string): Promise<void> {
   if (partes.length !== 3) return;
   const { supabase } = await import('./supabase');
   const ahora = Date.now();
-  const lista = (await leerRevocados()).filter(r => r.vence > ahora); // los vencidos ya no sirven igual
+  // Lectura con revisión de error (8 oct 2026): leerRevocados() devuelve []
+  // si Supabase falla, y escribir esa lista reabría todas las sesiones ya
+  // cerradas. Si no se puede leer, se lanza sin escribir (logout lo atrapa).
+  const { data, error: errLeer } = await supabase.from('settings').select('value').eq('key', SETTING_REVOCADOS).maybeSingle();
+  if (errLeer) throw new Error(errLeer.message);
+  let actual: unknown;
+  try { actual = JSON.parse(data?.value || '[]'); } catch { throw new Error('admin_tokens_revocados ilegible'); }
+  if (!Array.isArray(actual)) throw new Error('admin_tokens_revocados ilegible');
+  const lista = (actual as { firma: string; vence: number }[]).filter(r => r.vence > ahora); // los vencidos ya no sirven igual
   lista.push({ firma: partes[2], vence: Number(partes[1]) || ahora + DURACION_SESION_MS });
-  await supabase.from('settings').upsert(
+  const { error: errGuardar } = await supabase.from('settings').upsert(
     { key: SETTING_REVOCADOS, value: JSON.stringify(lista), updated_at: new Date().toISOString() },
     { onConflict: 'key' },
   );
   cacheRevocados = null;
+  if (errGuardar) throw new Error(errGuardar.message);
 }

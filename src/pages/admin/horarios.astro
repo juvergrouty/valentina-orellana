@@ -152,6 +152,17 @@ const feriados = await estadoFeriados().catch(() => []);
       ⚠ No se guardó el bloqueo{Astro.url.searchParams.get('detail') ? `: ${Astro.url.searchParams.get('detail')}` : ''}. Esas fechas siguen abiertas en la agenda web — intenta de nuevo.
     </div>
   )}
+  {/* Quitar bloqueo que no se borró (8 oct 2026): antes volvía sin aviso. */}
+  {errorMsg === 'bloqueo_quitar' && (
+    <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
+      ⚠ No se quitó el bloqueo{Astro.url.searchParams.get('detail') ? `: ${Astro.url.searchParams.get('detail')}` : ''}. Esa fecha sigue cerrada — intenta de nuevo.
+    </div>
+  )}
+  {errorMsg === 'slots_guardar' && (
+    <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
+      ⚠ No se guardó el cambio de horario{Astro.url.searchParams.get('detail') ? `: ${Astro.url.searchParams.get('detail')}` : ''}. Intenta de nuevo.
+    </div>
+  )}
   {errorMsg === 'settings_guardar' && (
     <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.75rem 1.25rem;margin-bottom:1.5rem;font-size:0.8rem;">
       ⚠ No se guardó la configuración{Astro.url.searchParams.get('detail') ? ` (${Astro.url.searchParams.get('detail')})` : ''}. Intenta de nuevo.
