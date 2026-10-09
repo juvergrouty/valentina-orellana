@@ -8,6 +8,7 @@ import { resumenDiaCompleto } from '../../lib/blockedDayAlerts';
 import { corregirPrefijoInvitacionesUnaVez } from '../../lib/syncCalendar';
 import { leerRebotes, type Rebote } from '../../lib/rebotes';
 import { getComprobanteAlerts, type ComprobanteAlert } from '../../lib/comprobantes';
+import { avisosCambioTarifa, type AvisoTarifa } from '../../lib/cambiosTarifa';
 
 interface Props {
   title: string;
@@ -101,7 +102,7 @@ function mensajeCumpleanos(nombre: string): string {
   return `${nombre}, feliz cumpleaños! 🎉 Te mando un saludo grande, que hoy lo disfrutes mucho y que este nuevo año venga con cosas lindas para ti`;
 }
 
-const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes] = await Promise.all([
+const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas] = await Promise.all([
   // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
   // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
   contarErroresNuevos().catch(() => 0),
@@ -118,7 +119,10 @@ const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDay
   corregirPrefijoInvitacionesUnaVez().catch(() => undefined),
   cumpleanosHoy().catch((): Cumple[] => []),
   avisosRebotes().catch((): ReboteAviso[] => []),
+  // Cambios de tarifa de pacientes actuales (ver src/lib/cambiosTarifa.ts).
+  avisosCambioTarifa().catch((): AvisoTarifa[] => []),
 ]);
+const fechaLarga = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleDateString('es-CL', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const horasTxt = (n: number, tipo: 'presencial' | 'online') =>
@@ -939,6 +943,31 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
                 <input type="hidden" name="redirect" value={Astro.url.pathname} />
                 <button type="submit" style="background:#fff;color:#9a3b2e;border:none;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;cursor:pointer;">Listo</button>
               </form>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+    {tarifas.length > 0 && (
+      <div role="status" id="tarifas-alert" style="background:#576352;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
+        <p style="font-weight:700;margin:0 0 0.35rem;">💲 Cambios de tarifa</p>
+        <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:0.4rem;">
+          {tarifas.map(t => (
+            <li style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
+              <span>
+                {t.fase === 'avisar' && <>Falta avisarle a <strong>{t.nombre}</strong> que su tarifa {t.anterior ? `pasa de ${clp(t.anterior)} a` : 'sube a'} <strong>{clp(t.nuevo)}</strong> desde el {fechaLarga(t.desde)}.</>}
+                {t.fase === 'proxima' && <>El {fechaLarga(t.desde)} empieza la tarifa nueva de <strong>{t.nombre}</strong>: <strong>{clp(t.nuevo)}</strong>{t.anterior ? ` (antes ${clp(t.anterior)})` : ''}. Desde esa semana, agéndalo con el monto nuevo.</>}
+                {t.fase === 'vigente' && <>Desde el {fechaLarga(t.desde)} rige la tarifa nueva de <strong>{t.nombre}</strong>: <strong>{clp(t.nuevo)}</strong>{t.anterior ? ` (antes ${clp(t.anterior)})` : ''}. Al agendarle (aquí o en Encuadrado) usa el monto nuevo.</>}
+                {t.sesionesConMontoAntiguo > 0 && <> ⚠ Tiene {t.sesionesConMontoAntiguo} {t.sesionesConMontoAntiguo === 1 ? 'sesión agendada' : 'sesiones agendadas'} desde esa fecha con el monto antiguo: cámbiale el monto.</>}
+              </span>
+              {t.fase !== 'proxima' && (
+                <form method="POST" action="/api/admin/cambios-tarifa" style="display:inline;">
+                  <input type="hidden" name="id" value={t.id} />
+                  <input type="hidden" name="campo" value={t.fase === 'avisar' ? 'avisado' : 'aplicado'} />
+                  <input type="hidden" name="redirect" value={Astro.url.pathname} />
+                  <button type="submit" style="background:#fff;color:#576352;border:none;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;cursor:pointer;">{t.fase === 'avisar' ? 'Ya le avisé' : 'Listo'}</button>
+                </form>
+              )}
             </li>
           ))}
         </ul>

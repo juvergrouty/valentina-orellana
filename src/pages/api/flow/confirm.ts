@@ -121,6 +121,26 @@ export const POST: APIRoute = async ({ request }) => {
         }
       }
 
+      // Tercera vía: el identificador con que se creó la orden en Flow
+      // (commerceOrder = id de la reserva en los links de agenda, cobros y
+      // "Agendar con link"). Cubre links antiguos que no quedaron en el
+      // historial: el 27 sep Werner pagó un link creado antes de que existiera
+      // el historial y quedó como "pago huérfano" (conciliado a mano el 8 oct).
+      // Solo con el mismo monto; si esa sesión ya estaba pagada, se avisa de un
+      // posible pago doble en vez de no decir nada.
+      if (!selErr && (!candidates || !candidates.length) && /^[0-9a-f-]{36}$/i.test(String(status.commerceOrder ?? ''))) {
+        const { data: porOrden } = await supabase.from('bookings').select('*').eq('id', String(status.commerceOrder)).maybeSingle();
+        if (porOrden && !porOrden.paid_at && Number(porOrden.amount) === Number(status.amount)) {
+          candidates = [porOrden];
+          porHistorial = true; // el monto ya se comprobó aquí
+          await logInfo('flow/pago-link-antiguo', `Pago de ${porOrden.patient_name} reconocido por la orden de Flow (link antiguo)`, { bookingId: porOrden.id, token, flowOrder: status.flowOrder });
+        } else if (porOrden?.paid_at && String(porOrden.mp_payment_id ?? '') !== String(status.flowOrder)) {
+          await logError('flow/posible-pago-doble',
+            `${porOrden.patient_name} pagó por Flow (${status.amount}) la sesión del ${porOrden.session_date} a las ${String(porOrden.session_time).slice(0, 5)}, que ya figuraba pagada (${porOrden.payment_note ?? 'otro medio'}). Revisa si hay que devolver el pago o asignarlo a otra sesión.`,
+            { bookingId: porOrden.id, token, flowOrder: status.flowOrder, amount: status.amount });
+        }
+      }
+
       // Monto pagado vs. lo que se cobra (camino normal, por token). Si no
       // calza (p. ej. la paciente pagó un "Cobrar todo" con una sesión que
       // Valentina ya había marcado pagada en efectivo), se confirma igual —el

@@ -4,6 +4,7 @@ import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { syncBookingToCalendar } from '../../../lib/syncCalendar';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { chocaConOtraSesion } from '../../../lib/disponibilidad';
+import { tagBookingsWithPaymentToken } from '../../../lib/debt';
 
 export const prerender = false;
 
@@ -145,6 +146,9 @@ export const POST: APIRoute = async ({ request }) => {
       });
       paymentUrl = `${order.url}?token=${order.token}`;
       await supabase.from('bookings').update({ mp_preference_id: order.token }).eq('id', bookingId);
+      // Historial del link (como en los demás cobros): si después se genera
+      // otro link, un pago con este igual se reconoce (ver flow/confirm.ts).
+      await tagBookingsWithPaymentToken([bookingId], order.token).catch(() => {});
     }
 
     // Con fecha/hora → evento en Google Calendar ("Por pagar", sin invitar).
