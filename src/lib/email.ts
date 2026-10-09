@@ -16,6 +16,12 @@ function getResend(): Resend | null {
 
 const FROM = import.meta.env.EMAIL_FROM ?? 'onboarding@resend.dev';
 
+// Si un paciente responde un correo automático, la respuesta va a consulta@
+// (reenvía a Gmail vía ImprovMX y Gmail responde "como" consulta@ vía Resend).
+// Sin esto, la respuesta iba a notificaciones@ y Valentina contestaba desde su
+// Gmail personal.
+const PATIENT_REPLY_TO = 'Ps. Valentina Orellana <consulta@valentinaorellana.cl>';
+
 // Respaldo si el setting `notification_email` no está configurado — el correo
 // real de Valentina, NUNCA una dirección de terceros. Preferible a omitir el
 // envío: un aviso o una boleta perdidos no deben quedar "en el aire".
@@ -102,6 +108,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
   const subject = `Sesión confirmada — Ps. Valentina Orellana`;
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   data.patient_email,
     subject,
     html: `
@@ -226,6 +233,7 @@ export async function sendSessionUpdatedEmail(data: {
   }
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   data.patient_email,
     subject,
     html: `
@@ -284,6 +292,7 @@ export async function sendPaymentLinkEmail(opts: {
 
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   opts.patientEmail,
     subject,
     html: `
@@ -337,6 +346,7 @@ export async function sendDebtReminderEmail(opts: {
   const subject = `Saldo pendiente de tus sesiones — Ps. Valentina Orellana`;
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   opts.patientEmail,
     subject,
     html: `
@@ -400,6 +410,7 @@ export async function sendReminderEmail(data: BookingEmailData, opts: { idempote
 
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   data.patient_email,
     subject,
     html: `
@@ -466,6 +477,7 @@ export async function sendPendingExpiredEmail(data: {
 
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   data.patient_email,
     subject,
     html: `
@@ -514,6 +526,7 @@ export async function sendReviewRequestEmail(opts: {
 
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   opts.patientEmail,
     subject: 'Tu opinión me ayudaría mucho 🌿',
     html: `
@@ -575,6 +588,7 @@ export async function sendEvaluationEmail(opts: {
 
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   opts.patientEmail,
     subject: '¿Cómo te sentiste con tu sesión?',
     html: `
@@ -677,6 +691,7 @@ export async function sendStepsEmail(opts: {
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   opts.patientEmail,
     subject: 'Pasos a seguir para tu proceso — Ps. Valentina Orellana',
     html: stepsEmailHtml(opts),
@@ -702,6 +717,7 @@ export async function sendBoletaEmail(opts: {
   const folioTxt = opts.folio ? ` N° ${opts.folio}` : '';
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   opts.to,
     subject: `Tu boleta de honorarios${folioTxt} — Ps. Valentina Orellana`,
     html: `
@@ -752,7 +768,7 @@ export async function sendBulkEmail(
         </p>
       </div>`;
     try {
-      const res = await client.emails.send({ from: FROM, to: r.email, subject, html });
+      const res = await client.emails.send({ from: FROM, to: r.email, replyTo: PATIENT_REPLY_TO, subject, html });
       if (res.error) { failed++; console.error('[email] bulk:', res.error); }
       else sent++;
     } catch (e) {
@@ -982,6 +998,7 @@ export async function sendConsentLinkEmail(opts: {
   const subject = 'Consentimiento informado para tu terapia';
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   opts.patientEmail,
     subject,
     html: `
@@ -1027,6 +1044,7 @@ export async function sendConsentSignedCopy(opts: {
   const subject = `Consentimiento firmado — ${opts.signerName}`;
   const res = await client.emails.send({
     from: FROM,
+    replyTo: PATIENT_REPLY_TO,
     to:   opts.to,
     subject,
     html: `

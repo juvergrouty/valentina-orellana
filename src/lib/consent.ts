@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { supabase } from './supabase';
-import { ADMIN_EMAIL_FALLBACK } from './email';
 
 // Consentimiento informado de tratamiento de datos personales y de salud
 // (Ley 21.719, que modifica la Ley 19.628). Pedido por Valentina el 3 oct
@@ -94,9 +93,12 @@ export function consentPlainText(contactEmail: string): string {
 
 export const sha256 = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex');
 
+// Correo público de contacto para temas de datos (mismo que /condiciones).
+// No usa `notification_email`: ese es el buzón interno de avisos a Valentina.
+// Las firmas antiguas no se ven afectadas: su integridad se verifica contra
+// el text_snapshot guardado, no contra el texto actual.
 export async function consentContactEmail(): Promise<string> {
-  const { data } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
-  return data?.value?.trim() || ADMIN_EMAIL_FALLBACK;
+  return 'consulta@valentinaorellana.cl';
 }
 
 export function consentUrl(origin: string, token: string) {
