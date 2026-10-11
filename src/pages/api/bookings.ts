@@ -53,6 +53,7 @@ async function handleBooking(request: Request) {
         patient_comuna,
         emergency_name,
         emergency_phone,
+        patient_birthdate,
         doc_tipo,
         doc_numero,
         doc_pais,
@@ -130,6 +131,14 @@ async function handleBooking(request: Request) {
   const emergTel  = txt(emergency_phone, 25);
   if (direccion.length < 3 || /[<>]/.test(direccion)) return json({ error: 'Revisa tu dirección.' }, 400);
   if (comuna.length < 2 || /[<>]/.test(comuna)) return json({ error: 'Revisa tu comuna.' }, 400);
+  // Fecha de nacimiento opcional (11 oct 2026): si viene, tiene que ser una fecha real y pasada.
+  const nacimiento = txt(patient_birthdate, 10);
+  if (nacimiento) {
+    const d = new Date(nacimiento + 'T12:00:00Z');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nacimiento) || isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== nacimiento || d.getUTCFullYear() < 1900 || d.getTime() > Date.now()) {
+      return json({ error: 'Revisa tu fecha de nacimiento.' }, 400);
+    }
+  }
   if (!!emergNom !== !!emergTel) return json({ error: 'Completa el nombre y el teléfono de tu contacto de emergencia, o deja ambos vacíos.' }, 400);
   if (emergNom && (emergNom.length < 2 || /[<>]/.test(emergNom))) return json({ error: 'Revisa el nombre de tu contacto de emergencia.' }, 400);
   if (emergTel && !/^[\d\s()+.-]{7,25}$/.test(emergTel)) return json({ error: 'Revisa el teléfono de tu contacto de emergencia.' }, 400);
@@ -398,6 +407,7 @@ async function handleBooking(request: Request) {
     comuna,
     emergency_name:  emergNom || null,
     emergency_phone: emergTel || null,
+    birthdate:       nacimiento || null,
     sin_rut:         sinRut,
     doc_tipo:        sinRut ? docTipo : null,
     doc_numero:      sinRut ? docNumero : null,

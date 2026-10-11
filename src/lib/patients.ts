@@ -22,6 +22,7 @@ export interface DatosFicha {
   comuna?: string | null;
   emergency_name?: string | null;
   emergency_phone?: string | null;
+  birthdate?: string | null;
   sin_rut?: boolean | null;
   doc_tipo?: string | null;
   doc_numero?: string | null;
@@ -82,6 +83,7 @@ export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizar
         if (t(b.address)) cambios.address = t(b.address);
         if (t(b.emergency_name)) cambios.emergency_name = t(b.emergency_name);
         if (t(b.emergency_phone)) cambios.emergency_phone = t(b.emergency_phone);
+        if (t(b.birthdate)) cambios.birthdate = t(b.birthdate);
         if ('comuna' in existing) {
           if (t(b.comuna)) cambios.comuna = t(b.comuna);
           if (t(b.doc_numero)) {
@@ -99,6 +101,7 @@ export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizar
       if (!existing.address?.trim() && t(b.address)) cambios.address = t(b.address);
       if (!existing.emergency_name?.trim() && t(b.emergency_name)) cambios.emergency_name = t(b.emergency_name);
       if (!existing.emergency_phone?.trim() && t(b.emergency_phone)) cambios.emergency_phone = t(b.emergency_phone);
+      if (!existing.birthdate && t(b.birthdate)) cambios.birthdate = t(b.birthdate);
       if ('comuna' in existing) {
         if (!existing.comuna?.trim() && t(b.comuna)) cambios.comuna = t(b.comuna);
         if (sinRut && !existing.rut?.trim() && !existing.sin_rut) cambios.sin_rut = true;
@@ -119,6 +122,7 @@ export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizar
         address:         t(b.address) || null,
         emergency_name:  t(b.emergency_name) || null,
         emergency_phone: t(b.emergency_phone) || null,
+        birthdate:       t(b.birthdate) || null,
         comuna:          t(b.comuna) || null,
         sin_rut:         sinRut,
         doc_tipo:        sinRut ? (t(b.doc_tipo) || null) : null,

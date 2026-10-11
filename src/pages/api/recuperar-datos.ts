@@ -44,6 +44,7 @@ export const POST: APIRoute = async ({ request }) => {
       comuna:    p?.comuna ?? '',
       emergNombre:   p?.emergency_name ?? '',
       emergTelefono: p?.emergency_phone ?? '',
+      nacimiento:    p?.birthdate ? String(p.birthdate).slice(0, 10) : '',
       motivo,
     },
   });

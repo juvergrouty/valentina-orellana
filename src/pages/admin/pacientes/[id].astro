@@ -115,7 +115,6 @@ const faltanDatos = patient ? [
   !patient.phone && 'teléfono',
   !patient.address && 'dirección',
   !patient.comuna && 'comuna',
-  (!patient.emergency_name || !patient.emergency_phone) && 'contacto de emergencia',
   sinRutFicha ? (!patient.doc_numero && 'documento') : (!patient.rut && 'RUT'),
 ].filter(Boolean) as string[] : [];
 ---

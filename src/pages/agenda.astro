@@ -335,6 +335,11 @@ const { data: catalogServices } = await supabase
             <p class="field-error hidden font-body text-xs text-red-500 mt-1">Selecciona un motivo de consulta.</p>
           </div>
           <div>
+            <label class="label text-stone block mb-2" for="patient_birthdate">Fecha de nacimiento</label>
+            <input id="patient_birthdate" type="date" autocomplete="bday" min="1900-01-01" class="field" />
+            <p class="field-error hidden font-body text-xs text-red-500 mt-1">Revisa tu fecha de nacimiento.</p>
+          </div>
+          <div>
             <label class="label text-stone block mb-2" for="patient_notes">¿Algo que quieras contarme antes? (opcional)</label>
             <textarea id="patient_notes" name="patient_notes" rows="3"
               placeholder="Puedes describir brevemente tu situación..."
@@ -1050,6 +1055,9 @@ const { data: catalogServices } = await supabase
     if (emergNom && !emergTel) { const e = $('emergency_phone').closest('div').nextElementSibling; if (e) { e.textContent = 'Si dejas el nombre, agrega también el teléfono.'; e.classList.remove('hidden'); } valid = false; }
     if (emergNom && emergNom.length < 2)  { const e = $('emergency_name').nextElementSibling; if (e) { e.textContent = 'Revisa el nombre de tu contacto de emergencia.'; e.classList.remove('hidden'); } valid = false; }
     if (emergTel && !/^[\d\s()+.-]{7,25}$/.test(emergTel)) { const e = $('emergency_phone').closest('div').nextElementSibling; if (e) { e.textContent = 'Revisa el teléfono de tu contacto de emergencia.'; e.classList.remove('hidden'); } valid = false; }
+    // Fecha de nacimiento opcional (11 oct 2026): solo se valida si se escribió.
+    const nacimiento = $('patient_birthdate').value.trim();
+    if ((nacimiento && !fechaNacimientoValida(nacimiento)) || $('patient_birthdate').validity?.badInput) { $('patient_birthdate').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!motivo) { $('motivo_consulta').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!valid) {
       // Con un formulario largo, en el celular el error puede quedar fuera de la
@@ -1115,6 +1123,7 @@ const { data: catalogServices } = await supabase
           patient_comuna:  comuna,
           emergency_name:  emergNom,
           emergency_phone: emergTel,
+          patient_birthdate: nacimiento,
           notes,
           recaptcha_token: recaptchaToken,
           origen:          (() => { try { return JSON.parse(localStorage.getItem('vo_origen') || 'null'); } catch (e) { return null; } })(),
@@ -1305,6 +1314,12 @@ const { data: catalogServices } = await supabase
   // código. Si se pegó o autocompletó con el código incluido, se quita.
   // País + número: lo arma CamposContacto (Chile por defecto). Devuelve
   // "+<código><número>" o '' si el número está mal escrito.
+  function fechaNacimientoValida(v) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+    const d = new Date(v + 'T12:00:00Z');
+    return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v && d.getUTCFullYear() >= 1900 && d <= new Date();
+  }
+
   function telefonoCompleto() {
     return window.telefonoDe ? window.telefonoDe($('patient_phone')) : '';
   }
@@ -1354,6 +1369,7 @@ const { data: catalogServices } = await supabase
       poner('emergency_name', d.datos.emergNombre);
       poner('emergency_phone', d.datos.emergTelefono);
       $('emergency_phone')?.dispatchEvent(new Event('input'));
+      poner('patient_birthdate', d.datos.nacimiento);
       if (d.datos.sinRut) {
         if (!$('sin_rut').checked) $('sin_rut').click();
         poner('doc_tipo', d.datos.docTipo);

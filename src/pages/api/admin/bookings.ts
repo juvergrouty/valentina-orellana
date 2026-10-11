@@ -582,12 +582,13 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (nuevaFicha) {
       if (sinRutNueva) finalRut = RUT_EXTRANJERO_SII;
       const incompleto = !finalPhone || !finalEmail || !fichaExtra.address || !fichaExtra.comuna
-        || !fichaExtra.emergency_name || !fichaExtra.emergency_phone
         || (sinRutNueva ? (!fichaExtra.doc_numero || !fichaExtra.doc_pais) : !finalRut);
       if (incompleto) return redirect(conParam(dest) + 'error=missing_patient_data');
       if (!sinRutNueva && !rutValido(finalRut)) return redirect(conParam(dest) + 'error=rut_invalido');
-      const telOk = normalizarTelefono(finalPhone), emergOk = normalizarTelefono(fichaExtra.emergency_phone);
-      if (!telOk || !emergOk) return redirect(conParam(dest) + 'error=telefono_invalido');
+      // Contacto de emergencia opcional (11 oct 2026): el teléfono se valida solo si viene.
+      const telOk = normalizarTelefono(finalPhone);
+      const emergOk = fichaExtra.emergency_phone ? normalizarTelefono(fichaExtra.emergency_phone) : '';
+      if (!telOk || emergOk === null) return redirect(conParam(dest) + 'error=telefono_invalido');
       finalPhone = telOk; fichaExtra.emergency_phone = emergOk;
       finalRut = sinRutNueva ? finalRut : limpiarRut(finalRut);
     }

@@ -348,7 +348,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
         <div class="cal-error-banner">⚠ No se pudo generar el link de pago{errorDetail ? `: ${errorDetail}` : ''}.{Astro.url.searchParams.get('canceladas') === '1' ? ' Las sesiones de este intento se cancelaron, así que la hora queda libre para reintentar.' : ' Revisa en la agenda si las sesiones quedaron creadas "esperando pago" y cancélalas antes de reintentar.'} Revisa la configuración de Flow.</div>
       )}
       {errorParam === 'missing_patient_data' && (
-        <div class="cal-error-banner">⚠ Para crear una paciente nueva faltan datos: correo, teléfono, dirección, comuna, contacto de emergencia y RUT (o documento si no tiene RUT). No se agendó nada.</div>
+        <div class="cal-error-banner">⚠ Para crear una paciente nueva faltan datos: correo, teléfono, dirección, comuna y RUT (o documento si no tiene RUT). No se agendó nada.</div>
       )}
       {errorParam === 'telefono_invalido' && (
         <div class="cal-error-banner">⚠ Revisa el teléfono: en Chile son 9 dígitos (ej. 9 1234 5678); si es de otro país, escríbelo con + y el código (ej. +1 305 555 1234). No se agendó nada.</div>
@@ -723,11 +723,11 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           </div>
           <div class="bp-field-row">
             <div class="bp-field">
-              <label>Contacto de emergencia *</label>
+              <label>Contacto de emergencia</label>
               <input type="text" name="emergency_name" id="bp-emerg-name" placeholder="Nombre">
             </div>
             <div class="bp-field">
-              <label>Tel. emergencia *</label>
+              <label>Tel. emergencia</label>
               <input type="tel" name="emergency_phone" id="bp-emerg-phone" data-validar-telefono placeholder="+56 9 XXXX XXXX">
             </div>
           </div>
@@ -2088,7 +2088,6 @@ document.getElementById('bp-form')?.addEventListener('submit', (e) => {
   if (sinRut ? (!val('bp-doc-numero') || !val('bp-doc-pais')) : !val('bp-prut')) faltan.push(sinRut ? 'documento y país' : 'RUT');
   if (!val('bp-paddress')) faltan.push('dirección');
   if (!val('bp-pcomuna')) faltan.push('comuna');
-  if (!val('bp-emerg-name') || !val('bp-emerg-phone')) faltan.push('contacto de emergencia');
   if (faltan.length) { e.preventDefault(); e.stopImmediatePropagation(); alert('Para crear la paciente falta: ' + faltan.join(', ') + '.'); }
 }, true);
 bpPatientSel?.addEventListener('change', () => {

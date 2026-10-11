@@ -55,8 +55,8 @@ export const POST: APIRoute = async ({ request }) => {
 
   // ── Crear paciente ──────────────────────────────────────────────────────────
   // Datos mínimos obligatorios (Valentina, 4 oct 2026): nombre completo,
-  // correo, teléfono, dirección, comuna, contacto de emergencia y RUT (o, si
-  // es extranjera/o sin RUT, el documento de su país).
+  // correo, teléfono, dirección, comuna y RUT (o, si es extranjera/o sin RUT,
+  // el documento de su país). Contacto de emergencia opcional desde el 11 oct 2026.
   if (action === 'create') {
     const d = datos();
     const faltan: string[] = [];
@@ -65,7 +65,6 @@ export const POST: APIRoute = async ({ request }) => {
     if (!d.phone) faltan.push('teléfono');
     if (!d.address) faltan.push('dirección');
     if (!d.comuna) faltan.push('comuna');
-    if (!d.emergency_name || !d.emergency_phone) faltan.push('contacto de emergencia');
     if (sinRut ? (!d.doc_numero || !d.doc_pais) : !d.rut) faltan.push(sinRut ? 'documento y país' : 'RUT');
     if (!sinRut && d.rut && !rutValido(String(d.rut))) faltan.push('RUT válido (revisa el dígito verificador)');
     if (telefonoMal()) faltan.push(MSG_TELEFONO);
