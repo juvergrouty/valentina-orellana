@@ -120,8 +120,9 @@ async function handleBooking(request: Request) {
   if (!service_id || !modality_choice || !session_date || !session_time || !patient_name || !patient_email || !patient_phone || (!patient_rut && !sinRut)) {
         return json({ error: 'Faltan campos obligatorios.' }, 400);
   }
-  // Datos mínimos de la ficha (Valentina, 4 oct 2026): dirección, comuna y
-  // contacto de emergencia, además de nombre, correo, teléfono y RUT.
+  // Datos mínimos de la ficha (Valentina, 4 oct 2026): dirección y comuna,
+  // además de nombre, correo, teléfono y RUT. El contacto de emergencia es
+  // opcional desde el 11 oct 2026: solo se valida si viene.
   const txt = (v: unknown, max: number) => (typeof v === 'string' ? v.trim() : '').slice(0, max);
   const direccion = txt(patient_address, 200);
   const comuna    = txt(patient_comuna, 80);
@@ -129,8 +130,9 @@ async function handleBooking(request: Request) {
   const emergTel  = txt(emergency_phone, 25);
   if (direccion.length < 3 || /[<>]/.test(direccion)) return json({ error: 'Revisa tu dirección.' }, 400);
   if (comuna.length < 2 || /[<>]/.test(comuna)) return json({ error: 'Revisa tu comuna.' }, 400);
-  if (emergNom.length < 2 || /[<>]/.test(emergNom)) return json({ error: 'Revisa el nombre de tu contacto de emergencia.' }, 400);
-  if (!/^[\d\s()+.-]{7,25}$/.test(emergTel)) return json({ error: 'Revisa el teléfono de tu contacto de emergencia.' }, 400);
+  if (!!emergNom !== !!emergTel) return json({ error: 'Completa el nombre y el teléfono de tu contacto de emergencia, o deja ambos vacíos.' }, 400);
+  if (emergNom && (emergNom.length < 2 || /[<>]/.test(emergNom))) return json({ error: 'Revisa el nombre de tu contacto de emergencia.' }, 400);
+  if (emergTel && !/^[\d\s()+.-]{7,25}$/.test(emergTel)) return json({ error: 'Revisa el teléfono de tu contacto de emergencia.' }, 400);
   const docTipo   = txt(doc_tipo, 40);
   const docNumero = txt(doc_numero, 40);
   const docPais   = txt(doc_pais, 60);
@@ -394,8 +396,8 @@ async function handleBooking(request: Request) {
     rut:           rutClean,
     address:         direccion,
     comuna,
-    emergency_name:  emergNom,
-    emergency_phone: emergTel,
+    emergency_name:  emergNom || null,
+    emergency_phone: emergTel || null,
     sin_rut:         sinRut,
     doc_tipo:        sinRut ? docTipo : null,
     doc_numero:      sinRut ? docNumero : null,

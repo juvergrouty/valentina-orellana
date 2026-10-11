@@ -246,6 +246,7 @@ const { data: catalogServices } = await supabase
         <div id="booking-summary" class="bg-warm border border-dust px-7 py-5 mb-8 font-body text-sm"></div>
 
         <form id="patient-form" class="bg-white border border-dust p-8 md:p-10 flex flex-col gap-7" novalidate>
+          <p class="font-body text-xs text-stone -mb-3">Los campos con * son obligatorios.</p>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-7">
             <div>
               <label class="label text-stone block mb-2" for="patient_name">Nombre completo *</label>
@@ -316,14 +317,14 @@ const { data: catalogServices } = await supabase
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-7">
             <div>
-              <label class="label text-stone block mb-2" for="emergency_name">Contacto de emergencia *</label>
+              <label class="label text-stone block mb-2" for="emergency_name">Contacto de emergencia</label>
               <input id="emergency_name" type="text" placeholder="Nombre" autocomplete="section-emergencia name" class="field" />
-              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa un contacto de emergencia.</p>
+              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Revisa el nombre de tu contacto de emergencia.</p>
             </div>
             <div>
-              <label class="label text-stone block mb-2" for="emergency_phone">Teléfono de emergencia *</label>
+              <label class="label text-stone block mb-2" for="emergency_phone">Teléfono de emergencia</label>
               <input id="emergency_phone" type="tel" data-validar-telefono placeholder="+56 9 1234 5678" autocomplete="section-emergencia tel" class="field" />
-              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa el teléfono de tu contacto de emergencia.</p>
+              <p class="field-error hidden font-body text-xs text-red-500 mt-1">Revisa el teléfono de tu contacto de emergencia.</p>
             </div>
           </div>
           <div>
@@ -1044,8 +1045,11 @@ const { data: catalogServices } = await supabase
     const emergTel  = $('emergency_phone').value.trim();
     if (direccion.length < 3) { $('patient_address').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (comuna.length < 2)    { $('patient_comuna').nextElementSibling?.classList.remove('hidden'); valid = false; }
-    if (emergNom.length < 2)  { $('emergency_name').nextElementSibling?.classList.remove('hidden'); valid = false; }
-    if (!/^[\d\s()+.-]{7,25}$/.test(emergTel)) { $('emergency_phone').closest('div').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    // Contacto de emergencia opcional (Valentina, 11 oct 2026): solo se valida si se escribió.
+    if (!emergNom && emergTel) { const e = $('emergency_name').nextElementSibling; if (e) { e.textContent = 'Si dejas el teléfono, agrega también el nombre.'; e.classList.remove('hidden'); } valid = false; }
+    if (emergNom && !emergTel) { const e = $('emergency_phone').closest('div').nextElementSibling; if (e) { e.textContent = 'Si dejas el nombre, agrega también el teléfono.'; e.classList.remove('hidden'); } valid = false; }
+    if (emergNom && emergNom.length < 2)  { const e = $('emergency_name').nextElementSibling; if (e) { e.textContent = 'Revisa el nombre de tu contacto de emergencia.'; e.classList.remove('hidden'); } valid = false; }
+    if (emergTel && !/^[\d\s()+.-]{7,25}$/.test(emergTel)) { const e = $('emergency_phone').closest('div').nextElementSibling; if (e) { e.textContent = 'Revisa el teléfono de tu contacto de emergencia.'; e.classList.remove('hidden'); } valid = false; }
     if (!motivo) { $('motivo_consulta').nextElementSibling?.classList.remove('hidden'); valid = false; }
     if (!valid) {
       // Con un formulario largo, en el celular el error puede quedar fuera de la
