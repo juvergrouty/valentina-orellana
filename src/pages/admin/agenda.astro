@@ -74,6 +74,8 @@ const svcMap: Record<string, string> = {};
 (svcRes.data ?? []).forEach((s: { id: string; name: string }) => { svcMap[s.id] = s.name; });
 const patientList = patientRes.data ?? [];
 const allServices = allSvcRes.data ?? [];
+// Ids de los servicios visibles en la web (los únicos cuyos horarios se ofrecen a pacientes).
+const serviciosEnWeb = new Set((allServices as Array<{ id: string }>).map(sv => sv.id));
 
 const cfg: Record<string, string> = {};
 (settingsRes.data ?? []).forEach((r: { key: string; value: string }) => { cfg[r.key] = r.value; });
@@ -558,7 +560,10 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
             ))}
 
             {/* Overlay de horarios disponibles (oculto por defecto; lo activa el menú "Mostrar") */}
-            {(availByDow[day.dow] ?? []).filter(s => !quitadasSemana.has(`${day.isoDate}|${s.start}|${s.svc}`)).map(s => (
+            {/* Solo servicios que se ofrecen en la web (12 oct 2026): antes se pintaban
+                 también horarios guardados de servicios ocultos (paquetes, familia) y
+                 franjas antiguas sin servicio, que a los pacientes no se les ofrecen. */}
+            {(availByDow[day.dow] ?? []).filter(s => serviciosEnWeb.has(s.svc) && !quitadasSemana.has(`${day.isoDate}|${s.start}|${s.svc}`)).map(s => (
               <div class="avail-block" data-svc={s.svc}
                 title={`Disponible ${s.start}${s.svc && svcMap[s.svc] ? ' · ' + svcMap[s.svc] : ''}`}
                 style={`top:${s.min - 360}px;height:${s.height - 2}px;--svcbg:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bg};--svcbd:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bd}`}></div>
