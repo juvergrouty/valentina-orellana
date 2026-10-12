@@ -263,6 +263,7 @@ body {
 .enc-sidebar {
   width: 220px;
   height: 100vh;
+  height: 100dvh;
   background: var(--enc-sidebar-bg);
   border-right: 1px solid var(--enc-sidebar-border);
   display: flex;
@@ -484,11 +485,24 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow: hidden;
+  height: 100dvh; /* celular: alto visible real (100vh queda tapado por la barra del navegador) */
+  /* Toda el área principal se desplaza (12 oct 2026): antes era fija y los
+     avisos de arriba se comían la pantalla; en el celular el calendario quedaba
+     en una franja de pocas horas sin poder bajar. Ahora los avisos suben al
+     desplazar y la página (calendario, listas) queda de alto completo debajo. */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
+/* Nada se encoge para caber bajo los avisos: cada página mantiene su alto
+   completo y el área principal se desplaza. */
+.enc-main > * { flex-shrink: 0; }
 
-/* Standard topbar (non-calendar pages) */
+/* Standard topbar (non-calendar pages) — queda pegada arriba al desplazar
+   (en el celular tiene el botón del menú). */
 .enc-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -511,7 +525,6 @@ body {
 
 .enc-content {
   flex: 1;
-  overflow-y: auto;
   padding: 1.5rem;
 }
 
@@ -1160,6 +1173,33 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
     </div>
   </div>
 <CamposContacto />
+<script>
+  // Rueda del mouse (12 oct 2026): el área principal se desplaza entera (avisos
+  // arriba + página). Si la rueda está sobre algo con scroll propio (calendario,
+  // lista de pacientes…), primero baja la PÁGINA hasta el final —los avisos
+  // suben y la página queda de pantalla completa— y recién ahí se recorre lo de
+  // adentro. Al subir, el navegador ya encadena solo (adentro primero, después
+  // la página). No aplica a paneles y ventanas flotantes (position: fixed),
+  // ni al zoom con pellizco/Ctrl+rueda.
+  const encMain = document.querySelector<HTMLElement>('.enc-main');
+  encMain?.addEventListener('wheel', (e) => {
+    if (e.ctrlKey || e.deltaY <= 0) return;
+    const falta = encMain.scrollHeight - encMain.clientHeight - encMain.scrollTop;
+    if (falta <= 1) return;
+    let el = e.target as HTMLElement | null;
+    let interno = false;
+    while (el && el !== encMain) {
+      const cs = getComputedStyle(el);
+      if (cs.position === 'fixed') return;
+      if (/(auto|scroll)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight) interno = true;
+      el = el.parentElement;
+    }
+    if (!interno) return; // sin scroll propio: el navegador ya desplaza la página
+    e.preventDefault();
+    encMain.scrollBy({ top: Math.min(e.deltaY, falta) });
+  }, { passive: false });
+</script>
+
 <script>
   // "✓ Saludo abierto" junto al cumpleaños una vez que se abrió WhatsApp (solo en este navegador).
   const hoyCumple = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });

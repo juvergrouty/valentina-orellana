@@ -1372,7 +1372,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 /* ── Wrapper ─────────────────────────────────────────────────────────────── */
 .cal-wrap {
   display: flex; flex-direction: column;
-  height: 100vh; overflow: hidden; background: white;
+  height: 100vh; height: 100dvh; overflow: hidden; background: white;
 }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
@@ -1444,7 +1444,10 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 .cal-grid { display: flex; position: relative; height: 1020px; }
 .cal-time-col { width: 52px; flex-shrink: 0; position: relative; border-right: 1px solid #f3f4f6; }
 .cal-time-lbl { position: absolute; right: 7px; transform: translateY(-50%); font-size: 0.6rem; color: #9ca3af; font-weight: 500; white-space: nowrap; user-select: none; pointer-events: none; }
-.cal-col { flex: 1; position: relative; border-left: 1px solid #f3f4f6; min-width: 0; cursor: crosshair; user-select: none; -webkit-user-select: none; touch-action: none; }
+/* touch-action: manipulation (antes none): con none el dedo no podía desplazar
+   el calendario en el celular. Arrastrar para crear horas es solo con mouse
+   (mousedown), así que no se pierde nada; tocar una hora sigue funcionando. */
+.cal-col { flex: 1; position: relative; border-left: 1px solid #f3f4f6; min-width: 0; cursor: crosshair; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
 .cal-col.today { background: #fafbff; }
 .h-line { position: absolute; left: 0; right: 0; height: 1px; background: #f3f4f6; pointer-events: none; }
 .h-half { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed #efefef; pointer-events: none; }
@@ -1693,8 +1696,15 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
   .cal-toolbar > div[style*="flex:1"] { display: none; }
   .cal-toolbar-right { margin-left: auto; }
 
+  /* Celular (12 oct 2026): el calendario completo es parte de la página, sin
+     recuadro interno con su propio scroll — con el dedo se baja toda la página
+     de una vez (antes quedaba una franja de pocas horas bajo los avisos). */
+  .cal-wrap { height: auto; overflow: visible; }
+  .cal-headers-fija { position: sticky; top: 0; z-index: 20; overflow: hidden; background: white; }
+  .cal-headers-fija .cal-headers { position: static; }
+
   /* La grilla de 7 días no cabe en pantalla chica → scroll horizontal táctil */
-  .cal-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .cal-scroll { flex: none; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .cal-headers, .cal-allday-row, .cal-grid { min-width: 680px; }
 
   /* Los paneles laterales ocupan casi todo el ancho en mobile */
@@ -1885,6 +1895,22 @@ setInterval(updateNowLine, 60_000);
 // Scroll to current hour
 const calScroll = document.getElementById('cal-scroll');
 if (calScroll) calScroll.scrollTop = Math.max(0, (new Date().getHours() - 8) * 60);
+
+// Celular (12 oct 2026): el calendario es parte de la página (sin recuadro con
+// scroll propio), pero la grilla de 7 días se desliza de lado dentro de
+// .cal-scroll, y eso impide que la fila de días quede pegada arriba al bajar.
+// Se saca esa fila a un contenedor propio pegado arriba y se mueve de lado
+// junto con la grilla.
+if (calScroll && window.matchMedia('(max-width: 768px)').matches) {
+  const filaDias = calScroll.querySelector('.cal-headers');
+  if (filaDias) {
+    const fija = document.createElement('div');
+    fija.className = 'cal-headers-fija';
+    calScroll.parentNode.insertBefore(fija, calScroll);
+    fija.appendChild(filaDias);
+    calScroll.addEventListener('scroll', () => { fija.scrollLeft = calScroll.scrollLeft; }, { passive: true });
+  }
+}
 
 // ── Panel helpers ─────────────────────────────────────────────────────────────
 const bookingPanel = document.getElementById('booking-panel');
