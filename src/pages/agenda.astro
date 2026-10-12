@@ -29,6 +29,23 @@ const { data: catalogServices } = await supabase
   .eq('visible', true)
   .order('sort_order')
   .order('created_at');
+
+// Precio y duración que se muestran en las tarjetas Individual / Pareja.
+// Si online y presencial cuestan distinto, se muestra "Desde" el menor.
+function resumenGrupo(tipo: string) {
+  const precios: number[] = [];
+  const duraciones: number[] = [];
+  for (const s of (catalogServices ?? []).filter((s) => s.type === tipo)) {
+    for (const p of [s.price_online, s.price_presencial, s.price]) if (p) precios.push(Number(p));
+    for (const d of [s.duration_min_online, s.duration_min_presencial, s.duration_min]) if (d) duraciones.push(Number(d));
+  }
+  if (!precios.length) return '';
+  const min = Math.min(...precios);
+  const dur = duraciones.length ? Math.min(...duraciones) : 50;
+  return `${new Set(precios).size > 1 ? 'Desde ' : ''}${formatCLP(min)} · ${dur} min`;
+}
+const resumenIndividual = resumenGrupo('individual');
+const resumenPareja     = resumenGrupo('pareja');
 ---
 
 <BaseLayout
@@ -103,6 +120,7 @@ const { data: catalogServices } = await supabase
             </div>
             <p class="font-heading font-semibold text-2xl text-ink mb-2">Individual</p>
             <p class="font-body text-sm text-stone font-light">Sesión de psicología para ti</p>
+            {resumenIndividual && <p class="font-body text-base text-forest font-medium mt-3">{resumenIndividual}</p>}
           </button>
           <button type="button" class="group-card bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer" data-group="pareja">
             <div class="icon-circle mb-5 pointer-events-none">
@@ -110,8 +128,12 @@ const { data: catalogServices } = await supabase
             </div>
             <p class="font-heading font-semibold text-2xl text-ink mb-2">Pareja</p>
             <p class="font-body text-sm text-stone font-light">Sesión para ambos</p>
+            {resumenPareja && <p class="font-body text-base text-forest font-medium mt-3">{resumenPareja}</p>}
           </button>
         </div>
+        <p id="nota-reembolso" class="font-body text-sm text-stone font-light mt-5 max-w-2xl">
+          Te entrego boleta para que solicites reembolso en tu Isapre o seguro complementario, según tu plan.
+        </p>
 
         <!-- 1b: Elegir servicio — aparece al elegir grupo -->
         <div id="service-selection" class="hidden mt-10">
@@ -717,6 +739,7 @@ const { data: catalogServices } = await supabase
       ? 'Sesión Individual — elige el tipo de terapia'
       : 'Sesión de Pareja — elige el tipo de terapia';
     $('group-selection')?.classList.add('hidden');
+    $('nota-reembolso')?.classList.add('hidden');
     $('service-selection')?.classList.remove('hidden');
     renderServiceCards(group);
   }
@@ -748,6 +771,7 @@ const { data: catalogServices } = await supabase
         );
 
         $('group-selection').classList.add('hidden');
+        $('nota-reembolso')?.classList.add('hidden');
         $('modality-for-service').classList.remove('hidden');
       } else {
         // Modalidad única → saltar directo al paso 2
@@ -777,6 +801,7 @@ const { data: catalogServices } = await supabase
     } else {
       $('service-selection').classList.add('hidden');
       $('group-selection').classList.remove('hidden');
+      $('nota-reembolso')?.classList.remove('hidden');
       selectedGroup = null;
     }
   });
@@ -786,6 +811,7 @@ const { data: catalogServices } = await supabase
     // Si venía con servicio pre-seleccionado, asegurarse de mostrar 1c
     if (preselectedServicioId) {
       $('group-selection')?.classList.add('hidden');
+      $('nota-reembolso')?.classList.add('hidden');
       $('service-selection')?.classList.add('hidden');
       $('modality-for-service')?.classList.remove('hidden');
     }
