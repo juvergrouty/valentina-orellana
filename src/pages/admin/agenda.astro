@@ -1,5 +1,6 @@
 ---
 export const prerender = false;
+import { conEstacionamiento } from '../../data/consulta';
 import { leerHorasExtra } from '../../lib/horasExtra';
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
@@ -78,6 +79,8 @@ const cfg: Record<string, string> = {};
 (settingsRes.data ?? []).forEach((r: { key: string; value: string }) => { cfg[r.key] = r.value; });
 const reviewUrl = reviewRequestUrl(cfg);
 const clinicAddress = cfg['clinic_address'] ?? '';
+// Dirección + estacionamiento para los textos de WhatsApp (12 oct 2026).
+const direccionLlegar = clinicAddress ? conEstacionamiento(clinicAddress) : '';
 const flowCheckoutBase = cfg['flow_env'] === 'production' ? 'https://www.flow.cl/app/web/pay.php' : 'https://sandbox.flow.cl/app/web/pay.php';
 
 // TODOS los servicios (incluidos ocultos/paquetes) — para el filtro y los colores
@@ -1699,7 +1702,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 }
 </style>
 
-<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase }}>
+<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase, direccionLlegar }}>
 // ── Copiar link de pago (banner tras crear cita con link) ──────────────────────
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-copy-link]');
@@ -2464,7 +2467,7 @@ function openSessionDetail(b) {
     const isOnlineRem = b.session_type?.includes('online');
     const whereLine = isOnlineRem
       ? 'Es una sesión online — te paso el link de la videollamada apenas se acerque la hora.'
-      : (clinicAddress ? `Te espero en: ${clinicAddress}` : 'Es una sesión presencial en mi consulta.');
+      : (direccionLlegar ? `Te espero en: ${direccionLlegar}` : 'Es una sesión presencial en mi consulta.');
     const msg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te recuerdo tu sesión del ${isoToLabel(b.session_date)} a las ${remTime}. ${whereLine}`;
     remWaBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`;
     remWaBtn.style.display = '';
@@ -2572,7 +2575,7 @@ function openSessionDetail(b) {
     const locWaDigits = (b.patient_phone || '').replace(/\D/g, '');
     const locWaPhone  = locWaDigits.length === 9 ? '56' + locWaDigits : locWaDigits;
     if (locWaPhone.length >= 10) {
-      const locMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te espero en: ${locLabel}`;
+      const locMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te espero en: ${direccionLlegar || locLabel}`;
       locWaBtn.href = `https://wa.me/${locWaPhone}?text=${encodeURIComponent(locMsg)}`;
       locWaBtn.style.display = 'inline-flex';
     } else {

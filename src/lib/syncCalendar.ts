@@ -8,6 +8,7 @@ import { supabase } from './supabase';
 import { quitarPrefijoSiHayInvitados, refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle, setCalendarEventPaidState, setCalendarEventVoided, UNPAID_PREFIX } from './googleCalendar';
 import { logError } from './logger';
 import { cambiarNotas } from './apigateway';
+import { ESTACIONAMIENTO } from '../data/consulta';
 
 const SESSION_LABELS: Record<string, string> = {
   'online':            'Sesión Individual Online',
@@ -184,7 +185,7 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
 
     const event = await createCalendarEvent(accessToken, {
       title:         `${sessionLabel} — ${booking.patient_name}`,
-      description:   `Sesión con Ps. Valentina Orellana\nPaciente: ${booking.patient_name}\nTipo: ${sessionLabel}${location ? `\nDirección: ${location}` : ''}`,
+      description:   `Sesión con Ps. Valentina Orellana\nPaciente: ${booking.patient_name}\nTipo: ${sessionLabel}${location ? `\nDirección: ${location}\n${ESTACIONAMIENTO}` : ''}`,
       location,
       date:          booking.session_date,
       startTime:     booking.session_time.slice(0, 5),

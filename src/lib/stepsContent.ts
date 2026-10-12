@@ -1,6 +1,8 @@
 // Contenido de "Pasos a seguir": ÚNICA fuente para la página oculta
 // (/pasos-a-seguir/<clave>) y el correo (email.ts::sendStepsEmail), para que
 // ambos digan siempre exactamente lo mismo.
+import { ESTACIONAMIENTO } from '../data/consulta';
+
 export interface StepItem { icon: string; titulo: string; texto: string }
 
 export const STEPS_INTRO = 'Aquí tienes todo lo que necesitas saber para empezar tranquila/o: qué vas a recibir, cómo son las sesiones y qué hacer si necesitas cambiar algo.';
@@ -27,7 +29,7 @@ export function stepsItems(clinicAddress?: string | null): StepItem[] {
       icon: 'map-pin',
       titulo: 'Si tu sesión es presencial',
       texto: addr
-        ? `La dirección de la consulta es ${addr}${/[.!]$/.test(addr) ? '' : '.'} Te recomiendo llegar unos minutos antes.`
+        ? `La dirección de la consulta es ${addr}${/[.!]$/.test(addr) ? '' : '.'} ${ESTACIONAMIENTO} Te recomiendo llegar unos minutos antes.`
         : 'Te confirmo la dirección exacta de la consulta por WhatsApp antes de tu primera sesión.',
     },
     {

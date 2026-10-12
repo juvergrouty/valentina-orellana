@@ -1,5 +1,5 @@
 ---
-import { DIRECCION, GOOGLE_MAPS_URL, PERFILES } from '../../data/consulta';
+import { DIRECCION, GOOGLE_MAPS_URL, COMO_LLEGAR_URL, PERFILES } from '../../data/consulta';
 const year = new Date().getFullYear();
 // Perfiles públicos (solo visibilidad; la reserva es siempre en este sitio).
 const perfiles: [string, string][] = [
@@ -65,7 +65,7 @@ const perfiles: [string, string][] = [
               {DIRECCION.calle}, {DIRECCION.detalle}<br />
               {DIRECCION.comuna} · Online para todo Chile
             </address>
-            <a href={GOOGLE_MAPS_URL} target="_blank" rel="noopener"
+            <a href={COMO_LLEGAR_URL} target="_blank" rel="noopener"
                class="inline-block mt-1 text-sand/70 underline underline-offset-4 hover:text-sand transition-colors duration-200">
               Cómo llegar · Ver en Google Maps
             </a>

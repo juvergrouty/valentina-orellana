@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 import { logEmail, logError } from './logger';
 import { stepsItems, STEPS_INTRO } from './stepsContent';
 import { todayCL } from './dateUtils';
+import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
 
 // Inicialización perezosa — no falla si la key no está configurada
@@ -88,7 +89,8 @@ const SESSION_LABELS: Record<string, string> = {
 async function lugarSesion(sessionType: string | null | undefined): Promise<string> {
   if ((sessionType ?? '').includes('online')) return 'Online · el enlace de Google Meet está en la invitación de tu calendario';
   const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
-  return addr?.value?.trim() ? `Presencial · ${addr.value.trim()}` : 'Presencial en la consulta';
+  // Con las indicaciones para estacionar (12 oct 2026).
+  return addr?.value?.trim() ? `Presencial · ${conEstacionamiento(addr.value)}` : 'Presencial en la consulta';
 }
 
 // opts.idempotencyKey: Resend rechaza un segundo envío con la misma llave (24 h),
@@ -240,7 +242,7 @@ export async function sendSessionUpdatedEmail(data: {
   let lugar = 'Online · el enlace de Google Meet está en la invitación de tu calendario';
   if (!esOnline) {
     const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
-    lugar = addr?.value?.trim() || 'Presencial en consulta';
+    lugar = addr?.value?.trim() ? conEstacionamiento(addr.value) : 'Presencial en consulta';
   }
   const res = await client.emails.send({
     from: FROM,
