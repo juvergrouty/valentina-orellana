@@ -1,5 +1,5 @@
 ---
-import { DIRECCION, MAPS_DIRECCION_URL, ESTACIONAMIENTO } from '../../data/consulta';
+import { DIRECCION, MAPS_DIRECCION_URL } from '../../data/consulta';
 import CamposContacto from '../CamposContacto.astro';
 import { supabase } from '../../lib/supabase';
 
@@ -37,7 +37,6 @@ const recaptchaSiteKey = recaptchaRow?.value ?? '';
             {DIRECCION.calle}, {DIRECCION.detalle}<br />
             {DIRECCION.comuna}, {DIRECCION.region}
           </address>
-          <p class="font-body text-sm font-light text-stone leading-relaxed mt-1">{ESTACIONAMIENTO}</p>
           <a href={MAPS_DIRECCION_URL} target="_blank" rel="noopener"
              class="inline-block mt-2 font-body text-sm text-forest underline underline-offset-4 hover:text-gold transition-colors">
             Ver en Google Maps

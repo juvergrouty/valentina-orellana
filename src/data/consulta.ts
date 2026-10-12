@@ -17,9 +17,9 @@ export const DIRECCION = {
   lng: -70.5331888,
 };
 
-// Indicaciones para llegar en auto (Valentina, 12 oct 2026). Se muestran en la
-// página de contacto, preguntas frecuentes, "Pasos a seguir", los correos y la
-// invitación de calendario de las sesiones presenciales.
+// Indicaciones para llegar en auto (Valentina, 12 oct 2026). SOLO para
+// pacientes con hora: correos, "Pasos a seguir", invitación de calendario y
+// WhatsApp. No va en las páginas públicas (pedido de Valentina: "se ve feo").
 export const ESTACIONAMIENTO = 'Estacionamiento por Lateral Kennedy: afuera hay un cartel azul que dice "Estacionamiento Estoril 50".';
 
 /** "<dirección>. <estacionamiento>" sin punto doble si la dirección ya trae punto final. */
