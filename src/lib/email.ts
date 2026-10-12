@@ -895,10 +895,9 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
   if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return { sent: false, reason: 'RESEND_API_KEY no configurado' }; }
 
   const sessionLabel = SESSION_LABELS[data.session_type] ?? data.session_type;
-  // La oficina donde subarrienda usa Reservo para el registro de horas
-  // presenciales, pero esa cuenta no es de Valentina (solo tiene un perfil
-  // dentro de ella) — no se puede integrar por API, así que el recordatorio
-  // es este aviso en el correo de cada reserva presencial.
+  // Cada sesión presencial necesita una hora de box comprada en Espacio Cala
+  // (desde el 12 oct 2026; antes se anotaba en Reservo). El panel también lo
+  // recuerda con un botón para marcarlo (ver src/lib/boxCala.ts).
   const isPresencial = data.session_type.includes('presencial');
 
   // CORREGIDO: cuando se genera un link de pago desde el panel (agendar +
@@ -927,7 +926,7 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
 
         ${isPresencial ? `
         <p style="font-size:0.8rem;background:#FDF2E9;border-left:3px solid #b5533c;padding:0.6rem 0.8rem;margin-bottom:1rem;">
-          📋 Sesión presencial — recuerda anotarla también en Reservo.
+          📋 Sesión presencial — recuerda comprar la hora de box en <a href="https://espaciocala.cl" style="color:#b5533c;">espaciocala.cl</a> (en el panel lo marcas como hecho).
         </p>` : ''}
 
         <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
