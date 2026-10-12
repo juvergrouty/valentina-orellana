@@ -1700,11 +1700,12 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
      recuadro interno con su propio scroll — con el dedo se baja toda la página
      de una vez (antes quedaba una franja de pocas horas bajo los avisos). */
   .cal-wrap { height: auto; overflow: visible; }
-  .cal-headers-fija { position: sticky; top: 0; z-index: 20; overflow: hidden; background: white; }
-  .cal-headers-fija .cal-headers { position: static; }
+  /* :global porque el contenedor lo crea el script (sin el atributo de estilos de Astro). */
+  :global(.cal-headers-fija) { position: sticky; top: 0; z-index: 20; overflow: hidden; background: white; }
+  :global(.cal-headers-fija) .cal-headers { position: static; }
 
   /* La grilla de 7 días no cabe en pantalla chica → scroll horizontal táctil */
-  .cal-scroll { flex: none; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .cal-scroll { flex: none; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
   .cal-headers, .cal-allday-row, .cal-grid { min-width: 680px; }
 
   /* Los paneles laterales ocupan casi todo el ancho en mobile */
