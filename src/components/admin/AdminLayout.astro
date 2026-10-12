@@ -4,7 +4,7 @@ import { getBoletaAlerts, type BoletaAlert } from '../../lib/boletaAlerts';
 import { getConsentAlerts, type ConsentAlert } from '../../lib/consent';
 import { getBlockedDayAlerts, type BlockedDayAlert } from '../../lib/blockedDayAlerts';
 import { feriadosPorDecidir, type FeriadoEstado } from '../../lib/feriados';
-import { resumenDiaCompleto } from '../../lib/blockedDayAlerts';
+import { resumenDiaCompleto, leerCierresOk, claveCierre } from '../../lib/blockedDayAlerts';
 import { corregirPrefijoInvitacionesUnaVez } from '../../lib/syncCalendar';
 import { leerRebotes, type Rebote } from '../../lib/rebotes';
 import { getComprobanteAlerts, type ComprobanteAlert } from '../../lib/comprobantes';
@@ -44,8 +44,13 @@ async function contarErroresNuevos(): Promise<number> {
 // que se pierden por modalidad (ver src/lib/blockedDayAlerts.ts). Antes del
 // aviso se cierran los feriados confirmados que se acercan (también lo hace la
 // tarea diaria google-reviews-refresh; esto solo escribe si falta alguno).
+// Los que Valentina ya marcó "OK" no se muestran, salvo que se haya agendado
+// otra sesión en ese día después del OK (12 oct 2026).
 async function avisosDiasCerrados(): Promise<BlockedDayAlert[]> {
-  return (await getBlockedDayAlerts()).filter(a => a.presencial.length || a.online.length || a.agendadas);
+  const [alertas, oks] = await Promise.all([getBlockedDayAlerts(), leerCierresOk().catch(() => new Map<string, number>())]);
+  return alertas
+    .filter(a => a.presencial.length || a.online.length || a.agendadas)
+    .filter(a => { const ok = oks.get(claveCierre(a)); return ok === undefined || a.agendadas > ok; });
 }
 // Feriados de las próximas 2 semanas sin decidir (ya no se cierran solos:
 // Valentina elige "Cerrar el día" o "Atender normal" desde el aviso).
@@ -964,6 +969,11 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
         ✕ No se pudo guardar el cambio de tarifa. El aviso sigue igual: intenta de nuevo.
       </div>
     )}
+    {Astro.url.searchParams.get('error') === 'cierre_guardar' && (
+      <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        ✕ No se pudo guardar el OK del cierre. El aviso sigue igual: intenta de nuevo.
+      </div>
+    )}
     {Astro.url.searchParams.get('error') === 'box_guardar' && (
       <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
         ✕ No se pudo guardar lo del box en Espacio Cala. El aviso sigue igual: intenta de nuevo.
@@ -1113,6 +1123,13 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
               ].filter(Boolean).join('; y ') || 'ninguna hora'}.
               {a.agendadas > 0 && <strong> ⚠ Tienes {a.agendadas === 1 ? '1 sesión agendada' : `${a.agendadas} sesiones agendadas`} ese día: revisa si se mantiene{a.agendadas === 1 ? '' : 'n'}.</strong>}
               {a.extrasSemana > 0 && <span> ✓ Ya abriste {a.extrasSemana === 1 ? '1 hora extra' : `${a.extrasSemana} horas extra`} esa semana.</span>}
+              {' '}
+              <form method="POST" action="/api/admin/cierre-ok" style="display:inline;">
+                <input type="hidden" name="clave" value={claveCierre(a)} />
+                <input type="hidden" name="agendadas" value={a.agendadas} />
+                <input type="hidden" name="redirect" value={urlVuelta} />
+                <button type="submit" title="Ya lo revisé: ocultar este aviso" style="background:#fff;color:#576352;border:none;border-radius:4px;padding:0.15rem 0.6rem;font-size:0.78rem;font-weight:700;cursor:pointer;">OK</button>
+              </form>
             </li>
           ))}
         </ul>

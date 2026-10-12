@@ -147,3 +147,35 @@ export async function resumenDiaCompleto(fechas: string[]): Promise<Record<strin
   }
   return out;
 }
+
+// ── "OK" en el aviso de cierres (Valentina, 12 oct 2026) ─────────────────────
+// Es un recordatorio: una vez que abrió horas en otro día (o decidió no
+// hacerlo) marca OK y ese cierre deja de aparecer, para no cargar el panel.
+// Un registro por cierre en settings ("cierre_ok:2026-10-12|dia" → {agendadas}).
+// Si después de marcar OK se agenda otra sesión en ese día/rango, el aviso
+// vuelve, porque hay que revisar si se mantiene.
+const PREFIJO_OK = 'cierre_ok:';
+
+export const claveCierre = (a: Pick<BlockedDayAlert, 'date' | 'rango'>) => `${a.date}|${a.rango ?? 'dia'}`;
+
+export async function leerCierresOk(): Promise<Map<string, number>> {
+  const { data, error } = await supabase.from('settings').select('key, value').like('key', `${PREFIJO_OK}%`);
+  if (error) throw new Error(error.message);
+  const out = new Map<string, number>();
+  for (const f of data ?? []) {
+    let agendadas = 0;
+    try { agendadas = Number(JSON.parse(f.value || '{}').agendadas) || 0; } catch { /* sin dato: 0 */ }
+    out.set(String(f.key).slice(PREFIJO_OK.length), agendadas);
+  }
+  return out;
+}
+
+export async function marcarCierreOk(clave: string, agendadas: number): Promise<void> {
+  const { error } = await supabase.from('settings').upsert(
+    { key: PREFIJO_OK + clave, value: JSON.stringify({ agendadas }), updated_at: new Date().toISOString() },
+    { onConflict: 'key' },
+  );
+  if (error) throw new Error(error.message);
+  // Limpieza de cierres ya pasados (si falla, no importa).
+  await supabase.from('settings').delete().like('key', `${PREFIJO_OK}%`).lt('key', PREFIJO_OK + todayCL());
+}
