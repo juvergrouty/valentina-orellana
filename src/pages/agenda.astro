@@ -545,10 +545,12 @@ const resumenPareja     = resumenGrupo('pareja');
   window.__RECAPTCHA_SITE_KEY__ = recaptchaSiteKey;
 </script>
 {recaptchaSiteKey && (
+  <Fragment>
   <!-- async defer (8 oct 2026): sin esto el script de Google bloqueaba el resto
        de la página de reserva mientras cargaba. Solo se usa al confirmar, con
        window.grecaptcha revisado antes y tope de 8 s. -->
   <script src={`https://www.google.com/recaptcha/api.js?render=${recaptchaSiteKey}`} is:inline async defer></script>
+  </Fragment>
 )}
 
 <script define:vars={{ catalogServicesRaw: JSON.stringify(catalogServices ?? []), preselectedGroup: grupoParam, preselectedServicioId: servicioParam }}>

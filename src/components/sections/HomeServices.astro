@@ -85,6 +85,7 @@ const cards = (dbServices ?? []).map(s => ({
       style="scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;cursor:grab;">
 
       {cards.map(card => (
+        <Fragment>
         <!-- flex-col + mt-auto en el pie: precio y botón quedan a la misma altura en
              todas las tarjetas aunque el nombre o la descripción ocupen más líneas. -->
         <div class="svc-card flex-shrink-0 w-[80vw] sm:w-[calc(50%-10px)] lg:w-[calc(25%-15px)] flex flex-col bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-lg transition-all duration-300"
@@ -142,6 +143,7 @@ const cards = (dbServices ?? []).map(s => ({
           </div>
 
         </div>
+        </Fragment>
       ))}
 
     </div>

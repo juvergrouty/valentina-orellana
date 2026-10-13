@@ -19,6 +19,10 @@ export default defineConfig({
     },
   }),
   integrations: [tailwind()],
+  // Astro 7 cambió el valor por defecto a 'jsx', que borra los espacios entre
+  // elementos en línea separados por saltos de línea (texto pegado). true
+  // mantiene el HTML igual que con Astro 6 (12 oct 2026).
+  compressHTML: true,
   site: 'https://www.valentinaorellana.cl',
   security: {
     checkOrigin: false, // Flow envía POST cross-site en urlReturn y urlConfirmation
