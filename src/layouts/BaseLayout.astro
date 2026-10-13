@@ -224,7 +224,8 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
       var s=(t.utm_source||'').toLowerCase(),m=(t.utm_medium||'').toLowerCase(),r=(t.referrer_host||'').toLowerCase(),f='';
       if(t.gclid||t.gbraid||t.wbraid||(s==='google'&&/^(cpc|ppc|paid)$/.test(m)))f='vi tu anuncio en Google';
       else if(/instagram|^ig$/.test(s)||/instagram/.test(r))f='te vi en Instagram';
-      else if(/facebook|^fb$/.test(s)||/facebook/.test(r))f='vi tu anuncio en Facebook';
+      else if(/facebook|^fb$|^meta$/.test(s))f='vi tu anuncio en redes';
+      else if(/facebook/.test(r))f='te vi en Facebook';
       else if(/psychologytoday|psicologiahoy/.test(s+r))f='vi tu perfil en Psychology Today';
       else if(/doctoralia/.test(s+r))f='vi tu perfil en Doctoralia';
       else if(/^(www\.)?google\.[a-z.]+$|googlequicksearchbox/.test(r)||s==='google')f='encontré tu página en Google';
