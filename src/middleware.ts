@@ -10,7 +10,7 @@ const COOKIE = 'vo_admin_token';
 // (?error=, etc.), solo la ruta. Lista exacta a propósito: NO agenda, admin,
 // api, pagar, recuperar, confirmacion ni pasos-a-seguir.
 const PAGINAS_CACHEABLES = new Set(['/', '/servicios', '/precios', '/contacto', '/opiniones', '/condiciones']);
-const CACHE_PUBLICO = 'public, s-maxage=300, stale-while-revalidate=86400';
+const CACHE_PUBLICO = 'public, s-maxage=300, stale-while-revalidate=3600';
 
 // Panel y API del panel: que nadie (navegador, CDN ni proxy) guarde una copia.
 const SIN_CACHE = 'private, no-store';
@@ -100,6 +100,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
     && res.status === 200
     && ['GET', 'HEAD'].includes(context.request.method)
     && !res.headers.has('set-cookie')
+    // Una página que no pudo cargar sus datos (Supabase caído) marca no-store: no se guarda.
+    && !/no-store/.test(res.headers.get('cache-control') ?? '')
   ) {
     return conEncabezado(res, 'Cache-Control', CACHE_PUBLICO);
   }

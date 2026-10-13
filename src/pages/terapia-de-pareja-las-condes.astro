@@ -16,7 +16,7 @@ const { data: servicios } = await supabase
   .order('sort_order');
 
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
-const precios = (servicios ?? []).map(s => s.price_presencial ?? s.price_online ?? s.price).filter((n): n is number => typeof n === 'number' && n > 0);
+const precios = (servicios ?? []).flatMap(s => [s.price_presencial, s.price_online, s.price_presencial || s.price_online ? null : s.price]).filter((n): n is number => typeof n === 'number' && n > 0);
 const precioDesde = precios.length ? Math.min(...precios) : null;
 
 const senales = [
@@ -101,7 +101,13 @@ const jsonLd = {
           Sesiones de 50 minutos, presenciales en {DIRECCION.calle}, {DIRECCION.detalle}, {DIRECCION.comuna}, u online.
           En la primera sesión los escucho a los dos y definimos juntos cómo seguir. Sin presión ni compromisos.
         </p>
-        {precioDesde && <p class="body-text text-ink font-medium mb-2">Valor: {clp(precioDesde)} por sesión.</p>}
+        {precioDesde && (
+          <p class="body-text text-ink font-medium mb-2">
+            {new Set(precios).size > 1
+              ? `Valor: desde ${clp(precioDesde)} por sesión (según modalidad).`
+              : `Valor: ${clp(precioDesde)} por sesión.`}
+          </p>
+        )}
         <p class="body-sm text-[#55524b] font-normal">Por cada sesión recibes boleta de honorarios para pedir reembolso en tu Isapre o seguro complementario, según tu plan.</p>
       </div>
       <div class="flex flex-col justify-center gap-4 md:items-start">

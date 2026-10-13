@@ -6,12 +6,14 @@ import { supabase } from '../lib/supabase';
 import { imagenUrl, imagenSrcset } from '../lib/imagenOptimizada';
 
 // Leer servicios visibles desde la base de datos
-const { data: dbServices } = await supabase
+const { data: dbServices, error: errServicios } = await supabase
   .from('services_catalog')
   .select('id, name, description, type, modality, location, duration_min, price, image_url, sort_order')
   .eq('visible', true)
   .order('sort_order')
   .order('created_at');
+// Sin datos de la base, la página no se guarda en la caché pública (middleware).
+if (errServicios) Astro.response.headers.set('Cache-Control', 'no-store');
 
 // Fallback si la BD está vacía
 const fallback = [

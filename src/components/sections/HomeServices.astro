@@ -5,10 +5,12 @@ import { imagenUrl, imagenSrcset } from '../../lib/imagenOptimizada';
 const SELECT = 'id, name, description, modality, location, image_url, type, price, duration_min';
 
 // 1º: servicios marcados para el inicio (⭐). 2º: si no hay, los visibles reales.
-let { data: dbServices } = await supabase
+let { data: dbServices, error: errServicios } = await supabase
   .from('services_catalog').select(SELECT)
   .eq('show_home', true).eq('visible', true)
   .order('sort_order').limit(10);
+// Sin datos de la base, la página no se guarda en la caché pública (middleware).
+if (errServicios) Astro.response.headers.set('Cache-Control', 'no-store');
 
 if (!dbServices || dbServices.length === 0) {
   const { data: visibles } = await supabase

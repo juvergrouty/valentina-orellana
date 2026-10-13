@@ -28,6 +28,11 @@ export const POST: APIRoute = async ({ request }) => {
   };
 
   if (!token) return json({ ok: false, error: 'Link no válido.' }, 400);
+  // La paciente debe firmar el mismo texto que vio (12 oct 2026): si la página
+  // se abrió con una versión anterior del consentimiento, se le pide recargar.
+  if (body.version !== undefined && String(body.version) !== CONSENT_VERSION) {
+    return json({ ok: false, error: 'El texto del consentimiento se actualizó. Recarga la página para leer la versión vigente y firmar.' }, 409);
+  }
   if (name.length < 3) return json({ ok: false, error: 'Escribe tu nombre completo.' }, 400);
   if (!acc.accept_treatment) return json({ ok: false, error: 'La autorización 1 es necesaria para poder atenderte.' }, 400);
 

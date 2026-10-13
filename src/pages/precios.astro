@@ -4,12 +4,14 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
 import { supabase } from '../lib/supabase';
 
-const { data: services } = await supabase
+const { data: services, error: errServicios } = await supabase
   .from('services_catalog')
   .select('name, price, duration_min, type, modality, price_online, price_presencial, duration_min_online, duration_min_presencial')
   .eq('visible', true)
   .order('sort_order')
   .order('created_at');
+// Sin datos de la base, la página no se guarda en la caché pública (middleware).
+if (errServicios) Astro.response.headers.set('Cache-Control', 'no-store');
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
@@ -78,7 +80,7 @@ const faq = [
   },
   {
     q: '¿Lo que hablamos es confidencial?',
-    a: 'Sí. Todo lo que conversamos está protegido por el secreto profesional. Las únicas excepciones son un riesgo grave para tu vida o la de otras personas, la vulneración de derechos de niños, niñas o adolescentes, y una orden judicial. En esos casos compartiré solo lo estrictamente necesario y, cuando sea posible, te lo diré antes.',
+    a: 'Sí. Todo lo que conversamos está protegido por el secreto profesional. Las únicas excepciones son un riesgo grave para tu vida o la de otras personas, la vulneración de derechos de niños, niñas o adolescentes, una orden judicial y los demás casos que establece la ley. En esos casos compartiré solo lo estrictamente necesario y, cuando sea posible, te lo diré antes.',
   },
   {
     q: '¿Trabajas con otros profesionales?',

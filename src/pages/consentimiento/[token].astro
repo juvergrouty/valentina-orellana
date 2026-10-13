@@ -2,7 +2,7 @@
 export const prerender = false;
 import Layout from '../../layouts/BaseLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { consentSections, CONSENT_OPTIONS, consentContactEmail } from '../../lib/consent';
+import { consentSections, CONSENT_OPTIONS, CONSENT_VERSION, consentContactEmail } from '../../lib/consent';
 
 // Página pública (sin login) que el paciente abre desde el link que Valentina
 // le manda por WhatsApp o correo. El token es aleatorio e irrepetible: es lo
@@ -90,7 +90,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
   </section>
 </Layout>
 
-<script define:vars={{ token, sinRut }}>
+<script define:vars={{ token, sinRut, version: CONSENT_VERSION }}>
 (function () {
   const form = document.getElementById('consent-form');
   if (!form) return;
@@ -111,6 +111,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token,
+          version,
           signer_name: form.signer_name.value.trim(),
           signer_rut: rut,
           accept_treatment: form.accept_treatment.checked,

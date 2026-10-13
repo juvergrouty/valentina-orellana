@@ -22,7 +22,7 @@ const items = [
             <span class="card-title text-xl mb-3">{it.titulo}</span>
             <span class="body-sm text-[#55524b] mb-6">{it.texto}</span>
             <span class="mt-auto font-body text-xs tracking-widest uppercase text-forest">
-              Ver horarios <span aria-hidden="true" class="inline-block transition-transform duration-300 group-hover:translate-x-1">→</span>
+              {it.href.startsWith('/agenda') ? 'Ver horarios' : 'Conocer más'} <span aria-hidden="true" class="inline-block transition-transform duration-300 group-hover:translate-x-1">→</span>
             </span>
           </a>
         </li>

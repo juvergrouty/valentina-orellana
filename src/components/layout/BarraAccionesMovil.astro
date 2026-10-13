@@ -47,6 +47,8 @@ const WHATSAPP = 'https://wa.me/56972735696?text=Hola%20Valentina%2C%20me%20gust
     /* Espacio a la derecha para el sello de reCAPTCHA (abajo a la derecha, ~70 px
        visibles): la barra no queda encima del sello ni el botón de WhatsApp debajo. */
     body:has(.grecaptcha-badge) #barra-movil { padding-right: 92px !important; }
+    /* El sello de reCAPTCHA queda visible sobre la barra (Google exige mostrarlo). */
+    body:has(#barra-movil) .grecaptcha-badge { bottom: 84px !important; z-index: 60 !important; }
     /* Lo último de la página no queda tapado: el footer ya deja 80 px (pb-20) bajo
        el copyright, más que los 68 px de la barra; se suma el área segura del iPhone. */
     body:has(#barra-movil) footer { padding-bottom: env(safe-area-inset-bottom); }
