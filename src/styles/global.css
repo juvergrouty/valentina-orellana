@@ -124,8 +124,14 @@
     @apply font-body text-lg text-stone font-light leading-relaxed;
   }
 
+  /* Párrafos justificados (Valentina, 12 oct 2026); con guiones automáticos
+     en español para que no queden espacios grandes en el celular. Si el
+     párrafo lleva text-center, la utilidad gana y queda centrado. */
   .body-text {
     @apply font-body text-base text-stone font-light leading-relaxed;
+    text-align: justify;
+    hyphens: auto;
+    -webkit-hyphens: auto;
   }
 
   .body-sm {
