@@ -94,6 +94,9 @@ const resumenPareja     = resumenGrupo('pareja');
 
   <section class="py-section bg-sand">
     <div class="container-site">
+      <!-- Anuncio para lectores de pantalla: dice en qué paso va la persona y
+           cuántos horarios hay al elegir un día (WCAG 4.1.3). -->
+      <p id="step-announcer" class="sr-only" aria-live="polite"></p>
 
       <!-- Resumen del servicio elegido (visible en pasos 2-4) -->
       <div id="service-summary" class="hidden mb-8 flex items-center gap-3 border border-dust bg-white px-5 py-4 rounded-sm max-w-2xl">
@@ -110,7 +113,7 @@ const resumenPareja     = resumenGrupo('pareja');
       <div id="step-1" class="booking-step">
         <p class="label text-stone mb-4">Paso 1</p>
         <div class="divider mb-6"></div>
-        <h2 class="font-heading font-light text-3xl text-ink mb-8">¿Para quién es la sesión?</h2>
+        <h2 class="step-title font-heading font-light text-3xl text-ink mb-8 focus:outline-none" tabindex="-1">¿Para quién es la sesión?</h2>
 
         <!-- 1a: Elegir grupo (Individual / Pareja) -->
         <div id="group-selection" class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
@@ -138,7 +141,7 @@ const resumenPareja     = resumenGrupo('pareja');
         <!-- 1b: Elegir servicio — aparece al elegir grupo -->
         <div id="service-selection" class="hidden mt-10">
           <button type="button" id="back-to-group" class="label text-stone hover:text-ink transition-colors mb-6 flex items-center gap-2">← Volver</button>
-          <h2 class="font-heading font-light text-3xl text-ink mb-2">¿Qué tipo de sesión necesitas?</h2>
+          <h2 id="service-selection-title" class="step-title font-heading font-light text-3xl text-ink mb-2 focus:outline-none" tabindex="-1">¿Qué tipo de sesión necesitas?</h2>
           <p id="service-subtitle" class="font-body text-sm text-stone mb-8"></p>
           <div id="service-cards" class="flex flex-col gap-4 max-w-2xl"></div>
         </div>
@@ -150,7 +153,7 @@ const resumenPareja     = resumenGrupo('pareja');
           <div class="divider mb-6"></div>
           <p id="presel-service-name" class="font-heading font-semibold text-2xl text-ink mb-2"></p>
           <p id="presel-service-desc" class="font-body text-sm text-stone mb-8 leading-relaxed"></p>
-          <h2 class="font-heading font-light text-3xl text-ink mb-8">¿Online o presencial?</h2>
+          <h2 class="step-title font-heading font-light text-3xl text-ink mb-8 focus:outline-none" tabindex="-1">¿Online o presencial?</h2>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
             <button type="button" id="presel-online-btn"
               class="bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer">
@@ -162,7 +165,9 @@ const resumenPareja     = resumenGrupo('pareja');
             </button>
             <button type="button" id="presel-presencial-btn"
               class="bg-white border border-dust text-left p-8 hover:bg-warm hover:border-forest/40 transition-all duration-200 cursor-pointer">
-              <p class="label text-gold mb-3">Más solicitado</p>
+              <!-- Sin etiqueta "Más solicitado" (Valentina, 12 oct 2026). Espacio
+                   invisible para que "Presencial" quede alineado con "Online". -->
+              <p class="label mb-3 invisible" aria-hidden="true">&nbsp;</p>
               <p class="font-heading font-semibold text-2xl text-ink mb-1">Presencial</p>
               <p id="presel-price-presencial" class="font-heading font-light text-xl text-ink mb-3"></p>
               <div class="h-px bg-dust my-3"></div>
@@ -179,20 +184,20 @@ const resumenPareja     = resumenGrupo('pareja');
         </button>
         <p class="label text-stone mb-4">Paso 2</p>
         <div class="divider mb-6"></div>
-        <h2 class="font-heading font-light text-3xl text-ink mb-8">Elige fecha y hora</h2>
+        <h2 class="step-title font-heading font-light text-3xl text-ink mb-8 focus:outline-none" tabindex="-1">Elige fecha y hora</h2>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-dust">
           <!-- Calendario -->
           <div class="bg-white p-5 sm:p-8 md:p-10">
             <div class="flex items-center justify-between mb-7">
-              <button id="prev-month" type="button"
+              <button id="prev-month" type="button" aria-label="Mes anterior"
                 class="w-11 h-11 flex items-center justify-center hover:bg-warm transition-colors text-stone hover:text-ink text-xl rounded-sm">
-                ‹
+                <span aria-hidden="true">‹</span>
               </button>
               <p id="calendar-title" class="font-heading font-semibold text-xl text-ink tracking-wide"></p>
-              <button id="next-month" type="button"
+              <button id="next-month" type="button" aria-label="Mes siguiente"
                 class="w-11 h-11 flex items-center justify-center hover:bg-warm transition-colors text-stone hover:text-ink text-xl rounded-sm">
-                ›
+                <span aria-hidden="true">›</span>
               </button>
             </div>
             <div class="grid grid-cols-7 gap-1 mb-2">
@@ -262,12 +267,20 @@ const resumenPareja     = resumenGrupo('pareja');
         </button>
         <p class="label text-stone mb-4">Paso 3</p>
         <div class="divider mb-6"></div>
-        <h2 class="font-heading font-light text-3xl text-ink mb-6">Tus datos</h2>
+        <h2 class="step-title font-heading font-light text-3xl text-ink mb-6 focus:outline-none" tabindex="-1">Tus datos</h2>
 
         <!-- Resumen de la reserva -->
         <div id="booking-summary" class="bg-warm border border-dust px-7 py-5 mb-8 font-body text-sm"></div>
 
         <form id="patient-form" class="bg-white border border-dust p-8 md:p-10 flex flex-col gap-7" novalidate>
+          <!-- Aviso de urgencias (Valentina, 12 oct 2026): discreto pero visible
+               antes de pagar. Los números se pueden tocar para llamar. -->
+          <p role="note" class="bg-sand border border-dust px-4 py-3 font-body text-xs text-stone leading-relaxed">
+            Este espacio no atiende urgencias. Si estás en crisis o piensas en hacerte daño, llama al
+            <a href="tel:*4141" class="underline underline-offset-2 hover:text-ink whitespace-nowrap">*4141</a> (gratis, 24/7),
+            a Salud Responde <a href="tel:6003607777" class="underline underline-offset-2 hover:text-ink whitespace-nowrap">600 360 7777</a>
+            o al SAMU <a href="tel:131" class="underline underline-offset-2 hover:text-ink">131</a>, o acude al servicio de urgencia más cercano.
+          </p>
           <p class="font-body text-xs text-stone -mb-3">Los campos con * son obligatorios.</p>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-7">
             <div>
@@ -327,13 +340,13 @@ const resumenPareja     = resumenGrupo('pareja');
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-7">
             <div class="sm:col-span-2">
               <label class="label text-stone block mb-2" for="patient_address">Dirección *</label>
-              <input id="patient_address" type="text" autocomplete="street-address"
+              <input id="patient_address" type="text" required autocomplete="street-address"
                 placeholder="Calle, número, depto." class="field" />
               <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa tu dirección.</p>
             </div>
             <div>
               <label class="label text-stone block mb-2" for="patient_comuna">Comuna *</label>
-              <input id="patient_comuna" type="text" autocomplete="address-level2" class="field" />
+              <input id="patient_comuna" type="text" required autocomplete="address-level2" class="field" />
               <p class="field-error hidden font-body text-xs text-red-500 mt-1">Ingresa tu comuna.</p>
             </div>
           </div>
@@ -350,11 +363,11 @@ const resumenPareja     = resumenGrupo('pareja');
             </div>
           </div>
           <div>
-            <label class="label text-stone block mb-2" for="motivo_consulta">Motivo de consulta *</label>
-            <select id="motivo_consulta" name="motivo_consulta" required class="field bg-transparent cursor-pointer">
-              <option value="" disabled selected>Selecciona el motivo principal...</option>
+            <!-- Opcional (Valentina, 12 oct 2026): no se exige para reservar. -->
+            <label class="label text-stone block mb-2" for="motivo_consulta">Motivo de consulta (opcional)</label>
+            <select id="motivo_consulta" name="motivo_consulta" class="field bg-transparent cursor-pointer">
+              <option value="" selected>Selecciona el motivo principal...</option>
             </select>
-            <p class="field-error hidden font-body text-xs text-red-500 mt-1">Selecciona un motivo de consulta.</p>
           </div>
           <div>
             <label class="label text-stone block mb-2" for="patient_birthdate">Fecha de nacimiento</label>
@@ -370,7 +383,8 @@ const resumenPareja     = resumenGrupo('pareja');
           <div class="bg-warm border border-dust p-4 text-left">
             <p class="label text-stone mb-2">Condiciones del servicio</p>
             <ul class="font-body text-xs text-stone leading-relaxed space-y-1 pl-3 list-disc">
-              <li>Las sesiones no se cancelan: solo puedes reagendar tu hora avisando con al menos <strong>24 horas de anticipación</strong>.</li>
+              <li>Puedes reagendar tu sesión sin costo avisando con al menos <strong>24 horas de anticipación</strong>.</li>
+              <li>Con menos de 24 horas de aviso, la sesión se considera realizada.</li>
               <li>Si soy yo quien debe cancelar, reagendamos tu sesión sin costo.</li>
               <li>Tu reserva se confirma solo cuando el pago es procesado.</li>
             </ul>
@@ -379,7 +393,7 @@ const resumenPareja     = resumenGrupo('pareja');
             <button type="submit" id="submit-patient" class="btn-dark text-[10px] py-3.5 px-8 w-full">
               Continuar al pago
             </button>
-            <p id="form-error" class="hidden font-body text-xs text-red-500 text-center mt-3"></p>
+            <p id="form-error" class="hidden font-body text-xs text-red-500 text-center mt-3" role="alert"></p>
             <p class="font-body text-xs text-stone text-center mt-3">Al continuar aceptas las <a href="/condiciones" target="_blank" class="underline underline-offset-2 hover:text-ink">condiciones del servicio y la política de privacidad</a>.</p>
           </div>
         </form>
@@ -389,7 +403,7 @@ const resumenPareja     = resumenGrupo('pareja');
       <div id="step-4" class="booking-step hidden">
         <p class="label text-stone mb-4">Paso 4</p>
         <div class="divider mb-6"></div>
-        <h2 class="font-heading font-light text-3xl text-ink mb-8 text-center">Completa tu pago</h2>
+        <h2 class="step-title font-heading font-light text-3xl text-ink mb-8 text-center focus:outline-none" tabindex="-1">Completa tu pago</h2>
         <div class="bg-white border border-dust max-w-md mx-auto p-10 text-center flex flex-col items-center gap-6">
           <div id="payment-loading" class="flex flex-col items-center gap-4 py-4">
             <div class="w-8 h-8 border border-ink border-t-transparent animate-spin"></div>
@@ -422,7 +436,7 @@ const resumenPareja     = resumenGrupo('pareja');
             </p>
           </div>
           <div id="payment-error" class="hidden w-full">
-            <p class="font-body text-sm text-ink mb-5 leading-relaxed" id="payment-error-msg"></p>
+            <p class="font-body text-sm text-ink mb-5 leading-relaxed" id="payment-error-msg" role="alert"></p>
             <div class="flex flex-col items-center gap-3">
               <button type="button" id="payment-back" class="btn-dark text-[10px] py-3 px-6">
                 Ver horarios disponibles
@@ -498,6 +512,23 @@ const resumenPareja     = resumenGrupo('pareja');
   #slots-grid .slot-selected:hover {
     @apply text-sand border-ink;
   }
+  /* Foco visible para teclado (WCAG 2.4.7 / 2.4.13): anillo verde que no
+     mueve nada del diseño (outline no ocupa espacio). Los campos de texto
+     muestran el anillo también al tocarlos; es el comportamiento del navegador. */
+  #patient-form input:focus-visible,
+  #patient-form select:focus-visible,
+  #patient-form textarea:focus-visible {
+    outline: 2px solid rgba(87, 99, 82, 0.55);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+  #patient-form input[type="checkbox"]:focus-visible { outline-offset: 2px; }
+  .booking-step button:focus-visible,
+  .booking-step a:focus-visible,
+  .booking-step .svc-card:focus-visible {
+    outline: 2px solid #576352;
+    outline-offset: 2px;
+  }
 </style>
 
 <script define:vars={{ recaptchaSiteKey }}>
@@ -530,6 +561,7 @@ const resumenPareja     = resumenGrupo('pareja');
 
   const catalogServices = JSON.parse(catalogServicesRaw);
 
+  const DIAS_ES = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
   const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -540,6 +572,13 @@ const resumenPareja     = resumenGrupo('pareja');
   function formatDateEs(iso) {
     const [y, m, d] = iso.split('-');
     return `${parseInt(d)} de ${MONTHS_ES[parseInt(m) - 1]} de ${y}`;
+  }
+
+  // "lunes 13 de octubre" (para lectores de pantalla)
+  function fechaLargaEs(iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    const dow = new Date(y, m - 1, d).getDay();
+    return `${DIAS_ES[dow]} ${d} de ${MONTHS_ES[m - 1].toLowerCase()}`;
   }
 
   function formatCLP(n) {
@@ -571,11 +610,38 @@ const resumenPareja     = resumenGrupo('pareja');
     }
   }
 
+  // ─── Accesibilidad: anuncios y foco ──────────────────────────────────────
+  const STEP_LABELS = ['Tipo de sesión', 'Fecha y hora', 'Tus datos', 'Pago'];
+  // En la carga inicial (servicio pre-seleccionado desde /servicios) no se
+  // mueve el foco ni se anuncia: solo cuando la persona avanza o vuelve.
+  let cargaInicial = true;
+
+  function anunciar(texto) {
+    const el = $('step-announcer');
+    if (!el) return;
+    // Vaciar y volver a escribir para que se anuncie aunque el texto se repita.
+    el.textContent = '';
+    setTimeout(() => { el.textContent = texto; }, 60);
+  }
+
+  // Lleva el foco al primer título visible dentro de un contenedor.
+  function enfocarTitulo(contenedor) {
+    if (!contenedor) return;
+    const titulo = [...contenedor.querySelectorAll('.step-title')].find((h) => h.offsetParent !== null);
+    titulo?.focus({ preventScroll: true });
+  }
+
   function goToStep(n) {
     state.step = n;
     document.querySelectorAll('.booking-step').forEach((el) => el.classList.add('hidden'));
     $(`step-${n}`)?.classList.remove('hidden');
     updateStepIndicators(n);
+    if (!cargaInicial) {
+      // Al cambiar de paso el botón que se apretó desaparece: sin esto el foco
+      // quedaba en la nada y el lector de pantalla no decía dónde estaba.
+      enfocarTitulo($(`step-${n}`));
+      anunciar(`Paso ${n} de 4: ${STEP_LABELS[n - 1]}`);
+    }
     // Resumen del servicio: visible desde el paso 2 en adelante
     const sum = $('service-summary');
     if (sum) sum.style.display = n >= 2 ? 'flex' : 'none';
@@ -606,7 +672,11 @@ const resumenPareja     = resumenGrupo('pareja');
     }
 
     services.forEach((svc) => {
-      const card = document.createElement('div');
+      // Servicio con online y presencial: la tarjeta es solo un contenedor y
+      // se elige con sus dos botones internos. Servicio de una sola modalidad:
+      // la tarjeta completa es un <button> (antes era un DIV que no se podía
+      // alcanzar con el teclado ni lo anunciaba el lector de pantalla).
+      const card = document.createElement(svc.modality === 'ambos' ? 'div' : 'button');
       card.className = 'bg-white border border-dust p-8 transition-all duration-200';
 
       if (svc.modality === 'ambos') {
@@ -641,14 +711,17 @@ const resumenPareja     = resumenGrupo('pareja');
         const tagText  = svc.modality === 'online' ? 'Online' : 'Presencial';
         const modLabel = svc.modality === 'online' ? 'Videollamada · Google Meet' : 'Las Condes';
 
-        card.className += ' cursor-pointer hover:border-forest/40 hover:bg-warm';
+        // <span class="block"> en vez de <p>/<div>: dentro de un <button> solo
+        // va contenido en línea; se ve igual.
+        card.type = 'button';
+        card.className += ' svc-card block w-full text-left cursor-pointer hover:border-forest/40 hover:bg-warm';
         card.innerHTML = `
-          <p class="label ${tagColor} mb-2">${tagText}</p>
-          <p class="font-heading font-semibold text-2xl text-ink mb-1">${svc.name}</p>
-          ${svc.description ? `<p class="font-body text-sm text-stone mb-4 leading-relaxed">${svc.description}</p>` : '<div class="mb-4"></div>'}
-          <div class="h-px bg-dust my-4"></div>
-          <p class="font-heading font-light text-xl text-ink">${formatCLP(price)} · ${dur} min</p>
-          <p class="font-body text-xs text-stone mt-1">${modLabel}</p>
+          <span class="block label ${tagColor} mb-2">${tagText}</span>
+          <span class="block font-heading font-semibold text-2xl text-ink mb-1">${svc.name}</span>
+          ${svc.description ? `<span class="block font-body text-sm text-stone mb-4 leading-relaxed">${svc.description}</span>` : '<span class="block mb-4"></span>'}
+          <span class="block h-px bg-dust my-4" aria-hidden="true"></span>
+          <span class="block font-heading font-light text-xl text-ink">${formatCLP(price)} · ${dur} min</span>
+          <span class="block font-body text-xs text-stone mt-1">${modLabel}</span>
         `;
         card.addEventListener('click', () =>
           selectService(svc.id, svc.modality, price, dur, svc.name)
@@ -742,6 +815,8 @@ const resumenPareja     = resumenGrupo('pareja');
     $('nota-reembolso')?.classList.add('hidden');
     $('service-selection')?.classList.remove('hidden');
     renderServiceCards(group);
+    // El botón Individual/Pareja se escondió: el foco pasa al título nuevo.
+    if (!cargaInicial) $('service-selection-title')?.focus({ preventScroll: true });
   }
 
   // ── Servicio pre-seleccionado desde /servicios (?servicio=UUID) ──────────────
@@ -802,6 +877,8 @@ const resumenPareja     = resumenGrupo('pareja');
       $('service-selection').classList.add('hidden');
       $('group-selection').classList.remove('hidden');
       $('nota-reembolso')?.classList.remove('hidden');
+      // Foco de vuelta a la tarjeta del grupo que había elegido.
+      (document.querySelector(`.group-card[data-group="${selectedGroup}"]`) ?? document.querySelector('.group-card'))?.focus();
       selectedGroup = null;
     }
   });
@@ -898,6 +975,9 @@ const resumenPareja     = resumenGrupo('pareja');
       btn.textContent = d;
       btn.dataset.iso = iso;
       btn.disabled = disabled;
+      // Nombre completo para lectores de pantalla: "lunes 13 de octubre, disponible".
+      btn.setAttribute('aria-label', `${fechaLargaEs(iso)}${isToday ? ', hoy' : ''}, ${disabled ? 'no disponible' : 'disponible'}`);
+      btn.setAttribute('aria-pressed', isSelected && !disabled ? 'true' : 'false');
       if (isBlocked) btn.title = 'No disponible (feriado o bloqueado)';
       else if (noWeekday) btn.title = 'Este día no hay atención para este servicio';
 
@@ -918,8 +998,10 @@ const resumenPareja     = resumenGrupo('pareja');
     document.querySelectorAll('.day-btn').forEach((b) => {
       if (b.dataset.iso === iso) {
         b.className = b.className.replace('day-available', 'day-selected');
+        b.setAttribute('aria-pressed', 'true');
       } else if (!b.disabled) {
         b.className = b.className.replace('day-selected', 'day-available');
+        b.setAttribute('aria-pressed', 'false');
       }
     });
 
@@ -956,13 +1038,16 @@ const resumenPareja     = resumenGrupo('pareja');
     const grid = $('slots-grid');
     grid.innerHTML = '';
 
+    const dia = state.selectedDate ? fechaLargaEs(state.selectedDate) : '';
     if (!slots.length) {
       show('no-slots-msg');
       hide('slots-help-msg');
+      anunciar(`Sin horarios disponibles para el ${dia}.`);
       return;
     }
     hide('no-slots-msg');
     show('slots-help-msg');
+    anunciar(`${slots.length} ${slots.length === 1 ? 'horario disponible' : 'horarios disponibles'} para el ${dia}.`);
 
     slots.forEach((time) => {
       const btn = document.createElement('button');
@@ -970,6 +1055,7 @@ const resumenPareja     = resumenGrupo('pareja');
       btn.className = `slot-btn ${state.selectedTime === time ? 'slot-selected' : ''}`;
       btn.textContent = time;
       btn.dataset.time = time;
+      btn.setAttribute('aria-pressed', state.selectedTime === time ? 'true' : 'false');
       btn.addEventListener('click', () => selectTime(time));
       grid.appendChild(btn);
     });
@@ -981,6 +1067,7 @@ const resumenPareja     = resumenGrupo('pareja');
     document.querySelectorAll('.slot-btn').forEach((b) => {
       if (b.dataset.time === time) b.className = b.className.replace('slot-btn', 'slot-btn slot-selected').replace('slot-selected slot-selected', 'slot-selected');
       else b.classList.remove('slot-selected');
+      b.setAttribute('aria-pressed', b.dataset.time === time ? 'true' : 'false');
     });
     // Pequeño delay para que el usuario vea la selección antes de avanzar
     setTimeout(() => {
@@ -1011,7 +1098,7 @@ const resumenPareja     = resumenGrupo('pareja');
       'Dificultades de convivencia',
       'Celos o inseguridades en la relación',
       'Decisiones importantes (hijos, matrimonio, separación)',
-      'Violencia o conflictos frecuentes',
+      'Conflictos frecuentes',
       'Retomar la conexión y el vínculo',
       'Otro',
     ],
@@ -1021,7 +1108,7 @@ const resumenPareja     = resumenGrupo('pareja');
     const select = $('motivo_consulta');
     if (!select) return;
     const opciones = MOTIVOS[group] ?? MOTIVOS.individual;
-    select.innerHTML = '<option value="" disabled selected>Selecciona el motivo principal...</option>';
+    select.innerHTML = '<option value="" selected>Selecciona el motivo principal...</option>';
     opciones.forEach((m) => {
       const opt = document.createElement('option');
       opt.value = m;
@@ -1084,7 +1171,7 @@ const resumenPareja     = resumenGrupo('pareja');
     // Fecha de nacimiento opcional (11 oct 2026): solo se valida si se escribió.
     const nacimiento = $('patient_birthdate').value.trim();
     if ((nacimiento && !fechaNacimientoValida(nacimiento)) || $('patient_birthdate').validity?.badInput) { $('patient_birthdate').nextElementSibling?.classList.remove('hidden'); valid = false; }
-    if (!motivo) { $('motivo_consulta').nextElementSibling?.classList.remove('hidden'); valid = false; }
+    // Motivo de consulta opcional (Valentina, 12 oct 2026): no se valida.
     if (!valid) {
       // Con un formulario largo, en el celular el error puede quedar fuera de la
       // pantalla: se lleva la vista al primer campo con problema.
@@ -1412,4 +1499,5 @@ const resumenPareja     = resumenGrupo('pareja');
   // ─── Init ─────────────────────────────────────────────────────────────────
   updateStepIndicators(1);
   runPreselection();  // preselección de servicio/grupo (al final: todo ya inicializado)
+  cargaInicial = false; // desde aquí, cada cambio de paso mueve el foco y se anuncia
 </script>
