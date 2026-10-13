@@ -124,8 +124,15 @@
     @apply font-body text-lg text-stone font-light leading-relaxed;
   }
 
+  /* Párrafos justificados en computador (Valentina, 12 oct 2026); en celular
+     quedan a la izquierda porque la columna angosta deja espacios grandes.
+     Dentro de un bloque centrado siguen centrados. */
   .body-text {
     @apply font-body text-base text-stone font-light leading-relaxed;
+  }
+  @media (min-width: 768px) {
+    .body-text { text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+    .text-center .body-text, .body-text.text-center { text-align: center; }
   }
 
   .body-sm {
