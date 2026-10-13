@@ -8,6 +8,7 @@ const PAGES: { path: string; changefreq: string; priority: string }[] = [
   { path: '',            changefreq: 'weekly',  priority: '1.0' },
   { path: 'sobre-mi',    changefreq: 'monthly', priority: '0.8' },
   { path: 'servicios',   changefreq: 'weekly',  priority: '0.9' },
+  { path: 'terapia-de-pareja-las-condes', changefreq: 'monthly', priority: '0.8' },
   { path: 'precios',     changefreq: 'monthly', priority: '0.7' },
   { path: 'opiniones',   changefreq: 'weekly',  priority: '0.7' },
   { path: 'contacto',    changefreq: 'monthly', priority: '0.6' },

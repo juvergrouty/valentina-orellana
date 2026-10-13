@@ -1,0 +1,129 @@
+---
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero   from '../components/sections/PageHero.astro';
+import { supabase } from '../lib/supabase';
+import { DIRECCION } from '../data/consulta';
+
+// Página de destino de terapia de pareja (12 oct 2026, auditoría de marketing):
+// los anuncios de pareja llevaban directo a la agenda de pago; quien busca
+// "terapia de pareja Las Condes" necesita leer antes de reservar $75.000.
+const { data: servicios } = await supabase
+  .from('services_catalog')
+  .select('name, price, price_online, price_presencial, modality, duration_min')
+  .eq('visible', true)
+  .ilike('name', '%pareja%')
+  .order('sort_order');
+
+const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+const precios = (servicios ?? []).map(s => s.price_presencial ?? s.price_online ?? s.price).filter((n): n is number => typeof n === 'number' && n > 0);
+const precioDesde = precios.length ? Math.min(...precios) : null;
+
+const senales = [
+  'Discuten por lo mismo una y otra vez, sin llegar a nada.',
+  'Sienten distancia: conviven, pero ya no se encuentran.',
+  'Hubo una infidelidad o algo que rompió la confianza.',
+  'Les cuesta hablar sin herirse, o uno de los dos ya no habla.',
+  'Están frente a una decisión grande: hijos, convivencia, separación.',
+];
+
+const pasos = [
+  { n: '01', t: 'Escucharlos a los dos', d: 'En la primera sesión cada uno cuenta qué le pasa y qué espera. Sin buscar culpables.' },
+  { n: '02', t: 'Entender el patrón', d: 'Miramos qué dinámica se repite entre ustedes y de dónde viene, desde la historia de cada uno.' },
+  { n: '03', t: 'Cambiar cómo se relacionan', d: 'Trabajamos herramientas concretas para comunicarse, cuidarse y decidir juntos.' },
+];
+
+const faq = [
+  { q: '¿Tenemos que ir los dos siempre?', a: 'Sí, las sesiones de pareja son con ambos. Si en algún momento es útil, puedo proponer alguna sesión individual dentro del proceso.' },
+  { q: '¿Y si mi pareja no quiere ir?', a: 'Puedes empezar tú en terapia individual: muchas veces el cambio de uno mueve la relación completa.' },
+  { q: '¿La terapia de pareja es para separarse o para seguir juntos?', a: 'Para entender qué les pasa y decidir con más claridad. A veces eso significa reencontrarse, y otras, separarse de una manera más cuidada.' },
+  { q: '¿Se puede hacer online?', a: 'Sí, por Google Meet, desde cualquier lugar de Chile. Solo necesitan un espacio privado y una buena conexión.' },
+  { q: '¿Y si en la relación hay violencia?', a: 'Si hay violencia física, sexual, amenazas o control, la terapia de pareja no es el primer paso. Escríbeme para orientarte o llama al 1455 (fono de orientación en violencias de género, gratuito). Si hay peligro inmediato, llama al 133.' },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faq.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })),
+};
+---
+
+<BaseLayout
+  title="Terapia de pareja en Las Condes y online"
+  description={`Terapia de pareja con la Ps. Valentina Orellana en ${DIRECCION.calle}, Las Condes, y online. Sesiones de 50 minutos${precioDesde ? `, ${clp(precioDesde)}` : ''}. Boleta para reembolso Isapre.`}
+>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, '\\u003c')} />
+
+  <PageHero
+    label="Terapia de pareja · Las Condes y online"
+    title="Terapia de pareja en Las Condes"
+    description="Un espacio para entender qué les está pasando y volver a encontrarse, o decidir con claridad."
+  />
+
+  <section class="bg-sand py-16 md:py-24">
+    <div class="container-site grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-16">
+      <div class="md:col-span-5">
+        <p class="label mb-3">¿Cuándo consultar?</p>
+        <h2 class="section-title">Señales de que puede ser el momento</h2>
+      </div>
+      <ul class="md:col-span-7 space-y-4">
+        {senales.map(s => (
+          <li class="flex gap-4 border-b border-dust pb-4 body-text text-[#4a4842] font-normal"><span aria-hidden="true" class="text-forest">—</span><span>{s}</span></li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="bg-warm border-y border-dust py-16 md:py-24">
+    <div class="container-site">
+      <p class="label mb-3">Cómo trabajo</p>
+      <h2 class="section-title mb-10 md:mb-14 max-w-2xl">Un proceso con dirección, no solo un lugar para discutir</h2>
+      <ol class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        {pasos.map(p => (
+          <li class="bg-white border border-dust rounded-[6px] p-7">
+            <p class="font-heading text-3xl text-gold mb-4">{p.n}</p>
+            <p class="card-title text-xl mb-3">{p.t}</p>
+            <p class="body-sm text-[#55524b] font-normal">{p.d}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section class="bg-sand py-16 md:py-24">
+    <div class="container-site grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16">
+      <div>
+        <p class="label mb-3">Primera sesión</p>
+        <h2 class="section-title mb-6">Cómo empezamos</h2>
+        <p class="body-text text-[#4a4842] font-normal mb-4">
+          Sesiones de 50 minutos, presenciales en {DIRECCION.calle}, {DIRECCION.detalle}, {DIRECCION.comuna}, u online.
+          En la primera sesión los escucho a los dos y definimos juntos cómo seguir. Sin presión ni compromisos.
+        </p>
+        {precioDesde && <p class="body-text text-ink font-medium mb-2">Valor: {clp(precioDesde)} por sesión.</p>}
+        <p class="body-sm text-[#55524b] font-normal">Por cada sesión recibes boleta de honorarios para pedir reembolso en tu Isapre o seguro complementario, según tu plan.</p>
+      </div>
+      <div class="flex flex-col justify-center gap-4 md:items-start">
+        <a href="/agenda?grupo=pareja" class="btn-dark justify-center" data-cta="pareja_landing_agenda">Ver horarios para pareja</a>
+        <a href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20quiero%20consultar%20por%20terapia%20de%20pareja." target="_blank" rel="noopener" class="btn-outline justify-center" data-cta="pareja_landing_whatsapp">Escribir por WhatsApp</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-warm border-t border-dust py-16 md:py-24">
+    <div class="container-site max-w-3xl">
+      <p class="label mb-3">Preguntas frecuentes</p>
+      <h2 class="section-title mb-8">Lo que suelen preguntarme</h2>
+      <div class="divide-y divide-dust border-y border-dust">
+        {faq.map(f => (
+          <details class="group py-5">
+            <summary class="cursor-pointer list-none flex justify-between gap-4 font-body text-base text-ink font-medium">
+              {f.q}<span aria-hidden="true" class="text-forest transition-transform group-open:rotate-45">+</span>
+            </summary>
+            <p class="body-sm text-[#55524b] font-normal mt-3">{f.a}</p>
+          </details>
+        ))}
+      </div>
+      <p class="body-sm mt-8">Este espacio no atiende urgencias. Si estás en crisis, llama al *4141 (gratis, 24/7) o acude al servicio de urgencia más cercano.</p>
+    </div>
+  </section>
+</BaseLayout>

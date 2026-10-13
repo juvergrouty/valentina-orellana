@@ -1,0 +1,45 @@
+---
+// "Cómo trabajo · para quién es" (12 oct 2026, auditoría): lo distintivo del
+// enfoque estaba escondido en Sobre mí.
+const paraTi = [
+  'Quieres entender qué te pasa, no solo desahogarte.',
+  'Buscas un espacio cálido, pero también directo.',
+  'Quieres cambios concretos en tu vida y en tus relaciones.',
+];
+const noEs = [
+  'Urgencias o crisis graves: en ese caso llama al *4141 o acude a urgencias.',
+  'Si buscas solo un certificado o una licencia médica.',
+];
+---
+
+<section class="bg-warm border-y border-dust py-16 md:py-24" aria-labelledby="enfoque-titulo">
+  <div class="container-site grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-16">
+    <div class="md:col-span-6">
+      <p class="label mb-3">Cómo trabajo</p>
+      <h2 id="enfoque-titulo" class="section-title mb-6">Entender de dónde viene lo que te pasa, y moverte</h2>
+      <p class="body-text text-[#4a4842] font-normal">
+        Trabajo con enfoque sistémico: miramos tu historia, tus vínculos y tus patrones para entender
+        de dónde viene lo que te pasa, y lo traducimos en cambios concretos. La terapia puede contener,
+        pero también debe ayudarte a avanzar.
+      </p>
+    </div>
+    <div class="md:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-8">
+      <div>
+        <p class="label text-forest mb-4">Es para ti si…</p>
+        <ul class="space-y-3">
+          {paraTi.map(t => (
+            <li class="flex gap-3 body-sm text-[#4a4842] font-normal"><span aria-hidden="true" class="text-forest">✓</span><span>{t}</span></li>
+          ))}
+        </ul>
+      </div>
+      <div>
+        <p class="label mb-4">No es lo indicado para…</p>
+        <ul class="space-y-3">
+          {noEs.map(t => (
+            <li class="flex gap-3 body-sm text-[#4a4842] font-normal"><span aria-hidden="true" class="text-stone">–</span><span>{t}</span></li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
