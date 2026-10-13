@@ -120,6 +120,10 @@ const jsonLd = esPublica ? {
 // reserva/pago ni en páginas privadas.
 const ruta = Astro.url.pathname.replace(/\/$/, '') || '/';
 const enAgenda = ruta === '/agenda';
+// El WhatsApp prellenado según canal solo aplica a visitas que todavía no son
+// pacientes: no en páginas de pago, reagendar, confirmación ni pasos a seguir.
+const waSegunCanal = !['/reagendar', '/confirmacion', '/recuperar', '/condiciones'].includes(ruta)
+  && !/^\/(pagar|consentimiento|pasos-a-seguir|admin)(\/|$)/.test(ruta);
 const mostrarAgendarFlotante = !['/agenda', '/reagendar', '/confirmacion', '/recuperar'].includes(ruta)
   && !/^\/(pagar|consentimiento|pasos-a-seguir)\//.test(ruta) && !noindex;
 // Google Tag Manager (Analytics/Meta) NO se carga en páginas con datos de una
@@ -214,15 +218,15 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
     </a>
     <!-- Mensaje de WhatsApp según de dónde llegó la persona (vo_origen): así
          Valentina sabe el canal de cada consulta sin tener que preguntarlo. -->
-    <script is:inline>(function(){try{
+    {waSegunCanal && <script is:inline>(function(){try{
       var o=null;try{o=JSON.parse(localStorage.getItem('vo_origen')||'null');}catch(e){}
-      var t=o&&(o.last||o.first);if(!t)return;
+      var t=o&&(o.last||o.first);if(!t||!(t.ts>Date.now()-5184e6))return;
       var s=(t.utm_source||'').toLowerCase(),m=(t.utm_medium||'').toLowerCase(),r=(t.referrer_host||'').toLowerCase(),f='';
       if(t.gclid||t.gbraid||t.wbraid||(s==='google'&&/^(cpc|ppc|paid)$/.test(m)))f='vi tu anuncio en Google';
       else if(/instagram|^ig$/.test(s)||/instagram/.test(r))f='te vi en Instagram';
       else if(/psychologytoday|psicologiahoy/.test(s+r))f='vi tu perfil en Psychology Today';
       else if(/doctoralia/.test(s+r))f='vi tu perfil en Doctoralia';
-      else if(/(^|\.)google\./.test(r))f='encontré tu página en Google';
+      else if(/^(www\.)?google\.[a-z.]+$|googlequicksearchbox/.test(r)||s==='google')f='encontré tu página en Google';
       if(!f)return;
       var a=document.querySelectorAll('a[href^="https://wa.me/56972735696"]');
       for(var i=0;i<a.length;i++){
@@ -231,6 +235,6 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
         var resto=x.slice(p.length);
         a[i].href='https://wa.me/56972735696?text='+encodeURIComponent(p+f+'.'+(resto?' '+resto.charAt(0).toUpperCase()+resto.slice(1):''));
       }
-    }catch(e){}})();</script>
+    }catch(e){}})();</script>}
   </body>
 </html>
