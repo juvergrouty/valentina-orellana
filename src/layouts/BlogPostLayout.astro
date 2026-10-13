@@ -149,10 +149,14 @@ const jsonLd = {
 </style>
 
 <style is:global>
-  /* Texto alineado a la izquierda (12 oct 2026): el justificado dejaba ríos de
-     espacios en celular. Líneas de máx. 66 caracteres para leer cómodo. */
-  .post .body p { margin: 0 0 22px; text-align: justify; hyphens: auto; -webkit-hyphens: auto; max-width: 66ch; line-height: 1.7; }
-  .post .body .aside { text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+  /* Justificado en computador y a la izquierda en celular (12 oct 2026): en
+     la columna angosta el justificado deja ríos de espacios. Líneas de máx.
+     66 caracteres para leer cómodo. */
+  .post .body p { margin: 0 0 22px; text-align: left; hyphens: manual; -webkit-hyphens: manual; max-width: 66ch; line-height: 1.7; }
+  .post .body .aside { text-align: left; hyphens: manual; -webkit-hyphens: manual; }
+  @media (min-width: 768px) {
+    .post .body p, .post .body .aside { text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+  }
   .post .body p.credit { text-align: center; max-width: none; }
   .post .body .cta-agenda p, .post .body p.quote { max-width: none; }
   /* Links dentro del texto de un artículo: visibles (antes heredaban el color del texto, sin subrayado). */
