@@ -43,6 +43,8 @@ export const GOOGLE_MAPS_EMBED = 'https://www.google.com/maps?q=Estoril+50,+Las+
 export const PERFILES = {
   instagram:      'https://www.instagram.com/psicologa.valentinaorellana/',
   doctoralia:     'https://www.doctoralia.cl/perfil/valentina-orellana',
-  psychologyToday:'https://www.psychologytoday.com/cl/psicologos/valentina-orellana-psicologa-adultos-y-parejas-las-condes-rm/1580324',
+  // URL final (12 oct 2026): la de psychologytoday.com redirigía 2 veces (301)
+  // a psicologiahoy.com con otro slug. Verificado con curl -sIL.
+  psychologyToday:'https://www.psicologiahoy.com/cl/psicologos/ps-valentina-orellana-jaramillo-psicologa-adult-las-condes-rm/1580324',
   encuadrado:     'https://encuadrado.com/p/valentina-orellana-jaramillo',
 };

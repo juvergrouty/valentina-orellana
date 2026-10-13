@@ -134,6 +134,11 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Precarga de las 2 fuentes que se ven arriba (Domine: logo y títulos;
+         Inter: texto). Son los mismos archivos de @font-face en global.css;
+         crossorigin es obligatorio en el preload de fuentes o se descargan 2 veces. -->
+    <link rel="preload" href="/fonts/domine-latin-var.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter-latin-var.woff2" as="font" type="font/woff2" crossorigin />
     <meta name="facebook-domain-verification" content="jvyq3gto3vw9mqgkpvusajy6srs890" />
     <!-- Google Tag Manager -->
     {cargarGTM && <script is:inline>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':

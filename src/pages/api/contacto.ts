@@ -63,18 +63,21 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ ok: false, error: `Revisa tu correo: "@${dom}" no recibe correos. Corrígelo para que pueda responderte.` }, 400);
   }
 
-  // reCAPTCHA v3, igual que /api/bookings (8 oct 2026). Si no hay clave
-  // secreta en Configuración, no se exige nada.
+  // reCAPTCHA v3, igual que /api/bookings (8 oct 2026). Desde el 12 oct 2026
+  // el token es OBLIGATORIO cuando hay clave secreta en Configuración: antes un
+  // mensaje sin token se aceptaba igual, y bastaba con no mandarlo para saltarse
+  // la verificación. Si no hay clave configurada, no se exige nada (para no
+  // romper el formulario) y queda el aviso en los registros del servidor.
   const { data: secretRow } = await supabase.from('settings').select('value').eq('key', 'recaptcha_secret_key').maybeSingle();
   const recaptchaSecret = secretRow?.value;
-  if (recaptchaSecret) {
+  if (!recaptchaSecret) {
+    console.warn('[contacto] recaptcha_secret_key no está configurada: el mensaje se acepta sin verificación reCAPTCHA');
+  } else {
     const token = (body.recaptcha_token ?? '').trim();
-    // Sin token (script de Google bloqueado o lento): se acepta igual — un
-    // contacto real perdido vale más que un spam, y quedan el campo trampa, el
-    // tiempo mínimo y el límite por hora. Con token, se exige el puntaje.
     if (!token) {
-      await logWarn('contacto', 'Mensaje sin verificación reCAPTCHA (script bloqueado o lento); se envió igual', {});
-    } else {
+      await logWarn('contacto', 'Mensaje rechazado: llegó sin token reCAPTCHA (script bloqueado, lento o envío automatizado)', { ip });
+      return json({ ok: false, error: 'No pude verificar que eres una persona: la verificación de Google no alcanzó a cargar (a veces la bloquea un bloqueador de anuncios). Recarga la página e intenta de nuevo, o escríbeme por WhatsApp.' }, 400);
+    }
     let verifyData: { success?: boolean; score?: number; action?: string; 'error-codes'?: string[] } = {};
     try {
       const verifyRes = await fetch('https://www.google.com/recaptcha/api/siteverify', {
@@ -88,7 +91,6 @@ export const POST: APIRoute = async ({ request }) => {
     if (!verifyData.success || (typeof verifyData.score === 'number' && verifyData.score < 0.5)) {
       await logWarn('contacto', 'reCAPTCHA rechazado', { score: verifyData.score, errors: verifyData['error-codes'] });
       return json({ ok: false, error: 'No pude verificar que eres una persona. Intenta de nuevo o escríbeme por WhatsApp.' }, 400);
-    }
     }
   }
 

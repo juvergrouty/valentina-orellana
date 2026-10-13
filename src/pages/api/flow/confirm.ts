@@ -63,7 +63,9 @@ export const POST: APIRoute = async ({ request }) => {
       : undefined;
 
     const status = await getPaymentStatus(token, flowBaseUrl);
-    console.log(`[Flow webhook] token=${token} status=${status.status} order=${status.flowOrder} env=${cfg['flow_env'] ?? 'default'}`);
+    // Sin el token de Flow en el registro (12 oct 2026): con él se puede abrir
+    // /confirmacion de esa paciente. La orden basta para ubicar el pago.
+    console.log(`[Flow webhook] status=${status.status} order=${status.flowOrder} env=${cfg['flow_env'] ?? 'default'}`);
 
     if (status.status === 2) {
       // ✅ Pagado — confirmar la(s) reserva(s) cubiertas por este token.
