@@ -7,8 +7,29 @@ const cache    = await getCachedReviews();
 const { data: placeRow } = await supabase.from('settings').select('value').eq('key', 'google_place_id').maybeSingle();
 const reviewsUrl = placeRow?.value ? `https://search.google.com/local/reviews?placeid=${encodeURIComponent(placeRow.value)}` : null;
 const reviews  = (cache?.reviews ?? []).filter(r => r.text);
-const featured = reviews[0] ?? null;
-const others   = reviews.slice(1, 5);
+
+// Destacada FIJA (pedido de Vale, 12 oct 2026): la de Ignacia Reyes, buscada por
+// nombre sin importar mayúsculas ni tildes. Antes era reviews[0] (la más reciente)
+// y quedaba arriba una que dice que la consulta queda lejos. Si algún día no
+// viene en la respuesta de Google, se usa la de 5 estrellas más larga.
+// Los textos vienen tal cual de Google: aquí solo se elige y ordena, no se editan.
+const normalizar = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const largoDesc  = (a: { text: string }, b: { text: string }) => b.text.length - a.text.length;
+// "Un poco lejos su consultorio" se excluye; "Lejos la mejor" es un elogio y no.
+const quedaLejos = (t: string) => /lejos(?!\s+(la|el|lo)\s+mejor)/.test(normalizar(t));
+const featured =
+  reviews.find(r => normalizar(r.author ?? '').includes('ignacia reyes'))
+  ?? [...reviews].filter(r => r.rating === 5).sort(largoDesc)[0]
+  ?? reviews[0] ?? null;
+
+// Secundarias: solo 4-5 estrellas, sin las que mencionan "lejos"; primero las de
+// 5 estrellas y, dentro de cada grupo, las de texto más largo. El servidor deja
+// visibles las primeras VISIBLES; en el navegador se barajan y van rotando (la
+// página queda en caché 5 min, por eso el azar se hace en el cliente).
+const VISIBLES = 2;
+const others = reviews
+  .filter(r => r !== featured && (r.rating ?? 0) >= 4 && !quedaLejos(r.text))
+  .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0) || largoDesc(a, b));
 
 function stars(n: number) {
   return Array.from({ length: 5 }, (_, i) => i < Math.round(n));
@@ -31,28 +52,39 @@ function stars(n: number) {
         "{featured.text}"
       </blockquote>
       <div class="w-10 h-px bg-stone/20 mx-auto mb-5"></div>
-      <p class="label">— {featured.author} · Reseña de Google</p>
+      <p class="label" style="color:#4F4C45;">— {featured.author} · Reseña de Google</p>
     </div>
 
     <!-- Otras reseñas -->
     {others.length > 0 && (
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-10 mt-16 pt-14 border-t border-stone/20">
-        {others.map((t) => (
-          <div>
+      <div class="mt-16 pt-14 border-t border-stone/20">
+      <div id="resenas-rotan" class="grid grid-cols-1 md:grid-cols-2 gap-10" data-visibles={VISIBLES}
+           style="transition:opacity .5s ease;">
+        {others.map((t, i) => (
+          <div class="resena-sec" hidden={i >= VISIBLES}>
             <div class="flex gap-0.5 mb-3">
               {stars(t.rating).map(on => (
                 <svg width="14" height="14" viewBox="0 0 24 24" fill={on ? '#F5A623' : 'none'} stroke="#F5A623" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
               ))}
             </div>
-            <p class="body-text italic mb-4">"{t.text}"</p>
-            <p class="label">— {t.author}</p>
+            <!-- #4F4C45 sobre #DDDCD1 = 6,2:1 (antes text-stone en cursiva, 4,0:1) -->
+            <p class="font-body text-base font-normal leading-relaxed mb-4" style="color:#4F4C45;">"{t.text}"</p>
+            <p class="label" style="color:#4F4C45;">— {t.author}</p>
           </div>
         ))}
+      </div>
+      {others.length > VISIBLES && (
+        <div class="flex justify-center mt-8">
+          <button type="button" id="resenas-pausa" hidden aria-pressed="false"
+            class="font-body text-xs tracking-widest uppercase underline underline-offset-4 min-h-[24px] px-2"
+            style="color:#4F4C45;">Pausar reseñas</button>
+        </div>
+      )}
       </div>
     )}
 
     {cache?.total && (
-      <p class="text-center label text-stone mt-14">
+      <p class="text-center label mt-14" style="color:#4F4C45;">
         {reviewsUrl
           ? <a href={reviewsUrl} target="_blank" rel="noopener" class="underline underline-offset-4 hover:text-ink">{Number(cache.rating ?? 5).toFixed(1).replace('.', ',')} ★ · Ver las {cache.total} reseñas en Google</a>
           : <>{Number(cache.rating ?? 5).toFixed(1).replace('.', ',')} ★ · {cache.total} reseñas en Google</>}
@@ -62,3 +94,56 @@ function stars(n: number) {
   </div>
 </section>
 )}
+
+<script>
+  // Reseñas secundarias: orden aleatorio al cargar y rotación suave cada 9 s
+  // (12 oct 2026). Con prefers-reduced-motion solo se baraja, sin rotar. Se
+  // detiene al pasar el mouse o enfocar una reseña, y con el botón "Pausar".
+  (() => {
+    const grid = document.getElementById('resenas-rotan');
+    if (!grid) return;
+    const items = Array.from(grid.querySelectorAll<HTMLElement>('.resena-sec'));
+    const n = Number(grid.dataset.visibles) || 2;
+    // Fisher-Yates
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [items[i], items[j]] = [items[j], items[i]];
+    }
+    let desde = 0;
+    const mostrar = () => {
+      const visibles = new Set(Array.from({ length: Math.min(n, items.length) }, (_, k) => items[(desde + k) % items.length]));
+      items.forEach((el) => { el.hidden = !visibles.has(el); });
+      visibles.forEach((el) => grid.appendChild(el)); // respeta el orden barajado
+    };
+    mostrar();
+    if (items.length <= n) return;
+
+    const sinMovimiento = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (sinMovimiento) return;
+
+    const boton = document.getElementById('resenas-pausa') as HTMLButtonElement | null;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let pausadoPorUsuario = false;
+    const avanzar = () => {
+      grid.style.opacity = '0';
+      setTimeout(() => { desde = (desde + n) % items.length; mostrar(); grid.style.opacity = '1'; }, 500);
+    };
+    const iniciar = () => { if (!timer && !pausadoPorUsuario) timer = setInterval(avanzar, 9000); };
+    const detener = () => { if (timer) { clearInterval(timer); timer = null; } };
+
+    if (boton) {
+      boton.hidden = false;
+      boton.addEventListener('click', () => {
+        pausadoPorUsuario = !pausadoPorUsuario;
+        boton.setAttribute('aria-pressed', String(pausadoPorUsuario));
+        boton.textContent = pausadoPorUsuario ? 'Seguir rotando' : 'Pausar reseñas';
+        pausadoPorUsuario ? detener() : iniciar();
+      });
+    }
+    grid.addEventListener('mouseenter', detener);
+    grid.addEventListener('mouseleave', iniciar);
+    grid.addEventListener('focusin', detener);
+    grid.addEventListener('focusout', iniciar);
+    iniciar();
+  })();
+</script>
