@@ -110,6 +110,8 @@ const recaptchaSiteKey = recaptchaRow?.value ?? '';
           Enviar mensaje
         </button>
         <p id="form-status" class="label text-stone mt-4 hidden"></p>
+        <!-- El sello flotante de reCAPTCHA se oculta (chocaba con WhatsApp en celular); Google lo permite con este aviso. -->
+        <p class="font-body text-[11px] text-stone mt-4">Protegido por reCAPTCHA de Google: aplican su <a href="https://policies.google.com/privacy" target="_blank" rel="noopener" class="underline underline-offset-2">Política de privacidad</a> y sus <a href="https://policies.google.com/terms" target="_blank" rel="noopener" class="underline underline-offset-2">Términos</a>.</p>
       </div>
     </form>
 

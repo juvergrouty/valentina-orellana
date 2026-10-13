@@ -31,6 +31,9 @@ const FOTOS_CONSULTA = {
   pareja:     { base: '/images/consulta-sala',   alt: 'Sala de atención de la consulta en Estoril 50, Las Condes: sofá para dos, sillón y mesa de centro junto a la ventana' },
 };
 const fotoConsulta = (s: { modality: string; type: string | null; name: string }) => {
+  // Valentina (12 oct 2026) prefiere las fotos referenciales del panel en las
+  // tarjetas: se desactiva la foto de la consulta (queda el código por si se retoma).
+  return null;
   if (s.modality !== 'presencial') return null;
   const esPareja = s.type === 'pareja' || /pareja/i.test(s.name);
   return esPareja ? FOTOS_CONSULTA.pareja : FOTOS_CONSULTA.individual;

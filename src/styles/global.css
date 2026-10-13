@@ -190,3 +190,7 @@
            placeholder:text-stone/60 focus:outline-none focus:border-forest transition-colors duration-200;
   }
 }
+
+/* Sello flotante de reCAPTCHA oculto (12 oct 2026): chocaba con el botón de
+   WhatsApp en celular. Los formularios que lo usan muestran el aviso de Google. */
+.grecaptcha-badge { visibility: hidden !important; }

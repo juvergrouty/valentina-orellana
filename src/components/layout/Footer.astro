@@ -1,6 +1,5 @@
 ---
 import { DIRECCION, GOOGLE_MAPS_URL, COMO_LLEGAR_URL, PERFILES } from '../../data/consulta';
-import BarraAccionesMovil from './BarraAccionesMovil.astro';
 const year = new Date().getFullYear();
 // Perfiles públicos (solo visibilidad; la reserva es siempre en este sitio).
 const perfiles: [string, string][] = [
@@ -36,6 +35,7 @@ const perfiles: [string, string][] = [
             ['/', 'Inicio'],
             ['/sobre-mi', 'Sobre mí'],
             ['/servicios', 'Servicios'],
+            ['/terapia-de-pareja-las-condes', 'Terapia de pareja'],
             ['/precios', 'Preguntas frecuentes'],
             ['/opiniones', 'Opiniones'],
             ['/blog', 'Blog'],
@@ -109,4 +109,3 @@ const perfiles: [string, string][] = [
 </footer>
 
 <!-- Barra fija inferior "Agendar sesión" + WhatsApp, solo en celular -->
-<BarraAccionesMovil />
