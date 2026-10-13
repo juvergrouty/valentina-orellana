@@ -2125,6 +2125,25 @@ document.getElementById('bp-form')?.addEventListener('submit', (e) => {
   if (!val('bp-pcomuna')) faltan.push('comuna');
   if (faltan.length) { e.preventDefault(); e.stopImmediatePropagation(); alert('Para crear la paciente falta: ' + faltan.join(', ') + '.'); }
 }, true);
+// Un solo envío (13 oct 2026): agendar con link de pago tarda ~6 s (paciente,
+// reserva, link de Flow y correo). Sin aviso, Valentina apretó de nuevo; el
+// segundo envío chocó con la reserva recién creada y la página mostró "todos
+// los horarios elegidos ya estaban ocupados" aunque la sesión sí se creó.
+document.getElementById('bp-form')?.addEventListener('submit', (e) => {
+  const form = e.currentTarget;
+  if (form.dataset.enviando === '1') { e.preventDefault(); return; }
+  if (e.defaultPrevented) return;
+  form.dataset.enviando = '1';
+  const btn = document.getElementById('bp-submit');
+  if (btn) { btn.textContent = 'Agendando…'; btn.disabled = true; }
+});
+// Si se vuelve con el botón "atrás" del navegador, el formulario queda usable.
+window.addEventListener('pageshow', () => {
+  const form = document.getElementById('bp-form');
+  if (form) delete form.dataset.enviando;
+  const btn = document.getElementById('bp-submit');
+  if (btn) { btn.textContent = 'Confirmar agendamiento'; btn.disabled = false; }
+});
 bpPatientSel?.addEventListener('change', () => {
   const isNew = bpPatientSel.value === '_new';
   bpNewPatient.style.display = isNew ? 'block' : 'none';
