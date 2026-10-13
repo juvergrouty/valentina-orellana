@@ -40,7 +40,12 @@ export function stepsItems(clinicAddress?: string | null): StepItem[] {
     {
       icon: 'clock',
       titulo: 'Si necesitas reagendar',
-      texto: 'Avísame con al menos 24 horas de anticipación (o usa el enlace de tu correo de confirmación). Si avisas con menos de 24 horas, no es posible reagendar y la sesión se considera realizada.',
+      texto: 'Puedes reagendar sin costo avisando con al menos 24 horas de anticipación (o con el enlace de tu correo de confirmación). Si avisas con menos de 24 horas, la sesión se considera realizada.',
+    },
+    {
+      icon: 'shield',
+      titulo: 'Si estás en crisis',
+      texto: 'Este espacio no atiende urgencias. Si estás en crisis o piensas en hacerte daño, llama al *4141 (gratis, 24/7), a Salud Responde 600 360 7777 o al SAMU 131, o acude al servicio de urgencia más cercano.',
     },
     {
       icon: 'check',

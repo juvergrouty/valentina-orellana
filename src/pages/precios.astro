@@ -41,7 +41,7 @@ const faq = [
   },
   {
     q: '¿Qué pasa si necesito reprogramar?',
-    a: 'Las sesiones no se cancelan: solo puedes reagendar tu hora avisando con al menos 24 horas de anticipación. Si soy yo quien debe cancelar, reagendamos tu sesión sin costo.',
+    a: 'Puedes reagendar tu sesión sin costo avisando con al menos 24 horas de anticipación. Si avisas con menos de 24 horas, la sesión se considera realizada. Si soy yo quien debe cancelar, reagendamos tu sesión sin costo.',
   },
   {
     q: '¿Atiendes con Fonasa o Isapre?',
@@ -65,13 +65,44 @@ const faq = [
     a: 'La consulta está en Estoril 50, oficina 811b, Las Condes. Al confirmar tu reserva recibirás las indicaciones para llegar.',
   },
   {
+    q: '¿Cada cuánto son las sesiones?',
+    a: 'Al comienzo, lo habitual es una sesión a la semana. A medida que avanza el proceso podemos espaciarlas cada dos semanas. Lo vamos definiendo juntos según lo que necesites.',
+  },
+  {
+    q: 'En terapia de pareja, ¿tenemos que ir los dos siempre?',
+    a: 'Sí, las sesiones de pareja son con ambos. Si en algún momento es útil, puedo proponer alguna sesión individual dentro del proceso.',
+  },
+  {
+    q: '¿Qué necesito para la sesión online?',
+    a: 'Un lugar privado y tranquilo, audífonos y una conexión a internet estable. El enlace de Google Meet te llega a tu correo en la invitación de calendario de tu sesión.',
+  },
+  {
+    q: '¿Lo que hablamos es confidencial?',
+    a: 'Sí. Todo lo que conversamos está protegido por el secreto profesional. Las únicas excepciones son un riesgo grave para tu vida o la de otras personas, la vulneración de derechos de niños, niñas o adolescentes, y una orden judicial. En esos casos compartiré solo lo estrictamente necesario y, cuando sea posible, te lo diré antes.',
+  },
+  {
+    q: '¿Trabajas con otros profesionales?',
+    a: 'Sí. Creo en un trabajo multidisciplinario: si durante el proceso considero que te ayudaría el apoyo de otro profesional (por ejemplo, psiquiatría u otra especialidad), te lo voy a sugerir. Y si en algún momento veo que la terapia no está siendo efectiva para ti, también te propondré una derivación a otro profesional calificado.',
+  },
+  {
+    q: '¿Atiendes urgencias?',
+    a: 'No. Este espacio no atiende urgencias. Si estás en crisis o piensas en hacerte daño, llama al *4141 (gratis, 24/7), a Salud Responde 600 360 7777 o al SAMU 131, o acude al servicio de urgencia más cercano.',
+  },
+  {
     q: '¿Cómo es la primera sesión?',
     a: 'La primera sesión es de evaluación y conocimiento mutuo. Me cuentas lo que te trae, cuáles son tus objetivos y así definimos juntos cómo continuar. No hay presión ni compromisos.',
   },
 ];
+// Datos estructurados para Google (12 oct 2026): las mismas preguntas como FAQPage.
+const faqJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faq.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })),
+};
 ---
 
 <BaseLayout title="Precios y preguntas frecuentes" description="Valores de las sesiones, pago seguro con Flow, reembolso con tu Isapre o seguro complementario y cómo reagendar con 24 horas de anticipación.">
+  <script type="application/ld+json" set:html={JSON.stringify(faqJsonLd).replace(/</g, '\\u003c')} />
 
   <PageHero
     label="Todo lo que necesitas saber"

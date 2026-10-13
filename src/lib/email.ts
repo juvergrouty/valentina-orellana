@@ -168,9 +168,10 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
             Condiciones del servicio
           </p>
           <ul style="font-family:'Inter',sans-serif;font-size:0.82rem;color:#6B6860;line-height:1.7;margin:0;padding-left:1.1rem;">
-            <li>Las sesiones no se cancelan: solo puedes <strong>reagendar tu hora</strong> avisando con al menos <strong>24 horas de anticipación</strong>.</li>
+            <li>Puedes <strong>reagendar tu sesión sin costo</strong> avisando con al menos <strong>24 horas de anticipación</strong>. Con menos de 24 horas de aviso, la sesión se considera realizada.</li>
             <li>Si soy yo quien debe cancelar, reagendamos tu sesión sin costo.</li>
             <li>Tu reserva está confirmada porque el <strong>pago fue procesado</strong>. Sin pago, el horario queda libre.</li>
+            <li>Este espacio no atiende urgencias. Si estás en crisis o piensas en hacerte daño, llama al *4141 (gratis, 24/7), a Salud Responde 600 360 7777 o al SAMU 131, o acude al servicio de urgencia más cercano.</li>
           </ul>
           <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#9B9485;margin-top:0.75rem;">
             <a href="https://www.valentinaorellana.cl/condiciones" style="color:#576352;">Ver condiciones completas →</a>
