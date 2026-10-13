@@ -224,12 +224,13 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
       var s=(t.utm_source||'').toLowerCase(),m=(t.utm_medium||'').toLowerCase(),r=(t.referrer_host||'').toLowerCase(),f='';
       if(t.gclid||t.gbraid||t.wbraid||(s==='google'&&/^(cpc|ppc|paid)$/.test(m)))f='vi tu anuncio en Google';
       else if(/instagram|^ig$/.test(s)||/instagram/.test(r))f='te vi en Instagram';
+      else if(/facebook|^fb$/.test(s)||/facebook/.test(r))f='vi tu anuncio en Facebook';
       else if(/psychologytoday|psicologiahoy/.test(s+r))f='vi tu perfil en Psychology Today';
       else if(/doctoralia/.test(s+r))f='vi tu perfil en Doctoralia';
       else if(/^(www\.)?google\.[a-z.]+$|googlequicksearchbox/.test(r)||s==='google')f='encontré tu página en Google';
       if(!f)return;
       var a=document.querySelectorAll('a[href^="https://wa.me/56972735696"]');
-      for(var i=0;i<a.length;i++){
+      for(var i=a.length;i--;){
         var u=new URL(a[i].href),x=u.searchParams.get('text')||'',p='Hola Valentina, ';
         if(x&&x.indexOf(p)!==0)continue;
         var resto=x.slice(p.length);
