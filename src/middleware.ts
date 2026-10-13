@@ -1,9 +1,35 @@
 import { defineMiddleware } from 'astro:middleware';
+import type { APIContext, MiddlewareNext } from 'astro';
 import { tokenAdminValido, tokenRevocado } from './lib/adminSession';
 
 const COOKIE = 'vo_admin_token';
 
-export const onRequest = defineMiddleware(async (context, next) => {
+// Páginas públicas que son iguales para todas las visitas (12 oct 2026): el
+// CDN de Vercel puede guardarlas 5 minutos y servir la copia anterior mientras
+// genera una nueva. Revisado: ninguna lee cookies ni parámetros de la dirección
+// (?error=, etc.), solo la ruta. Lista exacta a propósito: NO agenda, admin,
+// api, pagar, recuperar, confirmacion ni pasos-a-seguir.
+const PAGINAS_CACHEABLES = new Set(['/', '/servicios', '/precios', '/contacto', '/opiniones', '/condiciones']);
+const CACHE_PUBLICO = 'public, s-maxage=300, stale-while-revalidate=86400';
+
+// Panel y API del panel: que nadie (navegador, CDN ni proxy) guarde una copia.
+const SIN_CACHE = 'private, no-store';
+
+/** Pone un encabezado sin romper si la respuesta tiene encabezados inmutables. */
+function conEncabezado(res: Response, nombre: string, valor: string): Response {
+  try {
+    res.headers.set(nombre, valor);
+    return res;
+  } catch {
+    const copia = new Response(res.body, res);
+    copia.headers.set(nombre, valor);
+    return copia;
+  }
+}
+
+// Revisión de sesión del panel (sin cambios: solo se movió a una función para
+// poder agregar "private, no-store" a todas sus respuestas).
+async function protegerAdmin(context: APIContext, next: MiddlewareNext): Promise<Response> {
   const { pathname } = context.url;
 
   // Única ruta pública dentro de /api/admin: el login. El callback de Google
@@ -56,4 +82,26 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   return next();
+}
+
+export const onRequest = defineMiddleware(async (context, next) => {
+  const { pathname } = context.url;
+
+  // Toda respuesta de /admin/* y /api/admin/* (incluidos el login, los 401 y
+  // las redirecciones) sale con "private, no-store".
+  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+    return conEncabezado(await protegerAdmin(context, next), 'Cache-Control', SIN_CACHE);
+  }
+
+  const res = await next();
+  // Solo respuestas 200 de las rutas exactas, y nunca si la respuesta pone una cookie.
+  if (
+    PAGINAS_CACHEABLES.has(pathname)
+    && res.status === 200
+    && ['GET', 'HEAD'].includes(context.request.method)
+    && !res.headers.has('set-cookie')
+  ) {
+    return conEncabezado(res, 'Cache-Control', CACHE_PUBLICO);
+  }
+  return res;
 });

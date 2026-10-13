@@ -92,7 +92,7 @@ const recaptchaSiteKey = recaptchaRow?.value ?? '';
           <option value="">Selecciona una opción</option>
           <option>Psicología de adultos</option>
           <option>Terapia de pareja</option>
-          <option>Trauma / PAS</option>
+          <option>Trauma / Personas altamente sensibles (PAS)</option>
           <option>Parentalidad</option>
           <option>Información general</option>
         </select>
@@ -119,12 +119,12 @@ const recaptchaSiteKey = recaptchaRow?.value ?? '';
 <!-- Sugerencias de dominio y aviso "no recibe correos" en el campo correo, igual que en la agenda -->
 <CamposContacto />
 
+<!-- El script de reCAPTCHA (~357 KB) ya no se carga con la página (12 oct 2026):
+     se inserta recién cuando el formulario entra en pantalla o recibe foco, y
+     como último recurso al enviar (ver cargarRecaptcha() más abajo). -->
 <script is:inline define:vars={{ recaptchaSiteKey }}>
   window.__RECAPTCHA_SITE_KEY__ = recaptchaSiteKey;
 </script>
-{recaptchaSiteKey && (
-  <script src={`https://www.google.com/recaptcha/api.js?render=${recaptchaSiteKey}`} is:inline async defer></script>
-)}
 
 <script>
   const form   = document.getElementById('contact-form') as HTMLFormElement;
@@ -133,6 +133,36 @@ const recaptchaSiteKey = recaptchaRow?.value ?? '';
   let abiertoEn = Date.now();
   const status = document.getElementById('form-status');
   const button = form?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+
+  // Carga diferida de reCAPTCHA: una sola vez, cuando hace falta. Devuelve una
+  // promesa que se resuelve cuando el script terminó de cargar (o falló).
+  let recaptchaCarga: Promise<void> | null = null;
+  function cargarRecaptcha(): Promise<void> {
+    const w = window as any;
+    if (!w.__RECAPTCHA_SITE_KEY__) return Promise.resolve();
+    if (recaptchaCarga) return recaptchaCarga;
+    recaptchaCarga = new Promise<void>((resolve) => {
+      const s = document.createElement('script');
+      s.src = `https://www.google.com/recaptcha/api.js?render=${encodeURIComponent(w.__RECAPTCHA_SITE_KEY__)}`;
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => resolve(); // bloqueado: se resuelve igual y el servidor responde con un mensaje claro
+      document.head.appendChild(s);
+    });
+    return recaptchaCarga;
+  }
+  if (form && (window as any).__RECAPTCHA_SITE_KEY__) {
+    // Cuando el formulario se acerca a la pantalla (200 px antes) o alguien entra a un campo.
+    if ('IntersectionObserver' in window) {
+      const obs = new IntersectionObserver((entradas) => {
+        if (entradas.some((en) => en.isIntersecting)) { obs.disconnect(); cargarRecaptcha(); }
+      }, { rootMargin: '200px' });
+      obs.observe(form);
+    } else {
+      cargarRecaptcha();
+    }
+    form.addEventListener('focusin', () => { cargarRecaptcha(); }, { once: true });
+  }
 
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -149,20 +179,23 @@ const recaptchaSiteKey = recaptchaRow?.value ?? '';
     status.textContent = 'Enviando...';
     status.classList.remove('hidden');
 
-    // reCAPTCHA v3 (si está configurado): mismo patrón que /agenda.
+    // reCAPTCHA v3 (si está configurado): mismo patrón que /agenda. El token se
+    // pide al enviar; si el script aún no estaba cargado, se carga ahora.
     let recaptchaToken = '';
     const w = window as any;
-    if (w.__RECAPTCHA_SITE_KEY__ && w.grecaptcha) {
+    if (w.__RECAPTCHA_SITE_KEY__) {
       try {
-        // Con tope de 6 s: si el script de Google está bloqueado o lento, se
-        // envía igual sin token en vez de quedar "Enviando..." para siempre.
+        // Con tope de 8 s (carga del script + token): si el script de Google
+        // está bloqueado o lento, se envía sin token en vez de quedar
+        // "Enviando..." para siempre, y el servidor responde con un mensaje claro.
         recaptchaToken = await Promise.race([
-          new Promise<string>((resolve, reject) => {
+          cargarRecaptcha().then(() => new Promise<string>((resolve, reject) => {
+            if (!w.grecaptcha) { resolve(''); return; }
             w.grecaptcha.ready(() => {
               w.grecaptcha.execute(w.__RECAPTCHA_SITE_KEY__, { action: 'submit_contact' }).then(resolve).catch(reject);
             });
-          }),
-          new Promise<string>((resolve) => setTimeout(() => resolve(''), 6000)),
+          })),
+          new Promise<string>((resolve) => setTimeout(() => resolve(''), 8000)),
         ]);
       } catch (err) {
         console.error('[recaptcha] error obteniendo token', err);
