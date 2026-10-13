@@ -123,6 +123,42 @@ const modalityLabel = (m: string) =>
     </div>
   </section>
 
+  <!-- Temas que trabajo: motivos de consulta frecuentes, en palabras de quien
+       consulta (MRAS, blog e Instagram). Sin promesas de resultado. -->
+  <section class="py-section bg-white">
+    <div class="container-site">
+      <div class="max-w-2xl mb-12">
+        <p class="label text-stone mb-4">Temas que trabajo</p>
+        <div class="divider mb-6"></div>
+        <h2 class="font-heading font-light text-3xl md:text-4xl text-ink mb-4">¿Te suena alguno de estos?</h2>
+        <p class="body-text">Estos son algunos de los motivos por los que las personas llegan a consulta. Si lo tuyo no está aquí, escríbeme y lo conversamos.</p>
+      </div>
+      <ul class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-10">
+        {[
+          ['Me cuesta decir que no', 'Te acompaño a dejar de adaptarte por miedo a molestar.'],
+          ['Siento culpa al descansar o poner límites', 'Exploramos de dónde viene esa falta de permiso para elegirte.'],
+          ['Nunca es suficiente', 'Miramos qué protege tu exigencia y cómo soltarla de a poco.'],
+          ['Lo entiendo todo y aun así no cambio', 'Trabajamos los patrones que se repiten aunque ya sepas de dónde vienen.'],
+          ['Lo que viví en mi infancia me sigue pesando', 'Comprendemos cómo te organizó lo que viviste y trabajamos desde ahí.'],
+          ['Ansiedad y estrés', 'Entendemos qué hay detrás para que recuperes espacio interno.'],
+          ['Ánimo bajo', 'Un lugar para hablar de lo que pesa, a tu ritmo.'],
+          ['Duelos y pérdidas', 'Te acompaño a transitar lo que se terminó: una persona, un vínculo o una etapa.'],
+          ['Siento que tengo que ser otra persona para que me quieran', 'Trabajamos tu valor más allá de lo que haces o rindes.'],
+          ['Mi pareja y yo nos estamos alejando', 'Miramos lo que no se dice, en terapia de pareja o individual.'],
+          ['Siempre me las he arreglado sin ayuda', 'Para quienes aprendieron a no pedir ayuda y hoy sienten que eso les pesa.'],
+          ['Soy una persona altamente sensible (PAS)', 'Un espacio para entender tu sensibilidad y cuidarla, sin verla como un defecto.'],
+          ['La crianza me está desbordando', 'Para madres y padres que quieren mirar el vínculo con sus hijos y desde dónde crían.'],
+        ].map(([titulo, texto]) => (
+          <li class="border-b border-dust py-5">
+            <p class="font-body font-medium text-sm text-ink mb-1">{titulo}</p>
+            <p class="font-body text-sm text-stone font-light leading-relaxed">{texto}</p>
+          </li>
+        ))}
+      </ul>
+      <a href="/agenda" class="btn-dark inline-flex mt-12">Agendar sesión</a>
+    </div>
+  </section>
+
   <!-- CTA final -->
   <section class="py-20 bg-ink text-center">
     <div class="container-site max-w-xl">
