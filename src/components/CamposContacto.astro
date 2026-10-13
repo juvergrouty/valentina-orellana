@@ -70,7 +70,12 @@
         b.textContent = etiqueta(op);
         // mousedown: se elige antes de que el campo pierda el foco.
         b.addEventListener('mousedown', (e) => e.preventDefault());
-        b.addEventListener('click', () => {
+        b.addEventListener('click', (e) => {
+          // Al elegir, la lista se vuelve a dibujar y este botón sale de la
+          // página; si el clic sigue subiendo, los paneles que se cierran al
+          // "hacer clic afuera" (agenda del panel) lo toman como clic afuera y
+          // se cierran (13 oct 2026). El clic termina aquí.
+          e.stopPropagation();
           input.value = op;
           input.dispatchEvent(new Event('input', { bubbles: true }));
           input.dispatchEvent(new Event('change', { bubbles: true }));
