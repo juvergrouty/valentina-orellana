@@ -368,6 +368,15 @@ const resumenPareja     = resumenGrupo('pareja');
             <select id="motivo_consulta" name="motivo_consulta" class="field bg-transparent cursor-pointer">
               <option value="" selected>Selecciona el motivo principal...</option>
             </select>
+            <!-- Solo en terapia de pareja (Valentina, 12 oct 2026): la terapia de
+                 pareja conjunta no es el primer paso si hay violencia; se deriva al 1455. -->
+            <p id="nota-violencia" role="note" class="hidden font-body text-xs text-stone leading-relaxed mt-3 bg-sand px-4 py-3">
+              Si en tu relación hay violencia física, sexual, amenazas o control, la terapia de pareja no es el primer paso:
+              <a href="https://wa.me/56972735696" class="underline">escríbeme</a> para orientarte o llama al
+              <a href="tel:1455" class="underline font-medium">1455</a>
+              (<a href="https://www.chileatiende.gob.cl/fichas/11937-fono-de-orientacion-en-violencias-de-genero-1455" target="_blank" rel="noopener" class="underline">fono de orientación en violencias de género</a>, gratuito, todos los días de 8:00 a 00:00).
+              Si hay peligro inmediato, llama al <a href="tel:133" class="underline">133</a>.
+            </p>
           </div>
           <div>
             <label class="label text-stone block mb-2" for="patient_birthdate">Fecha de nacimiento</label>
@@ -1108,6 +1117,7 @@ const resumenPareja     = resumenGrupo('pareja');
     const select = $('motivo_consulta');
     if (!select) return;
     const opciones = MOTIVOS[group] ?? MOTIVOS.individual;
+    $('nota-violencia')?.classList.toggle('hidden', group !== 'pareja');
     select.innerHTML = '<option value="" selected>Selecciona el motivo principal...</option>';
     opciones.forEach((m) => {
       const opt = document.createElement('option');

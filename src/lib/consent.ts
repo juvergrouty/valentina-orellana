@@ -10,7 +10,10 @@ import { supabase } from './supabase';
 // Si se cambia el texto, subir CONSENT_VERSION: los ya firmados conservan el
 // texto exacto que aceptaron (text_snapshot), así que nunca se reescribe la
 // prueba de un consentimiento anterior.
-export const CONSENT_VERSION = '2026-10-v1';
+// v2 (12 oct 2026, pedido de Valentina): agrega "Sobre la atención psicológica"
+// (proceso, reagendamiento, derivación, urgencias) y los límites del secreto
+// profesional, para que el consentimiento también respalde la terapia.
+export const CONSENT_VERSION = '2026-10-v2';
 
 export const RESPONSABLE = {
   nombre: 'Valentina Orellana',
@@ -30,6 +33,15 @@ export function consentSections(contactEmail: string): ConsentSection[] {
       ],
     },
     {
+      titulo: 'Sobre la atención psicológica',
+      parrafos: [
+        'La psicoterapia es un proceso colaborativo: sus resultados dependen de muchos factores y no pueden garantizarse. Es normal que en algunos momentos aparezcan emociones difíciles. Puedes terminar la terapia cuando quieras.',
+        'Las sesiones duran 50 minutos. Puedes reagendar sin costo avisando con al menos 24 horas de anticipación; con menos de 24 horas de aviso, la sesión se considera realizada.',
+        'Si la psicóloga considera que te ayudaría el apoyo de otro profesional (por ejemplo, psiquiatría u otra especialidad), te lo sugerirá. Y si la terapia no está siendo efectiva para ti, te propondrá una derivación a otro profesional calificado.',
+        'Este espacio no atiende urgencias. Si estás en crisis o piensas en hacerte daño, llama al *4141 (gratis, 24/7), a Salud Responde 600 360 7777 o al SAMU 131, o acude al servicio de urgencia más cercano.',
+      ],
+    },
+    {
       titulo: 'Qué datos y para qué',
       parrafos: [
         'Tus datos de identificación y contacto, y los datos de salud que surgen de la terapia (motivo de consulta, notas clínicas y evolución). Los datos de salud son datos sensibles: por eso se te pide este consentimiento expreso.',
@@ -40,7 +52,7 @@ export function consentSections(contactEmail: string): ConsentSection[] {
       titulo: 'Quién más puede verlos',
       parrafos: [
         'Nadie fuera de la psicóloga, salvo los servicios tecnológicos que hacen funcionar la consulta y que solo pueden usar tus datos para eso: Encuadrado (plataforma clínica donde se transcriben y guardan las notas de sesión), almacenamiento de la ficha y del sitio web, correo, calendario y videollamada, pago en línea y emisión de boletas ante el SII. Algunos de estos servicios guardan la información en servidores fuera de Chile (principalmente en Estados Unidos), bajo contratos que los obligan a mantenerla segura y confidencial.',
-        'La ley obliga a entregar información solo ante una orden judicial o en los demás casos que la ley establece.',
+        'Todo lo que conversas en terapia está protegido por el secreto profesional. Las únicas excepciones son un riesgo grave para tu vida o la de otras personas, la vulneración de derechos de niños, niñas o adolescentes, y una orden judicial o los demás casos que la ley establece. En esos casos se comparte solo lo estrictamente necesario y, cuando sea posible, se te avisa antes.',
       ],
     },
     {
@@ -66,7 +78,7 @@ export const CONSENT_OPTIONS: ConsentOption[] = [
   {
     key: 'accept_treatment',
     titulo: '1. Tratamiento de mis datos (necesaria para atenderte)',
-    texto: 'Autorizo el tratamiento de mis datos personales y de salud para mi atención psicológica, en los términos descritos arriba.',
+    texto: 'Declaro haber leído la información sobre la atención psicológica y autorizo el tratamiento de mis datos personales y de salud para mi atención, en los términos descritos arriba.',
     obligatoria: true,
   },
   {
@@ -88,7 +100,7 @@ export const CONSENT_OPTIONS: ConsentOption[] = [
 export function consentPlainText(contactEmail: string): string {
   const s = consentSections(contactEmail).map(x => `${x.titulo}\n${x.parrafos.join('\n')}`).join('\n\n');
   const o = CONSENT_OPTIONS.map(x => `${x.titulo}\n${x.texto}`).join('\n\n');
-  return `Consentimiento informado para el tratamiento de datos personales y de salud (versión ${CONSENT_VERSION})\n\n${s}\n\nAutorizaciones\n\n${o}`;
+  return `Consentimiento informado para la atención psicológica y el tratamiento de datos personales y de salud (versión ${CONSENT_VERSION})\n\n${s}\n\nAutorizaciones\n\n${o}`;
 }
 
 export const sha256 = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex');
