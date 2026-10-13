@@ -1,5 +1,6 @@
 ---
 import { DIRECCION, GOOGLE_MAPS_URL, COMO_LLEGAR_URL, PERFILES } from '../../data/consulta';
+import BarraAccionesMovil from './BarraAccionesMovil.astro';
 const year = new Date().getFullYear();
 // Perfiles públicos (solo visibilidad; la reserva es siempre en este sitio).
 const perfiles: [string, string][] = [
@@ -29,7 +30,7 @@ const perfiles: [string, string][] = [
 
       <!-- Navegación -->
       <div class="md:col-span-3 md:col-start-6">
-        <p class="label text-sand/40 mb-5">Navegación</p>
+        <p class="label text-sand/60 mb-5">Navegación</p>
         <ul class="space-y-3">
           {[
             ['/', 'Inicio'],
@@ -53,7 +54,7 @@ const perfiles: [string, string][] = [
 
       <!-- Contacto -->
       <div class="md:col-span-4 md:col-start-9">
-        <p class="label text-sand/40 mb-5">Contacto</p>
+        <p class="label text-sand/60 mb-5">Contacto</p>
         <ul class="space-y-4">
           <li>
             <a href="tel:+56972735696" class="text-sm text-sand/50 hover:text-sand transition-colors duration-200 block">
@@ -99,9 +100,13 @@ const perfiles: [string, string][] = [
       ))}
     </div>
 
-    <!-- pb-20 en celular: el botón flotante "Agendar sesión" no tapa esta línea -->
+    <!-- pb-20 en celular: el botón flotante "Agendar sesión" no tapa esta línea
+         (con la barra inferior, el footer suma además su alto: BarraAccionesMovil) -->
     <div class="flex items-center justify-center pt-8 pb-20 md:pb-0 text-xs text-sand/60 text-center">
       <p>© {year} Valentina Alejandra Orellana Jaramillo · Ps. Valentina Orellana. Todos los derechos reservados.</p>
     </div>
   </div>
 </footer>
+
+<!-- Barra fija inferior "Agendar sesión" + WhatsApp, solo en celular -->
+<BarraAccionesMovil />

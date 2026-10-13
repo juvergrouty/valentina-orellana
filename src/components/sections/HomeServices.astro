@@ -21,8 +21,22 @@ if (!dbServices || dbServices.length === 0) {
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style:'currency', currency:'CLP', maximumFractionDigits:0 }).format(n);
 
+// Fotos reales de la consulta en Estoril 50 (12 oct 2026) para los servicios
+// presenciales: las de Supabase eran de banco de imágenes, con personas que no
+// son Valentina. Los online siguen con la imagen que se sube en el panel.
+const FOTOS_CONSULTA = {
+  individual: { base: '/images/consulta-puerta', alt: 'Sala de atención de la consulta en Estoril 50, Las Condes, vista desde la puerta: sillón, mesa de centro y ventana' },
+  pareja:     { base: '/images/consulta-sala',   alt: 'Sala de atención de la consulta en Estoril 50, Las Condes: sofá para dos, sillón y mesa de centro junto a la ventana' },
+};
+const fotoConsulta = (s: { modality: string; type: string | null; name: string }) => {
+  if (s.modality !== 'presencial') return null;
+  const esPareja = s.type === 'pareja' || /pareja/i.test(s.name);
+  return esPareja ? FOTOS_CONSULTA.pareja : FOTOS_CONSULTA.individual;
+};
+
 const cards = (dbServices ?? []).map(s => ({
   ...s,
+  foto:       fotoConsulta(s),
   href:       `/agenda?servicio=${s.id}`,
   badge:      s.modality === 'online' ? 'Online' : s.modality === 'presencial' ? 'Presencial' : 'Online · Presencial',
   priceLabel: formatCLP(s.price),
@@ -66,13 +80,26 @@ const cards = (dbServices ?? []).map(s => ({
       style="scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;cursor:grab;">
 
       {cards.map(card => (
-        <div class="flex-shrink-0 w-[80vw] sm:w-[calc(50%-10px)] lg:w-[calc(25%-15px)] bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-lg transition-all duration-300"
+        <!-- flex-col + mt-auto en el pie: precio y botón quedan a la misma altura en
+             todas las tarjetas aunque el nombre o la descripción ocupen más líneas. -->
+        <div class="svc-card flex-shrink-0 w-[80vw] sm:w-[calc(50%-10px)] lg:w-[calc(25%-15px)] flex flex-col bg-white border border-dust rounded-[10px] overflow-hidden group hover:shadow-lg transition-all duration-300"
              style="scroll-snap-align:start;scroll-snap-stop:always;">
 
           <!-- Imagen -->
-          <div class="relative h-[340px] overflow-hidden">
+          <div class="relative h-[340px] overflow-hidden flex-shrink-0">
             <!-- Optimizada por Vercel y diferida: el carrusel está bajo el hero, no es
-                 lo primero que se ve (8 oct 2026). -->
+                 lo primero que se ve (8 oct 2026). Presenciales: foto propia en WebP. -->
+            {card.foto ? (
+            <img
+              src={`${card.foto.base}-800.webp`}
+              srcset={`${card.foto.base}-800.webp 800w, ${card.foto.base}-1600.webp 1600w`}
+              sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 80vw"
+              width="800" height="1000"
+              loading="lazy" decoding="async"
+              alt={card.foto.alt}
+              class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+            />
+            ) : (
             <img
               src={imagenUrl(card.image_url ?? '/images/consultorio-individual.jpg', 828)}
               srcset={imagenSrcset(card.image_url ?? '/images/consultorio-individual.jpg', [384, 640, 828])}
@@ -82,6 +109,7 @@ const cards = (dbServices ?? []).map(s => ({
               alt={card.name}
               class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
             />
+            )}
             <div class="absolute inset-0 bg-gradient-to-t from-ink/40 to-transparent"></div>
             <span class="absolute top-3 left-3 text-xs font-body font-medium px-3 py-1 rounded-full bg-white/90 text-ink">
               {card.badge}
@@ -89,14 +117,14 @@ const cards = (dbServices ?? []).map(s => ({
           </div>
 
           <!-- Contenido -->
-          <div class="p-5 flex flex-col" style="min-height:180px;">
+          <div class="p-5 flex flex-col flex-1" style="min-height:180px;">
             <h3 class="font-heading font-semibold text-lg text-ink leading-tight mb-1">{card.name}</h3>
             {card.location && (
               <p class="font-body text-xs text-stone mb-2">📍 {card.location}</p>
             )}
-            <p class="font-body text-sm text-stone font-light leading-relaxed mb-4 flex-1 line-clamp-3">{card.description}</p>
+            <p class="font-body text-sm text-stone font-light leading-relaxed mb-4 line-clamp-3">{card.description}</p>
 
-            <div class="flex items-center justify-between pt-3 border-t border-dust">
+            <div class="mt-auto flex items-center justify-between pt-3 border-t border-dust">
               <div>
                 <p class="font-heading font-semibold text-base text-ink leading-none">{card.priceLabel}</p>
                 <p class="font-body text-xs text-stone mt-0.5">{card.duration_min} minutos</p>
@@ -115,7 +143,7 @@ const cards = (dbServices ?? []).map(s => ({
   </div>
 
   <!-- Dots -->
-  <div id="svc-dots" class="flex justify-center gap-2 mt-5 container-site"></div>
+  <div id="svc-dots" class="flex justify-center mt-4 container-site"></div>
 
 </section>
 )}
@@ -130,7 +158,7 @@ const cards = (dbServices ?? []).map(s => ({
   if (!track) return;
 
   const cardW = () => {
-    const c = track.querySelector('.flex-shrink-0') as HTMLElement;
+    const c = track.querySelector('.svc-card') as HTMLElement;
     if (!c) return 320;
     // gap-5 = 20px; usar offsetWidth del card real para snap exacto
     const gap = parseInt(getComputedStyle(track).gap) || 20;
@@ -149,11 +177,18 @@ const cards = (dbServices ?? []).map(s => ({
   track.addEventListener('mousemove',  e => { if (!dragging) return; e.preventDefault(); track.scrollLeft = scrollLeft - (e.pageX - startX); });
 
   // Dots
-  const cards = track.querySelectorAll('.flex-shrink-0:not(:last-child)');
+  const cards = track.querySelectorAll('.svc-card:not(:last-child)');
   cards.forEach((_, i) => {
     const dot = document.createElement('button');
     dot.setAttribute('aria-label', `Ir al servicio ${i+1}`);
-    dot.style.cssText = `width:7px;height:7px;border-radius:50%;border:none;cursor:pointer;transition:all .2s;background:${i===0?'#576352':'#DDD8CF'}`;
+    // Área táctil de 24×24 px (WCAG 2.5.8) con el punto de 7 px dibujado al centro
+    // por un span; el fondo del botón es transparente.
+    dot.className = 'svc-dot';
+    dot.style.cssText = 'width:24px;height:24px;padding:0;border:none;background:transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;';
+    const punto = document.createElement('span');
+    punto.setAttribute('aria-hidden', 'true');
+    punto.style.cssText = `display:block;width:7px;height:7px;border-radius:50%;transition:all .2s;background:${i===0?'#576352':'#DDD8CF'}`;
+    dot.appendChild(punto);
     dot.addEventListener('click', () => track.scrollTo({ left: i * cardW(), behavior: 'smooth' }));
     dots?.appendChild(dot);
   });
@@ -161,7 +196,7 @@ const cards = (dbServices ?? []).map(s => ({
   // Actualizar dots y flechas en scroll
   track.addEventListener('scroll', () => {
     const idx = Math.round(track.scrollLeft / cardW());
-    dots?.querySelectorAll('button').forEach((d, i) => {
+    dots?.querySelectorAll('button > span').forEach((d, i) => {
       (d as HTMLElement).style.background = i === idx ? '#576352' : '#DDD8CF';
       (d as HTMLElement).style.transform  = i === idx ? 'scale(1.3)' : 'scale(1)';
     });

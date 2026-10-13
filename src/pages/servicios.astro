@@ -51,6 +51,19 @@ const fallback = [
 
 const services = (dbServices && dbServices.length > 0 ? dbServices : fallback);
 
+// Fotos reales de la consulta en Estoril 50 (12 oct 2026) para los servicios
+// presenciales: las de Supabase eran de banco de imágenes, con personas que no
+// son Valentina. Misma regla que en la portada (HomeServices.astro).
+const FOTOS_CONSULTA = {
+  individual: { base: '/images/consulta-puerta', alt: 'Sala de atención de la consulta en Estoril 50, Las Condes, vista desde la puerta: sillón, mesa de centro y ventana' },
+  pareja:     { base: '/images/consulta-sala',   alt: 'Sala de atención de la consulta en Estoril 50, Las Condes: sofá para dos, sillón y mesa de centro junto a la ventana' },
+};
+const fotoConsulta = (s: { modality: string; type: string | null; name: string }) => {
+  if (s.modality !== 'presencial') return null;
+  const esPareja = s.type === 'pareja' || /pareja/i.test(s.name);
+  return esPareja ? FOTOS_CONSULTA.pareja : FOTOS_CONSULTA.individual;
+};
+
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 
@@ -60,17 +73,28 @@ const modalityLabel = (m: string) =>
 
 <BaseLayout title="Terapia Individual y de Pareja" description="Terapia individual para adultos y terapia de pareja, online o presencial en Las Condes. Sesiones de 50 minutos con la Ps. Valentina Orellana.">
 
-  <PageHero label="¿En qué puedo ayudarte?" title="Servicios" image="/images/banner-servicios.jpg" imageMobile="/images/banner-servicios-mobile.jpg" />
+  <PageHero label="¿En qué puedo ayudarte?" title="Servicios" image="/images/sala-espera-ancho-1600.webp" imageMobile="/images/sala-espera-800.webp" />
 
   <section class="py-section bg-sand">
     <div class="container-site">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {services.map((service, i) => (
+        {services.map((service, i) => { const foto = fotoConsulta(service); return (
           <div class="relative overflow-hidden rounded-[10px] group min-h-[420px] flex flex-col justify-end">
 
             <!-- Imagen de fondo -->
             <!-- Optimizada por Vercel y diferida: va bajo el banner, el LCP es el
-                 banner de PageHero (8 oct 2026). -->
+                 banner de PageHero (8 oct 2026). Presenciales: foto propia en WebP. -->
+            {foto ? (
+            <img
+              src={`${foto.base}-800.webp`}
+              srcset={`${foto.base}-800.webp 800w, ${foto.base}-1600.webp 1600w`}
+              sizes="(min-width: 768px) 50vw, 100vw"
+              width="800" height="1000"
+              loading="lazy" decoding="async"
+              alt={foto.alt}
+              class="absolute inset-0 w-full h-full object-cover object-[50%_65%] group-hover:scale-105 transition-transform duration-700"
+            />
+            ) : (
             <img
               src={imagenUrl(service.image_url ?? '/images/consultorio-individual.jpg', 1200)}
               srcset={imagenSrcset(service.image_url ?? '/images/consultorio-individual.jpg', [640, 828, 1200])}
@@ -80,9 +104,12 @@ const modalityLabel = (m: string) =>
               alt={service.name}
               class="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
             />
+            )}
 
-            <!-- Degradado inferior para legibilidad -->
-            <div class="absolute inset-0 bg-gradient-to-t from-ink/90 via-ink/40 to-transparent"></div>
+            <!-- Degradado inferior para legibilidad: más oscuro donde va el texto
+                 (antes from-ink/90 via-ink/40 dejaba la descripción bajo 4,5:1 sobre
+                 fotos claras como la de la consulta). -->
+            <div class="absolute inset-0 bg-gradient-to-t from-ink/95 via-ink/75 via-55% to-ink/10"></div>
 
             <!-- Badge modalidad -->
             <div class="absolute top-4 left-4 z-10">
@@ -93,20 +120,20 @@ const modalityLabel = (m: string) =>
 
             <!-- Contenido sobre la imagen -->
             <div class="relative z-10 px-6 pb-6 pt-16 sm:p-8 md:p-10">
-              <p class="label text-white/50 mb-3">{String(i + 1).padStart(2, '0')}</p>
-              <h2 class="font-heading font-light text-3xl md:text-4xl text-white leading-tight mb-3">
+              <p class="label text-white/80 mb-3">{String(i + 1).padStart(2, '0')}</p>
+              <h2 class="font-heading font-semibold text-3xl md:text-4xl text-white leading-tight mb-3">
                 {service.name}
               </h2>
-              <p class="font-body text-sm text-white/70 font-light leading-relaxed mb-6 max-w-sm">
+              <p class="font-body text-sm text-white/90 leading-relaxed mb-6 max-w-sm">
                 {service.description}
               </p>
               {service.location && (
-                <p class="font-body text-xs text-white/50 mb-4">📍 {service.location}</p>
+                <p class="font-body text-xs text-white/85 mb-4">📍 {service.location}</p>
               )}
               <div class="flex flex-wrap items-end justify-between gap-4 pt-5 border-t border-white/20">
                 <div>
-                  <p class="label text-white/40 mb-0.5">Duración · Valor</p>
-                  <p class="font-heading font-light text-lg text-white whitespace-nowrap">
+                  <p class="label text-white/80 mb-0.5">Duración · Valor</p>
+                  <p class="font-heading text-lg text-white whitespace-nowrap">
                     {service.duration_min} min · {formatCLP(service.price)}
                   </p>
                 </div>
@@ -118,7 +145,7 @@ const modalityLabel = (m: string) =>
             </div>
 
           </div>
-        ))}
+        ); })}
       </div>
     </div>
   </section>
@@ -126,7 +153,7 @@ const modalityLabel = (m: string) =>
   <!-- CTA final -->
   <section class="py-20 bg-ink text-center">
     <div class="container-site max-w-xl">
-      <p class="label text-sand/40 mb-4">¿No sabes por dónde empezar?</p>
+      <p class="label text-sand/60 mb-4">¿No sabes por dónde empezar?</p>
       <div class="divider-center bg-sand/20 mb-8"></div>
       <h2 class="font-heading font-light text-3xl md:text-4xl text-sand mb-6">
         Escríbeme y lo<br />descubrimos juntos.

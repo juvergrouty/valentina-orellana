@@ -1,0 +1,54 @@
+---
+// Barra fija inferior en celular (< 768px) con "Agendar sesión" y WhatsApp
+// (12 oct 2026). Reemplaza, solo en celular, a los dos botones flotantes de
+// BaseLayout (la píldora a la izquierda y el círculo verde a la derecha), que
+// tapaban contenido: la pregunta de Fonasa/Isapre en /precios, el teléfono en
+// /contacto. En escritorio esos botones siguen igual.
+//
+// Se renderiza desde Footer.astro porque BaseLayout lo están tocando otros
+// cambios; los flotantes viejos se ocultan por CSS solo cuando esta barra existe
+// (body:has(#barra-movil)). Mismas rutas que el flotante "Agendar sesión" de
+// BaseLayout: no aparece en el flujo de reserva/pago ni en páginas privadas (ahí
+// sigue el WhatsApp flotante de siempre). Mismos href que los botones viejos, así
+// las etiquetas de GTM que miran clics a /agenda y a wa.me siguen contando.
+const ruta = Astro.url.pathname.replace(/\/$/, '') || '/';
+const mostrar = !['/agenda', '/reagendar', '/confirmacion', '/recuperar'].includes(ruta)
+  && !/^\/(pagar|consentimiento|pasos-a-seguir|admin)(\/|$)/.test(ruta);
+const WHATSAPP = 'https://wa.me/56972735696?text=Hola%20Valentina%2C%20me%20gustar%C3%ADa%20saber%20m%C3%A1s%20sobre%20las%20sesiones.';
+---
+
+{mostrar && (
+  <div id="barra-movil" class="md:hidden fixed inset-x-0 bottom-0 z-50"
+       style="background:#FAF7F4;border-top:1px solid #DDD8CF;box-shadow:0 -4px 16px rgba(26,26,24,.06);padding:10px 16px calc(10px + env(safe-area-inset-bottom));">
+    <div class="flex items-center gap-3">
+      <a href="/agenda" data-cta="agendar" data-ubicacion="barra-movil"
+         class="flex-1 h-12 rounded-full flex items-center justify-center font-body text-sm font-medium tracking-wide text-white"
+         style="background-color:#576352;">
+        Agendar sesión
+      </a>
+      <a href={WHATSAPP} target="_blank" rel="noopener noreferrer"
+         data-cta="whatsapp" data-ubicacion="barra-movil"
+         aria-label="Contactar por WhatsApp"
+         class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center"
+         style="background-color:#25D366;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
+        </svg>
+      </a>
+    </div>
+  </div>
+)}
+
+<style is:global>
+  @media (max-width: 767px) {
+    /* Con la barra presente, fuera los flotantes viejos de BaseLayout (solo celular) */
+    body:has(#barra-movil) > a.fixed[href="/agenda"],
+    body:has(#barra-movil) > a.fixed[href^="https://wa.me/"] { display: none !important; }
+    /* Espacio a la derecha para el sello de reCAPTCHA (abajo a la derecha, ~70 px
+       visibles): la barra no queda encima del sello ni el botón de WhatsApp debajo. */
+    body:has(.grecaptcha-badge) #barra-movil { padding-right: 92px !important; }
+    /* Lo último de la página no queda tapado: el footer ya deja 80 px (pb-20) bajo
+       el copyright, más que los 68 px de la barra; se suma el área segura del iPhone. */
+    body:has(#barra-movil) footer { padding-bottom: env(safe-area-inset-bottom); }
+  }
+</style>

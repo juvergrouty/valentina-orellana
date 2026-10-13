@@ -2,7 +2,14 @@
 import { getCachedReviews } from '../../lib/googleReviews';
 
 const cache   = await getCachedReviews();
-const reviews = (cache?.reviews ?? []).filter(r => r.text).slice(0, 5);
+// Las que dicen que la consulta queda "lejos" pasan al final del carrusel (12 oct
+// 2026): la más reciente lo decía y era lo primero que se leía. "Lejos la mejor"
+// es un elogio y no cuenta.
+const sinTildes = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const quedaLejos = (t: string) => /lejos(?!\s+(la|el|lo)\s+mejor)/.test(sinTildes(t)) ? 1 : 0;
+const reviews = (cache?.reviews ?? []).filter(r => r.text)
+  .sort((a, b) => quedaLejos(a.text) - quedaLejos(b.text))
+  .slice(0, 5);
 const rating  = cache?.rating ?? 5.0;
 const total   = cache?.total ?? null;
 ---
@@ -10,23 +17,30 @@ const total   = cache?.total ?? null;
 <!-- La sección crece con el texto y la foto la cubre de fondo (cover). Antes,
      desde 640px la sección medía lo que mide la foto y el texto, superpuesto
      con position:absolute, se cortaba arriba y abajo en notebooks y tablets. -->
-<section class="relative overflow-hidden bg-sand min-h-[680px] sm:min-h-[600px] lg:min-h-[680px] flex items-start sm:items-center">
+<!-- En celular (< 640px) la foto va arriba, sin velo sobre la cara, y el texto
+     debajo sobre fondo crema (12 oct 2026): antes el degradado sand/95 sobre toda
+     la foto lavaba la cara de Valentina. Desde 640px queda igual que antes. -->
+<section class="relative overflow-hidden bg-sand sm:min-h-[600px] lg:min-h-[680px] flex flex-col sm:flex-row items-stretch sm:items-center">
 
-  <img
-    src="/images/hero-home.webp"
-    alt=""
-    aria-hidden="true"
-    fetchpriority="high"
-    class="absolute inset-0 w-full h-full object-cover object-[80%_20%] sm:object-[100%_center] lg:object-[75%_center] block"
-    width="1920"
-    height="900"
-  />
+  <div class="relative h-[340px] sm:h-auto sm:absolute sm:inset-0">
+    <img
+      src="/images/hero-home.webp"
+      alt=""
+      aria-hidden="true"
+      fetchpriority="high"
+      class="absolute inset-0 w-full h-full object-cover object-[78%_15%] sm:object-[100%_center] lg:object-[75%_center] block"
+      width="1920"
+      height="900"
+    />
+    <!-- Solo celular: funde el borde inferior de la foto con el crema del texto -->
+    <div class="sm:hidden absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-sand to-transparent"></div>
+  </div>
 
-  <!-- Degradado: cubre todo el ancho en mobile (texto sobre imagen), solo lado izq en desktop -->
-  <div class="absolute inset-y-0 left-0 w-full sm:w-[75%] lg:w-[55%] bg-gradient-to-r from-sand/95 via-sand/85 to-sand/50 sm:via-sand/80 sm:to-transparent lg:via-sand/70"></div>
+  <!-- Degradado: solo desde 640px y solo en el lado izquierdo (en celular el texto va bajo la foto) -->
+  <div class="hidden sm:block absolute inset-y-0 left-0 sm:w-[75%] lg:w-[55%] bg-gradient-to-r from-sand/95 sm:via-sand/80 sm:to-transparent lg:via-sand/70"></div>
 
   <!-- Texto (en el flujo normal: define la altura de la sección) -->
-  <div class="relative z-10 w-full pt-14 pb-12 sm:py-16">
+  <div class="relative z-10 w-full pt-4 pb-12 sm:py-16">
     <div class="container-site w-full">
       <div class="max-w-lg sm:max-w-md lg:max-w-lg">
 
@@ -87,10 +101,15 @@ const total   = cache?.total ?? null;
             </div>
 
             {reviews.length > 1 && (
-              <div id="hero-dots" class="flex gap-1.5 mt-3">
+              <!-- Cada botón mide 24×24 px (área táctil WCAG 2.5.8), transparente; el
+                   punto visible de 7 px es el span interior. -->
+              <div id="hero-dots" class="flex mt-1 -ml-2">
                 {reviews.map((_, i) => (
                   <button type="button" class="hero-dot" data-idx={i} aria-label={`Reseña ${i+1}`}
-                    style={`width:7px;height:7px;border-radius:9999px;border:none;padding:0;cursor:pointer;transition:background .3s,width .3s;background:${i===0?'#576352':'#D8D2C8'};${i===0?'width:16px;':''}`}></button>
+                    style="min-width:24px;height:24px;padding:0 4px;border:none;background:transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;">
+                    <span class="hero-dot-punto" aria-hidden="true"
+                      style={`display:block;height:7px;border-radius:9999px;transition:background .3s,width .3s;background:${i===0?'#576352':'#D8D2C8'};width:${i===0?'16px':'7px'};`}></span>
+                  </button>
                 ))}
               </div>
             )}
@@ -127,7 +146,7 @@ const total   = cache?.total ?? null;
       const wrap = document.getElementById('hero-reviews');
       if (!wrap) return;
       const items = Array.from(wrap.querySelectorAll('.hero-review'));
-      const dots  = Array.from(document.querySelectorAll('#hero-dots .hero-dot'));
+      const dots  = Array.from(document.querySelectorAll('#hero-dots .hero-dot-punto'));
 
       let i = 0, timer = null;
       const show = (n) => {
@@ -167,7 +186,7 @@ const total   = cache?.total ?? null;
 
       // ── Carrusel (solo si hay 2+) ──
       if (items.length > 1) {
-        dots.forEach((d, idx) => d.addEventListener('click', () => { stop(); show(idx); start(); }));
+        document.querySelectorAll('#hero-dots .hero-dot').forEach((d, idx) => d.addEventListener('click', () => { stop(); show(idx); start(); }));
         wrap.addEventListener('mouseenter', stop);
         wrap.addEventListener('mouseleave', start);
         start();
