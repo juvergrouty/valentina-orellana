@@ -1150,3 +1150,167 @@ export async function sendTransferReceiptAdmin(opts: {
   await logEmail('email/transferencia', opts.to, subject, !res.error, res.error?.message);
   return res.error ? { sent: false, reason: res.error.message } : { sent: true };
 }
+
+// ─── Vitrina: talleres, charlas y contenido digital (14 oct 2026) ────────────
+// Confirmación a quien se inscribió (pagó o era gratis) y aviso a Valentina.
+// Las indicaciones para estacionar van solo aquí (personas con inscripción
+// confirmada), igual que en las sesiones: nunca en la página pública.
+export interface VitrinaEmailData {
+  inscripcion_id: string;
+  name:           string;
+  email:          string;
+  phone?:         string | null;
+  item_title:     string;
+  item_type:      'taller' | 'charla' | 'contenido';
+  modality:       'online' | 'presencial';
+  starts_at:      string | null;
+  duration_min:   number | null;
+  amount:         number;
+  meet_url?:      string | null;  // online
+  direccion?:     string | null;  // presencial, ya con el estacionamiento
+  download_url?:  string | null;  // contenido digital (link firmado, vence en 7 días)
+}
+
+const VITRINA_TIPO: Record<string, string> = { taller: 'Taller', charla: 'Charla', contenido: 'Contenido digital' };
+
+/** "jueves, 5 de noviembre de 2026, 19:00 hrs (hora de Chile)" */
+function fechaVitrina(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const f = new Intl.DateTimeFormat('es-CL', { timeZone: 'America/Santiago', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(d);
+  const h = new Intl.DateTimeFormat('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
+  return `${f}, ${h} hrs (hora de Chile)`;
+}
+
+export async function sendVitrinaConfirmation(data: VitrinaEmailData, opts: { idempotencyKey?: string } = {}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) { console.warn('[email] RESEND_API_KEY no configurado — email omitido'); return { sent: false, reason: 'RESEND_API_KEY no configurado' }; }
+
+  const esContenido = data.item_type === 'contenido';
+  const tipo = VITRINA_TIPO[data.item_type] ?? 'Taller';
+  const subject = esContenido
+    ? `Tu contenido está listo — ${data.item_title}`
+    : `Inscripción confirmada — ${data.item_title}`;
+  const fila = (k: string, v: string) => `
+            <tr>
+              <td style="padding:0.4rem 0;color:#6B6860;width:35%;vertical-align:top;">${k}</td>
+              <td style="padding:0.4rem 0;font-weight:500;">${v}</td>
+            </tr>`;
+  const filas = [
+    fila(tipo, escapeHtml(data.item_title)),
+    !esContenido && data.starts_at ? fila('Fecha y hora', escapeHtml(fechaVitrina(data.starts_at))) : '',
+    !esContenido && data.duration_min ? fila('Duración', `${data.duration_min} minutos`) : '',
+    !esContenido ? fila('Modalidad', data.modality === 'online' ? 'Online (Google Meet)' : 'Presencial') : '',
+    !esContenido && data.modality === 'presencial' && data.direccion ? fila('Dirección', escapeHtml(data.direccion)) : '',
+    fila('Valor', data.amount > 0 ? `${formatCLP(data.amount)} · pagado` : 'Gratis'),
+  ].join('');
+
+  const boton = (href: string, texto: string) => `
+          <a href="${escapeHtml(href)}"
+             style="display:inline-block;background:#576352;color:white;padding:0.7rem 1.3rem;text-decoration:none;
+                    font-family:'Inter',sans-serif;font-size:0.75rem;letter-spacing:0.08em;text-transform:uppercase;">
+            ${texto}
+          </a>`;
+  const nota = (texto: string) => `
+        <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#6B6860;line-height:1.6;margin-bottom:1.5rem;">${texto}</p>`;
+
+  const bloqueOnline = esContenido || data.modality !== 'online' ? ''
+    : data.meet_url ? `
+        <div style="border:1px solid #DDD8CF;padding:1.1rem 1.25rem;margin-bottom:1.5rem;">
+          <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#1A1A18;margin:0 0 0.75rem;">El día del encuentro, entra con este enlace:</p>
+          ${boton(data.meet_url, 'Entrar a Google Meet')}
+          <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#6B6860;margin:0.75rem 0 0;">Te recomiendo conectarte 5 minutos antes, desde un lugar tranquilo.</p>
+        </div>`
+    : nota('Te enviaré el enlace de Google Meet a este correo antes del inicio.');
+
+  const bloqueDescarga = !esContenido ? ''
+    : data.download_url ? `
+        <div style="border:1px solid #DDD8CF;padding:1.1rem 1.25rem;margin-bottom:1.5rem;">
+          ${boton(data.download_url, 'Descargar')}
+          <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#6B6860;margin:0.75rem 0 0;">
+            El enlace es personal y funciona durante 7 días: te sugiero descargarlo y guardarlo. Si vence, responde este correo y te envío uno nuevo.
+          </p>
+        </div>`
+    : nota('En breve te envío el enlace de descarga a este correo.');
+
+  const res = await client.emails.send({
+    from: FROM,
+    replyTo: PATIENT_REPLY_TO,
+    to:   data.email,
+    subject,
+    html: `
+      <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
+        ${LOGO_HEADER}
+        <h1 style="font-size:1.6rem;font-weight:400;margin-bottom:0.5rem;color:#1A1A18;">
+          ${esContenido ? (data.amount > 0 ? 'Gracias por tu compra' : 'Aquí tienes tu contenido') : 'Tu inscripción está confirmada'}
+        </h1>
+        <p style="color:#6B6860;font-size:0.9rem;margin-bottom:2rem;font-family:'Inter',sans-serif;">
+          Hola ${escapeHtml(data.name)}, ${esContenido ? 'aquí tienes tu contenido.' : 'qué alegría que me acompañes. Estos son los detalles:'}
+        </p>
+
+        <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
+          <table style="width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:0.85rem;">${filas}
+          </table>
+        </div>
+        ${bloqueOnline}${bloqueDescarga}
+        ${esContenido ? '' : nota('Si no puedes asistir, avísame respondiendo este correo. Este es un espacio educativo y grupal: no reemplaza un proceso de psicoterapia ni atiende urgencias (si estás en crisis, llama al *4141, gratis y 24/7).')}
+
+        <a href="https://wa.me/56972735696"
+           style="display:inline-block;border:1px solid #576352;color:#576352;padding:0.65rem 1.3rem;
+                  text-decoration:none;font-family:'Inter',sans-serif;font-size:0.75rem;
+                  letter-spacing:0.1em;text-transform:uppercase;">
+          Escribir por WhatsApp
+        </a>
+
+        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
+                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
+          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
+        </p>
+      </div>
+    `,
+  }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+  // Misma llave = ese correo ya salió en un intento anterior: cuenta como enviado.
+  if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
+  await logEmail('email/vitrina-confirmacion', data.email, subject, !res.error, res.error?.message);
+  return res.error ? { sent: false, reason: res.error.message } : { sent: true };
+}
+
+export async function sendVitrinaAdminNotification(data: VitrinaEmailData & { cupos?: string | null }, adminEmail: string, opts: { idempotencyKey?: string } = {}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+  const tipo = VITRINA_TIPO[data.item_type] ?? 'Taller';
+  const subject = `Nueva inscripción — ${data.item_title} · ${data.name}`;
+  const fila = (k: string, v: string, fuerte = false) => `
+          <tr><td style="padding:0.35rem 0;color:#6B6860;width:35%;">${k}</td>
+              <td style="padding:0.35rem 0;${fuerte ? 'font-weight:500;' : ''}">${v}</td></tr>`;
+  const res = await client.emails.send({
+    from:    FROM,
+    to:      adminEmail,
+    subject,
+    html: `
+      <div style="font-family:'Inter',sans-serif;max-width:480px;margin:0 auto;padding:1.5rem;color:#1A1A18;background:#FAF7F4;">
+        <h2 style="font-size:1rem;font-weight:600;margin-bottom:1.25rem;border-bottom:2px solid #576352;padding-bottom:0.5rem;">
+          Nueva inscripción en la vitrina
+        </h2>
+        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+          ${fila(tipo, escapeHtml(data.item_title), true)}
+          ${data.starts_at ? fila('Fecha', escapeHtml(fechaVitrina(data.starts_at))) : ''}
+          ${fila('Nombre', escapeHtml(data.name), true)}
+          ${fila('Correo', escapeHtml(data.email))}
+          ${fila('Teléfono', escapeHtml(data.phone ?? ''))}
+          ${fila('Monto', data.amount > 0 ? `${formatCLP(data.amount)} · pagado` : 'Gratis', true)}
+          ${data.cupos ? fila('Cupos', escapeHtml(data.cupos)) : ''}
+        </table>
+        <a href="https://www.valentinaorellana.cl/admin/vitrina"
+           style="display:inline-block;margin-top:1.5rem;background:#1A1A18;color:white;
+                  padding:0.6rem 1.2rem;text-decoration:none;font-size:0.72rem;
+                  letter-spacing:0.1em;text-transform:uppercase;">
+          Ver en panel admin
+        </a>
+      </div>
+    `,
+  }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+  if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
+  await logEmail('email/vitrina-admin', adminEmail, subject, !res.error, res.error?.message);
+  return res.error ? { sent: false, reason: res.error.message } : { sent: true };
+}

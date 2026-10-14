@@ -1,0 +1,99 @@
+---
+// /talleres — Vitrina de talleres, charlas y contenido digital (14 oct 2026).
+// Oculta (404) mientras el ajuste vitrina_publica no sea 'true'; Valentina la
+// ve con ?preview=1 y la sesión del panel abierta.
+export const prerender = false;
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PageHero from '../../components/sections/PageHero.astro';
+import { supabase } from '../../lib/supabase';
+import { imagenUrl, imagenSrcset } from '../../lib/imagenOptimizada';
+import { vitrinaPublica, esAdmin, ocupadosPorItem, type VitrinaItem } from '../../lib/vitrina';
+import { TIPO_LABEL, fechaLargaChile, horaChile, precioTexto, yaPaso, cuposRestantes } from '../../lib/vitrinaUtils';
+
+const publica = await vitrinaPublica();
+const preview = Astro.url.searchParams.get('preview') === '1' && await esAdmin(Astro.cookies);
+if (!publica && !preview) return Astro.rewrite('/404');
+// La vista previa depende de la sesión del panel: que nadie guarde una copia.
+if (preview) Astro.response.headers.set('Cache-Control', 'private, no-store');
+
+let q = supabase.from('vitrina_items').select('*').order('sort_order').order('starts_at', { ascending: true, nullsFirst: false });
+if (!preview) q = q.eq('visible', true);
+const { data, error } = await q;
+if (error) Astro.response.headers.set('Cache-Control', 'no-store');
+const items = ((data ?? []) as VitrinaItem[]).filter(i => !yaPaso(i));
+const ocupados = await ocupadosPorItem(items.map(i => i.id)).catch(() => new Map<string, number>());
+const sufijo = preview ? '?preview=1' : '';
+---
+
+<BaseLayout
+  title="Talleres y charlas"
+  description="Talleres, charlas y contenido de la Ps. Valentina Orellana: espacios grupales online y presenciales en Las Condes sobre vínculos, pareja, trauma y bienestar emocional."
+  noindex={!publica}
+>
+  <PageHero label="Aprender en compañía" title="Talleres y charlas" image="/images/sala-espera-ancho-1600.webp" imageMobile="/images/sala-espera-800.webp" />
+
+  {preview && (
+    <div class="container-site" style="padding-top:1.5rem;">
+      <p class="font-body text-sm text-ink bg-warm border border-dust px-4 py-3">
+        Vista previa del panel{!publica ? ': la vitrina está desactivada y el público ve un 404' : ''}. Los items ocultos también aparecen aquí.
+      </p>
+    </div>
+  )}
+
+  <section class="py-section bg-sand">
+    <div class="container-site">
+      {items.length === 0 ? (
+        <div class="text-center max-w-xl mx-auto">
+          <p class="body-text mb-8">Por ahora no hay talleres abiertos. Escríbeme si quieres saber cuándo se abre el próximo.</p>
+          <a href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20quiero%20saber%20del%20pr%C3%B3ximo%20taller." target="_blank" rel="noopener noreferrer" class="btn-dark text-[10px] py-3 px-6">Avísame por WhatsApp</a>
+        </div>
+      ) : (
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {items.map((item) => {
+            const restantes = cuposRestantes(item.capacity, ocupados.get(item.id) ?? 0);
+            const agotado = restantes === 0;
+            return (
+              <a href={`/talleres/${item.slug}${sufijo}`} class="relative overflow-hidden rounded-[10px] group min-h-[420px] flex flex-col justify-end">
+                <img
+                  src={imagenUrl(item.image_url ?? '/images/sala-espera-800.webp', 1200)}
+                  srcset={item.image_url ? imagenSrcset(item.image_url, [640, 828, 1200]) : undefined}
+                  sizes="(min-width: 768px) 50vw, 100vw"
+                  width="1200" height="1200"
+                  loading="lazy" decoding="async"
+                  alt=""
+                  class="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
+                />
+                <div class="absolute inset-0 bg-gradient-to-t from-ink/95 via-ink/75 via-55% to-ink/10"></div>
+                <div class="absolute top-4 left-4 z-10 flex flex-wrap gap-2">
+                  <span class="font-body text-xs font-medium px-3 py-1 rounded-full bg-white/15 backdrop-blur-sm text-white border border-white/20">
+                    {TIPO_LABEL[item.type]}{item.type !== 'contenido' ? ` · ${item.modality === 'online' ? 'Online' : 'Presencial'}` : ''}
+                  </span>
+                  {agotado && <span class="font-body text-xs font-medium px-3 py-1 rounded-full bg-white text-ink">Cupos agotados</span>}
+                  {preview && !item.visible && <span class="font-body text-xs font-medium px-3 py-1 rounded-full bg-white text-ink">Oculto</span>}
+                </div>
+                <div class="relative z-10 px-6 pb-6 pt-16 sm:p-8 md:p-10">
+                  {item.starts_at && item.type !== 'contenido' && (
+                    <p class="label text-white/80 mb-3">{fechaLargaChile(item.starts_at)} · {horaChile(item.starts_at)} hrs</p>
+                  )}
+                  <h2 class="font-heading font-semibold text-3xl md:text-4xl text-white leading-tight mb-3">{item.title}</h2>
+                  {item.short_description && <p class="font-body text-sm text-white/90 leading-relaxed mb-6 max-w-sm">{item.short_description}</p>}
+                  <div class="flex flex-wrap items-end justify-between gap-4 pt-5 border-t border-white/20">
+                    <div>
+                      <p class="label text-white/80 mb-0.5">{item.duration_min ? 'Duración · Valor' : 'Valor'}</p>
+                      <p class="font-heading text-lg text-white whitespace-nowrap">
+                        {item.duration_min ? `${item.duration_min} min · ` : ''}{precioTexto(item.price)}
+                      </p>
+                    </div>
+                    <span class="font-body text-xs tracking-widest uppercase whitespace-nowrap py-2.5 px-5 border border-white/40 text-white hover:bg-white hover:text-ink transition-all duration-200">
+                      {agotado ? 'Ver detalle' : item.type === 'contenido' ? 'Ver contenido' : 'Inscribirme'}
+                    </span>
+                  </div>
+                </div>
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  </section>
+</BaseLayout>
