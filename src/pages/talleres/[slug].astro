@@ -1,0 +1,295 @@
+---
+// /talleres/<slug> — detalle de un taller, charla o contenido + inscripción.
+// 404 mientras la vitrina no esté publicada (salvo vista previa del panel).
+export const prerender = false;
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import CamposContacto from '../../components/CamposContacto.astro';
+import { supabase } from '../../lib/supabase';
+import { imagenUrl, imagenSrcset } from '../../lib/imagenOptimizada';
+import { DIRECCION, MAPS_DIRECCION_URL } from '../../data/consulta';
+import { vitrinaPublica, esAdmin, cuposDe, type VitrinaItem } from '../../lib/vitrina';
+import { TIPO_LABEL, fechaLargaChile, horaChile, precioTexto, parrafos, yaPaso, slugValido } from '../../lib/vitrinaUtils';
+
+const slug = String(Astro.params.slug ?? '');
+const publica = await vitrinaPublica();
+const preview = Astro.url.searchParams.get('preview') === '1' && await esAdmin(Astro.cookies);
+if ((!publica && !preview) || !slugValido(slug)) return Astro.rewrite('/404');
+if (preview) Astro.response.headers.set('Cache-Control', 'private, no-store');
+
+const { data } = await supabase.from('vitrina_items').select('*').eq('slug', slug).maybeSingle();
+const item = data as VitrinaItem | null;
+if (!item || (!item.visible && !preview)) return Astro.rewrite('/404');
+
+const { restantes } = await cuposDe(item).catch(() => ({ restantes: null as number | null }));
+const agotado = restantes === 0;
+const pasado = yaPaso(item);
+const esContenido = item.type === 'contenido';
+const gratis = !item.price || item.price <= 0;
+const textoBoton = gratis
+  ? (esContenido ? 'Quiero recibirlo gratis' : 'Inscribirme gratis')
+  : (esContenido ? `Comprar · ${precioTexto(item.price)}` : `Inscribirme y pagar · ${precioTexto(item.price)}`);
+
+const { data: recaptchaRow } = await supabase.from('settings').select('value').eq('key', 'recaptcha_site_key').maybeSingle();
+const recaptchaSiteKey = recaptchaRow?.value ?? '';
+
+const vitrinaItem = { id: item.id, name: item.title, type: item.type, value: item.price || 0 };
+const waTexto = encodeURIComponent(`Hola Valentina, tengo una consulta sobre "${item.title}".`);
+---
+
+<BaseLayout
+  title={item.title}
+  description={(item.short_description || `${TIPO_LABEL[item.type]} de la Ps. Valentina Orellana.`).slice(0, 160)}
+  image={item.image_url ?? undefined}
+  noindex={!publica || !item.visible}
+>
+  <section class="py-section bg-sand">
+    <div class="container-site">
+      {preview && (
+        <p class="font-body text-sm text-ink bg-warm border border-dust px-4 py-3 mb-8">
+          Vista previa del panel{!publica ? ' (vitrina desactivada: el público ve un 404)' : ''}{!item.visible ? ' · este item está oculto' : ''}. Puedes inscribirte para probar.
+        </p>
+      )}
+      <a href={`/talleres${preview ? '?preview=1' : ''}`} class="label text-stone hover:text-forest transition-colors">← Talleres y charlas</a>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-16 lg:gap-24 mt-8">
+        <!-- Detalle -->
+        <div>
+          <p class="label text-stone mb-4">{TIPO_LABEL[item.type]}{!esContenido ? ` · ${item.modality === 'online' ? 'Online' : 'Presencial'}` : ''}</p>
+          <div class="divider mb-6"></div>
+          <h1 class="section-title mb-8">{item.title}</h1>
+
+          {item.image_url && (
+            <img
+              src={imagenUrl(item.image_url, 1200)}
+              srcset={imagenSrcset(item.image_url, [640, 828, 1200])}
+              sizes="(min-width: 768px) 50vw, 100vw"
+              width="1200" height="800"
+              alt=""
+              class="w-full rounded-[10px] mb-10 object-cover" style="height:auto;"
+            />
+          )}
+
+          <ul class="space-y-6 mb-10">
+            {!esContenido && item.starts_at && (
+              <li>
+                <p class="label text-stone mb-1">Fecha y hora</p>
+                <p class="font-heading font-light text-xl text-ink">{fechaLargaChile(item.starts_at)} · {horaChile(item.starts_at)} hrs</p>
+                <p class="font-body text-sm font-light text-stone">Hora de Chile{item.duration_min ? ` · ${item.duration_min} minutos` : ''}</p>
+              </li>
+            )}
+            {!esContenido && (
+              <li>
+                <p class="label text-stone mb-1">Lugar</p>
+                {item.modality === 'online' ? (
+                  <p class="font-body text-sm font-light text-stone leading-relaxed">Online por Google Meet. Recibirás el enlace por correo al inscribirte.</p>
+                ) : (
+                  <Fragment>
+                    <address class="not-italic font-body text-sm font-light text-stone leading-relaxed">
+                      {DIRECCION.calle}, {DIRECCION.detalle}<br />
+                      {DIRECCION.comuna}, {DIRECCION.region}
+                    </address>
+                    <a href={MAPS_DIRECCION_URL} target="_blank" rel="noopener" class="inline-block mt-2 font-body text-sm text-forest underline underline-offset-4 hover:text-gold transition-colors">Ver en Google Maps</a>
+                  </Fragment>
+                )}
+              </li>
+            )}
+            <li>
+              <p class="label text-stone mb-1">Valor</p>
+              <p class="font-heading font-light text-xl text-ink">{precioTexto(item.price)}</p>
+              {!esContenido && restantes !== null && !pasado && (
+                <p class="font-body text-sm font-light text-stone">{agotado ? 'Cupos agotados' : `Quedan ${restantes} ${restantes === 1 ? 'cupo' : 'cupos'}`}</p>
+              )}
+            </li>
+          </ul>
+
+          {parrafos(item.description).map((p) => (
+            <p class="body-text mb-6" style="white-space:pre-line;">{p}</p>
+          ))}
+        </div>
+
+        <!-- Inscripción -->
+        <div>
+          {pasado ? (
+            <div class="bg-white p-8">
+              <p class="body-text mb-6">Este encuentro ya se realizó. Si quieres saber del próximo, escríbeme.</p>
+              <a href={`https://wa.me/56972735696?text=${waTexto}`} target="_blank" rel="noopener noreferrer" class="btn-dark text-[10px] py-3 px-6">Escribir por WhatsApp</a>
+            </div>
+          ) : agotado ? (
+            <div class="bg-white p-8">
+              <p class="label text-stone mb-4">Cupos agotados</p>
+              <p class="body-text mb-6">Se completaron los cupos. Escríbeme si quieres quedar en lista de espera o saber de la próxima fecha.</p>
+              <a href={`https://wa.me/56972735696?text=${waTexto}`} target="_blank" rel="noopener noreferrer" class="btn-dark text-[10px] py-3 px-6">Escribir por WhatsApp</a>
+            </div>
+          ) : (
+            <div class="bg-white p-8">
+              <p class="label text-stone mb-4">{esContenido ? (gratis ? 'Recíbelo en tu correo' : 'Compra') : 'Inscripción'}</p>
+              <div class="divider mb-6"></div>
+
+              <form id="vitrina-form" method="post" class="flex flex-col gap-8" novalidate>
+                <!-- Campo trampa anti-spam: las personas no lo ven ni lo llenan -->
+                <div aria-hidden="true" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;">
+                  <label for="website">No completar</label>
+                  <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
+                </div>
+                <div>
+                  <label class="label text-stone block mb-2" for="v-nombre">Nombre</label>
+                  <input id="v-nombre" name="name" type="text" required autocomplete="name" placeholder="Tu nombre" class="field" />
+                </div>
+                <div>
+                  <label class="label text-stone block mb-2" for="v-email">Correo</label>
+                  <input id="v-email" name="email" type="email" required autocomplete="email" placeholder="tu@correo.cl" class="field" />
+                </div>
+                <div>
+                  <label class="label text-stone block mb-2" for="v-telefono">Teléfono</label>
+                  <input id="v-telefono" name="phone" type="tel" required autocomplete="tel" data-validar-telefono class="field" />
+                </div>
+                <div>
+                  <button type="submit" class="btn-dark text-[10px] py-3.5 px-8">{textoBoton}</button>
+                  <p id="vitrina-status" class="font-body text-sm text-stone mt-4 hidden" role="status"></p>
+                  <p class="font-body text-[11px] text-stone mt-4">
+                    {gratis ? '' : 'El pago se hace con Flow (tarjetas de débito y crédito). '}Usaré tus datos solo para gestionar tu inscripción y enviarte la información{esContenido ? ' del contenido' : ' del encuentro'}.
+                    {recaptchaSiteKey && <Fragment> Protegido por reCAPTCHA de Google: aplican su <a href="https://policies.google.com/privacy" target="_blank" rel="noopener" class="underline underline-offset-2">Política de privacidad</a> y sus <a href="https://policies.google.com/terms" target="_blank" rel="noopener" class="underline underline-offset-2">Términos</a>.</Fragment>}
+                  </p>
+                </div>
+              </form>
+
+              <div id="vitrina-ok" class="hidden">
+                <p class="font-heading font-light text-xl text-ink mb-4">{esContenido ? '¡Listo! Revisa tu correo' : '¡Listo, estás inscrita/o!'}</p>
+                <p class="body-text">{esContenido ? 'Te envié el enlace de descarga a tu correo.' : 'Te envié la confirmación con todos los detalles a tu correo.'} Si no lo ves en unos minutos, revisa la carpeta de spam o promociones.</p>
+              </div>
+            </div>
+          )}
+          <p class="font-body text-sm font-light text-stone mt-6">
+            ¿Dudas? <a href={`https://wa.me/56972735696?text=${waTexto}`} target="_blank" rel="noopener noreferrer" class="text-forest underline underline-offset-4 hover:text-gold transition-colors">Escríbeme por WhatsApp</a>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <CamposContacto />
+</BaseLayout>
+
+<script is:inline define:vars={{ recaptchaSiteKey, vitrinaItem }}>
+  window.__RECAPTCHA_SITE_KEY__ = recaptchaSiteKey;
+  window.__VITRINA_ITEM__ = vitrinaItem;
+  // Medición (GTM): vio el detalle de un item de la vitrina.
+  try {
+    (window.dataLayer = window.dataLayer || []).push({ event: 'vitrina_ver_item', item_id: vitrinaItem.id, item_name: vitrinaItem.name, item_type: vitrinaItem.type, value: vitrinaItem.value, currency: 'CLP' });
+  } catch (e) {}
+</script>
+
+<script>
+  const w = window as any;
+  const form = document.getElementById('vitrina-form') as HTMLFormElement | null;
+  const status = document.getElementById('vitrina-status');
+  const button = form?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+  const textoBoton = button?.textContent ?? '';
+  // Una persona nunca envía en menos de 3 s desde que carga la página.
+  const abiertoEn = Date.now();
+  const item = w.__VITRINA_ITEM__ as { id: string; name: string; type: string; value: number };
+
+  const push = (ev: Record<string, unknown>) => {
+    try { (w.dataLayer = w.dataLayer || []).push(ev); } catch (e) { /* la medición no rompe el flujo */ }
+  };
+
+  // reCAPTCHA diferido (igual que el formulario de contacto): se carga al
+  // acercarse al formulario o al enfocar un campo, no con la página.
+  let recaptchaCarga: Promise<void> | null = null;
+  function cargarRecaptcha(): Promise<void> {
+    if (!w.__RECAPTCHA_SITE_KEY__) return Promise.resolve();
+    if (recaptchaCarga) return recaptchaCarga;
+    recaptchaCarga = new Promise<void>((resolve) => {
+      const s = document.createElement('script');
+      s.src = `https://www.google.com/recaptcha/api.js?render=${encodeURIComponent(w.__RECAPTCHA_SITE_KEY__)}`;
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => resolve();
+      document.head.appendChild(s);
+    });
+    return recaptchaCarga;
+  }
+  if (form && w.__RECAPTCHA_SITE_KEY__) {
+    if ('IntersectionObserver' in window) {
+      const obs = new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting)) { obs.disconnect(); cargarRecaptcha(); } }, { rootMargin: '200px' });
+      obs.observe(form);
+    } else {
+      cargarRecaptcha();
+    }
+    form.addEventListener('focusin', () => { cargarRecaptcha(); }, { once: true });
+  }
+
+  function mostrar(texto: string) {
+    if (!status) return;
+    status.textContent = texto;
+    status.classList.remove('hidden');
+  }
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!button) return;
+    const data = new FormData(form);
+    const nombre = String(data.get('name') ?? '').trim();
+    const correo = String(data.get('email') ?? '').trim();
+    // CamposContacto valida el teléfono antes (y no deja enviar si está mal).
+    const telefono = w.telefonoDe ? w.telefonoDe(document.getElementById('v-telefono')) : String(data.get('phone') ?? '');
+    if (!nombre || !correo || !telefono) { mostrar('Completa tu nombre, correo y teléfono.'); return; }
+
+    button.disabled = true;
+    button.textContent = 'Procesando…';
+    mostrar(item.value > 0 ? 'Preparando el pago…' : 'Enviando…');
+    push({ event: 'vitrina_inscripcion_iniciada', item_id: item.id, item_name: item.name, item_type: item.type, value: item.value, currency: 'CLP' });
+
+    let recaptchaToken = '';
+    if (w.__RECAPTCHA_SITE_KEY__) {
+      try {
+        recaptchaToken = await Promise.race([
+          cargarRecaptcha().then(() => new Promise<string>((resolve, reject) => {
+            if (!w.grecaptcha) { resolve(''); return; }
+            w.grecaptcha.ready(() => { w.grecaptcha.execute(w.__RECAPTCHA_SITE_KEY__, { action: 'submit_vitrina' }).then(resolve).catch(reject); });
+          })),
+          new Promise<string>((resolve) => setTimeout(() => resolve(''), 8000)),
+        ]);
+      } catch (err) { console.error('[recaptcha]', err); }
+    }
+
+    let origen = null;
+    try { origen = JSON.parse(localStorage.getItem('vo_origen') || 'null'); } catch (err) { origen = null; }
+
+    try {
+      const res = await fetch('/api/vitrina/inscribir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_id: item.id,
+          name: nombre,
+          email: correo,
+          phone: telefono,
+          website: String(data.get('website') ?? ''),
+          t: Date.now() - abiertoEn,
+          recaptcha_token: recaptchaToken,
+          origen,
+        }),
+      });
+      const r = await res.json().catch(() => ({}));
+      if (r.ok && r.checkoutUrl) {
+        mostrar('Te llevo a Flow para pagar…');
+        window.location.href = r.checkoutUrl;
+        return;
+      }
+      if (r.ok) {
+        // Gratis: no hay pago, pero se mide igual como inscripción completada (value 0).
+        push({ event: 'vitrina_pago_completado', item_id: item.id, item_name: item.name, item_type: item.type, value: 0, currency: 'CLP', gratis: true });
+        form.classList.add('hidden');
+        document.getElementById('vitrina-ok')?.classList.remove('hidden');
+        return;
+      }
+      mostrar(r.error || 'No pudimos completar tu inscripción. Intenta de nuevo o escríbeme por WhatsApp.');
+      if (r.campo === 'email') (document.getElementById('v-email') as HTMLInputElement | null)?.focus();
+    } catch {
+      mostrar('No pudimos conectarnos. Revisa tu conexión e intenta de nuevo, o escríbeme por WhatsApp.');
+    }
+    button.disabled = false;
+    button.textContent = textoBoton;
+  });
+</script>

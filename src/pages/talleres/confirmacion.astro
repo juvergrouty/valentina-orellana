@@ -1,0 +1,117 @@
+---
+// /talleres/confirmacion — vuelta desde Flow tras pagar un item de la vitrina.
+// El token llega en la cookie vo_vitrina_pago (ver /api/vitrina/flow-return),
+// nunca en la URL. Si el aviso de Flow aún no llegó, se consulta el estado
+// real a Flow aquí mismo (misma función idempotente que el webhook).
+export const prerender = false;
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { supabase } from '../../lib/supabase';
+import { COOKIE_PAGO_VITRINA, procesarPagoFlow, vitrinaPublica, type VitrinaItem, type VitrinaInscripcion } from '../../lib/vitrina';
+import { TIPO_LABEL, fechaLargaChile, horaChile, precioTexto } from '../../lib/vitrinaUtils';
+import { logWarn } from '../../lib/logger';
+
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+const token = Astro.cookies.get(COOKIE_PAGO_VITRINA)?.value ?? '';
+if (!token) {
+  if (await vitrinaPublica()) return Astro.redirect('/talleres', 302);
+  return Astro.rewrite('/404');
+}
+
+type Estado = 'pagada' | 'pendiente' | 'rechazada' | 'error';
+let estado: Estado = 'error';
+let insc: VitrinaInscripcion | null = null;
+let item: VitrinaItem | null = null;
+
+const { data: fila } = await supabase.from('vitrina_inscripciones').select('*').eq('flow_token', token).maybeSingle();
+insc = fila as VitrinaInscripcion | null;
+if (insc?.paid_at && insc.status === 'paid') {
+  estado = 'pagada';
+} else {
+  try {
+    const r = await Promise.race([
+      procesarPagoFlow(token),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Flow lento')), 8000)),
+    ]);
+    insc = r.inscripcion ?? insc;
+    estado = r.resultado === 'pagada' ? 'pagada'
+      : r.resultado === 'pendiente' ? 'pendiente'
+      : r.resultado === 'rechazada' || r.resultado === 'cancelada' ? 'rechazada' : 'error';
+  } catch (e) {
+    await logWarn('vitrina/confirmacion-pagina', 'No se pudo consultar el estado del pago al volver de Flow', { error: e instanceof Error ? e.message : String(e) });
+    estado = insc ? 'pendiente' : 'error';
+  }
+}
+if (insc) {
+  const { data } = await supabase.from('vitrina_items').select('*').eq('id', insc.item_id).maybeSingle();
+  item = data as VitrinaItem | null;
+}
+const esContenido = item?.type === 'contenido';
+const pago = estado === 'pagada' && insc && item
+  ? { transaction_id: insc.id, item_id: item.id, item_name: item.title, item_type: item.type, value: insc.amount }
+  : null;
+const waTexto = encodeURIComponent(`Hola Valentina, pagué ${item ? `"${item.title}"` : 'un taller'} y tengo una duda.`);
+---
+
+<BaseLayout title={estado === 'pagada' ? 'Pago confirmado' : 'Estado del pago'} noindex>
+  <section class="pt-40 pb-24 md:pt-48 md:pb-32 bg-white">
+    <div class="container-site text-center max-w-xl mx-auto">
+      {estado === 'pagada' && item ? (
+        <Fragment>
+          <p class="label text-stone mb-4">Pago confirmado</p>
+          <div class="divider mb-6 mx-auto"></div>
+          <h1 class="section-title mb-6">{esContenido ? '¡Gracias por tu compra!' : '¡Tu inscripción está confirmada!'}</h1>
+          <p class="body-text mb-4">
+            <strong>{TIPO_LABEL[item.type]}: {item.title}</strong>
+            {!esContenido && item.starts_at && <Fragment><br />{fechaLargaChile(item.starts_at)} · {horaChile(item.starts_at)} hrs (hora de Chile)</Fragment>}
+            <br />{precioTexto(insc?.amount ?? 0)}
+          </p>
+          <p class="body-text mb-10">
+            {esContenido ? 'Te envié el enlace de descarga a tu correo.' : 'Te envié la confirmación con todos los detalles a tu correo.'}
+            Si no lo ves en unos minutos, revisa spam o promociones.
+          </p>
+        </Fragment>
+      ) : estado === 'pendiente' ? (
+        <Fragment>
+          <p class="label text-stone mb-4">Pago en proceso</p>
+          <div class="divider mb-6 mx-auto"></div>
+          <h1 class="section-title mb-6">Estamos confirmando tu pago</h1>
+          <p class="body-text mb-10">Apenas Flow lo confirme te llegará un correo. Si ya pagaste, no necesitas hacer nada más.</p>
+        </Fragment>
+      ) : estado === 'rechazada' ? (
+        <Fragment>
+          <p class="label text-stone mb-4">Pago no realizado</p>
+          <div class="divider mb-6 mx-auto"></div>
+          <h1 class="section-title mb-6">El pago no se completó</h1>
+          <p class="body-text mb-10">No se te cobró nada. Puedes intentarlo de nuevo o escribirme y lo vemos juntas.</p>
+        </Fragment>
+      ) : (
+        <Fragment>
+          <p class="label text-stone mb-4">Estado del pago</p>
+          <div class="divider mb-6 mx-auto"></div>
+          <h1 class="section-title mb-6">No pudimos ver el estado de tu pago</h1>
+          <p class="body-text mb-10">Si pagaste, te llegará la confirmación por correo. Si no llega en unos minutos, escríbeme y lo reviso.</p>
+        </Fragment>
+      )}
+      <div class="flex flex-wrap gap-3 justify-center">
+        {estado === 'rechazada' && item && <a href={`/talleres/${item.slug}`} class="btn-dark text-[10px] py-3 px-6">Intentar de nuevo</a>}
+        <a href={`https://wa.me/56972735696?text=${waTexto}`} target="_blank" rel="noopener noreferrer" class="btn-dark text-[10px] py-3 px-6">Escribir por WhatsApp</a>
+      </div>
+    </div>
+  </section>
+
+  {pago && (
+    <script is:inline define:vars={{ pago }}>
+      // Medición (GTM): pago de la vitrina completado. Una vez por inscripción
+      // (al recargar no se cuenta de nuevo).
+      try {
+        var k = 'vo_vitrina_pago_' + pago.transaction_id;
+        if (!sessionStorage.getItem(k)) {
+          (window.dataLayer = window.dataLayer || []).push({ event: 'vitrina_pago_completado', transaction_id: pago.transaction_id, item_id: pago.item_id, item_name: pago.item_name, item_type: pago.item_type, value: pago.value, currency: 'CLP' });
+          sessionStorage.setItem(k, '1');
+        }
+      } catch (e) {
+        (window.dataLayer = window.dataLayer || []).push({ event: 'vitrina_pago_completado', transaction_id: pago.transaction_id, item_id: pago.item_id, item_name: pago.item_name, item_type: pago.item_type, value: pago.value, currency: 'CLP' });
+      }
+    </script>
+  )}
+</BaseLayout>
