@@ -9,9 +9,7 @@ const COOKIE = 'vo_admin_token';
 // genera una nueva. Revisado: ninguna lee cookies ni parámetros de la dirección
 // (?error=, etc.), solo la ruta. Lista exacta a propósito: NO agenda, admin,
 // api, pagar, recuperar, confirmacion ni pasos-a-seguir.
-const PAGINAS_CACHEABLES = new Set(['/', '/servicios', '/precios', '/contacto', '/opiniones', '/condiciones',
-  // Página de destino de pareja (14 oct 2026): el ?m= de los anuncios lo lee el navegador, no el servidor.
-  '/terapia-de-pareja-las-condes']);
+const PAGINAS_CACHEABLES = new Set(['/', '/servicios', '/precios', '/contacto', '/opiniones', '/condiciones']);
 const CACHE_PUBLICO = 'public, s-maxage=300, stale-while-revalidate=3600';
 
 // Panel y API del panel: que nadie (navegador, CDN ni proxy) guarde una copia.
