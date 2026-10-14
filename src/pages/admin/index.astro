@@ -2,79 +2,334 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { SESSION_LABELS } from '../../data/services';
-import { nowCL, todayCL, hoursUntilSessionCL } from '../../lib/dateUtils';
-import { origenTexto } from '../../lib/origen';
+import { todayCL, nowCL, hoursUntilSessionCL } from '../../lib/dateUtils';
+import { cargarAvisosPanel } from '../../lib/avisosPanel';
+import { sesionesPorCobrar, sesionesQueTeDeben } from '../../lib/porCobrar';
+import { getValidAccessToken } from '../../lib/syncCalendar';
+import { pacienteDeTitulo } from '../../lib/boxCala';
+import { URL_SII } from '../../lib/impuestos';
 
-// Reservas del día de hoy
-const today = todayCL();
+// Inicio del panel (rediseño aprobado por Valentina, 14 oct 2026): TODO lleva
+// directo a donde está la acción. Arriba el día que se mira (‹ › para moverse,
+// /admin?dia=YYYY-MM-DD), la próxima sesión, la lista "Para hacer" ordenada por
+// plazo, las sesiones del día, los números de la semana y los próximos 7 días.
+// La lista "Para hacer" usa los mismos avisos del layout (src/lib/avisosPanel.ts):
+// se cargan una vez aquí y se le pasan al layout, que en esta página no repite
+// esas franjas.
 
-const { data: todayBookings } = await supabase
-  .from('bookings')
-  .select('*')
-  .eq('session_date', today)
-  .neq('status', 'cancelled')
-  .order('session_time');
+const META_SEMANA = 28; // meta 28–29 sesiones por semana
 
-// Próximas reservas confirmadas (7 días)
-const weekEnd = nowCL();
-weekEnd.setDate(weekEnd.getDate() + 7);
-const weekEndStr = weekEnd.toISOString().slice(0, 10);
+// ── Día que se mira ──────────────────────────────────────────────────────────
+const hoy = todayCL();
+const diaParam = Astro.url.searchParams.get('dia') ?? '';
+const fechaValida = (iso: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const x = new Date(iso + 'T12:00:00Z');
+  return !Number.isNaN(x.getTime()) && x.toISOString().slice(0, 10) === iso;
+};
+const dia = fechaValida(diaParam) ? diaParam : hoy;
+const esHoy = dia === hoy;
+const sumarDias = (iso: string, n: number) => { const x = new Date(iso + 'T12:00:00Z'); if (Number.isNaN(x.getTime())) return iso; x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const diaSemana = (iso: string) => new Date(iso + 'T12:00:00Z').getUTCDay();
+const lunes = sumarDias(dia, diaSemana(dia) === 0 ? -6 : 1 - diaSemana(dia));
+const domingo = sumarDias(lunes, 6);
+const fin7 = sumarDias(dia, 7);
+const hasta = domingo > fin7 ? domingo : fin7;
 
-// Se pide de a poco más de 10 y se filtra después: una sesión de hoy que ya
-// terminó cumple session_date >= today (la columna solo tiene la fecha, no la
-// hora) y aparecía igual en "Próximas" aunque ya haya pasado — filtrar por
-// hora real evita eso sin dejar de mostrar 10 sesiones futuras cuando existen.
-const { data: upcomingRaw } = await supabase
-  .from('bookings')
-  .select('*')
-  .eq('status', 'confirmed')
-  .gte('session_date', today)
-  .lte('session_date', weekEndStr)
-  .order('session_date')
-  .order('session_time')
-  .limit(40);
+// ── Sesiones de Google Calendar (Encuadrado) ─────────────────────────────────
+// Las sesiones agendadas en Encuadrado solo están en Google Calendar (no en la
+// tabla de reservas). Se suman a las del día y de la semana para que el conteo
+// sea el real; una sesión con evento de la página y de Encuadrado (intencional)
+// se cuenta una vez por horario. null = no se pudo leer.
+type EventoGoogle = { fecha: string; hora: string; dur: number; titulo: string };
+async function sesionesGoogle(desde: string, hastaIso: string): Promise<EventoGoogle[] | null> {
+  const auth = await getValidAccessToken();
+  if (!auth) return null;
+  const tMin = new Date(Date.parse(desde + 'T00:00:00Z') - 86400000).toISOString();
+  const tMax = new Date(Date.parse(hastaIso + 'T00:00:00Z') + 2 * 86400000).toISOString();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(auth.calendarId)}/events`
+    + `?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true&orderBy=startTime&maxResults=250&timeZone=America%2FSantiago`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` }, signal: AbortSignal.timeout(5000) });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const out: EventoGoogle[] = [];
+  for (const ev of (data.items ?? []) as Array<{ summary?: string; status?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }>) {
+    const inicio = ev.start?.dateTime;
+    const titulo = ev.summary ?? '';
+    // Solo sesiones (página: "… Sesión Individual …"; Encuadrado: "Nombre Sesión individual …").
+    if (!inicio || ev.status === 'cancelled' || !/sesi[oó]n/i.test(titulo)) continue;
+    // Con timeZone=America/Santiago, dateTime viene en hora de Chile.
+    const fecha = inicio.slice(0, 10);
+    if (fecha < desde || fecha > hastaIso) continue;
+    const dur = ev.end?.dateTime ? Math.max(20, Math.round((Date.parse(ev.end.dateTime) - Date.parse(inicio)) / 60000)) : 50;
+    out.push({ fecha, hora: inicio.slice(11, 16), dur, titulo });
+  }
+  return out;
+}
 
-const upcoming = (upcomingRaw ?? [])
-  .filter((b) => {
-    const durationHrs = (b.duration_min ?? 55) / 60;
-    return hoursUntilSessionCL(b.session_date, b.session_time) > -durationHrs;
-  })
-  .slice(0, 10);
+// "Te deben": misma regla y agrupación por paciente que /admin/deudas (sesiones
+// sin pagar que ya empezaron, ver src/lib/porCobrar.ts).
+async function teDeben(): Promise<{ personas: number; total: number }> {
+  const claves = new Set<string>();
+  let total = 0;
+  for (const b of await sesionesQueTeDeben()) {
+    claves.add(String(b.patient_email ?? '').toLowerCase() || `${b.patient_name}|${b.patient_phone ?? ''}`);
+    total += Number(b.amount) || 0;
+  }
+  return { personas: claves.size, total };
+}
 
-// Reservas pendientes de pago
-const { count: pendingCount } = await supabase
-  .from('bookings')
-  .select('*', { count: 'exact', head: true })
-  .eq('status', 'pending_payment')
-  .gte('session_date', today)
-  .neq('session_date', '2099-12-31'); // cobros manuales sin sesión (no son reservas)
+type Reserva = {
+  id: string; patient_name: string; session_type: string; session_date: string; session_time: string;
+  status: string; amount: number | null; duration_min: number | null; paid_at: string | null; debt_voided: boolean | null;
+};
 
-// Reservas confirmadas totales del mes
-const monthStartD = nowCL();
-const monthStart = new Date(monthStartD.getFullYear(), monthStartD.getMonth(), 1).toISOString().slice(0, 10);
-// Último día del mes (8 oct 2026): sin tope se contaban también las sesiones
-// de meses siguientes y los cobros sin fecha (2099-12-31).
-const monthEnd = new Date(monthStartD.getFullYear(), monthStartD.getMonth() + 1, 0).toISOString().slice(0, 10);
-const { count: monthCount } = await supabase
-  .from('bookings')
-  .select('*', { count: 'exact', head: true })
-  .eq('status', 'confirmed')
-  .gte('session_date', monthStart)
-  .lte('session_date', monthEnd);
-
-// Reservas por origen (últimos 90 días, por fecha en que se reservó): solo
-// confirmadas. select('*') para no fallar si la migración 0008 aún no corre.
 const hace90 = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-const { data: recientes } = await supabase
-  .from('bookings')
-  .select('*')
-  .eq('status', 'confirmed')
-  .gte('created_at', hace90)
-  .neq('session_date', '2099-12-31');
+const [avisos, reservasRes, google, porCobrar, deben, recientesRes] = await Promise.all([
+  cargarAvisosPanel(Astro.url.origin),
+  // Sesiones desde el lunes de la semana del día mirado hasta 7 días después
+  // (o el domingo, lo que llegue más lejos). Sin canceladas NI vencidas.
+  supabase.from('bookings')
+    .select('id, patient_name, session_type, session_date, session_time, status, amount, duration_min, paid_at, debt_voided')
+    .gte('session_date', lunes).lte('session_date', hasta)
+    .not('status', 'in', '(cancelled,expired)')
+    .order('session_date').order('session_time'),
+  sesionesGoogle(lunes, hasta).catch(() => null),
+  sesionesPorCobrar().catch(() => null),
+  teDeben().catch(() => null),
+  // Reservas por origen (últimos 90 días, por fecha en que se reservó): solo
+  // confirmadas. select('*') para no fallar si la migración 0008 aún no corre.
+  supabase.from('bookings').select('*').eq('status', 'confirmed').gte('created_at', hace90).neq('session_date', '2099-12-31'),
+]);
+const errorReservas = !!reservasRes.error;
+const reservas = (reservasRes.data ?? []) as Reserva[];
+
+// ── Sesiones (página + Google/Encuadrado) ───────────────────────────────────
+type Sesion = {
+  id: string | null; fecha: string; hora: string; dur: number; paciente: string;
+  online: boolean; tipo: string; pago: 'pagada' | 'por-pagar' | 'anulada' | 'sin-cobro' | 'externa'; href: string;
+};
+const TIPOS: Record<string, string> = {
+  'online': 'Individual online', 'presencial': 'Individual presencial',
+  'pareja-online': 'Pareja online', 'pareja-presencial': 'Pareja presencial',
+};
+const sesiones: Sesion[] = reservas.filter((b) => b.session_date !== '2099-12-31' && b.session_time).map((b) => ({
+  id: b.id,
+  fecha: b.session_date,
+  hora: String(b.session_time).slice(0, 5),
+  dur: b.duration_min ?? 50,
+  paciente: b.patient_name,
+  online: String(b.session_type ?? '').includes('online'),
+  tipo: TIPOS[b.session_type] ?? b.session_type,
+  // El pago se lee de paid_at (no del estado de la reserva): igual que el calendario.
+  pago: b.paid_at ? 'pagada' : b.debt_voided ? 'anulada' : (Number(b.amount) > 0 ? 'por-pagar' : 'sin-cobro'),
+  href: `/admin/agenda?booking=${b.id}`,
+}));
+{
+  const ocupados = new Set(sesiones.map((s) => `${s.fecha}|${s.hora}`));
+  for (const g of google ?? []) {
+    const slot = `${g.fecha}|${g.hora}`;
+    if (ocupados.has(slot)) continue; // ya está como reserva de la página (o repetido página + Encuadrado)
+    ocupados.add(slot);
+    const online = /online/i.test(g.titulo);
+    sesiones.push({
+      id: null, fecha: g.fecha, hora: g.hora, dur: g.dur,
+      paciente: pacienteDeTitulo(g.titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, '')),
+      online, tipo: `${online ? 'Online' : 'Presencial'} · Google Calendar`, pago: 'externa',
+      href: `/admin/agenda?fecha=${g.fecha}&hora=${g.hora}`,
+    });
+  }
+  sesiones.sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+}
+const delDia = sesiones.filter((s) => s.fecha === dia);
+const semana = sesiones.filter((s) => s.fecha >= lunes && s.fecha <= domingo);
+const proximas = sesiones.filter((s) => s.fecha > dia && s.fecha <= fin7);
+const proximasPorDia = [...proximas.reduce((m, s) => m.set(s.fecha, [...(m.get(s.fecha) ?? []), s]), new Map<string, Sesion[]>())];
+
+// Próxima sesión: hoy, la que viene o la que está en curso (si no queda
+// ninguna hoy, la siguiente de los próximos días); otro día, la primera.
+let heroEnCurso = false;
+let hero: Sesion | null = null;
+if (esHoy) {
+  for (const s of delDia) {
+    const h = hoursUntilSessionCL(s.fecha, s.hora);
+    if (h > 0) { hero = s; break; }
+    if (h > -s.dur / 60) { hero = s; heroEnCurso = true; break; }
+  }
+  hero ??= proximas[0] ?? null;
+} else {
+  hero = delDia[0] ?? null;
+}
+
+// ── Formatos ────────────────────────────────────────────────────────────────
+const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const DIAS_CORTOS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const fechaLarga = (iso: string) => { const [, m, d] = iso.split('-').map(Number); return `${DIAS[diaSemana(iso)]} ${d} de ${MESES[m - 1]}`; };
+const mayus = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+const fechaCorta = (iso: string) => { const [, m, d] = iso.split('-').map(Number); return `${DIAS_CORTOS[diaSemana(iso)]} ${d}/${m}`; };
+const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+const manana = sumarDias(hoy, 1);
+const ayer = sumarDias(hoy, -1);
+const cuando = (fecha: string, hora?: string) => {
+  const rel = fecha === hoy ? 'hoy' : fecha === manana ? 'mañana' : fecha === ayer ? 'ayer' : fechaCorta(fecha);
+  return hora ? `${rel} ${hora}` : rel;
+};
+// Instante → "YYYY-MM-DDTHH:MM" en hora de Chile (para ordenar junto a fecha+hora).
+const claveCL = (iso: string) => {
+  if (Number.isNaN(Date.parse(iso))) return nowCL().toISOString().slice(0, 16); // fecha ilegible: cuenta como "ahora"
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(iso));
+  const v = (t: string) => p.find((x) => x.type === t)?.value ?? '00';
+  return `${v('year')}-${v('month')}-${v('day')}T${v('hour')}:${v('minute')}`;
+};
+const ahoraClave = nowCL().toISOString().slice(0, 16);
+
+// ── Para hacer (ordenado por plazo) ─────────────────────────────────────────
+type Accion =
+  | { tipo: 'wa'; url: string | null; id: string }
+  | { tipo: 'form'; action: string; campos: Record<string, string>; texto: string }
+  | { tipo: 'link'; url: string; texto: string }
+  | { tipo: 'folio'; bookingId: string; sugerido: number | null };
+type Tarea = {
+  clave: string;         // plazo "YYYY-MM-DDTHH:MM" (hora de Chile) para ordenar; '9999' = sin plazo
+  chip: string;
+  titulo: string;
+  detalle: string;
+  href: string | null;
+  externo?: boolean;
+  accion?: Accion;
+};
+const vuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); return u.pathname + u.search; })();
+const tareas: Tarea[] = [];
+const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos } = avisos;
+
+for (const c of cobros ?? []) {
+  const plazo = sumarDias(c.fecha, -1); // el pago debe quedar 24 h antes
+  const vencido = hoursUntilSessionCL(plazo, c.hora) <= 0;
+  tareas.push({
+    clave: `${plazo}T${c.hora}`,
+    chip: vencido ? `sesión ${cuando(c.fecha, c.hora)}` : `pago vence ${cuando(plazo, c.hora)}`,
+    titulo: `Cobrar a ${c.paciente}`,
+    detalle: `${c.presencial ? 'Presencial' : 'Online'} · ${clp(c.monto)}${c.presencial ? ' · si no paga, mueve el box' : ''}${c.sinLink ? ' · sin link de pago: cóbrale desde su sesión' : ''}`,
+    href: `/admin/agenda?booking=${c.id}&accion=cobrar`,
+    accion: { tipo: 'wa', url: c.waUrl, id: c.id },
+  });
+}
+if (cobros === null) {
+  tareas.push({ clave: ahoraClave, chip: 'revisar', titulo: 'No se pudieron revisar los pagos pendientes', detalle: 'Recarga en un rato o mira la lista de por cobrar.', href: '/admin/por-cobrar' });
+}
+for (const b of box.liberar) {
+  tareas.push({
+    clave: `${b.fecha}T${b.hora}`,
+    chip: `liberar antes de ${cuando(b.fecha, b.hora)}`,
+    titulo: `Liberar box de ${b.paciente}`,
+    detalle: 'Espacio Cala · la sesión ya no está en tu calendario (se canceló o se movió)',
+    href: `/admin/agenda?fecha=${b.fecha}&hora=${b.hora}`,
+    accion: { tipo: 'form', action: '/api/admin/box-cala', campos: { slot: b.slot, paciente: b.paciente, accion: 'liberado', redirect: vuelta }, texto: 'Ya lo liberé' },
+  });
+}
+for (const b of box.pendientes) {
+  tareas.push({
+    clave: `${b.fecha}T${b.hora}`,
+    chip: `box vence ${cuando(b.fecha, b.hora)}`,
+    titulo: `Comprar box para ${b.paciente}`,
+    detalle: `Espacio Cala · ${fechaLarga(b.fecha)} a las ${b.hora}`,
+    href: `/admin/agenda?fecha=${b.fecha}&hora=${b.hora}`,
+    accion: { tipo: 'form', action: '/api/admin/box-cala', campos: { slot: b.slot, paciente: b.paciente, accion: 'reservado', redirect: vuelta }, texto: 'Ya compré el box' },
+  });
+}
+if (box.error) {
+  tareas.push({ clave: ahoraClave, chip: 'revisar', titulo: 'No se pudo revisar tu calendario para los boxes', detalle: 'Recarga en un rato; mientras, revisa tus horas presenciales en Google Calendar.', href: null });
+}
+for (const a of comprobanteAlerts) {
+  tareas.push({
+    clave: claveCL(a.subidoEl),
+    chip: `subido ${cuando(claveCL(a.subidoEl).slice(0, 10), claveCL(a.subidoEl).slice(11, 16))}`,
+    titulo: `Confirmar transferencia de ${a.patientName}`,
+    detalle: `${clp(a.total)} · revisa tu banco y confirma el pago en la sesión`,
+    href: `/admin/agenda?booking=${a.bookingIds[0]}`,
+    accion: { tipo: 'link', url: `/api/admin/comprobante?b=${a.bookingIds[0]}`, texto: 'Ver comprobante' },
+  });
+}
+for (const a of boletaAlerts) {
+  tareas.push({
+    clave: ahoraClave,
+    chip: 'boleta con problemas',
+    titulo: `Boleta de ${a.patientName}${a.sessionDate && a.sessionDate !== '2099-12-31' ? ` · sesión ${fechaCorta(a.sessionDate)}` : ''}`,
+    detalle: a.message,
+    href: a.href.startsWith('/admin/pacientes/') ? `${a.href}#s-${a.bookingId}` : a.href,
+    accion: a.registrarFolio ? { tipo: 'folio', bookingId: a.bookingId, sugerido: a.registrarFolio.sugerido } : undefined,
+  });
+}
+for (const r of rebotes) {
+  tareas.push({
+    clave: ahoraClave,
+    chip: 'correo rebotado',
+    titulo: `Correo que no llegó${r.paciente ? `: ${r.paciente.name}` : ''}`,
+    detalle: `${r.correo}${r.asunto ? ` (“${r.asunto}”)` : ''} · ${r.paciente ? 'pídele su correo correcto y cámbialo en su ficha' : 'revisa ese correo con la persona'}`,
+    href: r.paciente ? `/admin/pacientes/${r.paciente.id}?tab=info#email` : null,
+    accion: { tipo: 'form', action: '/api/admin/rebotes', campos: { correo: r.correo, redirect: vuelta }, texto: 'Listo' },
+  });
+}
+// Tarifas: van por nombre (la paciente puede no tener ficha); se busca la ficha
+// con el mismo nombre (sin tildes ni mayúsculas) para llevar a sus sesiones.
+const normalizar = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const fichaPorNombre = new Map<string, string>();
+if (tarifas.length) {
+  const { data } = await supabase.from('patients').select('id, name');
+  for (const p of data ?? []) if (p.name) fichaPorNombre.set(normalizar(String(p.name)), p.id);
+}
+for (const t of tarifas) {
+  const ficha = fichaPorNombre.get(normalizar(t.nombre));
+  const monto = `${t.anterior ? `${clp(t.anterior)} → ` : ''}${clp(t.nuevo)} desde el ${fechaLarga(t.desde)}`;
+  const montoAntiguo = t.sesionesConMontoAntiguo > 0 ? ` · ⚠ ${t.sesionesConMontoAntiguo} ${t.sesionesConMontoAntiguo === 1 ? 'sesión agendada' : 'sesiones agendadas'} con el monto antiguo` : '';
+  tareas.push({
+    clave: t.fase === 'avisar' ? (t.atrasado ? ahoraClave : `${sumarDias(t.desde, -1)}T23:59`) : t.fase === 'vigente' ? ahoraClave : `${t.desde}T00:00`,
+    chip: t.fase === 'avisar' ? (t.atrasado ? 'urgente: ya rige' : `avisar antes del ${cuando(t.desde)}`) : t.fase === 'proxima' ? `rige ${cuando(t.desde)}` : 'ya rige',
+    titulo: t.fase === 'avisar' ? `Avisar cambio de tarifa a ${t.nombre}` : `Tarifa nueva de ${t.nombre}`,
+    detalle: monto + montoAntiguo + (t.fase === 'vigente' ? ' · al agendarle usa el monto nuevo' : ''),
+    href: ficha ? `/admin/pacientes/${ficha}?tab=sesiones` : '/admin/pacientes',
+    accion: t.fase === 'proxima' ? undefined : { tipo: 'form', action: '/api/admin/cambios-tarifa', campos: { id: t.id, campo: t.fase === 'avisar' ? 'avisado' : 'aplicado', redirect: vuelta }, texto: t.fase === 'avisar' ? 'Ya le avisé' : 'Listo' },
+  });
+}
+for (const i of impuestos) {
+  tareas.push({
+    clave: ahoraClave,
+    chip: 'pendiente',
+    titulo: `Pagar impuestos de ${i.nombre}`,
+    detalle: 'En el SII (se abre en otra pestaña)',
+    href: URL_SII, externo: true,
+    accion: { tipo: 'form', action: '/api/admin/impuestos-ok', campos: { mes: i.mes, redirect: vuelta }, texto: 'Ya lo hice' },
+  });
+}
+for (const a of consentAlerts) {
+  tareas.push({
+    clave: '9999',
+    chip: a.sentAt ? 'enviado, sin firmar' : 'sin enviar',
+    titulo: `Consentimiento de datos: ${a.name}`,
+    detalle: 'Ley 21.719 · envíaselo desde su ficha',
+    href: `/admin/pacientes/${a.patientId}#consentimiento`,
+  });
+}
+tareas.sort((a, b) => a.clave.localeCompare(b.clave));
+// Color del plazo: rojo si vence en menos de 24 h (o ya venció), ámbar hasta 3 días.
+const tono = (clave: string) => {
+  if (clave === '9999') return 'gris';
+  const [f, h] = clave.split('T');
+  const horas = hoursUntilSessionCL(f, h ?? '00:00');
+  return horas < 24 ? 'rojo' : horas < 72 ? 'ambar' : 'gris';
+};
+const VISIBLES = 6;
+const hayBox = box.pendientes.length > 0 || box.liberar.length > 0;
+
+// ── Números ─────────────────────────────────────────────────────────────────
+const porCobrarTotal = (porCobrar ?? []).reduce((s, b) => s + (Number(b.amount) || 0), 0);
+const avanceSemana = Math.min(100, Math.round((semana.length / META_SEMANA) * 100));
+
+// ── Reservas por origen ─────────────────────────────────────────────────────
 const porCanal = new Map<string, { n: number; monto: number }>();
 let sinOrigen = 0;
-for (const b of recientes ?? []) {
+for (const b of recientesRes.data ?? []) {
   const canal = b.origen?.canal as string | undefined;
   if (!canal) { sinOrigen++; continue; }
   const acc = porCanal.get(canal) ?? { n: 0, monto: 0 };
@@ -82,143 +337,337 @@ for (const b of recientes ?? []) {
   porCanal.set(canal, acc);
 }
 const origenes = [...porCanal.entries()].sort((a, b) => b[1].n - a[1].n);
-const formatCLP = (n: number) => '$' + Math.round(n).toLocaleString('es-CL');
 
-const formatTime = (t: string) => t.slice(0, 5);
-const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-const formatDate = (iso: string) => {
-  const [y, m, d] = iso.split('-');
-  return `${parseInt(d)} ${MONTHS_ES[parseInt(m)-1]}`;
-};
+const chevron = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>';
+const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-pagar': 'por pagar', 'anulada': 'deuda anulada', 'sin-cobro': 'sin cobro', 'externa': 'Encuadrado' };
 ---
 
-<AdminLayout title="Dashboard" current="/admin">
+<AdminLayout title="Inicio" current="/admin" avisos={avisos} ocultarAvisosDeInicio>
+  <div class="inicio">
 
-  <!-- Métricas -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2rem;">
-    <div class="stat-card" style="text-align:center;">
-      <p class="stat-label">Sesiones hoy</p>
-      <p class="stat-value">{todayBookings?.length ?? 0}</p>
-      <p class="stat-sub">{formatDate(today)}</p>
-    </div>
-    <div class="stat-card" style="text-align:center;">
-      <p class="stat-label">Este mes</p>
-      <p class="stat-value">{monthCount ?? 0}</p>
-      <p class="stat-sub">confirmadas</p>
-    </div>
-    <div class="stat-card" style="text-align:center;">
-      <p class="stat-label">Pago pendiente</p>
-      <p class="stat-value" style={(pendingCount ?? 0) > 0 ? 'color:var(--gold)' : ''}>{pendingCount ?? 0}</p>
-      <p class="stat-sub">reservas</p>
-    </div>
-  </div>
-
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5rem;">
-
-    <!-- Sesiones de hoy -->
-    <div class="card">
-      <div class="section-header">
-        <p class="label">Hoy — {formatDate(today)}</p>
-        <a href="/admin/agenda" class="btn btn-outline btn-sm">Ver agenda</a>
+    <!-- Día que se mira -->
+    <nav class="ini-dia" aria-label="Cambiar de día">
+      <a href={`/admin?dia=${sumarDias(dia, -1)}`} class="ini-flecha" aria-label="Día anterior">‹</a>
+      <div class="ini-dia-txt">
+        <p class="ini-dia-rel">{esHoy ? 'Hoy' : dia === manana ? 'Mañana' : dia === ayer ? 'Ayer' : ' '}</p>
+        <h2>{mayus(fechaLarga(dia))}</h2>
       </div>
-      {!todayBookings?.length ? (
-        <p style="font-size:0.875rem;color:var(--stone);padding:1rem 0;">Sin sesiones para hoy.</p>
+      <a href={`/admin?dia=${sumarDias(dia, 1)}`} class="ini-flecha" aria-label="Día siguiente">›</a>
+      {!esHoy && <a href="/admin" class="btn btn-outline btn-sm ini-hoy">Hoy</a>}
+    </nav>
+
+    {errorReservas && (
+      <p class="alert-error">⚠ No se pudieron leer las sesiones. Recarga en un rato.</p>
+    )}
+
+    <!-- Próxima sesión -->
+    <section class="card ini-hero">
+      <p class="label">{hero ? (heroEnCurso ? 'En curso' : esHoy ? 'Próxima sesión' : 'Primera sesión del día') : (esHoy ? 'Próxima sesión' : 'Sesiones del día')}</p>
+      {hero ? (
+        <>
+          <a href={hero.href} class="ini-hero-main">
+            <span class="ini-hero-hora">{hero.hora}</span>
+            <span class="ini-hero-txt">
+              <strong>{hero.paciente}</strong>
+              <span>{hero.fecha !== dia ? `${cuando(hero.fecha)} · ` : ''}{hero.tipo}</span>
+            </span>
+            <span class={`ini-pago ini-pago-${hero.pago}`}>{PAGO_TXT[hero.pago]}</span>
+          </a>
+          <div class="ini-hero-botones">
+            <a href={hero.href} class="btn btn-dark ini-btn">Abrir sesión</a>
+            {/* Sala online abre el Meet de la sesión de la página en curso o por
+                empezar: solo se ofrece si esta sesión es de la página (las de
+                Encuadrado no tienen Meet aquí) y es la que viene hoy. */}
+            {hero.online && hero.id && hero.fecha === hoy && (
+              <a href="/admin/sala-online" target="_blank" rel="noopener" class="btn btn-primary ini-btn">Entrar a Meet</a>
+            )}
+          </div>
+        </>
       ) : (
-        <div style="display:flex;flex-direction:column;gap:0.5rem;">
-          {todayBookings.map((b) => (
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem;background:var(--sand);border-radius:var(--radius);">
-              <div>
-                <p style="font-size:0.9rem;font-weight:500;">{b.patient_name}</p>
-                <p style="font-size:0.78rem;color:var(--stone);margin-top:0.15rem;">
-                  {SESSION_LABELS[b.session_type as keyof typeof SESSION_LABELS] ?? b.session_type}
-                </p>
-                {origenTexto(b.origen) && <p style="font-size:0.72rem;color:var(--stone);margin-top:0.1rem;">Origen: {origenTexto(b.origen)}</p>}
-              </div>
-              <div style="text-align:right;">
-                <p style="font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:400;">{formatTime(b.session_time)}</p>
-                <span class={`badge badge-${b.status === 'confirmed' ? 'confirmed' : 'pending'}`} style="margin-top:0.25rem;">
-                  {b.status === 'confirmed' ? 'Confirmada' : 'Por pagar'}
-                </span>
-              </div>
+        <p class="ini-vacio">{errorReservas ? 'No se pudieron leer las sesiones.' : esHoy ? 'No quedan sesiones hoy ni en los próximos 7 días.' : 'Sin sesiones este día.'}</p>
+      )}
+    </section>
+
+    <!-- Números -->
+    <section class="ini-stats" aria-label="Resumen">
+      <a href={`/admin/agenda?fecha=${dia}`} class="ini-stat">
+        <span class="stat-label">{esHoy ? 'Hoy' : 'Día'}</span>
+        <span class="stat-value">{delDia.length}</span>
+        <span class="stat-sub">{delDia.length === 1 ? 'sesión' : 'sesiones'}</span>
+      </a>
+      <a href={`/admin/agenda?fecha=${lunes}`} class="ini-stat">
+        <span class="stat-label">Semana</span>
+        <span class="stat-value">{semana.length}<small>/{META_SEMANA}</small></span>
+        <span class="ini-barra" aria-hidden="true"><span style={`width:${avanceSemana}%`}></span></span>
+        <span class="stat-sub">lun {Number(lunes.slice(8))} – dom {Number(domingo.slice(8))}{google === null ? ' · sin Google' : ''}</span>
+      </a>
+      <a href="/admin/por-cobrar" class="ini-stat">
+        <span class="stat-label">Por cobrar</span>
+        <span class="stat-value">{porCobrar === null ? '—' : porCobrar.length}</span>
+        <span class="stat-sub">{porCobrar === null ? 'no se pudo leer' : clp(porCobrarTotal)}</span>
+      </a>
+      <a href="/admin/deudas" class="ini-stat">
+        <span class="stat-label">Te deben</span>
+        <span class="stat-value">{deben === null ? '—' : deben.personas}</span>
+        <span class="stat-sub">{deben === null ? 'no se pudo leer' : `${clp(deben.total)} en total`}</span>
+      </a>
+    </section>
+
+    <div class="ini-cols">
+      <!-- Para hacer -->
+      <section class="card ini-lista">
+        <div class="section-header">
+          <p class="label">Para hacer{tareas.length ? ` (${tareas.length})` : ''}</p>
+          {hayBox && <a href="https://espaciocala.cl" target="_blank" rel="noopener" class="ini-link-sec">espaciocala.cl ↗</a>}
+        </div>
+        {!tareas.length ? (
+          <p class="ini-ok">Todo al día ✓</p>
+        ) : (
+          <>
+            {[tareas.slice(0, VISIBLES), tareas.slice(VISIBLES)].map((grupo, gi) => {
+              const lista = (
+                <ul class="ini-tareas">
+                  {grupo.map((t) => (
+                    <li class="ini-tarea">
+                      {t.href ? (
+                        <a href={t.href} class="ini-tarea-link" {...(t.externo ? { target: '_blank', rel: 'noopener' } : {})}>
+                          <span class="ini-tarea-txt">
+                            <span class={`ini-chip ini-chip-${tono(t.clave)}`}>{t.chip}</span>
+                            <strong>{t.titulo}</strong>
+                            <span class="ini-det">{t.detalle}</span>
+                          </span>
+                          <span class="ini-chev" set:html={chevron}></span>
+                        </a>
+                      ) : (
+                        <div class="ini-tarea-link">
+                          <span class="ini-tarea-txt">
+                            <span class={`ini-chip ini-chip-${tono(t.clave)}`}>{t.chip}</span>
+                            <strong>{t.titulo}</strong>
+                            <span class="ini-det">{t.detalle}</span>
+                          </span>
+                        </div>
+                      )}
+                      {t.accion && (
+                        <div class="ini-tarea-accion">
+                          {t.accion.tipo === 'wa' && (t.accion.url
+                            ? <>
+                                <a href={t.accion.url} target="_blank" rel="noopener" data-cobro-wa={t.accion.id} class="btn ini-btn ini-btn-wa">WhatsApp</a>
+                                <span data-cobro-enviado={t.accion.id} hidden class="ini-hecho">✓ abierto</span>
+                              </>
+                            : <span class="ini-hecho">sin teléfono válido</span>)}
+                          {t.accion.tipo === 'form' && (
+                            <form method="POST" action={t.accion.action}>
+                              {Object.entries(t.accion.campos).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+                              <button type="submit" class="btn btn-outline ini-btn">{t.accion.texto}</button>
+                            </form>
+                          )}
+                          {t.accion.tipo === 'link' && (
+                            <a href={t.accion.url} target="_blank" rel="noopener" class="btn btn-outline ini-btn">{t.accion.texto}</a>
+                          )}
+                          {t.accion.tipo === 'folio' && (
+                            <button type="button" class="btn btn-outline ini-btn btn-registrar-folio" data-booking={t.accion.bookingId} data-folio={t.accion.sugerido ?? ''}>Registrar folio</button>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              );
+              if (!grupo.length) return null;
+              return gi === 0 ? lista : (
+                <details class="ini-mas">
+                  <summary><span class="ini-mas-abrir">Ver todo ({tareas.length})</span><span class="ini-mas-cerrar">Ver menos</span></summary>
+                  {lista}
+                </details>
+              );
+            })}
+          </>
+        )}
+      </section>
+
+      <!-- Sesiones del día -->
+      <section class="card ini-lista">
+        <div class="section-header">
+          <p class="label">Sesiones · {esHoy ? 'hoy' : fechaCorta(dia)}</p>
+          <a href={`/admin/agenda?fecha=${dia}`} class="ini-link-sec">Ver en calendario</a>
+        </div>
+        {!delDia.length ? (
+          <p class="ini-vacio">Sin sesiones este día.</p>
+        ) : (
+          <ul class="ini-sesiones">
+            {delDia.map((s) => (
+              <li>
+                <a href={s.href} class="ini-sesion">
+                  <span class="ini-sesion-hora">{s.hora}</span>
+                  <span class="ini-tarea-txt">
+                    <strong>{s.paciente}</strong>
+                    <span class="ini-det">{s.tipo}</span>
+                  </span>
+                  <span class={`ini-pago ini-pago-${s.pago}`}>{PAGO_TXT[s.pago]}</span>
+                  <span class="ini-chev" set:html={chevron}></span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+        {google === null && <p class="ini-nota">No se pudo leer Google Calendar: faltan las sesiones de Encuadrado.</p>}
+      </section>
+    </div>
+
+    <!-- Próximos 7 días -->
+    <section class="card ini-lista">
+      <div class="section-header">
+        <p class="label">Próximos 7 días</p>
+        <a href={`/admin/agenda?fecha=${sumarDias(dia, 1)}`} class="ini-link-sec">Calendario</a>
+      </div>
+      {!proximasPorDia.length ? (
+        <p class="ini-vacio">Sin sesiones agendadas en los próximos 7 días.</p>
+      ) : (
+        <div class="ini-dias">
+          {proximasPorDia.map(([fecha, lista]) => (
+            <div class="ini-dia-card">
+              <a href={`/admin?dia=${fecha}`} class="ini-dia-card-tit">{mayus(cuando(fecha) === fechaCorta(fecha) ? fechaCorta(fecha) : `${cuando(fecha)} · ${fechaCorta(fecha)}`)} <span>{lista.length}</span></a>
+              <ul>
+                {lista.map((s) => (
+                  <li>
+                    <a href={s.href} class="ini-mini">
+                      <span class="ini-mini-hora">{s.hora}</span>
+                      <span class="ini-mini-nom">{s.paciente}</span>
+                      <span class={`ini-punto ini-pago-${s.pago}`} title={PAGO_TXT[s.pago]}></span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </section>
 
-    <!-- Próximas sesiones -->
-    <div class="card">
-      <div class="section-header">
-        <p class="label">Próximos 7 días</p>
-        <a href="/admin/agenda" class="btn btn-dark btn-sm">+ Nueva reserva</a>
-      </div>
-      {!upcoming?.length ? (
-        <p style="font-size:0.875rem;color:var(--stone);padding:1rem 0;">Sin sesiones próximas confirmadas.</p>
+    <!-- Reservas por origen -->
+    <details class="card ini-origen">
+      <summary class="label">Reservas por origen (últimos 90 días)</summary>
+      {!origenes.length ? (
+        <p class="ini-vacio">Aún no hay reservas confirmadas con origen registrado.</p>
       ) : (
         <table>
-          <thead>
-            <tr>
-              <th>Paciente</th>
-              <th>Fecha</th>
-              <th>Hora</th>
-              <th>Tipo</th>
-            </tr>
-          </thead>
+          <thead><tr><th>Origen</th><th>Reservas</th><th>Monto</th></tr></thead>
           <tbody>
-            {upcoming.map((b) => (
-              <tr>
-                <td style="font-weight:500;">
-                  {b.patient_name}
-                  {b.origen?.canal && <span style="display:block;font-size:0.72rem;font-weight:400;color:var(--stone);">{b.origen.canal}</span>}
-                </td>
-                <td>{formatDate(b.session_date)}</td>
-                <td style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;">{formatTime(b.session_time)}</td>
-                <td style="color:var(--stone);">
-                  {b.session_type === 'online' ? 'Ind. Online' :
-                   b.session_type === 'presencial' ? 'Ind. Presencial' :
-                   b.session_type === 'pareja-online' ? 'Pareja Online' : 'Pareja Presencial'}
-                </td>
-              </tr>
+            {origenes.map(([canal, v]) => (
+              <tr><td style="font-weight:500;">{canal}</td><td>{v.n}</td><td>{clp(v.monto)}</td></tr>
             ))}
           </tbody>
         </table>
       )}
-    </div>
-
+      {sinOrigen > 0 && (
+        <p class="ini-nota">{sinOrigen} {sinOrigen === 1 ? 'reserva confirmada' : 'reservas confirmadas'} sin origen registrado (creadas en el panel o antes de activar esto).</p>
+      )}
+    </details>
   </div>
-
-  <!-- Reservas por origen -->
-  <div class="card" style="margin-top:1.5rem;">
-    <div class="section-header">
-      <p class="label">Reservas por origen (últimos 90 días)</p>
-    </div>
-    {!origenes.length ? (
-      <p style="font-size:0.875rem;color:var(--stone);padding:1rem 0;">Aún no hay reservas confirmadas con origen registrado.</p>
-    ) : (
-      <table>
-        <thead>
-          <tr>
-            <th>Origen</th>
-            <th>Reservas</th>
-            <th>Monto</th>
-          </tr>
-        </thead>
-        <tbody>
-          {origenes.map(([canal, v]) => (
-            <tr>
-              <td style="font-weight:500;">{canal}</td>
-              <td>{v.n}</td>
-              <td>{formatCLP(v.monto)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    )}
-    {sinOrigen > 0 && (
-      <p style="font-size:0.78rem;color:var(--stone);margin-top:0.75rem;">
-        {sinOrigen} {sinOrigen === 1 ? 'reserva confirmada' : 'reservas confirmadas'} sin origen registrado (creadas en el panel o antes de activar esto).
-      </p>
-    )}
-  </div>
-
 </AdminLayout>
+
+<style>
+  .inicio { display: flex; flex-direction: column; gap: 1rem; max-width: 1100px; }
+
+  /* Día */
+  .ini-dia { display: flex; align-items: center; gap: 0.5rem; }
+  .ini-dia-txt { flex: 1; min-width: 0; text-align: center; }
+  .ini-dia-txt h2 { font-size: 1.15rem; font-weight: 700; color: var(--enc-text-1); }
+  .ini-dia-rel { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--enc-text-3); font-weight: 600; min-height: 1em; }
+  .ini-flecha { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--enc-border); background: white; color: var(--enc-text-2); font-size: 1.5rem; line-height: 1; text-decoration: none; flex-shrink: 0; }
+  .ini-flecha:active { transform: scale(0.95); }
+  .ini-hoy { min-height: 44px; }
+
+  /* Próxima sesión */
+  .ini-hero { display: flex; flex-direction: column; gap: 0.75rem; }
+  .ini-hero-main { display: flex; align-items: center; gap: 0.9rem; text-decoration: none; color: inherit; min-height: 44px; }
+  .ini-hero-hora { font-size: 1.8rem; font-weight: 700; color: var(--enc-text-1); line-height: 1; }
+  .ini-hero-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .ini-hero-txt strong { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ini-hero-txt span { font-size: 0.8rem; color: var(--enc-text-3); }
+  .ini-hero-botones { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .ini-btn { min-height: 44px; }
+  .ini-hero-botones .ini-btn { flex: 1; min-width: 140px; }
+
+  /* Pago */
+  .ini-pago { font-size: 0.7rem; font-weight: 600; padding: 0.2rem 0.55rem; border-radius: 99px; border: 1px solid; white-space: nowrap; flex-shrink: 0; }
+  .ini-pago-pagada { color: #15803d; border-color: #86efac; background: #f0fdf4; }
+  .ini-pago-por-pagar { color: #b91c1c; border-color: #fca5a5; background: #fef2f2; }
+  .ini-pago-anulada, .ini-pago-sin-cobro, .ini-pago-externa { color: var(--enc-text-3); border-color: var(--enc-border); background: var(--enc-body-bg); }
+
+  /* Números */
+  .ini-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
+  .ini-stat { display: flex; flex-direction: column; gap: 0.15rem; background: white; border: 1px solid var(--enc-border); border-radius: var(--enc-radius-lg); padding: 0.9rem 1rem; box-shadow: var(--enc-shadow); text-decoration: none; color: inherit; min-height: 44px; transition: border-color .15s; }
+  .ini-stat:hover { border-color: #9ca3af; }
+  .ini-stat:active { transform: scale(0.98); }
+  .ini-stat .stat-label { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--enc-text-3); font-weight: 600; }
+  .ini-stat .stat-value { font-size: 1.7rem; font-weight: 700; color: var(--enc-text-1); line-height: 1.1; }
+  .ini-stat .stat-value small { font-size: 0.95rem; font-weight: 600; color: var(--enc-text-3); }
+  .ini-stat .stat-sub { font-size: 0.75rem; color: var(--enc-text-3); }
+  .ini-barra { display: block; height: 4px; border-radius: 99px; background: var(--enc-border-2); overflow: hidden; margin: 0.15rem 0; }
+  .ini-barra span { display: block; height: 100%; background: #4f5ce8; border-radius: 99px; }
+
+  /* Listas */
+  .ini-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+  .ini-lista .section-header { margin-bottom: 0.5rem; }
+  .ini-link-sec { font-size: 0.8rem; color: var(--enc-nav-active-text); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0 0.25rem; }
+  .ini-tareas, .ini-sesiones { list-style: none; display: flex; flex-direction: column; }
+  .ini-tarea { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; border-top: 1px solid var(--enc-border-2); padding: 0.15rem 0; }
+  .ini-tareas > .ini-tarea:first-child, .ini-sesiones > li:first-child > .ini-sesion { border-top: none; }
+  .ini-tarea-link { flex: 1 1 220px; min-width: 0; display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding: 0.45rem 0.25rem; text-decoration: none; color: inherit; border-radius: 8px; }
+  a.ini-tarea-link:hover, .ini-sesion:hover { background: var(--enc-body-bg); }
+  .ini-tarea-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+  .ini-tarea-txt strong { font-size: 0.88rem; font-weight: 600; color: var(--enc-text-1); }
+  .ini-det { font-size: 0.76rem; color: var(--enc-text-3); }
+  .ini-chev { color: var(--enc-text-4); display: inline-flex; flex-shrink: 0; }
+  .ini-tarea-accion { display: flex; align-items: center; gap: 0.4rem; padding: 0 0.25rem 0.35rem; }
+  .ini-tarea-accion form { display: inline; }
+  .ini-btn-wa { background: #25D366 !important; color: white !important; border-color: #25D366 !important; }
+  .ini-hecho { font-size: 0.75rem; color: var(--enc-text-3); }
+  .ini-chip { align-self: flex-start; font-size: 0.68rem; font-weight: 600; padding: 0.1rem 0.5rem; border-radius: 99px; margin-bottom: 0.1rem; }
+  .ini-chip-rojo { background: #fee2e2; color: #b91c1c; }
+  .ini-chip-ambar { background: #fef3c7; color: #92400e; }
+  .ini-chip-gris { background: var(--enc-border-2); color: var(--enc-text-3); }
+  .ini-ok { font-size: 0.95rem; font-weight: 600; color: var(--enc-green-dark); padding: 0.75rem 0; }
+  .ini-vacio { font-size: 0.875rem; color: var(--enc-text-3); padding: 0.5rem 0; }
+  .ini-nota { font-size: 0.75rem; color: var(--enc-text-3); margin-top: 0.5rem; }
+  .ini-mas summary { cursor: pointer; list-style: none; font-size: 0.82rem; font-weight: 600; color: var(--enc-nav-active-text); min-height: 44px; display: flex; align-items: center; border-top: 1px solid var(--enc-border-2); }
+  .ini-mas summary::-webkit-details-marker { display: none; }
+  .ini-mas[open] summary .ini-mas-abrir, .ini-mas:not([open]) summary .ini-mas-cerrar { display: none; }
+
+  .ini-sesion { display: flex; align-items: center; gap: 0.7rem; min-height: 48px; padding: 0.45rem 0.25rem; text-decoration: none; color: inherit; border-top: 1px solid var(--enc-border-2); border-radius: 8px; }
+  .ini-sesion-hora { font-weight: 700; font-size: 0.95rem; width: 3rem; flex-shrink: 0; }
+
+  /* Próximos 7 días */
+  .ini-dias { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0.6rem; }
+  .ini-dia-card { border: 1px solid var(--enc-border); border-radius: var(--enc-radius-lg); padding: 0.35rem 0.5rem 0.5rem; }
+  .ini-dia-card-tit { display: flex; align-items: center; justify-content: space-between; min-height: 44px; font-size: 0.8rem; font-weight: 700; color: var(--enc-text-1); text-decoration: none; }
+  .ini-dia-card-tit span { font-size: 0.7rem; font-weight: 600; color: var(--enc-text-3); background: var(--enc-border-2); border-radius: 99px; padding: 0 0.45rem; }
+  .ini-dia-card ul { list-style: none; }
+  .ini-mini { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding: 0 0.25rem; text-decoration: none; color: inherit; border-radius: 6px; font-size: 0.82rem; }
+  .ini-mini:hover { background: var(--enc-body-bg); }
+  .ini-mini-hora { font-weight: 600; width: 2.8rem; flex-shrink: 0; }
+  .ini-mini-nom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ini-punto { width: 9px; height: 9px; border-radius: 50%; padding: 0; flex-shrink: 0; border: none; background: #d1d5db; }
+  .ini-punto.ini-pago-pagada { background: #16a34a; }
+  .ini-punto.ini-pago-por-pagar { background: #dc2626; }
+
+  /* Origen */
+  .ini-origen summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 0.4rem; list-style: none; }
+  .ini-origen summary::-webkit-details-marker { display: none; }
+  .ini-origen summary::before { content: '▸'; font-size: 0.8rem; transition: transform .15s; }
+  .ini-origen[open] summary::before { transform: rotate(90deg); }
+  .ini-origen[open] summary { margin-bottom: 0.75rem; }
+
+  @media (max-width: 860px) {
+    .ini-cols { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    .ini-stats { grid-template-columns: 1fr 1fr; }
+    .ini-tarea-accion { width: 100%; padding-left: 0.25rem; }
+    .ini-tarea-accion .ini-btn { flex: 1; }
+    .ini-tarea-accion form { display: flex; flex: 1; }
+    .ini-tarea-accion form .ini-btn { flex: 1; }
+    .ini-origen { overflow-x: auto; }
+  }
+</style>

@@ -4,17 +4,13 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { frasePlazoPago, AVISO_REAGENDAR } from '../../lib/cobrosProximos';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
+import { sesionesPorCobrar } from '../../lib/porCobrar';
 
 // "Por cobrar" (distinto de "deuda", ver /admin/deudas): sesiones que TODAVÍA
-// no ocurren y cuyo link de pago (Flow) sigue sin pagarse. No es dinero que se
-// deba — es dinero que debería entrar cuando el paciente pague el link.
-const { data: rows } = await supabase
-  .from('bookings')
-  .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, mp_preference_id, created_at')
-  .eq('status', 'pending_payment')
-  .neq('session_date', '2099-12-31') // cobros manuales sin fecha se gestionan desde /admin/cobros
-  .gt('amount', 0)
-  .order('session_date', { ascending: true });
+// no ocurren y siguen sin pagar. No es dinero que se deba — es dinero que
+// debería entrar cuando el paciente pague el link. Misma definición que la
+// tarjeta "Por cobrar" del Inicio (ver src/lib/porCobrar.ts).
+const rows = await sesionesPorCobrar().catch(() => null);
 
 const { data: settingsRows } = await supabase.from('settings').select('key, value').eq('key', 'flow_env');
 const flowEnv = settingsRows?.[0]?.value;
@@ -42,6 +38,7 @@ function formatDate(iso: string) {
 }
 
 const pending = rows ?? [];
+const errorLectura = rows === null;
 const grandTotal = pending.reduce((s, b) => s + (b.amount ?? 0), 0);
 
 const debtEmailSent = Astro.url.searchParams.get('debt_email_sent') === '1';
@@ -55,7 +52,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
     <div>
       <a href="/admin/finanzas" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Finanzas</a>
       <h1 style="margin-top:0.5rem;">Por cobrar — links de pago pendientes</h1>
-      <p style="color:var(--stone);font-size:0.88rem;">Sesiones agendadas cuyo link de pago aún no se paga. No son deudas — nadie ha prestado el servicio todavía.</p>
+      <p style="color:var(--stone);font-size:0.88rem;">Sesiones que todavía no ocurren y siguen sin pagar. No son deudas — nadie ha prestado el servicio todavía.</p>
     </div>
     <div style="text-align:right;">
       <p class="label" style="color:#b45309;">Total pendiente</p>
@@ -83,9 +80,14 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
       ⚠ No se pudo enviar el correo{errorDetail ? `: ${errorDetail}` : '.'}
     </div>
   )}
+  {errorLectura && (
+    <div class="card" style="background:#fef2f2;border-color:#fecaca;color:#dc2626;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ⚠ No se pudieron leer las sesiones por cobrar. Recarga en un rato.
+    </div>
+  )}
   {!pending.length ? (
     <div class="card" style="text-align:center;padding:3rem;">
-      <p style="color:var(--stone);font-size:0.9rem;">No hay links de pago pendientes. 🎉</p>
+      <p style="color:var(--stone);font-size:0.9rem;">{errorLectura ? 'Sin datos por ahora.' : 'No hay sesiones por cobrar. 🎉'}</p>
     </div>
   ) : (
     <div class="card" style="padding:0;overflow:hidden;">
