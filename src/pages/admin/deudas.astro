@@ -3,6 +3,7 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { upsertPatientFromBooking } from '../../lib/patients';
+import { sesionesQueTeDeben, sesionesPorCobrar } from '../../lib/porCobrar';
 
 // Se arma desde la URL real de la petición (no desde PUBLIC_SITE_URL): esa
 // variable de entorno en Vercel resultó estar apuntando al dominio de Vercel
@@ -11,19 +12,26 @@ import { upsertPatientFromBooking } from '../../lib/patients';
 // el que entró la visita, así no depende de esa variable.
 const siteUrl = Astro.url.origin;
 
-// "Deuda real" = misma definición ya usada en el calendario (agenda.astro,
-// función evClass): una reserva CONFIRMADA (la sesión se dio o se va a dar)
-// que todavía no tiene paid_at (nadie registró que se cobró) y cuya deuda no
-// fue anulada explícitamente. Las reservas pending_payment (alguien reservando
-// online, aún sin confirmar) NO cuentan como deuda — son otra cosa.
-const { data: rows } = await supabase
-  .from('bookings')
-  .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, notes')
-  .eq('status', 'confirmed')
-  .is('paid_at', null)
-  .or('debt_voided.is.null,debt_voided.eq.false')
-  .gt('amount', 0)
-  .order('session_date', { ascending: true });
+// "Te deben" (14 oct 2026, ver src/lib/porCobrar.ts): sesiones sin pagar
+// (confirmadas o esperando pago, deuda no anulada) que YA EMPEZARON, más los
+// cobros manuales sin fecha. Lo que todavía no ocurre está en /admin/por-cobrar
+// (antes las sesiones futuras confirmadas salían en las dos listas). Misma
+// regla que la tarjeta "Te deben" del Inicio.
+// El link /pagar/[id] y el correo de cobro NO cambian: cobran todo lo
+// pendiente del paciente, también sus próximas sesiones sin pagar; por eso
+// cada fila avisa cuánto de eso hay (ver "proximasPorEmail").
+const [rows, porCobrar] = await Promise.all([
+  sesionesQueTeDeben().catch(() => null),
+  sesionesPorCobrar().catch(() => [] as Awaited<ReturnType<typeof sesionesPorCobrar>>),
+]);
+const errorLectura = rows === null;
+const proximasPorEmail: Record<string, { n: number; total: number }> = {};
+for (const b of porCobrar) {
+  const e = String(b.patient_email ?? '').toLowerCase();
+  if (!e) continue;
+  const acc = (proximasPorEmail[e] ??= { n: 0, total: 0 });
+  acc.n++; acc.total += Number(b.amount) || 0;
+}
 
 const { data: patients } = await supabase.from('patients').select('id, name, email, rut');
 const rutByEmail: Record<string, string> = {};
@@ -48,7 +56,7 @@ type DebtPatient = {
 };
 
 const byPatient: Record<string, DebtPatient> = {};
-(rows ?? []).forEach((b: any) => {
+(rows ?? []).forEach((b) => {
   const key = (b.patient_email ?? '').toLowerCase() || `${b.patient_name}|${b.patient_phone ?? ''}`;
   const entry = (byPatient[key] ??= {
     key, name: b.patient_name, email: b.patient_email, phone: b.patient_phone,
@@ -105,7 +113,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
     <div>
       <a href="/admin/finanzas" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Finanzas</a>
       <h1 style="margin-top:0.5rem;">Deudas pendientes</h1>
-      <p style="color:var(--stone);font-size:0.88rem;">Sesiones confirmadas que aún no se han pagado.</p>
+      <p style="color:var(--stone);font-size:0.88rem;">Sesiones que ya ocurrieron (o cobros sin fecha) y aún no se han pagado. Las que vienen están en <a href="/admin/por-cobrar" style="color:inherit;">Por cobrar</a>.</p>
     </div>
     <div style="display:flex;align-items:center;gap:1rem;">
       <div style="text-align:right;">
@@ -152,9 +160,14 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
       ⚠ {errorParam === 'boleta_failed' ? 'El pago se registró, pero la boleta NO se emitió' : 'No se pudo guardar el cambio'}{errorDetail ? `: ${errorDetail}` : ''}{errorParam === 'boleta_failed' ? '.' : ' — intenta de nuevo.'}
     </div>
   )}
+  {errorLectura && (
+    <div class="card" style="background:#fef2f2;border-color:#fecaca;color:#dc2626;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ⚠ No se pudieron leer las deudas. Recarga en un rato.
+    </div>
+  )}
   {!debtors.length ? (
     <div class="card" style="text-align:center;padding:3rem;">
-      <p style="color:var(--stone);font-size:0.9rem;">No hay deudas pendientes. 🎉</p>
+      <p style="color:var(--stone);font-size:0.9rem;">{errorLectura ? 'Sin datos por ahora.' : 'No hay deudas pendientes. 🎉'}</p>
     </div>
   ) : (
     <>
@@ -184,9 +197,12 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
               // realmente debe al momento de abrirla, así que da lo mismo si ya
               // le mandaste otro link antes o si pagó parte por otro medio.
               const payUrl = patientId ? `${siteUrl}/pagar/${patientId}` : null;
+              // El link cobra también sus próximas sesiones sin pagar (debt.ts):
+              // el mensaje y la fila lo dicen, para que el monto del link no sorprenda.
+              const proximas = d.email ? proximasPorEmail[d.email.toLowerCase()] : undefined;
               const waMsg = encodeURIComponent(
                 payUrl
-                  ? `Hola ${firstName}, tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores. Puedes revisarlo y pagarlo aquí: ${payUrl}`
+                  ? `Hola ${firstName}, tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores.${proximas ? ` El link incluye también ${proximas.n === 1 ? 'tu próxima sesión' : 'tus próximas sesiones'} sin pagar (${formatCLP(proximas.total)}).` : ''} Puedes revisarlo y pagarlo aquí: ${payUrl}`
                   : `Hola ${firstName}, te escribo de la consulta de Ps. Valentina Orellana — tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores. ¿Me confirmas cuándo podrías regularizarlo?`
               );
               const waUrl = waNumber.length >= 10 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
@@ -203,7 +219,14 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
                     </td>
                     <td style="font-size:0.84rem;color:var(--stone);">{formatDate(d.lastSessionDate)}</td>
                     <td style="font-size:0.84rem;">{d.bookings.length}</td>
-                    <td style="font-weight:600;font-size:0.88rem;white-space:nowrap;">{formatCLP(d.total)}</td>
+                    <td style="font-weight:600;font-size:0.88rem;white-space:nowrap;">
+                      {formatCLP(d.total)}
+                      {proximas && payUrl && (
+                        <p style="font-weight:400;font-size:0.72rem;color:var(--stone);white-space:normal;max-width:180px;">
+                          El link incluye también {proximas.n === 1 ? '1 sesión próxima' : `${proximas.n} sesiones próximas`} sin pagar ({formatCLP(proximas.total)}).
+                        </p>
+                      )}
+                    </td>
                     <td style="white-space:nowrap;">
                       {/* Igual que Encuadrado (Finanzas → Historial de pagos → Pendientes):
                           dos íconos directos, WhatsApp y correo, sin desplegable — el link

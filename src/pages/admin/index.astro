@@ -4,7 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { todayCL, nowCL, hoursUntilSessionCL } from '../../lib/dateUtils';
 import { cargarAvisosPanel } from '../../lib/avisosPanel';
-import { sesionesPorCobrar } from '../../lib/porCobrar';
+import { sesionesPorCobrar, sesionesQueTeDeben } from '../../lib/porCobrar';
 import { getValidAccessToken } from '../../lib/syncCalendar';
 import { pacienteDeTitulo } from '../../lib/boxCala';
 import { URL_SII } from '../../lib/impuestos';
@@ -67,19 +67,12 @@ async function sesionesGoogle(desde: string, hastaIso: string): Promise<EventoGo
   return out;
 }
 
-// "Te deben": misma definición que /admin/deudas (confirmada, sin pagar, deuda
-// no anulada, con monto), agrupada por paciente igual que esa página.
+// "Te deben": misma regla y agrupación por paciente que /admin/deudas (sesiones
+// sin pagar que ya empezaron, ver src/lib/porCobrar.ts).
 async function teDeben(): Promise<{ personas: number; total: number }> {
-  const { data, error } = await supabase.from('bookings')
-    .select('patient_name, patient_email, patient_phone, amount')
-    .eq('status', 'confirmed')
-    .is('paid_at', null)
-    .or('debt_voided.is.null,debt_voided.eq.false')
-    .gt('amount', 0);
-  if (error) throw new Error(error.message);
   const claves = new Set<string>();
   let total = 0;
-  for (const b of data ?? []) {
+  for (const b of await sesionesQueTeDeben()) {
     claves.add(String(b.patient_email ?? '').toLowerCase() || `${b.patient_name}|${b.patient_phone ?? ''}`);
     total += Number(b.amount) || 0;
   }
