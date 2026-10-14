@@ -24,7 +24,17 @@ type OrigenGuardado = { first?: Toque | null; last?: Toque | null } | null;
 
 const GCLID = /^[A-Za-z0-9_-]+$/;
 const DIA = 86400e3;
-const enChile = (ms: number) => new Date(ms).toLocaleString('sv-SE', { timeZone: 'America/Santiago' });
+// Hora de Chile con su desfase explícito ("2026-10-14 15:30:00-03:00"): el Gestor
+// de Datos de Google lee la primera fila como encabezado, así que la zona horaria
+// va en cada fecha y no en una línea "Parameters:TimeZone" aparte.
+function enChile(ms: number): string {
+  const d = new Date(ms);
+  const local = d.toLocaleString('sv-SE', { timeZone: 'America/Santiago' });
+  const gmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Santiago', timeZoneName: 'longOffset' })
+    .formatToParts(d).find(p => p.type === 'timeZoneName')?.value ?? 'GMT-03:00';
+  const desfase = gmt === 'GMT' ? '+00:00' : gmt.replace('GMT', '');
+  return local + desfase;
+}
 
 /** Toque con GCLID válido (el último clic de anuncio manda; si no, el primero). */
 function toqueConClic(o: OrigenGuardado): Toque | null {
@@ -116,7 +126,7 @@ export async function csvConversiones(): Promise<string> {
     if (hora) filas.set(toque.gclid!, [toque.gclid, NOMBRE_CONVERSION, hora, String(pago.monto ?? 0), 'CLP'].join(','));
   }
 
-  const lineas = ['Parameters:TimeZone=America/Santiago', 'Google Click ID,Conversion Name,Conversion Time,Conversion Value,Conversion Currency', ...filas.values()];
+  const lineas = ['Google Click ID,Conversion Name,Conversion Time,Conversion Value,Conversion Currency', ...filas.values()];
   return lineas.join('\n') + '\n';
 }
 
