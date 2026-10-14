@@ -608,6 +608,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
                 data-svc={b.service_id ?? ''}
                 data-date={b.session_date}
                 data-time={String(b.session_time ?? '').slice(0, 5)}
+                data-status={b.status}
                 style={`${evStyle(b.session_time, b.duration_min)};--svcbg:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bg};--svcbd:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bd}`}
                 data-booking={JSON.stringify({
                   id: b.id,
@@ -1753,7 +1754,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 }
 </style>
 
-<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase, direccionLlegar }}>
+<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase, direccionLlegar, weekOffset }}>
 // ── Copiar link de pago (banner tras crear cita con link) ──────────────────────
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-copy-link]');
@@ -2275,8 +2276,9 @@ function enviarHorasExtra(campos) {
   f.action = '/api/admin/horas-extra';
   // Volver a la misma semana con la URL limpia (sin avisos ni "deshacer" de una
   // acción anterior: se acumulaban y "Deshacer" podía restaurar otra hora).
-  const semana = new URLSearchParams(window.location.search).get('w');
-  const volver = '/admin/agenda' + (semana && /^-?\d+$/.test(semana) ? `?w=${semana}` : '');
+  // La semana que se está mirando la calcula el servidor (también cuando se
+  // llegó con ?booking= o ?fecha=, sin ?w=).
+  const volver = `/admin/agenda?w=${Number(weekOffset) || 0}`;
   for (const [k, v] of Object.entries({ ...campos, volver })) {
     const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = String(v); f.appendChild(i);
   }
@@ -2488,7 +2490,10 @@ document.getElementById('session-panel')?.addEventListener('submit', (e) => {
   if (!abierto && fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
     const col = document.querySelector(`.cal-col[data-date="${fecha}"]`);
     if (col && hora && /^\d{2}:\d{2}$/.test(hora)) {
-      let marca = col.querySelector(`.cal-event[data-time="${hora}"], .cal-gcal-event[data-time="${hora}"]`);
+      // Primero una sesión vigente (no vencida), después un evento de Google.
+      let marca = col.querySelector(`.cal-event[data-time="${hora}"]:not([data-status="expired"])`)
+        || col.querySelector(`.cal-gcal-event[data-time="${hora}"]`)
+        || col.querySelector(`.cal-event[data-time="${hora}"]`);
       if (!marca) {
         const [h, m] = hora.split(':').map(Number);
         const top = (h - 6) * 60 + m;

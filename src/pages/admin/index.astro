@@ -22,10 +22,14 @@ const META_SEMANA = 28; // meta 28–29 sesiones por semana
 // ── Día que se mira ──────────────────────────────────────────────────────────
 const hoy = todayCL();
 const diaParam = Astro.url.searchParams.get('dia') ?? '';
-const fechaValida = (iso: string) => /^\d{4}-\d{2}-\d{2}$/.test(iso) && new Date(iso + 'T12:00:00Z').toISOString().slice(0, 10) === iso;
+const fechaValida = (iso: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const x = new Date(iso + 'T12:00:00Z');
+  return !Number.isNaN(x.getTime()) && x.toISOString().slice(0, 10) === iso;
+};
 const dia = fechaValida(diaParam) ? diaParam : hoy;
 const esHoy = dia === hoy;
-const sumarDias = (iso: string, n: number) => { const x = new Date(iso + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const sumarDias = (iso: string, n: number) => { const x = new Date(iso + 'T12:00:00Z'); if (Number.isNaN(x.getTime())) return iso; x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const diaSemana = (iso: string) => new Date(iso + 'T12:00:00Z').getUTCDay();
 const lunes = sumarDias(dia, diaSemana(dia) === 0 ? -6 : 1 - diaSemana(dia));
 const domingo = sumarDias(lunes, 6);
@@ -180,6 +184,7 @@ const cuando = (fecha: string, hora?: string) => {
 };
 // Instante → "YYYY-MM-DDTHH:MM" en hora de Chile (para ordenar junto a fecha+hora).
 const claveCL = (iso: string) => {
+  if (Number.isNaN(Date.parse(iso))) return nowCL().toISOString().slice(0, 16); // fecha ilegible: cuenta como "ahora"
   const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(iso));
   const v = (t: string) => p.find((x) => x.type === t)?.value ?? '00';
   return `${v('year')}-${v('month')}-${v('day')}T${v('hour')}:${v('minute')}`;
@@ -377,13 +382,16 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
           </a>
           <div class="ini-hero-botones">
             <a href={hero.href} class="btn btn-dark ini-btn">Abrir sesión</a>
-            {hero.online && hero.fecha === hoy && (
+            {/* Sala online abre el Meet de la sesión de la página en curso o por
+                empezar: solo se ofrece si esta sesión es de la página (las de
+                Encuadrado no tienen Meet aquí) y es la que viene hoy. */}
+            {hero.online && hero.id && hero.fecha === hoy && (
               <a href="/admin/sala-online" target="_blank" rel="noopener" class="btn btn-primary ini-btn">Entrar a Meet</a>
             )}
           </div>
         </>
       ) : (
-        <p class="ini-vacio">{esHoy ? 'No quedan sesiones hoy ni en los próximos 7 días.' : 'Sin sesiones este día.'}</p>
+        <p class="ini-vacio">{errorReservas ? 'No se pudieron leer las sesiones.' : esHoy ? 'No quedan sesiones hoy ni en los próximos 7 días.' : 'Sin sesiones este día.'}</p>
       )}
     </section>
 
@@ -475,7 +483,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
               if (!grupo.length) return null;
               return gi === 0 ? lista : (
                 <details class="ini-mas">
-                  <summary>Ver todo ({tareas.length})</summary>
+                  <summary><span class="ini-mas-abrir">Ver todo ({tareas.length})</span><span class="ini-mas-cerrar">Ver menos</span></summary>
                   {lista}
                 </details>
               );
@@ -632,7 +640,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
   .ini-nota { font-size: 0.75rem; color: var(--enc-text-3); margin-top: 0.5rem; }
   .ini-mas summary { cursor: pointer; list-style: none; font-size: 0.82rem; font-weight: 600; color: var(--enc-nav-active-text); min-height: 44px; display: flex; align-items: center; border-top: 1px solid var(--enc-border-2); }
   .ini-mas summary::-webkit-details-marker { display: none; }
-  .ini-mas[open] summary { display: none; }
+  .ini-mas[open] summary .ini-mas-abrir, .ini-mas:not([open]) summary .ini-mas-cerrar { display: none; }
 
   .ini-sesion { display: flex; align-items: center; gap: 0.7rem; min-height: 48px; padding: 0.45rem 0.25rem; text-decoration: none; color: inherit; border-top: 1px solid var(--enc-border-2); border-radius: 8px; }
   .ini-sesion-hora { font-weight: 700; font-size: 0.95rem; width: 3rem; flex-shrink: 0; }
