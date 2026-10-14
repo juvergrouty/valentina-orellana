@@ -14,6 +14,9 @@ create table if not exists public.bulk_email_recipients (
 );
 create index if not exists bulk_email_recipients_bulk_id_idx on public.bulk_email_recipients (bulk_id);
 alter table public.bulk_email_recipients enable row level security;
+-- En este proyecto las tablas nuevas no traen permisos para el servidor: se dan
+-- solo a service_role (la llave que usa la página), nunca a anon/authenticated.
+grant select, insert, update, delete on public.bulk_email_recipients to service_role;
 
 -- Suma una apertura en un solo paso (sin carreras). Solo la usa el servidor.
 create or replace function public.marcar_apertura(p_id uuid)
