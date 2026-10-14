@@ -11,6 +11,7 @@ import { getComprobanteAlerts, type ComprobanteAlert } from '../../lib/comproban
 import { avisosCambioTarifa, type AvisoTarifa } from '../../lib/cambiosTarifa';
 import { avisosSalud, type AvisoSalud } from '../../lib/saludSitio';
 import { avisosBoxCala, type AvisosBox } from '../../lib/boxCala';
+import { avisosImpuestos, URL_SII, type MesImpuestos } from '../../lib/impuestos';
 import { cobrosProximos, limite24h, HORAS_AVISO_COBRO, type CobroProximo } from '../../lib/cobrosProximos';
 
 interface Props {
@@ -110,7 +111,7 @@ function mensajeCumpleanos(nombre: string): string {
   return `${nombre}, feliz cumpleaños! 🎉 Te mando un saludo grande, que hoy lo disfrutes mucho y que este nuevo año venga con cosas lindas para ti`;
 }
 
-const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros] = await Promise.all([
+const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos] = await Promise.all([
   // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
   // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
   contarErroresNuevos().catch(() => 0),
@@ -138,6 +139,8 @@ const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDay
   // Sesiones sin pagar que empiezan en las próximas 32 horas, con el WhatsApp
   // de cobro listo (14 oct 2026, ver src/lib/cobrosProximos.ts).
   cobrosProximos(Astro.url.origin).catch((): CobroProximo[] | null => null),
+  // Pagar impuestos desde el día 16 de cada mes, hasta "Ya lo hice" (14 oct 2026, ver src/lib/impuestos.ts).
+  avisosImpuestos().catch((): MesImpuestos[] => []),
 ]);
 const fechaLarga = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleDateString('es-CL', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
@@ -971,6 +974,28 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
     {Astro.url.searchParams.get('error') === 'tarifa_guardar' && (
       <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
         ✕ No se pudo guardar el cambio de tarifa. El aviso sigue igual: intenta de nuevo.
+      </div>
+    )}
+    {Astro.url.searchParams.get('error') === 'impuestos_guardar' && (
+      <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        ✕ No se pudo guardar "Ya lo hice" de los impuestos. El aviso sigue igual: intenta de nuevo.
+      </div>
+    )}
+    {impuestos.length > 0 && (
+      <div role="status" id="impuestos-alert" style="background:#4b3f6b;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
+        <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:0.4rem;">
+          {impuestos.map(i => (
+            <li style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
+              <span>🧾 <strong>Pagar impuestos</strong> de {i.nombre}.</span>
+              <a href={URL_SII} target="_blank" rel="noopener" style="background:#fff;color:#4b3f6b;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;text-decoration:none;">Ir al SII</a>
+              <form method="POST" action="/api/admin/impuestos-ok" style="display:inline;">
+                <input type="hidden" name="mes" value={i.mes} />
+                <input type="hidden" name="redirect" value={urlVuelta} />
+                <button type="submit" style="background:transparent;color:#fff;border:1px solid #fff;border-radius:4px;padding:0.15rem 0.6rem;font-size:0.78rem;font-weight:700;cursor:pointer;">Ya lo hice</button>
+              </form>
+            </li>
+          ))}
+        </ul>
       </div>
     )}
     {Astro.url.searchParams.get('error') === 'cierre_guardar' && (
