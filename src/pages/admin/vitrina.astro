@@ -1,0 +1,431 @@
+---
+// /admin/vitrina — talleres, charlas y contenido digital (14 oct 2026).
+// Lista de items, crear/editar/duplicar, inscritas por item (con CSV, marcar
+// pagado, cancelar y reenviar confirmación) y el interruptor general.
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+import { type VitrinaItem, type VitrinaInscripcion } from '../../lib/vitrina';
+import { TIPO_LABEL, ESTADO_LABEL, formatCLP, precioTexto, fechaLargaChile, horaChile, isoAInputLocal, yaPaso, ocupaCupo, esEnlaceExterno } from '../../lib/vitrinaUtils';
+import { origenTexto } from '../../lib/origen';
+
+const p = Astro.url.searchParams;
+const ok = p.get('ok');
+const aviso = p.get('aviso');
+const error = p.get('error');
+const editId = p.get('edit');
+const nuevo = p.get('nuevo') === '1';
+const itemSel = p.get('item');
+
+const { data: pubRow } = await supabase.from('settings').select('value').eq('key', 'vitrina_publica').maybeSingle();
+const publica = pubRow?.value === 'true';
+
+const { data: itemsData, error: errItems } = await supabase.from('vitrina_items').select('*')
+  .order('sort_order').order('starts_at', { ascending: false, nullsFirst: true });
+const faltaMigracion = errItems?.code === '42P01' || /vitrina_items/.test(errItems?.message ?? '');
+const items = (itemsData ?? []) as VitrinaItem[];
+
+// Totales por item (todas las inscripciones; pocas filas).
+const { data: inscData } = items.length
+  ? await supabase.from('vitrina_inscripciones').select('id, item_id, status, amount, created_at').in('item_id', items.map(i => i.id))
+  : { data: [] as { id: string; item_id: string; status: string; amount: number; created_at: string }[] };
+const resumen = new Map<string, { ocupan: number; pagadas: number; gratis: number; recaudado: number }>();
+for (const i of (inscData ?? []) as { item_id: string; status: string; amount: number; created_at: string }[]) {
+  const r = resumen.get(i.item_id) ?? { ocupan: 0, pagadas: 0, gratis: 0, recaudado: 0 };
+  if (ocupaCupo(i)) r.ocupan++;
+  if (i.status === 'paid') { r.pagadas++; r.recaudado += Number(i.amount) || 0; }
+  if (i.status === 'free') r.gratis++;
+  resumen.set(i.item_id, r);
+}
+const totalRecaudado = [...resumen.values()].reduce((t, r) => t + r.recaudado, 0);
+
+const editItem = editId ? items.find(i => i.id === editId) ?? null : null;
+const mostrarForm = nuevo || !!editItem;
+const f: Partial<VitrinaItem> = editItem ?? { type: 'taller', modality: 'online', price: 0, visible: false, sort_order: 0, duration_min: 90 };
+
+const seleccionado = itemSel ? items.find(i => i.id === itemSel) ?? null : null;
+let inscritas: VitrinaInscripcion[] = [];
+if (seleccionado) {
+  const { data } = await supabase.from('vitrina_inscripciones').select('*').eq('item_id', seleccionado.id).order('created_at', { ascending: false });
+  inscritas = (data ?? []) as VitrinaInscripcion[];
+}
+const cuenta = (s: string) => inscritas.filter(i => i.status === s).length;
+const pendientesVigentes = inscritas.filter(i => i.status === 'pending_payment' && ocupaCupo(i)).length;
+
+const OK_TEXTO: Record<string, string> = {
+  guardado: '✓ Guardado.', publicado: '✓ Item visible en la vitrina.', ocultado: '✓ Item ocultado.',
+  duplicado: '✓ Copia creada (oculta). Revisa la fecha y guárdala.', eliminado: '✓ Item eliminado.',
+  calendario: '✓ Evento de Google Calendar listo.', vitrina_on: '✓ Vitrina pública activada.', vitrina_off: '✓ Vitrina desactivada: el público ve un 404.', pagada: '✓ Inscripción marcada como pagada y confirmación enviada.',
+  cancelada: '✓ Inscripción cancelada.', reenviada: '✓ Confirmación reenviada.',
+};
+const fechaCorta = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+const BADGE: Record<string, string> = { paid: 'badge-confirmed', free: 'badge-confirmed', pending_payment: 'badge-pending', cancelled: 'badge-cancelled', expired: 'badge-cancelled' };
+---
+
+<AdminLayout title="Vitrina" current="/admin/vitrina">
+
+  {ok && <div class="alert-success">{OK_TEXTO[ok] ?? '✓ Listo.'}</div>}
+  {aviso && <div class="alert-error">⚠ {aviso}</div>}
+  {error && <div class="alert-error">⚠ {error}</div>}
+  {faltaMigracion && <div class="alert-error">⚠ Falta crear las tablas de la vitrina: ejecuta <code>supabase/migrations/0012_vitrina.sql</code> en el SQL Editor de Supabase.</div>}
+
+  <!-- Interruptor general -->
+  <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.25rem;">
+    <div>
+      <p style="font-weight:600;font-size:0.95rem;">
+        Vitrina pública: <span style={`color:${publica ? 'var(--green)' : 'var(--stone)'};`}>{publica ? 'activada' : 'desactivada'}</span>
+      </p>
+      <p style="font-size:0.78rem;color:var(--stone);margin-top:0.2rem;">
+        {publica
+          ? 'Cualquiera puede ver /talleres y los items visibles; aparecen en el sitemap.'
+          : 'El público ve un 404 en /talleres. Tú puedes revisarla con la vista previa (con tu sesión abierta).'}
+      </p>
+    </div>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+      <a href="/talleres?preview=1" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Vista previa →</a>
+      <a href="/servicios" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Servicios públicos →</a>
+      <form method="POST" action="/api/admin/settings" style="margin:0;"
+        onsubmit={publica ? "return confirm('¿Ocultar la vitrina? /talleres volverá a dar 404 para el público.')" : "return confirm('¿Publicar la vitrina? /talleres quedará visible para todos y en el sitemap.')"}>
+        <input type="hidden" name="vitrina_publica" value={publica ? 'false' : 'true'} />
+        <input type="hidden" name="redirect" value={`/admin/vitrina?ok=${publica ? 'vitrina_off' : 'vitrina_on'}`} />
+        <button type="submit" class={`btn btn-sm ${publica ? 'btn-outline' : 'btn-dark'}`}>{publica ? 'Desactivar vitrina' : 'Activar vitrina'}</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Cabecera -->
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
+    <p style="font-size:0.85rem;color:var(--stone);">{items.length} item{items.length !== 1 ? 's' : ''} · recaudado {formatCLP(totalRecaudado)}</p>
+    <a href="/admin/vitrina?nuevo=1" class="btn btn-dark">+ Nuevo taller, charla o contenido</a>
+  </div>
+
+  <!-- Items -->
+  <div class="card" style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
+    <div style="overflow-x:auto;">
+      {!items.length ? (
+        <div style="padding:3rem;text-align:center;">
+          <p style="color:var(--stone);font-size:0.9rem;">Todavía no hay items. Crea el primero con el botón de arriba.</p>
+        </div>
+      ) : (
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Fecha</th><th>Modalidad</th><th>Valor</th><th>Cupos</th><th>Recaudado</th><th>Visible</th><th></th></tr>
+          </thead>
+          <tbody>
+            {items.map(i => {
+              const r = resumen.get(i.id) ?? { ocupan: 0, pagadas: 0, gratis: 0, recaudado: 0 };
+              return (
+                <tr style={itemSel === i.id ? 'background:var(--enc-nav-active-bg);' : ''}>
+                  <td>
+                    <p style="font-weight:600;font-size:0.88rem;">{i.title}</p>
+                    <p style="font-size:0.72rem;color:var(--stone);">{TIPO_LABEL[i.type]} · /talleres/{i.slug}{yaPaso(i) ? ' · ya pasó' : ''}</p>
+                  </td>
+                  <td style="font-size:0.82rem;color:var(--stone);white-space:nowrap;">{i.starts_at && i.type !== 'contenido' ? `${fechaCorta(i.starts_at)}` : '—'}</td>
+                  <td style="font-size:0.82rem;color:var(--stone);">
+                    {i.type === 'contenido' ? (i.digital_file_path ? (esEnlaceExterno(i.digital_file_path) ? 'Enlace' : 'Archivo') : '⚠ sin archivo') : i.modality === 'online' ? (i.meet_url ? 'Online · Meet ✓' : 'Online · sin Meet') : 'Presencial'}
+                  </td>
+                  <td style="font-weight:600;font-size:0.85rem;">{precioTexto(i.price)}</td>
+                  <td style="font-size:0.82rem;">{r.ocupan}{i.capacity ? ` / ${i.capacity}` : ''}</td>
+                  <td style="font-size:0.82rem;">{formatCLP(r.recaudado)}</td>
+                  <td>
+                    <form method="POST" action="/api/admin/vitrina" style="margin:0;">
+                      <input type="hidden" name="action" value="toggle_visible" />
+                      <input type="hidden" name="id" value={i.id} />
+                      <button type="submit" title={i.visible ? 'Ocultar' : 'Mostrar en la vitrina'}
+                        style={`background:none;border:none;cursor:pointer;font-size:0.75rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding:0.2rem 0.5rem;border-radius:99px;${i.visible ? 'background:#f0fdf4;color:var(--green);' : 'background:var(--warm);color:var(--stone);'}`}>
+                        {i.visible ? 'Visible' : 'Oculto'}
+                      </button>
+                    </form>
+                  </td>
+                  <td>
+                    <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
+                      <a href={`/admin/vitrina?item=${i.id}#inscritas`} class="btn btn-outline btn-sm">Inscritas ({r.pagadas + r.gratis})</a>
+                      <a href={`/admin/vitrina?edit=${i.id}`} class="btn btn-outline btn-sm">Editar</a>
+                      <a href={`/talleres/${i.slug}?preview=1`} target="_blank" rel="noopener" class="btn btn-outline btn-sm">Ver</a>
+                      <form method="POST" action="/api/admin/vitrina" style="margin:0;">
+                        <input type="hidden" name="action" value="duplicate" />
+                        <input type="hidden" name="id" value={i.id} />
+                        <button type="submit" class="btn btn-outline btn-sm">Duplicar</button>
+                      </form>
+                      {i.type !== 'contenido' && i.starts_at && (
+                        <form method="POST" action="/api/admin/vitrina" style="margin:0;">
+                          <input type="hidden" name="action" value="calendar" />
+                          <input type="hidden" name="id" value={i.id} />
+                          <button type="submit" class="btn btn-outline btn-sm" title="Crea (o actualiza) el evento en tu Google Calendar; si es online, genera el Meet">
+                            {i.google_event_id ? 'Actualizar calendario' : (i.modality === 'online' ? 'Crear Meet' : 'Agregar al calendario')}
+                          </button>
+                        </form>
+                      )}
+                      {!(r.pagadas + r.gratis) && !(inscData ?? []).some((x: { item_id: string }) => x.item_id === i.id) && (
+                        <form method="POST" action="/api/admin/vitrina" style="margin:0;" onsubmit="return confirm('¿Eliminar este item? No se puede deshacer.')">
+                          <input type="hidden" name="action" value="delete" />
+                          <input type="hidden" name="id" value={i.id} />
+                          <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+                        </form>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  </div>
+
+  <!-- Inscritas del item -->
+  {seleccionado && (
+    <div class="card" id="inscritas" style="margin-bottom:1.5rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+        <div>
+          <p style="font-weight:600;font-size:1rem;">{seleccionado.title}</p>
+          <p style="font-size:0.78rem;color:var(--stone);">
+            {seleccionado.starts_at && seleccionado.type !== 'contenido' ? `${fechaLargaChile(seleccionado.starts_at)} · ${horaChile(seleccionado.starts_at)} hrs · ` : ''}
+            {cuenta('paid')} pagadas · {cuenta('free')} gratis · {pendientesVigentes} esperando pago · {cuenta('cancelled')} canceladas · {cuenta('expired')} vencidas
+            · recaudado {formatCLP(inscritas.filter(i => i.status === 'paid').reduce((t, i) => t + (Number(i.amount) || 0), 0))}
+          </p>
+          {seleccionado.modality === 'online' && seleccionado.type !== 'contenido' && (
+            <p style="font-size:0.78rem;margin-top:0.3rem;">Meet: {seleccionado.meet_url ? <a href={seleccionado.meet_url} target="_blank" rel="noopener">{seleccionado.meet_url}</a> : <span style="color:var(--red);">sin enlace (usa "Crear Meet" o pégalo en Editar)</span>}</p>
+          )}
+        </div>
+        <div style="display:flex;gap:0.5rem;">
+          <a href={`/api/admin/vitrina-inscripciones?item=${seleccionado.id}`} class="btn btn-outline btn-sm">Descargar CSV</a>
+          <a href="/admin/vitrina" class="btn btn-outline btn-sm">Cerrar</a>
+        </div>
+      </div>
+      {!inscritas.length ? (
+        <p style="font-size:0.85rem;color:var(--stone);">Aún no hay inscripciones.</p>
+      ) : (
+        <div style="overflow-x:auto;">
+          <table>
+            <thead><tr><th>Nombre</th><th>Contacto</th><th>Estado</th><th>Monto</th><th>Inscrita</th><th>Origen</th><th></th></tr></thead>
+            <tbody>
+              {inscritas.map(i => (
+                <tr>
+                  <td style="font-weight:600;font-size:0.85rem;">{i.name}</td>
+                  <td style="font-size:0.78rem;color:var(--stone);">{i.email}<br />{i.phone}</td>
+                  <td>
+                    <span class={`badge ${BADGE[i.status] ?? ''}`}>{i.status === 'pending_payment' && !ocupaCupo(i) ? 'Vencida (no pagó)' : ESTADO_LABEL[i.status]}</span>
+                    {i.payment_note && i.payment_note !== 'Flow' && <p style="font-size:0.7rem;color:var(--stone);margin-top:0.2rem;">{i.payment_note}</p>}
+                    {(i.status === 'paid' || i.status === 'free') && !i.confirmation_sent_at && <p style="font-size:0.7rem;color:var(--red);margin-top:0.2rem;">Correo no enviado</p>}
+                  </td>
+                  <td style="font-size:0.82rem;">{i.amount ? formatCLP(i.amount) : 'Gratis'}</td>
+                  <td style="font-size:0.78rem;color:var(--stone);white-space:nowrap;">{fechaCorta(i.created_at)}</td>
+                  <td style="font-size:0.72rem;color:var(--stone);">{origenTexto(i.origen) ?? '—'}</td>
+                  <td>
+                    <div style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+                      {(i.status === 'paid' || i.status === 'free') && (
+                        <form method="POST" action="/api/admin/vitrina-inscripciones" style="margin:0;">
+                          <input type="hidden" name="action" value="reenviar" />
+                          <input type="hidden" name="id" value={i.id} />
+                          <input type="hidden" name="item_id" value={seleccionado.id} />
+                          <button type="submit" class="btn btn-outline btn-sm">Reenviar correo</button>
+                        </form>
+                      )}
+                      {i.status !== 'paid' && i.status !== 'free' && !i.paid_at && (
+                        <form method="POST" action="/api/admin/vitrina-inscripciones" style="margin:0;display:flex;gap:0.3rem;"
+                          onsubmit="return confirm('¿Marcar como pagada? Se le enviará la confirmación.')">
+                          <input type="hidden" name="action" value="marcar_pagado" />
+                          <input type="hidden" name="id" value={i.id} />
+                          <input type="hidden" name="item_id" value={seleccionado.id} />
+                          <select name="medio" style="font-size:0.75rem;padding:0.2rem;width:auto;">
+                            <option>Transferencia</option><option>Efectivo</option><option>Otro</option>
+                          </select>
+                          <button type="submit" class="btn btn-outline btn-sm">Marcar pagado</button>
+                        </form>
+                      )}
+                      {i.status !== 'cancelled' && (
+                        <form method="POST" action="/api/admin/vitrina-inscripciones" style="margin:0;"
+                          onsubmit="return confirm('¿Cancelar esta inscripción? Libera su cupo. Si pagó, la devolución se hace aparte.')">
+                          <input type="hidden" name="action" value="cancelar" />
+                          <input type="hidden" name="id" value={i.id} />
+                          <input type="hidden" name="item_id" value={seleccionado.id} />
+                          <button type="submit" class="btn btn-danger btn-sm">Cancelar</button>
+                        </form>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )}
+
+  <p style="font-size:0.78rem;color:var(--stone);">
+    Los pagos van por Flow (mismo comercio que las sesiones). Una inscripción sin pagar guarda el cupo 30 minutos.
+    Al publicar un taller o charla con fecha se crea el evento en tu Google Calendar (bloquea esa hora en la agenda) y, si es online, el Meet.
+  </p>
+
+</AdminLayout>
+
+<!-- Crear / editar -->
+{mostrarForm && (
+<div id="modal-vitrina" style="display:flex;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;align-items:center;justify-content:center;padding:1rem;">
+  <div style="background:white;width:100%;max-width:640px;max-height:92vh;overflow-y:auto;padding:2rem;border-radius:6px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+      <p style="font-family:'Cormorant Garamond',serif;font-size:1.3rem;">{editItem ? 'Editar item' : 'Nuevo item'}</p>
+      <a href="/admin/vitrina" style="font-size:1.4rem;color:var(--stone);text-decoration:none;" aria-label="Cerrar">✕</a>
+    </div>
+
+    <form method="POST" action="/api/admin/vitrina" id="form-vitrina" style="display:flex;flex-direction:column;gap:1rem;">
+      <input type="hidden" name="action" value="save" />
+      {editItem && <input type="hidden" name="id" value={editItem.id} />}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div>
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Tipo</label>
+          <select name="type" id="v-type">
+            {(['taller', 'charla', 'contenido'] as const).map(t => <option value={t} selected={f.type === t}>{TIPO_LABEL[t]}</option>)}
+          </select>
+        </div>
+        <div data-solo="evento">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Modalidad</label>
+          <select name="modality" id="v-modality">
+            <option value="online" selected={f.modality === 'online'}>Online (Google Meet)</option>
+            <option value="presencial" selected={f.modality === 'presencial'}>Presencial (Estoril 50, of. 811b)</option>
+          </select>
+        </div>
+
+        <div style="grid-column:1/-1;">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Título *</label>
+          <input type="text" name="title" required maxlength="160" value={f.title ?? ''} placeholder="Ej: Taller: Apego en la pareja" />
+        </div>
+        <div style="grid-column:1/-1;">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Dirección de la página</label>
+          <input type="text" name="slug" maxlength="80" value={f.slug ?? ''} placeholder="se arma sola desde el título" />
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.3rem;">valentinaorellana.cl/talleres/<strong>esta-parte</strong> (letras, números y guiones).</p>
+        </div>
+        <div style="grid-column:1/-1;">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Descripción corta (tarjeta)</label>
+          <input type="text" name="short_description" maxlength="300" value={f.short_description ?? ''} placeholder="Una o dos frases" />
+        </div>
+        <div style="grid-column:1/-1;">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Descripción completa</label>
+          <textarea name="description" rows="7" placeholder="Texto simple. Separa los párrafos con una línea en blanco.">{f.description ?? ''}</textarea>
+        </div>
+
+        <div>
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Valor (CLP, 0 = gratis)</label>
+          <input type="number" name="price" min="0" step="1000" value={f.price ?? 0} />
+        </div>
+        <div data-solo="evento">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Fecha y hora (hora de Chile) *</label>
+          <input type="datetime-local" name="starts_at" value={isoAInputLocal(f.starts_at)} />
+        </div>
+        <div data-solo="evento">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Duración (minutos)</label>
+          <input type="number" name="duration_min" min="10" step="5" value={f.duration_min ?? ''} />
+        </div>
+        <div data-solo="evento">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Cupos (vacío = sin límite)</label>
+          <input type="number" name="capacity" min="1" step="1" value={f.capacity ?? ''} />
+        </div>
+        <div data-solo="online" style="grid-column:1/-1;">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Enlace de Meet</label>
+          <input type="url" name="meet_url" value={f.meet_url ?? ''} placeholder="Se genera solo al publicar; o pega uno aquí" />
+        </div>
+
+        <div data-solo="contenido" style="grid-column:1/-1;">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Archivo o enlace del contenido</label>
+          <input type="text" name="digital_file_path" id="v-archivo" value={f.digital_file_path ?? ''} placeholder="Sube un archivo, o pega un enlace https:// (YouTube no listado, Drive…)" />
+          <div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.5rem;flex-wrap:wrap;">
+            <input type="file" id="v-archivo-file" style="display:none;" />
+            <button type="button" id="v-archivo-btn" class="btn btn-outline btn-sm">Subir archivo (privado)</button>
+            <span id="v-archivo-estado" style="font-size:0.75rem;color:var(--stone);"></span>
+          </div>
+          <p style="font-size:0.72rem;color:var(--stone);margin-top:0.3rem;">El archivo queda privado; cada persona recibe un enlace personal que dura 7 días.</p>
+        </div>
+
+        <div style="grid-column:1/-1;">
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Imagen (opcional)</label>
+          <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+            <input type="text" name="image_url" id="v-imagen" value={f.image_url ?? ''} placeholder="https://…" style="flex:1;min-width:200px;" />
+            <input type="file" id="v-imagen-file" accept="image/jpeg,image/png,image/webp" style="display:none;" />
+            <button type="button" id="v-imagen-btn" class="btn btn-outline btn-sm">Subir imagen</button>
+          </div>
+          <span id="v-imagen-estado" style="font-size:0.75rem;color:var(--stone);"></span>
+        </div>
+
+        <div>
+          <label class="label" style="display:block;margin-bottom:0.3rem;">Orden (menor = primero)</label>
+          <input type="number" name="sort_order" value={f.sort_order ?? 0} />
+        </div>
+        <div style="display:flex;align-items:flex-end;">
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;">
+            <input type="checkbox" name="visible" style="width:auto;" checked={f.visible ?? false} />
+            Visible en la vitrina
+          </label>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-dark btn-lg" style="width:100%;justify-content:center;margin-top:0.5rem;">
+        {editItem ? 'Guardar cambios' : 'Crear'}
+      </button>
+    </form>
+  </div>
+</div>
+)}
+
+<script>
+  // Campos según tipo/modalidad, y subidas (imagen pública; contenido privado).
+  const tipo = document.getElementById('v-type') as HTMLSelectElement | null;
+  const modalidad = document.getElementById('v-modality') as HTMLSelectElement | null;
+  function ajustar() {
+    if (!tipo || !modalidad) return;
+    const esContenido = tipo.value === 'contenido';
+    document.querySelectorAll<HTMLElement>('[data-solo="evento"]').forEach(el => { el.style.display = esContenido ? 'none' : ''; });
+    document.querySelectorAll<HTMLElement>('[data-solo="contenido"]').forEach(el => { el.style.display = esContenido ? '' : 'none'; });
+    document.querySelectorAll<HTMLElement>('[data-solo="online"]').forEach(el => { el.style.display = !esContenido && modalidad.value === 'online' ? '' : 'none'; });
+  }
+  tipo?.addEventListener('change', ajustar);
+  modalidad?.addEventListener('change', ajustar);
+  ajustar();
+
+  function subida(btnId: string, fileId: string, estadoId: string, destinoId: string, subir: (f: File) => Promise<string>) {
+    const btn = document.getElementById(btnId);
+    const file = document.getElementById(fileId) as HTMLInputElement | null;
+    const estado = document.getElementById(estadoId);
+    const destino = document.getElementById(destinoId) as HTMLInputElement | null;
+    btn?.addEventListener('click', () => file?.click());
+    file?.addEventListener('change', async () => {
+      const f = file.files?.[0];
+      if (!f || !estado || !destino) return;
+      estado.textContent = 'Subiendo…';
+      try {
+        destino.value = await subir(f);
+        estado.textContent = '✓ Subido. Recuerda guardar.';
+      } catch (e) {
+        estado.textContent = '⚠ ' + (e instanceof Error ? e.message : 'No se pudo subir.');
+      }
+      file.value = '';
+    });
+  }
+
+  subida('v-imagen-btn', 'v-imagen-file', 'v-imagen-estado', 'v-imagen', async (f) => {
+    if (f.size > 3 * 1024 * 1024) throw new Error('La imagen supera los 3 MB.');
+    const fd = new FormData();
+    fd.append('file', f);
+    const r = await fetch('/api/admin/upload-image', { method: 'POST', body: fd });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.url) throw new Error(d.error ?? 'No se pudo subir.');
+    return d.url;
+  });
+
+  subida('v-archivo-btn', 'v-archivo-file', 'v-archivo-estado', 'v-archivo', async (f) => {
+    if (f.size > 50 * 1024 * 1024) throw new Error('El archivo supera los 50 MB: súbelo a Drive o YouTube (no listado) y pega el enlace.');
+    const r = await fetch('/api/admin/vitrina-archivo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nombre: f.name }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.signedUrl) throw new Error(d.error ?? 'No se pudo preparar la subida.');
+    // Directo a Supabase Storage con el link firmado (mismo formato que supabase-js uploadToSignedUrl).
+    const fd = new FormData();
+    fd.append('cacheControl', '3600');
+    fd.append('', f);
+    const up = await fetch(d.signedUrl, { method: 'PUT', headers: { 'x-upsert': 'false' }, body: fd });
+    if (!up.ok) throw new Error(`Supabase rechazó el archivo (${up.status}).`);
+    return d.ruta;
+  });
+</script>
