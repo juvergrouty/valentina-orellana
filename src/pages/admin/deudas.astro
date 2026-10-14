@@ -22,11 +22,11 @@ const siteUrl = Astro.url.origin;
 // cada fila avisa cuánto de eso hay (ver "proximasPorEmail").
 const [rows, porCobrar] = await Promise.all([
   sesionesQueTeDeben().catch(() => null),
-  sesionesPorCobrar().catch(() => [] as Awaited<ReturnType<typeof sesionesPorCobrar>>),
+  sesionesPorCobrar().catch(() => null),
 ]);
 const errorLectura = rows === null;
 const proximasPorEmail: Record<string, { n: number; total: number }> = {};
-for (const b of porCobrar) {
+for (const b of porCobrar ?? []) {
   const e = String(b.patient_email ?? '').toLowerCase();
   if (!e) continue;
   const acc = (proximasPorEmail[e] ??= { n: 0, total: 0 });
@@ -158,6 +158,11 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
   {errorParam && !['patient_no_email', 'no_debt', 'email_failed', 'anular_deuda', 'tarifa_guardar', 'rebote_guardar', 'feriado'].includes(errorParam) && (
     <div class="card" style="background:#fef2f2;border-color:#fecaca;color:#dc2626;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
       ⚠ {errorParam === 'boleta_failed' ? 'El pago se registró, pero la boleta NO se emitió' : 'No se pudo guardar el cambio'}{errorDetail ? `: ${errorDetail}` : ''}{errorParam === 'boleta_failed' ? '.' : ' — intenta de nuevo.'}
+    </div>
+  )}
+  {porCobrar === null && !errorLectura && (
+    <div class="card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ⚠ No se pudo revisar si hay sesiones próximas sin pagar: recuerda que el link de pago cobra todo lo pendiente, también lo que aún no ocurre.
     </div>
   )}
   {errorLectura && (
