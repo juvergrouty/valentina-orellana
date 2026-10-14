@@ -2,6 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { claveCsv, CSV_USUARIO } from '../../lib/conversionesGoogle';
 
 // Pacientes por canal (14 oct 2026). Cada WhatsApp que llega desde el sitio trae
 // "(código G-7K3Q)" (ver BaseLayout + /api/wa-clic). Cuando esa persona paga su
@@ -66,6 +67,9 @@ for (const f of filas) {
 const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+// Datos para la subida programada de Google Ads (se crean la primera vez).
+const claveGoogle = await claveCsv(true);
+const urlGoogle = `${Astro.url.origin}/api/google-ads/conversiones.csv`;
 ---
 
 <AdminLayout title="Pacientes por canal" current="/admin/whatsapp-codigos">
@@ -83,6 +87,18 @@ const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago
       <label class="text-sm">Fecha del pago<br /><input name="fecha" type="date" value={hoy} class="border rounded px-3 py-2" /></label>
       <button class="px-4 py-2 rounded bg-indigo-600 text-white text-sm">Marcar como paciente</button>
     </form>
+
+    <div class="mb-8 p-4 border rounded bg-white text-sm">
+      <h2 class="font-semibold mb-1">Conexión automática con Google Ads</h2>
+      <p class="text-gray-600 mb-3">Google Ads descarga solo, cada día, los pacientes nuevos que pagaron y llegaron por un anuncio (reservas pagadas en la web y links de pago). No tienes que hacer nada. Estos datos se usan una sola vez al configurar la subida programada en Google Ads.</p>
+      {claveGoogle ? (
+        <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-xs">
+          <dt class="text-gray-500">URL</dt><dd class="break-all">{urlGoogle}</dd>
+          <dt class="text-gray-500">Usuario</dt><dd>{CSV_USUARIO}</dd>
+          <dt class="text-gray-500">Contraseña</dt><dd class="break-all">{claveGoogle}</dd>
+        </dl>
+      ) : <p class="text-red-700">No se pudo crear la contraseña. Recarga la página.</p>}
+    </div>
 
     <h2 class="font-semibold mb-2">Resumen (últimos 90 días)</h2>
     <table class="w-full text-sm mb-8 border">

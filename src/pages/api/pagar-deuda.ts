@@ -4,6 +4,7 @@ import { getTotalOwedByEmail, tagBookingsWithPaymentToken, manualChargeLabel } f
 import { createPaymentOrder, FLOW_URLS } from '../../lib/flow';
 import { logError } from '../../lib/logger';
 import { comprobanteEnRevision } from '../../lib/comprobantes';
+import { limpiarOrigen } from '../../lib/origen';
 
 export const prerender = false;
 
@@ -19,7 +20,7 @@ const SESSION_LABELS: Record<string, string> = {
 // marca pagadas a la vez, cada una con su propia boleta.
 export const POST: APIRoute = async ({ request }) => {
   try {
-    const { patientId } = await request.json();
+    const { patientId, origen } = await request.json();
     if (!patientId) return Response.json({ error: 'Falta patientId.' }, { status: 400 });
 
     const { data: patient } = await supabase
@@ -78,6 +79,17 @@ export const POST: APIRoute = async ({ request }) => {
       await logError('pagar-deuda', 'Se creó la orden de Flow pero no se pudo asociar a las reservas — el pago no se podrá conciliar', { patientId, ids, token: order.token, error: tagErr.message });
       return Response.json({ error: 'Error al preparar el pago. Intenta de nuevo o contacta a Valentina.' }, { status: 500 });
     }
+    // De qué anuncio llegó quien paga el link que Valentina mandó por WhatsApp
+    // (14 oct 2026): el navegador lo recuerda (vo_origen). Solo se guarda en las
+    // reservas que no tenían origen, y solo si trae un clic de anuncio. Sirve para
+    // contarle a Google Ads qué búsquedas traen pacientes (src/lib/conversionesGoogle.ts).
+    // Nunca bloquea el pago.
+    try {
+      const o = limpiarOrigen(origen);
+      if ([o.first, o.last].some(t => t?.gclid || t?.gbraid || t?.wbraid)) {
+        await supabase.from('bookings').update({ origen: o }).in('id', ids).is('origen', null);
+      }
+    } catch { /* sin origen no pasa nada */ }
     try { await tagBookingsWithPaymentToken(ids, order.token); } catch (e) {
       await logError('pagar-deuda', 'No se pudo guardar el historial de token de pago (no bloquea el pago)', { patientId, ids, error: e instanceof Error ? e.message : String(e) });
     }

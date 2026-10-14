@@ -248,7 +248,11 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
       const res = await fetch('/api/pagar-deuda', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patientId }),
+        body: JSON.stringify({
+          patientId,
+          // De qué anuncio llegó (si llegó por uno): ver /api/pagar-deuda.
+          origen: (() => { try { return JSON.parse(localStorage.getItem('vo_origen') || 'null'); } catch { return null; } })(),
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
