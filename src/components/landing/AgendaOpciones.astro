@@ -9,8 +9,9 @@ interface Props {
   grupo: 'individual' | 'pareja';
   /** Identificador para medir el clic (data-cta). */
   lugar?: string;
+  class?: string;
 }
-const { grupo, lugar = 'landing' } = Astro.props;
+const { grupo, lugar = 'landing', class: extra = '' } = Astro.props;
 
 const SERVICIOS = {
   individual: { online: '59372f15-ff74-4e2d-839a-cebc165a98bf', presencial: '95e28c78-ff4b-48be-9962-0c04507b84c8', precio: '$65.000' },
@@ -23,10 +24,9 @@ const textoWa = grupo === 'pareja'
 const waHref = `https://wa.me/56972735696?text=${encodeURIComponent(textoWa)}`;
 ---
 
-<div class="agenda-opciones max-w-md" data-grupo={grupo}>
+<div class={`agenda-opciones max-w-md w-full ${extra}`} data-grupo={grupo}>
   <a href={waHref} target="_blank" rel="noopener"
-     class="ao-wa btn justify-center w-full py-4 px-6 text-white hover:opacity-90"
-     style="background-color:#1b7f45;"
+     class="ao-wa btn justify-center w-full py-4 px-6 text-white text-[13px] font-medium bg-forest hover:bg-forest/80"
      data-cta={`${lugar}_${grupo}_whatsapp`}>
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.05 0C5.5 0 .16 5.34.16 11.89c0 2.1.55 4.14 1.59 5.95L.06 24l6.3-1.65a11.9 11.9 0 0 0 5.69 1.45c6.55 0 11.89-5.34 11.89-11.9C23.94 5.33 18.6 0 12.05 0Zm0 21.79a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.27c0-5.45 4.44-9.88 9.89-9.88 5.45 0 9.88 4.43 9.88 9.88 0 5.45-4.43 9.9-9.89 9.9Zm5.42-7.41c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.16-.17.2-.35.22-.64.08-.3-.15-1.26-.47-2.39-1.48-.88-.79-1.48-1.76-1.65-2.06-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.52.15-.18.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.61-.92-2.2-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.06 2.88 1.21 3.07.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.7.63.71.22 1.36.2 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.18-1.41-.08-.13-.28-.2-.57-.35Z"/></svg>
     Agenda por WhatsApp
@@ -34,7 +34,7 @@ const waHref = `https://wa.me/56972735696?text=${encodeURIComponent(textoWa)}`;
   <p class="body-sm text-center mt-2 mb-4">Te respondo personalmente y coordinamos tu hora.</p>
 
   <button type="button"
-          class="ao-web btn-outline w-full justify-center py-4"
+          class="ao-web btn-outline w-full justify-center py-4 text-[13px] font-medium"
           aria-expanded="false"
           data-cta={`${lugar}_${grupo}_web`}
           data-online={`/agenda?servicio=${s.online}`}
@@ -42,13 +42,15 @@ const waHref = `https://wa.me/56972735696?text=${encodeURIComponent(textoWa)}`;
     Agenda tu hora en la web
   </button>
   <div class="ao-modalidad hidden mt-3 grid grid-cols-2 gap-3">
-    <a href={`/agenda?servicio=${s.online}`} class="border border-forest rounded-[6px] p-4 text-center bg-white hover:bg-warm transition-colors" data-cta={`${lugar}_${grupo}_web_online`}>
+    <a href={`/agenda?servicio=${s.online}`} class="border border-forest rounded-[4px] p-4 text-center bg-white hover:bg-warm transition-colors" data-cta={`${lugar}_${grupo}_web_online`}>
       <span class="block font-body font-medium text-ink">Online</span>
-      <span class="block body-sm">Google Meet · {s.precio}</span>
+      <span class="block body-sm">Google Meet</span>
+      <span class="block body-sm font-medium text-ink">{s.precio}</span>
     </a>
-    <a href={`/agenda?servicio=${s.presencial}`} class="border border-forest rounded-[6px] p-4 text-center bg-white hover:bg-warm transition-colors" data-cta={`${lugar}_${grupo}_web_presencial`}>
+    <a href={`/agenda?servicio=${s.presencial}`} class="border border-forest rounded-[4px] p-4 text-center bg-white hover:bg-warm transition-colors" data-cta={`${lugar}_${grupo}_web_presencial`}>
       <span class="block font-body font-medium text-ink">Presencial</span>
-      <span class="block body-sm">Las Condes · {s.precio}</span>
+      <span class="block body-sm">Las Condes</span>
+      <span class="block body-sm font-medium text-ink">{s.precio}</span>
     </a>
   </div>
   <p class="body-sm text-center mt-2">Eliges día y hora en el calendario y pagas en línea.</p>

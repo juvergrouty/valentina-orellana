@@ -5,11 +5,13 @@ interface Props {
   description?: string;
   image?: string;        // imagen desktop, por defecto hero-paginas.jpg
   imageMobile?: string;  // imagen opcional para mobile (< 768px)
+  /** Portada más baja en celular (páginas de destino de anuncios: los botones deben verse sin bajar). */
+  compact?: boolean;
 }
-const { label, title, description, image = '/images/hero-paginas.jpg', imageMobile } = Astro.props;
+const { label, title, description, image = '/images/hero-paginas.jpg', imageMobile, compact = false } = Astro.props;
 ---
 
-<section class="relative overflow-hidden min-h-[380px] md:min-h-[420px] flex items-end border-b border-dust">
+<section class={`relative overflow-hidden ${compact ? 'min-h-[240px]' : 'min-h-[380px]'} md:min-h-[420px] flex items-end border-b border-dust`}>
 
   <!-- Imagen de fondo: en mobile usa imageMobile si existe -->
   <picture class="absolute inset-0 w-full h-full">
@@ -26,7 +28,7 @@ const { label, title, description, image = '/images/hero-paginas.jpg', imageMobi
   <div class="absolute inset-0 bg-gradient-to-t from-ink/80 via-ink/30 to-ink/10"></div>
 
   <!-- Contenido -->
-  <div class="relative z-10 container-site py-14 md:py-20 w-full">
+  <div class={`relative z-10 container-site ${compact ? 'py-8' : 'py-14'} md:py-20 w-full`}>
     <p class="label text-white/60 mb-3">{label}</p>
     <div class="w-10 h-0.5 bg-white/30 mb-5"></div>
     <h1 class="font-heading font-semibold text-display text-white leading-tight"
@@ -34,7 +36,7 @@ const { label, title, description, image = '/images/hero-paginas.jpg', imageMobi
       {title}
     </h1>
     {description && (
-      <p class="font-body text-white/75 font-light text-lg mt-4 max-w-lg leading-relaxed">{description}</p>
+      <p class={`font-body text-white/75 font-light text-lg mt-4 max-w-lg leading-relaxed ${compact ? 'hidden md:block' : ''}`}>{description}</p>
     )}
   </div>
 

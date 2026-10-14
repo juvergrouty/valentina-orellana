@@ -3,6 +3,7 @@ export const prerender = false;
 import BaseLayout from '../layouts/BaseLayout.astro';
 import CamposContacto from '../components/CamposContacto.astro';
 import { supabase } from '../lib/supabase';
+import { getCachedReviews } from '../lib/googleReviews';
 
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
@@ -20,6 +21,12 @@ const transferPaymentEnabled  = false && settings['transfer_payment_enabled'] ==
 const recaptchaSiteKey        = settings['recaptcha_site_key'] ?? '';
 
 // Pre-selección de grupo desde URL (ej: /agenda?grupo=individual)
+// Prueba social y WhatsApp en la agenda (14 oct 2026, panel de expertos): la
+// agenda no mostraba reseñas y quien prefiere que Valentina le agende tenía que
+// buscar el botón flotante.
+const resenas = await getCachedReviews().catch(() => null);
+const lineaResenas = resenas?.total ? `★ ${(resenas.rating ?? 5).toFixed(1).replace('.', ',')} en Google · ${resenas.total} reseñas` : '';
+const waAgendaHref = 'https://wa.me/56972735696?text=' + encodeURIComponent('Hola Valentina, quiero agendar mi hora de terapia. ¿Me ayudas a coordinarla?');
 const grupoParam    = Astro.url.searchParams.get('grupo')    ?? null;
 const servicioParam = Astro.url.searchParams.get('servicio') ?? null;
 
@@ -138,6 +145,17 @@ const resumenPareja     = resumenGrupo('pareja');
           Te entrego boleta para que solicites reembolso en tu Isapre o seguro complementario, según tu plan.
         </p>
 
+        <!-- Agenda por WhatsApp (14 oct 2026): secundario, no compite con elegir. -->
+        <div class="wa-agenda mt-8 max-w-xs">
+          {lineaResenas && <p class="font-body text-xs text-stone mb-2">{lineaResenas}</p>}
+          <a href={waAgendaHref} target="_blank" rel="noopener" data-cta="agenda_paso1_whatsapp"
+             class="btn-outline w-full justify-center min-h-[44px] py-2.5 text-[12px] font-medium">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.05 0C5.5 0 .16 5.34.16 11.89c0 2.1.55 4.14 1.59 5.95L.06 24l6.3-1.65a11.9 11.9 0 0 0 5.69 1.45c6.55 0 11.89-5.34 11.89-11.9C23.94 5.33 18.6 0 12.05 0Zm0 21.79a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.27c0-5.45 4.44-9.88 9.89-9.88 5.45 0 9.88 4.43 9.88 9.88 0 5.45-4.43 9.9-9.89 9.9Z"/></svg>
+            Agenda por WhatsApp
+          </a>
+          <p class="font-body text-xs text-stone mt-2">Te respondo personalmente y coordinamos tu hora.</p>
+        </div>
+
         <!-- 1b: Elegir servicio — aparece al elegir grupo -->
         <div id="service-selection" class="hidden mt-10">
           <button type="button" id="back-to-group" class="label text-stone hover:text-ink transition-colors mb-6 flex items-center gap-2">← Volver</button>
@@ -247,16 +265,21 @@ const resumenPareja     = resumenGrupo('pareja');
                   class="inline-block mt-3 text-forest underline underline-offset-2 hover:text-ink transition-colors"
                 >Escríbeme para un sobrecupo</a>
               </div>
-              <p id="slots-help-msg" class="hidden font-body text-xs text-stone/60 text-center pt-4 mt-2 border-t border-dust">
-                ¿Ninguna hora te acomoda?
-                <a
-                  href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20estoy%20buscando%20un%20sobrecupo%20o%20un%20horario%20disponible%20distinto%20a%20los%20que%20aparecen%20en%20la%20agenda.%20%C2%BFMe%20puedes%20ayudar%3F"
-                  target="_blank" rel="noopener"
-                  class="text-forest underline underline-offset-2 hover:text-ink transition-colors"
-                >Escríbeme</a>
-              </p>
+              <!-- "¿Ninguna hora te acomoda?" reemplazado por el botón de WhatsApp bajo el calendario (14 oct 2026). -->
+              <p id="slots-help-msg" class="hidden"></p>
             </div>
           </div>
+        </div>
+
+        <!-- Agenda por WhatsApp (14 oct 2026): secundario, no compite con elegir. -->
+        <div class="wa-agenda mt-6 max-w-xs">
+          {lineaResenas && <p class="font-body text-xs text-stone mb-2">{lineaResenas}</p>}
+          <a href={waAgendaHref} target="_blank" rel="noopener" data-cta="agenda_paso2_whatsapp"
+             class="btn-outline w-full justify-center min-h-[44px] py-2.5 text-[12px] font-medium">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.05 0C5.5 0 .16 5.34.16 11.89c0 2.1.55 4.14 1.59 5.95L.06 24l6.3-1.65a11.9 11.9 0 0 0 5.69 1.45c6.55 0 11.89-5.34 11.89-11.9C23.94 5.33 18.6 0 12.05 0Zm0 21.79a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.27c0-5.45 4.44-9.88 9.89-9.88 5.45 0 9.88 4.43 9.88 9.88 0 5.45-4.43 9.9-9.89 9.9Z"/></svg>
+            Agenda por WhatsApp
+          </a>
+          <p class="font-body text-xs text-stone mt-2">Te respondo personalmente y coordinamos tu hora.</p>
         </div>
       </div>
 
