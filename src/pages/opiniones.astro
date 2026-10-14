@@ -15,14 +15,16 @@ export const prerender = false;
 
   <Testimonials />
 
-  <section class="py-20 bg-ink text-center">
+  <!-- CTA (14 oct 2026, pedido de Vale): quien llega desde el enlace "Reseñas"
+       del anuncio de Google pasa a Servicios, donde elige individual o pareja. -->
+  <section class="py-14 md:py-20 bg-ink text-center">
     <div class="container-site max-w-lg">
       <p class="font-heading font-light text-3xl md:text-4xl text-sand mb-3">
         ¿Quieres dar<br />el primer paso?
       </p>
       <div class="divider-center bg-sand/20 my-7"></div>
-      <a href="/agenda" class="btn bg-sand text-ink hover:bg-gold hover:text-white text-[10px] tracking-widest2 uppercase py-3.5 px-8 transition-all duration-300">
-        Agendar sesión
+      <a href="/servicios" data-cta="opiniones_reservar" class="btn bg-sand text-ink hover:bg-gold hover:text-white font-body text-sm font-medium normal-case tracking-normal min-h-[44px] py-3.5 px-7 transition-all duration-300">
+        Quiero reservar una hora con la terapeuta
       </a>
     </div>
   </section>
