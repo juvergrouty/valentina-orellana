@@ -145,16 +145,11 @@ const resumenPareja     = resumenGrupo('pareja');
           Te entrego boleta para que solicites reembolso en tu Isapre o seguro complementario, según tu plan.
         </p>
 
-        <!-- Agenda por WhatsApp (14 oct 2026): secundario, no compite con elegir. -->
-        <div class="wa-agenda mt-8 max-w-xs">
-          {lineaResenas && <p class="font-body text-xs text-stone mb-2">{lineaResenas}</p>}
-          <a href={waAgendaHref} target="_blank" rel="noopener" data-cta="agenda_paso1_whatsapp"
-             class="btn-outline w-full justify-center min-h-[44px] py-2.5 text-[12px] font-medium">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.05 0C5.5 0 .16 5.34.16 11.89c0 2.1.55 4.14 1.59 5.95L.06 24l6.3-1.65a11.9 11.9 0 0 0 5.69 1.45c6.55 0 11.89-5.34 11.89-11.9C23.94 5.33 18.6 0 12.05 0Zm0 21.79a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.27c0-5.45 4.44-9.88 9.89-9.88 5.45 0 9.88 4.43 9.88 9.88 0 5.45-4.43 9.9-9.89 9.9Z"/></svg>
-            Agenda por WhatsApp
-          </a>
-          <p class="font-body text-xs text-stone mt-2">Te respondo personalmente y coordinamos tu hora.</p>
-        </div>
+        <!-- Agenda por WhatsApp (14 oct 2026, panel de expertos): enlace secundario. -->
+        <p class="wa-agenda font-body text-sm text-stone mt-3 max-w-2xl">
+          ¿Prefieres que te agende yo?
+          <a href={waAgendaHref} target="_blank" rel="noopener" data-cta="agenda_paso1_whatsapp" class="text-forest font-medium underline underline-offset-2 hover:text-ink">Escríbeme por WhatsApp</a>
+        </p>
 
         <!-- 1b: Elegir servicio — aparece al elegir grupo -->
         <div id="service-selection" class="hidden mt-10">
@@ -202,7 +197,18 @@ const resumenPareja     = resumenGrupo('pareja');
         </button>
         <p class="label text-stone mb-4">Paso 2</p>
         <div class="divider mb-6"></div>
-        <h2 class="step-title font-heading font-light text-3xl text-ink mb-8 focus:outline-none" tabindex="-1">Elige fecha y hora</h2>
+        <h2 class="step-title font-heading font-light text-3xl text-ink mb-4 focus:outline-none" tabindex="-1">Elige fecha y hora</h2>
+        <!-- Confianza + WhatsApp en el punto de decisión (14 oct 2026, panel de expertos). -->
+        <div class="wa-agenda flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-8">
+          <p class="font-body text-xs text-stone leading-relaxed">
+            {lineaResenas && <span>{lineaResenas} · </span>}Boleta para reembolso en tu Isapre o seguro · Reagendas sin costo avisando con 24 h
+          </p>
+          <a href={waAgendaHref} target="_blank" rel="noopener" data-cta="agenda_paso2_whatsapp"
+             class="btn-outline justify-center min-h-[44px] py-2 px-4 text-[12px] font-medium flex-shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.05 0C5.5 0 .16 5.34.16 11.89c0 2.1.55 4.14 1.59 5.95L.06 24l6.3-1.65a11.9 11.9 0 0 0 5.69 1.45c6.55 0 11.89-5.34 11.89-11.9C23.94 5.33 18.6 0 12.05 0Zm0 21.79a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.27c0-5.45 4.44-9.88 9.89-9.88 5.45 0 9.88 4.43 9.88 9.88 0 5.45-4.43 9.9-9.89 9.9Z"/></svg>
+            ¿Prefieres que te agende yo? Escríbeme
+          </a>
+        </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-dust">
           <!-- Calendario -->
@@ -271,16 +277,6 @@ const resumenPareja     = resumenGrupo('pareja');
           </div>
         </div>
 
-        <!-- Agenda por WhatsApp (14 oct 2026): secundario, no compite con elegir. -->
-        <div class="wa-agenda mt-6 max-w-xs">
-          {lineaResenas && <p class="font-body text-xs text-stone mb-2">{lineaResenas}</p>}
-          <a href={waAgendaHref} target="_blank" rel="noopener" data-cta="agenda_paso2_whatsapp"
-             class="btn-outline w-full justify-center min-h-[44px] py-2.5 text-[12px] font-medium">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.05 0C5.5 0 .16 5.34.16 11.89c0 2.1.55 4.14 1.59 5.95L.06 24l6.3-1.65a11.9 11.9 0 0 0 5.69 1.45c6.55 0 11.89-5.34 11.89-11.9C23.94 5.33 18.6 0 12.05 0Zm0 21.79a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.27c0-5.45 4.44-9.88 9.89-9.88 5.45 0 9.88 4.43 9.88 9.88 0 5.45-4.43 9.9-9.89 9.9Z"/></svg>
-            Agenda por WhatsApp
-          </a>
-          <p class="font-body text-xs text-stone mt-2">Te respondo personalmente y coordinamos tu hora.</p>
-        </div>
       </div>
 
       <!-- ── PASO 3: Datos del paciente ────────────────────────────────── -->
