@@ -1,0 +1,154 @@
+---
+export const prerender = false;
+import { supabase } from '../../../../lib/supabase';
+import { todayCL, hoursUntilSessionCL } from '../../../../lib/dateUtils';
+import { DIRECCION } from '../../../../data/consulta';
+
+// Certificado de atención psicológica (Valentina, 14 oct 2026; antes se hacía
+// en "Documentos" de Encuadrado). Los pacientes lo piden para el trabajo, la
+// universidad o un trámite. Se arma con las sesiones REALIZADAS que están en
+// la página (confirmadas, ya pasadas y sin inasistencia) y se guarda en PDF
+// desde el navegador, igual que la constancia del consentimiento.
+// Por secreto profesional NO incluye diagnóstico ni motivo de consulta; solo
+// lleva una observación si Valentina la escribe (con acuerdo del paciente).
+const { id } = Astro.params;
+const q = Astro.url.searchParams;
+
+const { data: patient } = await supabase.from('patients').select('id, name, rut, email, sin_rut, doc_tipo, doc_numero').eq('id', id!).maybeSingle();
+if (!patient) return Astro.redirect('/admin/pacientes');
+
+const hoy = todayCL();
+const { data: filas } = patient.email
+  ? await supabase.from('bookings')
+      .select('session_date, session_time, session_type, status, no_show')
+      .eq('patient_email', patient.email)
+      .eq('status', 'confirmed')
+      .lte('session_date', hoy)
+      .order('session_date')
+  : { data: [] as { session_date: string; session_time: string; session_type: string; status: string; no_show: boolean | null }[] };
+// Una sesión de hoy cuenta solo si ya empezó.
+const realizadas = (filas ?? []).filter((b) => !b.no_show && b.session_date !== '2099-12-31' && !(b.session_date === hoy && hoursUntilSessionCL(b.session_date, String(b.session_time).slice(0, 5)) > 0));
+
+const esFecha = (v: string | null) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().startsWith(v);
+const primera = realizadas[0]?.session_date ?? hoy;
+const desde = esFecha(q.get('desde')) ? q.get('desde')! : primera;
+const hasta = esFecha(q.get('hasta')) ? q.get('hasta')! : hoy;
+const tipo = q.get('tipo') === 'tratamiento' ? 'tratamiento' : 'asistencia';
+const destinatario = (q.get('para') ?? '').trim().slice(0, 120);
+const observacion = (q.get('obs') ?? '').trim().slice(0, 600);
+const listar = q.get('fechas') !== '0';
+
+const enRango = realizadas.filter((b) => b.session_date >= desde && b.session_date <= hasta);
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const larga = (f: string) => { const [y, m, d] = f.split('-').map(Number); return `${d} de ${MESES[m - 1]} de ${y}`; };
+const corta = (f: string) => f.split('-').reverse().join('-');
+const modalidad = (t: string) => t?.includes('online') ? 'online' : 'presencial';
+const identidad = patient.sin_rut
+  ? (patient.doc_numero ? `${patient.doc_tipo || 'documento'} N° ${patient.doc_numero}` : '')
+  : (patient.rut ? `RUT ${patient.rut}` : '');
+const n = enRango.length;
+---
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Certificado · {patient.name} · {hoy}</title>
+  <style>
+    body { font-family: Georgia, 'Times New Roman', serif; color: #1A1A18; background: #fff; max-width: 760px; margin: 0 auto; padding: 2rem 1.25rem; font-size: 15px; line-height: 1.7; }
+    .bar { font-family: -apple-system, 'Inter', sans-serif; font-size: 13px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 2rem; display: flex; flex-direction: column; gap: 0.75rem; }
+    .bar form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.6rem 0.9rem; align-items: end; }
+    .bar label { display: flex; flex-direction: column; gap: 0.2rem; color: #4b5563; font-size: 12px; }
+    .bar input, .bar select, .bar textarea { font: inherit; padding: 0.4rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #111827; }
+    .bar .full { grid-column: 1 / -1; }
+    .bar .acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .bar a, .bar button { font: inherit; padding: 0.45rem 0.9rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #111827; text-decoration: none; cursor: pointer; }
+    .bar .principal { background: #576352; color: #fff; border-color: #576352; }
+    .bar .nota { color: #6b7280; margin: 0; }
+    .membrete { display: flex; align-items: center; gap: 1rem; border-bottom: 1px solid #DDD8CF; padding-bottom: 1rem; margin-bottom: 2.5rem; }
+    .membrete img { width: 64px; height: auto; }
+    .membrete p { margin: 0; font-family: -apple-system, 'Inter', sans-serif; font-size: 12px; color: #6B6860; line-height: 1.5; }
+    .membrete strong { font-family: Georgia, serif; font-size: 16px; color: #1A1A18; font-weight: 400; }
+    h1 { font-weight: 400; font-size: 1.35rem; text-align: center; letter-spacing: 0.04em; margin: 0 0 2rem; text-transform: uppercase; }
+    .fechas { columns: 3 140px; margin: 0.5rem 0 1.25rem; padding-left: 1.1rem; font-size: 14px; }
+    .firma { margin-top: 3.5rem; text-align: center; font-size: 14px; line-height: 1.5; }
+    .firma .linea { width: 260px; border-top: 1px solid #1A1A18; margin: 0 auto 0.5rem; }
+    .pie { margin-top: 3rem; font-family: -apple-system, 'Inter', sans-serif; font-size: 11px; color: #6B6860; border-top: 1px solid #DDD8CF; padding-top: 0.75rem; }
+    .aviso { font-family: -apple-system, 'Inter', sans-serif; font-size: 13px; color: #b45309; }
+    @media print { .bar { display: none; } body { padding: 0; } @page { margin: 2cm; } }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <form method="get">
+      <label>Tipo de certificado
+        <select name="tipo">
+          <option value="asistencia" selected={tipo === 'asistencia'}>Asistencia a sesiones</option>
+          <option value="tratamiento" selected={tipo === 'tratamiento'}>En proceso de atención</option>
+        </select>
+      </label>
+      <label>Desde <input type="date" name="desde" value={desde} /></label>
+      <label>Hasta <input type="date" name="hasta" value={hasta} /></label>
+      <label>Listar fechas
+        <select name="fechas">
+          <option value="1" selected={listar}>Sí</option>
+          <option value="0" selected={!listar}>No</option>
+        </select>
+      </label>
+      <label class="full">Para presentar ante (opcional, ej. "su empleador", "la universidad")
+        <input type="text" name="para" value={destinatario} maxlength="120" placeholder="Quien corresponda" />
+      </label>
+      <label class="full">Observación (opcional; sin diagnóstico salvo que el paciente lo pida por escrito)
+        <textarea name="obs" rows="2" maxlength="600">{observacion}</textarea>
+      </label>
+      <div class="acciones full">
+        <button type="submit">Actualizar</button>
+        <button type="button" class="principal" onclick="window.print()">Imprimir / Guardar PDF</button>
+        <a href={`/admin/pacientes/${patient.id}`}>← Volver a la ficha</a>
+      </div>
+    </form>
+    <p class="nota">Cuenta las sesiones realizadas registradas en tu página (confirmadas, ya pasadas y sin inasistencia). Lo de esta barra no sale en el PDF.</p>
+    {(n === 0 || (tipo === 'tratamiento' && realizadas.length === 0)) && <p class="aviso">⚠ No hay sesiones realizadas en ese rango. Revisa las fechas antes de emitirlo.</p>}
+  </div>
+
+  <div class="membrete">
+    <img src="/firma/sello.png" alt="" />
+    <p><strong>Ps. Valentina Orellana Jaramillo</strong><br />Psicóloga · Adultos y parejas<br />Registro Superintendencia de Salud N° 360070<br />{DIRECCION.calle}, {DIRECCION.detalle}, {DIRECCION.comuna} · consulta@valentinaorellana.cl</p>
+  </div>
+
+  <h1>Certificado de atención psicológica</h1>
+
+  {tipo === 'asistencia' ? (
+    <p>
+      Certifico que <strong>{patient.name}</strong>{identidad && <>, {identidad}</>}, asistió a <strong>{n} {n === 1 ? 'sesión' : 'sesiones'}</strong> de atención psicológica conmigo
+      {desde === hasta ? <> el {larga(desde)}</> : <> entre el {larga(desde)} y el {larga(hasta)}</>}{listar && n > 0 ? ', en las siguientes fechas:' : '.'}
+    </p>
+  ) : (
+    <p>
+      Certifico que <strong>{patient.name}</strong>{identidad && <>, {identidad}</>}, se encuentra en proceso de atención psicológica conmigo desde el {larga(realizadas[0]?.session_date ?? desde)}, con <strong>{realizadas.length} {realizadas.length === 1 ? 'sesión realizada' : 'sesiones realizadas'}</strong> a la fecha{listar && n > 0 ? <>. Sesiones entre el {larga(desde)} y el {larga(hasta)}:</> : '.'}
+    </p>
+  )}
+
+  {listar && n > 0 && (
+    <ul class="fechas">
+      {enRango.map((b) => <li>{corta(b.session_date)} · {modalidad(b.session_type)}</li>)}
+    </ul>
+  )}
+
+  {observacion && <p>{observacion}</p>}
+
+  <p>Se extiende el presente certificado a solicitud del/la interesado/a{destinatario ? <>, para ser presentado ante {destinatario}</> : ', para los fines que estime convenientes'}.</p>
+
+  <p style="margin-top:2rem;">Santiago, {larga(hoy)}.</p>
+
+  <div class="firma">
+    <div class="linea"></div>
+    Ps. Valentina Orellana Jaramillo<br />
+    Psicóloga · Universidad del Desarrollo<br />
+    Registro Superintendencia de Salud N° 360070
+  </div>
+
+  {!observacion && <p class="pie">En resguardo del secreto profesional, este certificado no contiene información clínica.</p>}
+</body>
+</html>

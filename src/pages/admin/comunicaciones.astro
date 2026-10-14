@@ -16,6 +16,20 @@ const { data: emails } = await supabase
 
 const history = emails ?? [];
 
+// Aperturas por envío (14 oct 2026): un registro por destinatario con la fecha
+// de la primera apertura. Envíos anteriores a la medición no tienen registros.
+type Dest = { bulk_id: string; name: string | null; email: string; sent: boolean; opened_at: string | null };
+const ids = history.map(e => String(e.id)).filter(Boolean);
+const { data: destRows } = ids.length
+  ? await supabase.from('bulk_email_recipients' as never).select('bulk_id, name, email, sent, opened_at').in('bulk_id', ids) as { data: Dest[] | null }
+  : { data: [] as Dest[] };
+const destPorEnvio = new Map<string, Dest[]>();
+for (const d of destRows ?? []) {
+  if (!destPorEnvio.has(d.bulk_id)) destPorEnvio.set(d.bulk_id, []);
+  destPorEnvio.get(d.bulk_id)!.push(d);
+}
+const fmtHora = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
 // Pacientes activos para el selector
 const { data: patients } = await supabase
   .from('patients').select('name, email').eq('active', true).not('email', 'is', null).order('name');
@@ -83,18 +97,35 @@ function fmt(iso: string) {
             </button>
           </div>
           <table class="com-table">
-            <thead><tr><th>Asunto</th><th>Destinatarios</th><th>Enviados</th><th>Fecha</th></tr></thead>
+            <thead><tr><th>Asunto</th><th>Destinatarios</th><th>Enviados</th><th>Abiertos</th><th>Fecha</th></tr></thead>
             <tbody>
-              {history.map(e => (
+              {history.map(e => {
+                const dest = (destPorEnvio.get(String(e.id)) ?? []).filter(d => d.sent);
+                const abiertos = dest.filter(d => d.opened_at);
+                const tasa = dest.length ? Math.round((abiertos.length / dest.length) * 100) : null;
+                return (
                 <tr>
                   <td style="font-weight:600;color:#111827;">{String(e.subject ?? '')}</td>
                   <td style="color:#6b7280;text-transform:capitalize;">{String(e.target ?? '')}</td>
                   <td style="color:#15803d;font-weight:600;">{String(e.sent_count ?? 0)}{e.failed_count && Number(e.failed_count) > 0 ? <span style="color:#dc2626;font-weight:400;"> · {String(e.failed_count)} fallaron</span> : null}</td>
+                  <td>
+                    {tasa === null ? <span style="color:#9ca3af;" title="Sin medición para este envío">—</span> : (
+                      <details>
+                        <summary style="cursor:pointer;font-weight:600;color:#111827;">{tasa}% <span style="font-weight:400;color:#6b7280;">({abiertos.length} de {dest.length})</span></summary>
+                        <ul style="margin:0.4rem 0 0;padding:0;list-style:none;font-size:0.8rem;display:flex;flex-direction:column;gap:0.2rem;">
+                          {[...dest].sort((a, b) => Number(!!b.opened_at) - Number(!!a.opened_at)).map(d => (
+                            <li>{d.opened_at ? '✓' : '·'} {d.name || d.email} <span style="color:#6b7280;">{d.opened_at ? `abrió ${fmtHora(d.opened_at)}` : 'sin abrir'}</span></li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                  </td>
                   <td style="color:#6b7280;">{e.created_at ? fmt(String(e.created_at)) : '—'}</td>
                 </tr>
-              ))}
+              ); })}
             </tbody>
           </table>
+          <p style="font-size:0.75rem;color:#6b7280;margin:0.75rem 0 0;">Abiertos es aproximado: se cuenta cuando el correo carga sus imágenes. Algunos programas (como Mail de iPhone) las cargan solos al llegar, y otros las bloquean.</p>
         </div>
       )}
     </div>

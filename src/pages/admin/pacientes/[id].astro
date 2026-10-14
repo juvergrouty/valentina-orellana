@@ -157,6 +157,7 @@ const faltanDatos = patient ? [
             data-mail-action="review_request" data-email={patient.email} data-name={patient.name}>Solicitar reseña</button>
         </>
       )}
+      <a href={`/admin/pacientes/${patient.id}/certificado`} target="_blank" class="btn btn-outline btn-sm">Certificado</a>
       <span id="mail-status" style="font-size:0.78rem;"></span>
       <button id="open-agenda-modal" class="btn btn-dark btn-sm">+ Agendar sesión</button>
       <form method="POST" action="/api/admin/patients" style="margin:0;">

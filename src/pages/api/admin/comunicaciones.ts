@@ -35,22 +35,43 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const bodyHtml = esc(body).replace(/\n/g, '<br>');
 
+    // Se registra el envío y cada destinatario ANTES de mandar: así cada
+    // correo lleva su imagen invisible de apertura (/api/abierto/<id>.gif,
+    // 14 oct 2026). Si el registro falla, el correo sale igual, sin medición.
+    const { data: envio, error: envErr } = await supabase.from('bulk_emails' as never)
+      .insert({ subject, body, target, sent_count: 0, failed_count: 0 } as never)
+      .select('id').single();
+    if (envErr && envErr.code !== '42P01') console.error('[comunicaciones] log:', envErr.message);
+    const envioId = (envio as { id?: string } | null)?.id ?? null;
+    let filas: { id: string; email: string }[] = [];
+    if (envioId) {
+      const { data: rs, error: rErr } = await supabase.from('bulk_email_recipients' as never)
+        .insert(recipients.map(r => ({ bulk_id: envioId, name: r.name, email: r.email })) as never)
+        .select('id, email');
+      if (rErr) console.error('[comunicaciones] destinatarios:', rErr.message);
+      filas = (rs ?? []) as { id: string; email: string }[];
+    }
+    const pixelPorCorreo = new Map(filas.map(f => [f.email, f.id]));
+
     const result = await sendBulkEmail(
-      recipients.map(r => ({ name: r.name, email: r.email as string })),
+      recipients.map(r => ({ name: r.name, email: r.email as string, pixelId: pixelPorCorreo.get(r.email as string) })),
       subject,
       bodyHtml,
     );
 
-    // Registrar el envío (si la tabla existe)
-    await supabase.from('bulk_emails' as never).insert({
-      subject,
-      body,
-      target,
-      sent_count:    result.sent,
-      failed_count:  result.failed,
-    } as never).then(({ error }) => {
-      if (error && error.code !== '42P01') console.error('[comunicaciones] log:', error.message);
-    });
+    if (!envioId) {
+      // Sin registro previo: se guarda el envío al final, como antes.
+      await supabase.from('bulk_emails' as never)
+        .insert({ subject, body, target, sent_count: result.sent, failed_count: result.failed } as never)
+        .then(({ error }) => { if (error && error.code !== '42P01') console.error('[comunicaciones] log:', error.message); });
+    }
+    if (envioId) {
+      await supabase.from('bulk_emails' as never)
+        .update({ sent_count: result.sent, failed_count: result.failed } as never).eq('id', envioId);
+      if (result.enviados?.length) {
+        await supabase.from('bulk_email_recipients' as never).update({ sent: true } as never).in('id', result.enviados);
+      }
+    }
 
     return redirect(`${dest}?sent=${result.sent}&failed=${result.failed}`);
   }

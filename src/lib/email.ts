@@ -786,10 +786,11 @@ export async function sendBoletaEmail(opts: {
 }
 
 // ─── Correo masivo a pacientes ───────────────────────────────────────────────
-export interface BulkEmailResult { sent: number; failed: number; skipped: number; }
+export interface BulkEmailResult { sent: number; failed: number; skipped: number; enviados?: string[]; }
 
 export async function sendBulkEmail(
-  recipients: { name: string; email: string }[],
+  // pixelId: registro del destinatario para medir la apertura (14 oct 2026).
+  recipients: { name: string; email: string; pixelId?: string }[],
   subject: string,
   bodyHtml: string,
 ): Promise<BulkEmailResult> {
@@ -797,6 +798,7 @@ export async function sendBulkEmail(
   if (!client) { console.warn('[email] RESEND_API_KEY no configurado — envío masivo omitido'); return { sent: 0, failed: 0, skipped: recipients.length }; }
 
   let sent = 0, failed = 0, skipped = 0;
+  const enviados: string[] = [];
 
   for (const r of recipients) {
     if (!r.email) { skipped++; continue; }
@@ -809,18 +811,19 @@ export async function sendBulkEmail(
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
           Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
+        ${r.pixelId ? `<img src="https://www.valentinaorellana.cl/api/abierto/${r.pixelId}.gif" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;" />` : ''}
       </div>`;
     try {
       const res = await client.emails.send({ from: FROM, to: r.email, replyTo: PATIENT_REPLY_TO, subject, html });
       if (res.error) { failed++; console.error('[email] bulk:', res.error); }
-      else sent++;
+      else { sent++; enviados.push(r.pixelId ?? ''); }
     } catch (e) {
       failed++;
       console.error('[email] bulk exception:', e);
     }
   }
 
-  return { sent, failed, skipped };
+  return { sent, failed, skipped, enviados: enviados.filter(Boolean) };
 }
 
 // ─── Email al admin: hora liberada automáticamente por falta de pago ────────
