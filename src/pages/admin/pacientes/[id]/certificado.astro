@@ -43,9 +43,11 @@ const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', '
 const larga = (f: string) => { const [y, m, d] = f.split('-').map(Number); return `${d} de ${MESES[m - 1]} de ${y}`; };
 const corta = (f: string) => f.split('-').reverse().join('-');
 const modalidad = (t: string) => t?.includes('online') ? 'online' : 'presencial';
+// 15367112-5 → 15.367.112-5
+const conPuntos = (r: string) => { const m = r.replace(/\./g, '').match(/^(\d+)-([\dkK])$/); return m ? `${m[1].replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${m[2].toUpperCase()}` : r; };
 const identidad = patient.sin_rut
   ? (patient.doc_numero ? `${patient.doc_tipo || 'documento'} N° ${patient.doc_numero}` : '')
-  : (patient.rut ? `RUT ${patient.rut}` : '');
+  : (patient.rut ? `RUT ${conPuntos(patient.rut)}` : '');
 const n = enRango.length;
 ---
 <!doctype html>
