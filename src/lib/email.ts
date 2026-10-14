@@ -1242,7 +1242,7 @@ export async function sendVitrinaConfirmation(data: VitrinaEmailData, opts: { id
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         ${LOGO_HEADER}
         <h1 style="font-size:1.6rem;font-weight:400;margin-bottom:0.5rem;color:#1A1A18;">
-          ${esContenido ? 'Gracias por tu compra' : 'Tu inscripción está confirmada'}
+          ${esContenido ? (data.amount > 0 ? 'Gracias por tu compra' : 'Aquí tienes tu contenido') : 'Tu inscripción está confirmada'}
         </h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:2rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(data.name)}, ${esContenido ? 'aquí tienes tu contenido.' : 'qué alegría que me acompañes. Estos son los detalles:'}

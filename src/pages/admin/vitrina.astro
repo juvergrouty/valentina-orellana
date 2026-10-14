@@ -310,7 +310,7 @@ const BADGE: Record<string, string> = { paid: 'badge-confirmed', free: 'badge-co
 
         <div>
           <label class="label" style="display:block;margin-bottom:0.3rem;">Valor (CLP, 0 = gratis)</label>
-          <input type="number" name="price" min="0" step="1000" value={f.price ?? 0} />
+          <input type="number" name="price" min="0" step="100" value={f.price ?? 0} />
         </div>
         <div data-solo="evento">
           <label class="label" style="display:block;margin-bottom:0.3rem;">Fecha y hora (hora de Chile) *</label>
