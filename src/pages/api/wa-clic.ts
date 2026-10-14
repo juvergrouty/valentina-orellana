@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
 import { limpiarOrigen } from '../../lib/origen';
+import { createHash } from 'node:crypto';
 
 export const prerender = false;
 
@@ -33,17 +34,19 @@ export const POST: APIRoute = async ({ request }) => {
   if ((count ?? 0) > 0) return ok();
 
   // Límite simple contra abuso: máximo 30 códigos nuevos por conexión por hora.
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'desconocida';
+  // Solo un hash corto de la IP (para el límite de abuso), nunca la IP (dato personal).
+  const ipRaw = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'desconocida';
+  const ip = createHash('sha256').update('vo-wa:' + ipRaw).digest('hex').slice(0, 12);
   const desde = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const { count: recientes } = await supabase.from('admin_logs').select('id', { count: 'exact', head: true })
-    .eq('context', 'wa/clic').gt('created_at', desde).eq('data->>ip', ip);
+    .eq('context', 'wa/clic').gt('created_at', desde).eq('data->>ip_h', ip);
   if ((recientes ?? 0) >= 30) return ok();
 
   await supabase.from('admin_logs').insert({
     level: 'info',
     context: 'wa/clic',
     message: codigo,
-    data: { codigo, path, ip, canal: origen.canal, first: origen.first, last: origen.last },
+    data: { codigo, path, ip_h: ip, canal: origen.canal, first: origen.first, last: origen.last },
   });
   return ok();
 };

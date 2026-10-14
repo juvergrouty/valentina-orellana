@@ -36,12 +36,13 @@ const waHref = `https://wa.me/56972735696?text=${encodeURIComponent(textoWa)}`;
   <button type="button"
           class="ao-web btn-outline w-full justify-center py-4 text-[13px] font-medium"
           aria-expanded="false"
+          aria-controls={`ao-mod-${grupo}-${lugar}`}
           data-cta={`${lugar}_${grupo}_web`}
           data-online={`/agenda?servicio=${s.online}`}
           data-presencial={`/agenda?servicio=${s.presencial}`}>
     Agenda tu hora en la web
   </button>
-  <div class="ao-modalidad hidden mt-3 grid grid-cols-2 gap-3">
+  <div id={`ao-mod-${grupo}-${lugar}`} class="ao-modalidad hidden mt-3 grid grid-cols-2 gap-3">
     <a href={`/agenda?servicio=${s.online}`} class="border border-forest rounded-[4px] p-4 text-center bg-white hover:bg-warm transition-colors" data-cta={`${lugar}_${grupo}_web_online`}>
       <span class="block font-body font-medium text-ink">Online</span>
       <span class="block body-sm">Google Meet</span>
@@ -62,6 +63,7 @@ const waHref = `https://wa.me/56972735696?text=${encodeURIComponent(textoWa)}`;
     if(box.dataset.listo)return;box.dataset.listo='1';
     var btn=box.querySelector('.ao-web'),panel=box.querySelector('.ao-modalidad');
     if(!btn||!panel)return;
+    if(m==='online'||m==='presencial')btn.removeAttribute('aria-expanded');
     btn.addEventListener('click',function(){
       // Si el anuncio ya dice la modalidad, directo al calendario.
       if(m==='online'||m==='presencial'){location.href=btn.dataset[m];return;}

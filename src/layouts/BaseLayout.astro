@@ -272,7 +272,8 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
       document.addEventListener('click',function(ev){
         var a=ev.target&&ev.target.closest&&ev.target.closest('a[href^="'+N+'"]');if(!a)return;
         var k=codigo(),u=new URL(a.href),x=u.searchParams.get('text')||'Hola Valentina.';
-        if(x.indexOf('(código ')<0){u.searchParams.set('text',x+' (código '+k+')');a.href=u.toString();}
+        if(x.indexOf('(código ')<0)a.href=N+'?text='+encodeURIComponent(x+' (código '+k+')');
+        if(window.__voWaEnviado===k)return;window.__voWaEnviado=k;
         try{var o=JSON.parse(localStorage.getItem('vo_origen')||'null');
           var d=JSON.stringify({codigo:k,path:location.pathname,origen:o});
           if(!(navigator.sendBeacon&&navigator.sendBeacon('/api/wa-clic',new Blob([d],{type:'application/json'}))))fetch('/api/wa-clic',{method:'POST',body:d,keepalive:true});

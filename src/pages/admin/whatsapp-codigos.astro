@@ -19,10 +19,13 @@ if (Astro.request.method === 'POST') {
   const codigo = String(form.get('codigo') ?? '').trim().toUpperCase().replace(/\s+/g, '').replace(/^([A-Z])([A-Z0-9]{4})$/, '$1-$2');
   if (accion === 'marcar') {
     const monto = Number(String(form.get('monto') ?? '').replace(/\D/g, ''));
-    const fecha = String(form.get('fecha') ?? '') || new Date().toISOString().slice(0, 10);
+    const fechaIn = String(form.get('fecha') ?? '');
+    const fecha = /^\d{4}-\d{2}-\d{2}$/.test(fechaIn) ? fechaIn : new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
     if (!CODIGO.test(codigo)) aviso = 'El código no es válido. Debe verse así: G-7K3Q.';
     else if (!(monto > 0)) aviso = 'Falta el monto que pagó.';
     else {
+      // Volver a marcar reemplaza (no duplica la conversión en Google Ads).
+      await supabase.from('admin_logs').delete().eq('context', 'wa/paciente').eq('message', codigo);
       await supabase.from('admin_logs').insert({ level: 'info', context: 'wa/paciente', message: codigo, data: { codigo, monto, fecha } });
       return Astro.redirect('/admin/whatsapp-codigos?ok=' + codigo);
     }
@@ -41,7 +44,10 @@ const { data: pagos } = await supabase.from('admin_logs').select('message, creat
 
 type Toque = { gclid?: string; gbraid?: string; wbraid?: string; utm_campaign?: string; utm_term?: string; landing_path?: string };
 const pagoPorCodigo = new Map((pagos ?? []).map(p => [p.message, p.data as { monto: number; fecha: string }]));
-const filas = (clics ?? []).map(c => {
+// Un código = una fila (la más antigua), aunque llegue el aviso dos veces.
+const vistos = new Set<string>();
+const clicsUnicos = [...(clics ?? [])].reverse().filter(c => !vistos.has(c.message) && (vistos.add(c.message), true)).reverse();
+const filas = clicsUnicos.map(c => {
   const d = (c.data ?? {}) as { canal?: string; last?: Toque | null; first?: Toque | null; path?: string };
   const t = d.last ?? d.first ?? {};
   return { codigo: c.message as string, fecha: c.created_at as string, canal: d.canal ?? '—', campana: t.utm_campaign ?? '', termino: t.utm_term ?? '', pagina: d.path ?? '', gclid: t.gclid ?? '', pago: pagoPorCodigo.get(c.message) };

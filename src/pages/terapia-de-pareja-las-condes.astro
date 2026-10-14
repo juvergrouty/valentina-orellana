@@ -9,12 +9,14 @@ import AgendaOpciones from '../components/landing/AgendaOpciones.astro';
 // Página de destino de terapia de pareja (12 oct 2026, auditoría de marketing):
 // los anuncios de pareja llevaban directo a la agenda de pago; quien busca
 // "terapia de pareja Las Condes" necesita leer antes de reservar $75.000.
-const { data: servicios } = await supabase
+const { data: servicios, error: errServicios } = await supabase
   .from('services_catalog')
   .select('name, price, price_online, price_presencial, modality, duration_min')
   .eq('visible', true)
   .ilike('name', '%pareja%')
   .order('sort_order');
+// Sin datos de la base, la página no se guarda en la caché pública (middleware).
+if (errServicios) Astro.response.headers.set('Cache-Control', 'no-store');
 
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 const precios = (servicios ?? []).flatMap(s => [s.price_presencial, s.price_online, s.price_presencial || s.price_online ? null : s.price]).filter((n): n is number => typeof n === 'number' && n > 0);
