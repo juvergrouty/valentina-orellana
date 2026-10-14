@@ -2,7 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { frasePlazoPago } from '../../lib/cobrosProximos';
+import { frasePlazoPago, AVISO_REAGENDAR } from '../../lib/cobrosProximos';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
 
 // "Por cobrar" (distinto de "deuda", ver /admin/deudas): sesiones que TODAVÍA
@@ -113,10 +113,11 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
             const hora = String(b.session_time ?? '').slice(0, 5);
             const plazo = b.session_date && /^\d{2}:\d{2}$/.test(hora) && hoursUntilSessionCL(b.session_date, hora) > 0
               ? `, ${frasePlazoPago(b.session_date, hora)}` : '';
+            const extraPres = plazo ? `\n${AVISO_REAGENDAR}` : '';
             const waMsg = payUrl ? encodeURIComponent(
               patientId
-                ? `Hola ${firstName}, te recuerdo el link de pago pendiente${plazo}: ${payUrl}`
-                : `Hola ${firstName}, te recuerdo el link de pago para tu sesión (${formatCLP(b.amount)})${plazo}: ${payUrl}`
+                ? `Hola ${firstName}, te recuerdo el link de pago pendiente${plazo}: ${payUrl}${extraPres}`
+                : `Hola ${firstName}, te recuerdo el link de pago para tu sesión (${formatCLP(b.amount)})${plazo}: ${payUrl}${extraPres}`
             ) : '';
             const waUrl = payUrl && waNumber.length >= 10 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
             return (

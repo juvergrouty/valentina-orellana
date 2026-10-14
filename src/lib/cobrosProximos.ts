@@ -24,13 +24,17 @@ export function frasePlazoPago(fecha: string, hora: string): string {
   return `el cual debe quedar confirmado con un plazo máximo de 24 horas antes de tu sesión del ${fechaSesionLarga(fecha)} a las ${h}`;
 }
 
+/** Va en todos los mensajes de pago, online y presencial (Valentina, 14 oct
+ *  2026): forma el hábito de pagar a tiempo. Dicho con suavidad, sin sonar a multa. */
+export const AVISO_REAGENDAR = 'Si no alcanzas a pagar dentro de ese plazo, te escribo para que busquemos otro horario.';
+
 /** Mensaje de WhatsApp con el link de pago (el mismo texto que usaba
  *  Valentina a mano). Sin fecha de sesión, solo el link. */
 export function mensajeLinkPago(nombre: string, url: string, fecha?: string | null, hora?: string | null): string {
   const primerNombre = (nombre || '').trim().split(/\s+/)[0] || '';
   const saludo = primerNombre ? `Hola ${primerNombre} 👋` : 'Hola 👋';
   if (fecha && hora && /^\d{4}-\d{2}-\d{2}$/.test(fecha) && hoursUntilSessionCL(fecha, hora.slice(0, 5)) > 0) {
-    return `${saludo} Te comparto el link de pago, ${frasePlazoPago(fecha, hora)}: ${url}`;
+    return `${saludo} Te comparto el link de pago, ${frasePlazoPago(fecha, hora)}: ${url}\n${AVISO_REAGENDAR}`;
   }
   return `${saludo} Te comparto el link de pago: ${url}`;
 }
@@ -85,13 +89,14 @@ export async function cobrosProximos(origen: string): Promise<CobroProximo[]> {
       const url = pid ? `${origen}/pagar/${pid}` : (b.mp_preference_id ? `${flowBase}?token=${b.mp_preference_id}` : null);
       const digitos = String(b.patient_phone ?? '').replace(/\D/g, '');
       const tel = digitos.length === 9 ? '56' + digitos : digitos;
+      const presencial = !String(b.session_type ?? '').includes('online');
       const texto = url ? mensajeLinkPago(b.patient_name, url, b.session_date, hora) : `Hola ${String(b.patient_name).split(' ')[0]} 👋`;
       return {
         id: b.id,
         paciente: b.patient_name,
         fecha: b.session_date,
         hora,
-        presencial: !String(b.session_type ?? '').includes('online'),
+        presencial,
         monto: Number(b.amount),
         waUrl: tel.length >= 10 ? `https://wa.me/${tel}?text=${encodeURIComponent(texto)}` : null,
         sinLink: !url,

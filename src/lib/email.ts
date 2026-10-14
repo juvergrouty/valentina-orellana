@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 import { logEmail, logError } from './logger';
 import { stepsItems, STEPS_INTRO } from './stepsContent';
 import { todayCL, hoursUntilSessionCL } from './dateUtils';
-import { frasePlazoPago } from './cobrosProximos';
+import { frasePlazoPago, AVISO_REAGENDAR } from './cobrosProximos';
 import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
 
@@ -332,7 +332,7 @@ export async function sendPaymentLinkEmail(opts: {
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(opts.patientName)}, para confirmar tu reserva realiza el pago con el siguiente enlace seguro.
         </p>
-        ${plazo ? `<p style="font-size:0.95rem;margin:0 0 1.5rem;font-family:'Inter',sans-serif;line-height:1.5;"><strong>El pago debe quedar confirmado ${plazo}.</strong></p>` : ''}
+        ${plazo ? `<p style="font-size:0.95rem;margin:0 0 1.5rem;font-family:'Inter',sans-serif;line-height:1.5;"><strong>El pago debe quedar confirmado ${plazo}.</strong></p><p style="font-size:0.9rem;margin:-1rem 0 1.5rem;font-family:'Inter',sans-serif;line-height:1.5;color:#6B6860;">${AVISO_REAGENDAR}</p>` : ''}
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
           <table style="width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:0.85rem;">
             <tr><td style="padding:0.4rem 0;color:#6B6860;width:40%;">Servicio</td><td style="padding:0.4rem 0;font-weight:500;">${opts.serviceName}</td></tr>
