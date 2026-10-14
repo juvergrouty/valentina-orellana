@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { supabase } from './supabase';
+import { logError } from './logger';
 
 // Conversiones sin conexión para Google Ads (14 oct 2026): "paciente nuevo que
 // pagó", por GCLID. Todo automático, sin trabajo para Valentina:
@@ -31,11 +32,22 @@ function toqueConClic(o: OrigenGuardado): Toque | null {
   return null;
 }
 
-/** Hora para Google: posterior al clic y nunca futura. */
-function horaConversion(pagoMs: number, clicMs: number | undefined, ahora: number): string {
+/** Hora para Google: posterior al clic. Si todavía es futura se devuelve null y
+ *  la fila sale en la próxima descarga con su hora definitiva (si se ajustara a
+ *  "ahora", Google la contaría dos veces: misma conversión con otra hora). */
+function horaConversion(pagoMs: number, clicMs: number | undefined, ahora: number): string | null {
   let ms = pagoMs;
+  if (!Number.isFinite(ms)) return null;
   if (clicMs && ms <= clicMs) ms = clicMs + 3600e3;
-  return enChile(Math.min(ms, ahora));
+  return ms > ahora ? null : enChile(ms);
+}
+
+/** Una consulta que falla no puede producir un archivo vacío "normal": se avisa
+ *  y la descarga responde error (Google marca la subida como fallida). */
+async function revisar(error: { message: string } | null, que: string) {
+  if (!error) return;
+  await logError('conversiones-google', `No se pudo leer ${que}`, { error: error.message });
+  throw new Error(`conversiones-google: ${que}`);
 }
 
 export async function csvConversiones(): Promise<string> {
@@ -44,38 +56,54 @@ export async function csvConversiones(): Promise<string> {
   const filas = new Map<string, string>(); // gclid -> línea (una conversión por clic)
 
   // 1) Reservas pagadas con clic de anuncio.
-  const { data: pagadas } = await supabase.from('bookings')
+  const { data: pagadas, error: e1 } = await supabase.from('bookings')
     .select('patient_email, amount, paid_at, origen')
-    .not('paid_at', 'is', null).not('origen', 'is', null).gte('paid_at', desde).limit(2000);
+    .not('paid_at', 'is', null).not('origen', 'is', null).gte('paid_at', desde)
+    .order('paid_at', { ascending: true }).limit(1000);
+  await revisar(e1, 'reservas pagadas');
   const conClic = (pagadas ?? [])
     .map(b => ({ ...b, toque: toqueConClic(b.origen as OrigenGuardado) }))
     .filter(b => b.toque && b.patient_email);
   if (conClic.length) {
     // Primer pago de cada paciente, mirando TODO su historial (no solo 90 días).
     const emails = [...new Set(conClic.map(b => String(b.patient_email).toLowerCase()))];
-    const { data: historial } = await supabase.from('bookings')
-      .select('patient_email, paid_at').in('patient_email', emails).not('paid_at', 'is', null).limit(5000);
+    // Ordenado por fecha: si algún día se corta en 1000 filas, se pierden las más
+    // nuevas (a lo más falta una conversión), nunca el primer pago real.
+    const { data: historial, error: e2 } = await supabase.from('bookings')
+      .select('patient_email, paid_at').in('patient_email', emails).not('paid_at', 'is', null)
+      .order('paid_at', { ascending: true }).limit(1000);
+    await revisar(e2, 'historial de pagos');
     const primerPago = new Map<string, number>();
     for (const h of historial ?? []) {
       const e = String(h.patient_email).toLowerCase();
       const ms = new Date(h.paid_at as string).getTime();
       if (!primerPago.has(e) || ms < primerPago.get(e)!) primerPago.set(e, ms);
     }
-    for (const b of conClic.sort((x, y) => String(x.paid_at).localeCompare(String(y.paid_at)))) {
+    // Primer pago de cada paciente; si ese pago cubrió varias sesiones (mismo
+    // paid_at), el valor es la suma.
+    const porClic = new Map<string, { pagoMs: number; ts?: number; valor: number }>();
+    for (const b of conClic) {
       const pagoMs = new Date(b.paid_at as string).getTime();
       if (pagoMs !== primerPago.get(String(b.patient_email).toLowerCase())) continue; // paciente recurrente
-      const gclid = b.toque!.gclid!;
-      if (filas.has(gclid)) continue;
       if (b.toque!.ts && b.toque!.ts < ahora - 90 * DIA) continue;
-      filas.set(gclid, [gclid, NOMBRE_CONVERSION, horaConversion(pagoMs, b.toque!.ts, ahora), String(Number(b.amount) || 0), 'CLP'].join(','));
+      const gclid = b.toque!.gclid!;
+      const previo = porClic.get(gclid);
+      if (!previo) porClic.set(gclid, { pagoMs, ts: b.toque!.ts, valor: Number(b.amount) || 0 });
+      else if (previo.pagoMs === pagoMs) previo.valor += Number(b.amount) || 0;
+    }
+    for (const [gclid, c] of porClic) {
+      const hora = horaConversion(c.pagoMs, c.ts, ahora);
+      if (hora) filas.set(gclid, [gclid, NOMBRE_CONVERSION, hora, String(c.valor), 'CLP'].join(','));
     }
   }
 
   // 2) Códigos de WhatsApp marcados a mano (si alguna vez se usan).
-  const { data: marcados } = await supabase.from('admin_logs').select('message, data')
+  const { data: marcados, error: e3 } = await supabase.from('admin_logs').select('message, data')
     .eq('context', 'wa/paciente').limit(1000);
-  const { data: clics } = await supabase.from('admin_logs').select('message, data, created_at')
-    .eq('context', 'wa/clic').gte('created_at', desde).limit(2000);
+  await revisar(e3, 'pacientes marcados');
+  const { data: clics, error: e4 } = await supabase.from('admin_logs').select('message, data, created_at')
+    .eq('context', 'wa/clic').gte('created_at', desde).order('created_at', { ascending: false }).limit(1000);
+  await revisar(e4, 'clics de WhatsApp');
   const clicPorCodigo = new Map((clics ?? []).map(c => [c.message as string, c]));
   for (const p of marcados ?? []) {
     const c = clicPorCodigo.get(p.message as string);
@@ -84,7 +112,8 @@ export async function csvConversiones(): Promise<string> {
     const pago = (p.data ?? {}) as { monto?: number; fecha?: string };
     const pagoMs = new Date(`${pago.fecha ?? new Date().toISOString().slice(0, 10)}T12:00:00-03:00`).getTime();
     const clicMs = c ? new Date(c.created_at as string).getTime() : toque.ts;
-    filas.set(toque.gclid!, [toque.gclid, NOMBRE_CONVERSION, horaConversion(pagoMs, clicMs, ahora), String(pago.monto ?? 0), 'CLP'].join(','));
+    const hora = horaConversion(pagoMs, clicMs, ahora);
+    if (hora) filas.set(toque.gclid!, [toque.gclid, NOMBRE_CONVERSION, hora, String(pago.monto ?? 0), 'CLP'].join(','));
   }
 
   const lineas = ['Parameters:TimeZone=America/Santiago', 'Google Click ID,Conversion Name,Conversion Time,Conversion Value,Conversion Currency', ...filas.values()];

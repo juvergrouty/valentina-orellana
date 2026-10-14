@@ -32,7 +32,12 @@ export const GET: APIRoute = async ({ request }) => {
   } catch { return noAutorizado(); }
   if (!igual(usuario, CSV_USUARIO) || !igual(pass, clave)) return noAutorizado();
 
-  return new Response(await csvConversiones(), {
-    headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'private, no-store' },
-  });
+  try {
+    return new Response(await csvConversiones(), {
+      headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'private, no-store' },
+    });
+  } catch {
+    // Ya quedó en el registro de errores: Google marca la subida como fallida y avisa.
+    return new Response('Error temporal', { status: 500, headers: { 'Cache-Control': 'private, no-store' } });
+  }
 };
