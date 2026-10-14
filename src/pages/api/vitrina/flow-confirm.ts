@@ -25,8 +25,10 @@ export const POST: APIRoute = async ({ request }) => {
   if (!token) return new Response('Token requerido', { status: 400 });
 
   try {
-    const { resultado, status } = await procesarPagoFlow(token);
+    const { resultado, status, correoFallido } = await procesarPagoFlow(token);
     console.log(`[Flow vitrina] status=${status?.status} order=${status?.flowOrder} resultado=${resultado}`);
+    // Pago registrado pero el correo no salió: 500 para que Flow reintente el aviso.
+    if (correoFallido) return new Response('Correo pendiente', { status: 500 });
   } catch (err) {
     await logError('vitrina/webhook', 'Excepción al consultar/procesar el pago de la vitrina en Flow', { token, error: err instanceof Error ? err.message : String(err) });
     return new Response('Error interno', { status: 500 });

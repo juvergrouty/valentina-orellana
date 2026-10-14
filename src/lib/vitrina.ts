@@ -223,7 +223,7 @@ export type ResultadoPago = 'pagada' | 'pendiente' | 'rechazada' | 'cancelada' |
  * o la página de vuelta llamándolo a la vez, no duplica nada (guardia
  * paid_at IS NULL + confirmation_sent_at). Lanza si Flow no responde.
  */
-export async function procesarPagoFlow(token: string): Promise<{ resultado: ResultadoPago; inscripcion: VitrinaInscripcion | null; status?: FlowStatus }> {
+export async function procesarPagoFlow(token: string): Promise<{ resultado: ResultadoPago; inscripcion: VitrinaInscripcion | null; status?: FlowStatus; correoFallido?: boolean }> {
   const status = await getPaymentStatus(token, await flowBaseDesdeSettings());
 
   let { data: insc } = await supabase.from('vitrina_inscripciones').select('*').eq('flow_token', token).maybeSingle();
@@ -232,7 +232,8 @@ export async function procesarPagoFlow(token: string): Promise<{ resultado: Resu
     if (id) ({ data: insc } = await supabase.from('vitrina_inscripciones').select('*').eq('id', id).maybeSingle());
   }
   if (!insc) {
-    if (status.status === 2) {
+    // Solo órdenes de la vitrina (VT-…): un token de reserva que llegara aquí no es un huérfano.
+    if (status.status === 2 && idDesdeOrden(status.commerceOrder)) {
       await logError('vitrina/pago-huerfano', 'Flow confirmó un pago de la vitrina pero ninguna inscripción coincide. Revisar en Flow y conciliar a mano.', { token, flowOrder: status.flowOrder, commerceOrder: status.commerceOrder, amount: status.amount });
     }
     return { resultado: 'desconocida', inscripcion: null, status };
@@ -271,6 +272,13 @@ export async function procesarPagoFlow(token: string): Promise<{ resultado: Resu
         await logInfo('vitrina/pagada', `Inscripción pagada: ${insc.name}`, { inscripcionId: insc.id, itemId: insc.item_id, flowOrder });
         if (estabaVencida) {
           // Pagó tarde (después de los 30 min): se confirma igual porque el pago es real.
+          // Si la misma persona ya tenía OTRA inscripción confirmada en este item
+          // (reintentó en otra pestaña y pagó las dos), es un pago doble.
+          const { data: otras } = await supabase.from('vitrina_inscripciones').select('id')
+            .eq('item_id', insc.item_id).eq('email', insc.email).in('status', ['paid', 'free']).neq('id', insc.id).limit(1);
+          if (otras?.length) {
+            await logError('vitrina/posible-pago-doble', `${insc.name} (${insc.email}) pagó dos veces el mismo item (una inscripción vencida y otra vigente). Devuelve uno de los pagos desde Flow.`, { inscripcionId: insc.id, otra: otras[0].id, flowOrder });
+          }
           const { data: item } = await supabase.from('vitrina_items').select('id, capacity, title').eq('id', insc.item_id).maybeSingle();
           if (item?.capacity) {
             const { ocupados } = await cuposDe(item as VitrinaItem);
@@ -281,8 +289,10 @@ export async function procesarPagoFlow(token: string): Promise<{ resultado: Resu
         }
       }
     }
-    await enviarConfirmacion(insc.id, { avisarAdmin: true });
-    return { resultado: 'pagada', inscripcion: insc as VitrinaInscripcion, status };
+    const envio = await enviarConfirmacion(insc.id, { avisarAdmin: true });
+    // correoFallido: el webhook responde 500 para que Flow vuelva a avisar y
+    // se reintente el correo (el pago ya quedó registrado; no se duplica nada).
+    return { resultado: 'pagada', inscripcion: insc as VitrinaInscripcion, status, correoFallido: !envio.sent };
   }
 
   if (status.status === 3 || status.status === 4) {

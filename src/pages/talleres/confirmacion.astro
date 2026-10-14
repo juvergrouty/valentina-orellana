@@ -17,7 +17,7 @@ if (!token) {
   return Astro.rewrite('/404');
 }
 
-type Estado = 'pagada' | 'pendiente' | 'rechazada' | 'error';
+type Estado = 'pagada' | 'pendiente' | 'rechazada' | 'cancelada' | 'error';
 let estado: Estado = 'error';
 let insc: VitrinaInscripcion | null = null;
 let item: VitrinaItem | null = null;
@@ -35,7 +35,8 @@ if (insc?.paid_at && insc.status === 'paid') {
     insc = r.inscripcion ?? insc;
     estado = r.resultado === 'pagada' ? 'pagada'
       : r.resultado === 'pendiente' ? 'pendiente'
-      : r.resultado === 'rechazada' || r.resultado === 'cancelada' ? 'rechazada' : 'error';
+      : r.resultado === 'rechazada' ? 'rechazada'
+      : r.resultado === 'cancelada' ? 'cancelada' : 'error';
   } catch (e) {
     await logWarn('vitrina/confirmacion-pagina', 'No se pudo consultar el estado del pago al volver de Flow', { error: e instanceof Error ? e.message : String(e) });
     estado = insc ? 'pendiente' : 'error';
@@ -76,6 +77,13 @@ const waTexto = encodeURIComponent(`Hola Valentina, pagué ${item ? `"${item.tit
           <div class="divider mb-6 mx-auto"></div>
           <h1 class="section-title mb-6">Estamos confirmando tu pago</h1>
           <p class="body-text mb-10">Apenas Flow lo confirme te llegará un correo. Si ya pagaste, no necesitas hacer nada más.</p>
+        </Fragment>
+      ) : estado === 'cancelada' ? (
+        <Fragment>
+          <p class="label text-stone mb-4">Pago recibido</p>
+          <div class="divider mb-6 mx-auto"></div>
+          <h1 class="section-title mb-6">Recibí tu pago, pero tu inscripción no está activa</h1>
+          <p class="body-text mb-10">Esta inscripción había sido cancelada antes de que se completara el pago. Te escribiré para devolverte el dinero o reinscribirte; si prefieres, escríbeme por WhatsApp.</p>
         </Fragment>
       ) : estado === 'rechazada' ? (
         <Fragment>
