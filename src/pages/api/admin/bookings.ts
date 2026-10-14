@@ -883,7 +883,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
         // Redirigir mostrando el link (el banner de "compartir por WhatsApp" solo
         // se muestra si el envío automático no se hizo, para no duplicar el mensaje)
-        return redirect(conParam(dest) + `payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}&pl_wa_sent=${waSent ? '1' : '0'}${avisoPack}`);
+        return redirect(conParam(dest) + `payment_link=${encodeURIComponent(paymentUrl)}&pl_phone=${encodeURIComponent(finalPhone)}&pl_nombre=${encodeURIComponent(finalName.split(' ')[0] ?? '')}&pl_fecha=${encodeURIComponent(primeraFecha || session_date)}&pl_hora=${encodeURIComponent(session_time)}&pl_wa_sent=${waSent ? '1' : '0'}${avisoPack}`);
       } catch (e) {
         console.error('[create-admin] flow order:', e);
         const msg = e instanceof Error ? e.message : String(e);

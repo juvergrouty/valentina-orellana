@@ -8,6 +8,7 @@ import { pricingPlans } from '../../data/services';
 import { getValidAccessToken } from '../../lib/syncCalendar';
 import { reviewRequestUrl } from '../../lib/googleReviews';
 import { nowCL } from '../../lib/dateUtils';
+import { mensajeLinkPago } from '../../lib/cobrosProximos';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
 // ?w=abc daba NaN y la página se caía al armar las fechas (8 oct 2026): si no es un número, semana actual.
@@ -303,7 +304,8 @@ const plWaSent     = Astro.url.searchParams.get('pl_wa_sent') === '1';
 // Sesión futura marcada pagada: la boleta sale sola ese día (8 oct 2026).
 const boletaProgramada   = Astro.url.searchParams.get('boleta_programada') ?? '';
 const boletaProgramadaOk = /^\d{4}-\d{2}-\d{2}$/.test(boletaProgramada);
-const plWaMsg      = paymentLink ? `Hola 👋 Te comparto el enlace de pago para tu sesión: ${paymentLink}` : '';
+// Con la fecha de la sesión, el mensaje lleva el plazo de pago (24 h antes, 14 oct 2026).
+const plWaMsg      = paymentLink ? mensajeLinkPago(Astro.url.searchParams.get('pl_nombre') ?? '', paymentLink, Astro.url.searchParams.get('pl_fecha'), Astro.url.searchParams.get('pl_hora')) : '';
 // El botón manual de WhatsApp solo se muestra si el envío automático (plantilla
 // de Meta) no se hizo — para no mandar el mensaje duplicado.
 const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${plPhoneWa}?text=${encodeURIComponent(plWaMsg)}` : null;
@@ -2550,7 +2552,25 @@ function openSessionDetail(b) {
   const canSendPaylink = !isPaid && !isVoided && (b.patient_id || b.mp_preference_id);
   if (canSendPaylink) {
     const payUrl = b.patient_id ? `${window.location.origin}/pagar/${b.patient_id}` : `${flowCheckoutBase}?token=${b.mp_preference_id}`;
-    const payMsg = `Hola ${b.patient_name.split(' ')[0]} 👋 Te comparto el link de pago: ${payUrl}`;
+    // Plazo de pago: 24 horas antes de la sesión (Valentina, 14 oct 2026). Mismo
+    // texto que mensajeLinkPago() en src/lib/cobrosProximos.ts.
+    const payMsg = (() => {
+      const saludo = `Hola ${b.patient_name.split(' ')[0]} 👋`;
+      const hora = String(b.session_time ?? '').slice(0, 5);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(b.session_date ?? '') || !/^\d{2}:\d{2}$/.test(hora)) return `${saludo} Te comparto el link de pago: ${payUrl}`;
+      const [y, m, d] = b.session_date.split('-').map(Number);
+      const [hh, mi] = hora.split(':').map(Number);
+      // Horas que faltan, con la hora de Chile (el navegador puede estar en otra zona).
+      const ahoraCL = new Date(new Date().toLocaleString('sv-SE', { timeZone: 'America/Santiago' }).replace(' ', 'T'));
+      const faltan = (new Date(y, m - 1, d, hh, mi).getTime() - ahoraCL.getTime()) / 3600000;
+      if (faltan <= 0) return `${saludo} Te comparto el link de pago: ${payUrl}`;
+      const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+      const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+      const cuando = `${dias[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d} de ${meses[m - 1]} a las ${hora}`;
+      return faltan < 24
+        ? `${saludo} Te comparto el link de pago, el cual debe quedar confirmado antes de tu sesión del ${cuando}: ${payUrl}`
+        : `${saludo} Te comparto el link de pago, el cual debe quedar confirmado con un plazo máximo de 24 horas antes de tu sesión del ${cuando}: ${payUrl}`;
+    })();
     const waPayBtn = document.getElementById('sp-paylink-wa');
     if (waPhone.length >= 10) {
       waPayBtn.href = `https://wa.me/${waPhone}?text=${encodeURIComponent(payMsg)}`;

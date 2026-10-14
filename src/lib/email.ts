@@ -2,7 +2,8 @@ import { Resend } from 'resend';
 import { supabase } from './supabase';
 import { logEmail, logError } from './logger';
 import { stepsItems, STEPS_INTRO } from './stepsContent';
-import { todayCL } from './dateUtils';
+import { todayCL, hoursUntilSessionCL } from './dateUtils';
+import { frasePlazoPago } from './cobrosProximos';
 import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
 
@@ -307,6 +308,14 @@ export async function sendPaymentLinkEmail(opts: {
   const total = Math.max(opts.totalAPagar ?? 0, opts.amount);
   const incluyeOtras = total > opts.amount;
   const subject = `Enlace de pago para tu sesión — Ps. Valentina Orellana`;
+  // Plazo de pago (Valentina, 14 oct 2026): 24 horas antes de la sesión, dicho
+  // desde el primer correo. Si ya faltan menos de 24 h, "antes de tu sesión".
+  const plazo = (() => {
+    const hora = (opts.sessionTime ?? '').slice(0, 5);
+    if (!opts.sessionDate || !/^\d{4}-\d{2}-\d{2}$/.test(opts.sessionDate) || !/^\d{2}:\d{2}$/.test(hora)) return '';
+    if (hoursUntilSessionCL(opts.sessionDate, hora) <= 0) return '';
+    return frasePlazoPago(opts.sessionDate, hora).replace(/^el cual debe quedar confirmado /, '');
+  })();
   const dateLine = opts.sessionDate
     ? `<tr><td style="padding:0.4rem 0;color:#6B6860;width:40%;">Fecha</td><td style="padding:0.4rem 0;font-weight:500;">${formatDate(opts.sessionDate)}${opts.sessionTime ? ' · ' + opts.sessionTime : ''}</td></tr>`
     : '';
@@ -323,6 +332,7 @@ export async function sendPaymentLinkEmail(opts: {
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(opts.patientName)}, para confirmar tu reserva realiza el pago con el siguiente enlace seguro.
         </p>
+        ${plazo ? `<p style="font-size:0.95rem;margin:0 0 1.5rem;font-family:'Inter',sans-serif;line-height:1.5;"><strong>El pago debe quedar confirmado ${plazo}.</strong></p>` : ''}
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
           <table style="width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:0.85rem;">
             <tr><td style="padding:0.4rem 0;color:#6B6860;width:40%;">Servicio</td><td style="padding:0.4rem 0;font-weight:500;">${opts.serviceName}</td></tr>
