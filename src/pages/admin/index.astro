@@ -126,15 +126,24 @@ const sesiones: Sesion[] = reservas.filter((b) => b.session_date !== '2099-12-31
   href: `/admin/agenda?booking=${b.id}`,
 }));
 {
-  const ocupados = new Set(sesiones.map((s) => `${s.fecha}|${s.hora}`));
+  // Una misma sesión puede estar dos veces: evento de la página y de Encuadrado
+  // (intencional), a veces a HORAS DISTINTAS (ej. Encuadrado 9:00 y página
+  // 10:00). Se reconoce por paciente + día, no por horario (14 oct 2026: antes
+  // se contaba dos veces y la semana mostraba 10 en vez de las reales).
+  const normal = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-zñ ]/g, ' ').split(/\s+/).filter((w) => w.length > 1);
+  const mismaPersona = (a: string, b: string) => {
+    const x = normal(a), y = normal(b);
+    if (!x.length || !y.length || x[0] !== y[0]) return false; // mismo primer nombre
+    const restoX = x.slice(1), restoY = y.slice(1);
+    return !restoX.length || !restoY.length || restoX.some((w) => restoY.includes(w));
+  };
   for (const g of google ?? []) {
-    const slot = `${g.fecha}|${g.hora}`;
-    if (ocupados.has(slot)) continue; // ya está como reserva de la página (o repetido página + Encuadrado)
-    ocupados.add(slot);
+    const paciente = pacienteDeTitulo(g.titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, ''));
+    if (sesiones.some((s) => s.fecha === g.fecha && mismaPersona(s.paciente, paciente))) continue; // ya está ese día (otro evento o reserva de la página)
     const online = /online/i.test(g.titulo);
     sesiones.push({
       id: null, fecha: g.fecha, hora: g.hora, dur: g.dur,
-      paciente: pacienteDeTitulo(g.titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, '')),
+      paciente,
       online, tipo: `${online ? 'Online' : 'Presencial'} · Google Calendar`, pago: 'externa',
       href: `/admin/agenda?fecha=${g.fecha}&hora=${g.hora}`,
     });
@@ -374,7 +383,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
             <span class={`ini-pago ini-pago-${hero.pago}`}>{PAGO_TXT[hero.pago]}</span>
           </a>
           <div class="ini-hero-botones">
-            <a href={hero.href} class="btn btn-dark ini-btn">Abrir sesión</a>
+            <a href={hero.href} class="btn btn-dark ini-btn">Ver en el calendario</a>
             {/* Sala online abre el Meet de la sesión de la página en curso o por
                 empezar: solo se ofrece si esta sesión es de la página (las de
                 Encuadrado no tienen Meet aquí) y es la que viene hoy. */}
