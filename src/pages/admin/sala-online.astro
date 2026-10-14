@@ -2,17 +2,16 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { hoursUntilSessionCL } from '../../lib/dateUtils';
+import { hoursUntilSessionCL, todayCL } from '../../lib/dateUtils';
 import { fechaSesionLarga } from '../../lib/cobrosProximos';
 
 // "Sala online" (Valentina, 14 oct 2026). En Encuadrado era un atajo a UNA
 // sala fija de Meet para todas las sesiones; aquí cada sesión tiene su propio
 // Meet (más privado: un link guardado no sirve para entrar a la hora de otra
-// persona). Este atajo lleva directo al Meet de la sesión online que está por
-// empezar (desde 15 min antes) o en curso. Si no hay ninguna, muestra las
-// próximas sesiones online con su link.
-
-const ANTES_MIN = 15;
+// persona). El botón lleva a la sesión online MÁS PRÓXIMA (la que está en
+// curso o la siguiente, aunque falte rato: Valentina suele entrar a la hora o
+// unos minutos antes). Primero dice "Estás entrando a la sesión de <nombre>"
+// y a los 2 segundos abre Meet con la cuenta dueña del calendario.
 
 const hoy = new Date();
 const desde = new Date(hoy.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10);
@@ -27,9 +26,8 @@ const [{ data, error }, { data: calRow }] = await Promise.all([
   supabase.from('settings').select('value').eq('key', 'google_calendar_id').maybeSingle(),
 ]);
 
-// Abre Meet con la cuenta de Google del calendario (la que es dueña de la reunión).
+// Cuenta de Google dueña de las reuniones (la del calendario conectado).
 const cuenta = String(calRow?.value ?? '');
-const conCuenta = (url: string) => cuenta.includes('@') ? `${url}${url.includes('?') ? '&' : '?'}authuser=${encodeURIComponent(cuenta)}` : url;
 const meetDe = (notes: string | null) => [...String(notes ?? '').matchAll(/(?:^|\n)Meet: (https:\/\/meet\.google\.com\/\S+)/g)].at(-1)?.[1] ?? null;
 
 type Sesion = { id: string; paciente: string; fecha: string; hora: string; meet: string | null; faltaMin: number; dur: number };
@@ -39,71 +37,111 @@ const sesiones: Sesion[] = (data ?? [])
     const hora = String(b.session_time).slice(0, 5);
     return { id: b.id, paciente: b.patient_name, fecha: b.session_date, hora, meet: meetDe(b.notes), faltaMin: hoursUntilSessionCL(b.session_date, hora) * 60, dur: Number(b.duration_min) || 50 };
   })
-  .filter((s) => s.faltaMin > -s.dur); // las que ya terminaron no
+  .filter((s) => s.faltaMin > -s.dur) // las que ya terminaron no
+  .sort((a, b) => a.faltaMin - b.faltaMin);
 
-const ahora = sesiones.find((s) => s.faltaMin <= ANTES_MIN);
-if (ahora?.meet) return Astro.redirect(conCuenta(ahora.meet), 302);
-
-const proximas = sesiones.filter((s) => s !== ahora).slice(0, 6);
-const cuando = (s: Sesion) => s.faltaMin <= 0 ? 'en curso' : s.faltaMin <= ANTES_MIN ? `empieza a las ${s.hora}` : `${fechaSesionLarga(s.fecha)} a las ${s.hora}`;
+const siguiente = sesiones[0] ?? null;
+const otras = sesiones.slice(1, 6);
+const hoyCL = todayCL();
+const cuando = (s: Sesion) => {
+  if (s.faltaMin <= 0) return `en curso (empezó a las ${s.hora})`;
+  if (s.fecha === hoyCL) return `hoy a las ${s.hora}`;
+  return `el ${fechaSesionLarga(s.fecha)} a las ${s.hora}`;
+};
 ---
 
 <AdminLayout title="Sala online" current="/admin/sala-online">
   <div style="max-width:640px;margin:0 auto;padding:2rem 1.25rem;display:flex;flex-direction:column;gap:1.25rem;">
-    <h1 style="font-size:1.4rem;margin:0;">Sala online</h1>
-    <p style="margin:0;color:var(--stone);font-size:0.9rem;">Te lleva directo al Meet de la sesión online que empieza en los próximos {ANTES_MIN} minutos o que está en curso. Cada sesión tiene su propio link.</p>
-
     {error && <p role="alert" style="color:#991b1b;margin:0;">⚠ No se pudieron leer tus sesiones. Recarga en un rato.</p>}
 
-    {ahora && (
-      <div style="border:1px solid var(--dust);border-radius:8px;padding:1rem;background:#fff;">
-        <p style="margin:0 0 0.5rem;font-weight:700;">Ahora: {ahora.paciente} · {cuando(ahora)}</p>
-        <button type="button" data-crear-meet={ahora.id} class="btn-primary" style="cursor:pointer;">Crear el link de Meet y entrar</button>
+    {siguiente && (
+      <div id="sala-entrada" data-id={siguiente.id} data-meet={siguiente.meet ?? ''} style="border:1px solid var(--dust);border-radius:10px;padding:1.5rem;background:#fff;display:flex;flex-direction:column;gap:0.75rem;">
+        <p style="margin:0;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--stone);">Sala online</p>
+        <h1 style="font-size:1.35rem;margin:0;line-height:1.3;">Estás entrando a la sesión de <strong>{siguiente.paciente}</strong></h1>
+        <p id="sala-cuando" style="margin:0;color:var(--stone);">Sesión online {cuando(siguiente)}{cuenta.includes('@') && <> · Meet se abre con tu cuenta {cuenta}</>}</p>
+        <p id="sala-estado" aria-live="polite" style="margin:0;font-weight:600;">Abriendo Meet…</p>
+        <div style="display:flex;flex-wrap:wrap;gap:0.75rem;">
+          <button type="button" id="sala-entrar" class="btn-primary" style="cursor:pointer;">Entrar ahora</button>
+          <button type="button" id="sala-cancelar" style="background:none;border:none;text-decoration:underline;cursor:pointer;color:inherit;">No entrar todavía</button>
+        </div>
       </div>
     )}
 
-    {!error && !ahora && <p style="margin:0;font-weight:600;">No tienes una sesión online en este momento.</p>}
+    {!error && !siguiente && (
+      <div style="border:1px solid var(--dust);border-radius:10px;padding:1.5rem;background:#fff;">
+        <h1 style="font-size:1.3rem;margin:0 0 0.5rem;">Sala online</h1>
+        <p style="margin:0;">No tienes sesiones online agendadas en los próximos 15 días.</p>
+      </div>
+    )}
 
-    {proximas.length > 0 && (
+    {otras.length > 0 && (
       <div style="display:flex;flex-direction:column;gap:0.6rem;">
-        <p style="margin:0;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--stone);">Próximas sesiones online</p>
+        <p style="margin:0;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--stone);">Otras próximas sesiones online</p>
         <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:0.5rem;">
-          {proximas.map((s) => (
+          {otras.map((s) => (
             <li style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:0.5rem;border:1px solid var(--dust);border-radius:8px;padding:0.7rem 0.9rem;background:#fff;">
               <span><strong>{s.paciente}</strong> · {cuando(s)}</span>
-              {s.meet
-                ? <a href={conCuenta(s.meet)} target="_blank" rel="noopener" style="font-weight:700;font-size:0.85rem;">Abrir Meet</a>
-                : <button type="button" data-crear-meet={s.id} style="font-weight:700;font-size:0.85rem;background:none;border:none;color:inherit;text-decoration:underline;cursor:pointer;">Crear link de Meet</button>}
+              <button type="button" data-entrar={s.id} data-meet={s.meet ?? ''} data-nombre={s.paciente} data-cuando={cuando(s)} style="font-weight:700;font-size:0.85rem;background:none;border:none;color:inherit;text-decoration:underline;cursor:pointer;">Entrar a esta</button>
             </li>
           ))}
         </ul>
       </div>
     )}
-    {!error && !ahora && proximas.length === 0 && <p style="margin:0;color:var(--stone);">No hay sesiones online agendadas en los próximos 15 días.</p>}
   </div>
 </AdminLayout>
 
 <script define:vars={{ cuenta }}>
-  // Sesión sin Meet todavía: se crea con el mismo endpoint del calendario y se abre.
-  document.querySelectorAll('[data-crear-meet]').forEach((b) => {
-    b.addEventListener('click', async () => {
-      const original = b.textContent;
-      b.textContent = 'Creando…';
-      b.disabled = true;
-      try {
-        const res = await fetch('/api/admin/generate-meet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.crearMeet }) });
-        const data = await res.json().catch(() => ({}));
-        if (data.ok && data.meetLink) {
-          const url = cuenta.includes('@') ? `${data.meetLink}${data.meetLink.includes('?') ? '&' : '?'}authuser=${encodeURIComponent(cuenta)}` : data.meetLink;
-          location.href = url;
-          return;
-        }
-        alert(data.error || 'No se pudo crear el link de Meet. Intenta de nuevo.');
-      } catch {
-        alert('No se pudo crear el link de Meet. Intenta de nuevo.');
-      }
-      b.textContent = original;
-      b.disabled = false;
+  // Fuerza la cuenta dueña de las reuniones (Valentina, 14 oct 2026): el
+  // selector de cuentas de Google con el correo indicado entra directo con esa
+  // cuenta si ya tiene sesión en el navegador, y si no, pide iniciar sesión con
+  // ella (nunca abre Meet con otra). authuser queda como respaldo.
+  const conCuenta = (url) => {
+    if (!cuenta.includes('@')) return url;
+    const destino = `${url}${url.includes('?') ? '&' : '?'}authuser=${encodeURIComponent(cuenta)}`;
+    return `https://accounts.google.com/AccountChooser?Email=${encodeURIComponent(cuenta)}&continue=${encodeURIComponent(destino)}`;
+  };
+  // Link de la sesión: el guardado, o se crea al momento (mismo endpoint del calendario).
+  async function linkDe(id, meet) {
+    if (meet) return meet;
+    const res = await fetch('/api/admin/generate-meet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    const data = await res.json().catch(() => ({}));
+    if (data.ok && data.meetLink) return data.meetLink;
+    throw new Error(data.error || 'No se pudo crear el link de Meet.');
+  }
+  const estado = document.getElementById('sala-estado');
+  let cancelado = false;
+  let enCurso = false; // una sola entrada a la vez (evita dos Meet o dos eventos)
+  async function entrar(id, meet) {
+    if (enCurso) return;
+    enCurso = true;
+    try {
+      if (estado) estado.textContent = 'Abriendo Meet…';
+      const link = await linkDe(id, meet);
+      location.href = conCuenta(link);
+    } catch (e) {
+      if (estado) estado.textContent = '⚠ ' + (e.message || 'No se pudo abrir Meet. Intenta de nuevo.');
+      enCurso = false;
+    }
+  }
+  const caja = document.getElementById('sala-entrada');
+  if (caja) {
+    // 2 segundos para leer a quién se entra (y poder detenerlo).
+    const t = setTimeout(() => { if (!cancelado) entrar(caja.dataset.id, caja.dataset.meet); }, 2000);
+    document.getElementById('sala-entrar')?.addEventListener('click', () => { clearTimeout(t); entrar(caja.dataset.id, caja.dataset.meet); });
+    document.getElementById('sala-cancelar')?.addEventListener('click', () => {
+      cancelado = true; clearTimeout(t);
+      if (estado) estado.textContent = 'Detenido. Aprieta "Entrar ahora" cuando quieras.';
+    });
+  }
+  document.querySelectorAll('[data-entrar]').forEach((b) => {
+    b.addEventListener('click', () => {
+      cancelado = true;
+      const h1 = document.querySelector('#sala-entrada h1');
+      if (h1) h1.innerHTML = '';
+      if (h1) { h1.append('Estás entrando a la sesión de '); const s = document.createElement('strong'); s.textContent = b.dataset.nombre; h1.append(s); }
+      const cuandoEl = document.getElementById('sala-cuando');
+      if (cuandoEl) cuandoEl.textContent = 'Sesión online ' + (b.dataset.cuando || '');
+      entrar(b.dataset.entrar, b.dataset.meet);
     });
   });
 </script>
