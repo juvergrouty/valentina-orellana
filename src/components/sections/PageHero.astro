@@ -5,8 +5,9 @@ interface Props {
   description?: string;
   image?: string;        // imagen desktop, por defecto hero-paginas.jpg
   imageMobile?: string;  // imagen opcional para mobile (< 768px)
+  imageMobilePosition?: string; // encuadre de imageMobile (CSS object-position)
 }
-const { label, title, description, image = '/images/hero-paginas.jpg', imageMobile } = Astro.props;
+const { label, title, description, image = '/images/hero-paginas.jpg', imageMobile, imageMobilePosition } = Astro.props;
 ---
 
 <section class="relative overflow-hidden min-h-[300px] md:min-h-[420px] flex items-end border-b border-dust">
@@ -17,7 +18,8 @@ const { label, title, description, image = '/images/hero-paginas.jpg', imageMobi
     <img
       src={image}
       alt=""
-      class="w-full h-full object-cover object-[50%_25%]"
+      class="w-full h-full object-cover object-[50%_25%] max-md:[object-position:var(--pos-m,50%_25%)]"
+      style={imageMobilePosition ? `--pos-m: ${imageMobilePosition}` : undefined}
       aria-hidden="true"
     />
   </picture>

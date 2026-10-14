@@ -5,21 +5,23 @@ import PageHero   from '../components/sections/PageHero.astro';
 
 <BaseLayout title="Sobre mí · Psicóloga en Las Condes" description="Conoce a la Ps. Valentina Orellana: más de 15 años acompañando a adultos y parejas, su formación en terapia sistémica y su forma de trabajar.">
 
-  <PageHero label="Mi historia" title="Sobre mí" image="/images/banner-sobre-mi.jpg" imageMobile="/images/banner-sobre-mi-mobile.jpg" />
+  <!-- Celular: la foto con su hijo va en la portada y no se repite abajo; computador:
+       portada del escritorio y la foto al lado del texto (Vale, 14 oct 2026). -->
+  <PageHero label="Mi historia" title="Sobre mí" image="/images/banner-sobre-mi.jpg" imageMobile="/images/sobre-mi-2.jpg" imageMobilePosition="50% 20%" />
 
   <!-- Contenido -->
   <section class="py-section bg-sand">
     <div class="container-site grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16 lg:gap-24 items-start">
 
       <!-- Imagen sticky -->
-      <div class="md:sticky md:top-28">
+      <div class="hidden md:block md:sticky md:top-28">
         <div class="aspect-[4/5] max-h-[60vh] md:max-h-none md:aspect-[3/4] bg-warm overflow-hidden">
-          <!-- Medidas reales para reservar el espacio; en celular aparece apenas bajo el
-               banner, por eso se carga de inmediato (14 oct 2026). -->
+          <!-- Medidas reales para reservar el espacio; diferida: en celular no se muestra (la foto
+               va en la portada) y así no se descarga dos veces (14 oct 2026). -->
           <img
             src="/images/sobre-mi-2.jpg"
             width="960" height="1280"
-            loading="eager" decoding="async"
+            loading="lazy" decoding="async"
             alt="Ps. Valentina Orellana"
             class="w-full h-full object-cover object-top"
             onerror="this.style.display='none'"
