@@ -192,7 +192,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
               const waUrl = waNumber.length >= 10 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
               return (
                 <>
-                  <tr class="debt-row" data-key={d.key} data-name={d.name.toLowerCase()}>
+                  <tr class="debt-row" id={patientId ? `p-${patientId}` : undefined} data-key={d.key} data-name={d.name.toLowerCase()}>
                     <td>
                       <button type="button" class="btn-toggle-debt" data-key={d.key}
                         style="background:none;border:none;cursor:pointer;font-size:0.9rem;color:var(--stone);">▸</button>
@@ -291,6 +291,9 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
   .icon-btn { transition: transform .08s ease-out, filter .08s ease-out, opacity .1s; }
   .icon-btn:hover { filter: brightness(1.1); }
   .icon-btn:active { transform: scale(0.9); filter: brightness(0.85); }
+  /* Enlace directo desde el Inicio del panel (#p-<paciente>): fila resaltada. */
+  .debt-row { scroll-margin-top: 72px; }
+  .debt-row:target td { background: #eef0ff; }
 </style>
 
 <script>

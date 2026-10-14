@@ -12,8 +12,9 @@ import { mensajeLinkPago } from '../../lib/cobrosProximos';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
 // ?w=abc daba NaN y la página se caía al armar las fechas (8 oct 2026): si no es un número, semana actual.
-const weekOffsetRaw = parseInt(Astro.url.searchParams.get('w') ?? '0');
-const weekOffset = Number.isFinite(weekOffsetRaw) ? weekOffsetRaw : 0;
+const wParam = Astro.url.searchParams.get('w');
+const weekOffsetRaw = parseInt(wParam ?? '0');
+let weekOffsetBase = Number.isFinite(weekOffsetRaw) ? weekOffsetRaw : 0;
 
 const NOW = nowCL();
 NOW.setHours(0, 0, 0, 0);
@@ -26,6 +27,30 @@ function getWeekStart(offset: number): Date {
   d.setDate(d.getDate() + toMon + offset * 7);
   return d;
 }
+
+// Enlaces directos desde el Inicio del panel (14 oct 2026), sin ?w=:
+//  ?booking=<id>             → la semana de esa sesión (y se abre su panel)
+//  ?fecha=YYYY-MM-DD[&hora=] → la semana de esa fecha (y se marca esa hora)
+// Con ?w= manda la semana pedida (así vuelven las acciones del propio panel).
+function semanaDe(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number);
+  const t = new Date(y, m - 1, d);
+  const dow = t.getDay();
+  t.setDate(t.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return Math.round((t.getTime() - getWeekStart(0).getTime()) / (7 * 86400000));
+}
+if (wParam === null) {
+  const bookingParam = Astro.url.searchParams.get('booking') ?? '';
+  const fechaParam = Astro.url.searchParams.get('fecha') ?? '';
+  let fechaObjetivo: string | null = null;
+  if (/^[\w-]{8,64}$/.test(bookingParam)) {
+    const { data } = await supabase.from('bookings').select('session_date').eq('id', bookingParam).maybeSingle();
+    if (data?.session_date && data.session_date !== '2099-12-31') fechaObjetivo = data.session_date;
+  }
+  if (!fechaObjetivo && /^\d{4}-\d{2}-\d{2}$/.test(fechaParam) && !Number.isNaN(Date.parse(fechaParam))) fechaObjetivo = fechaParam;
+  if (fechaObjetivo) weekOffsetBase = semanaDe(fechaObjetivo);
+}
+const weekOffset = weekOffsetBase;
 
 const weekStart = getWeekStart(weekOffset);
 const weekEnd   = new Date(weekStart);
@@ -581,6 +606,8 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
               <div
                 class={`cal-event ${evClass(b.status, b.payment_method, b.paid_at, b.debt_voided)}`}
                 data-svc={b.service_id ?? ''}
+                data-date={b.session_date}
+                data-time={String(b.session_time ?? '').slice(0, 5)}
                 style={`${evStyle(b.session_time, b.duration_min)};--svcbg:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bg};--svcbd:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bd}`}
                 data-booking={JSON.stringify({
                   id: b.id,
@@ -619,7 +646,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
             ))}
 
             {(gcalByDate[day.isoDate] ?? []).map(g => (
-              <div class="cal-gcal-event" style={evStyle(g.time, g.dur)} title={`${g.title} · ${g.time} (Google Calendar)`}>
+              <div class="cal-gcal-event" data-date={g.date} data-time={g.time} style={evStyle(g.time, g.dur)} title={`${g.title} · ${g.time} (Google Calendar)`}>
                 <span class="ev-time">{g.time}</span>
                 <span class="ev-name">{g.title}</span>
                 {g.dur > 35 && <span class="ev-type">Google Calendar</span>}
@@ -1375,6 +1402,12 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 
 </AdminLayout>
 
+<style>
+/* Enlaces directos desde el Inicio: hora o sesión marcada al llegar. */
+:global(.deeplink-flash) { outline: 3px solid #4f5ce8 !important; outline-offset: 1px; z-index: 6 !important; animation: deeplinkPulso 1.2s ease-out 3; }
+:global(.deeplink-slot) { position: absolute; left: 2px; right: 2px; height: 50px; border-radius: 4px; background: rgba(79,92,232,.12); pointer-events: none; z-index: 2; }
+@keyframes deeplinkPulso { 0% { box-shadow: 0 0 0 6px rgba(79,92,232,.35); } 100% { box-shadow: 0 0 0 0 rgba(79,92,232,0); } }
+</style>
 <style>
 /* ── Wrapper ─────────────────────────────────────────────────────────────── */
 .cal-wrap {
@@ -2421,6 +2454,57 @@ document.getElementById('session-panel')?.addEventListener('submit', (e) => {
           match.scrollIntoView({ block: 'center', behavior: 'smooth' });
         }
       } catch {}
+    }
+  }
+}
+
+// Enlaces directos desde el Inicio (14 oct 2026):
+//  &accion=cobrar → abre el menú "Cobrar" de la sesión
+//  &accion=meet   → lleva a "Ingresar a Google Meet" de la sesión
+//  ?fecha=YYYY-MM-DD&hora=HH:MM → marca esa hora (sesión, evento de Google /
+//  Encuadrado o, si no hay nada, la franja vacía) y la deja a la vista.
+{
+  const qs = new URLSearchParams(location.search);
+  const abierto = qs.get('booking');
+  const accion = qs.get('accion');
+  if (abierto && window.__currentSessionBookingId === abierto) {
+    if (accion === 'cobrar') {
+      const toggle = document.getElementById('sp-cobrar-toggle');
+      const menu = document.getElementById('sp-cobrar-menu');
+      if (toggle && menu && toggle.getClientRects().length > 0) {
+        menu.style.display = 'block';
+        setTimeout(() => toggle.scrollIntoView({ block: 'center' }), 250);
+      }
+    } else if (accion === 'meet') {
+      const meet = document.getElementById('sp-meet-link');
+      if (meet && meet.style.display !== 'none') {
+        meet.classList.add('deeplink-flash');
+        setTimeout(() => meet.scrollIntoView({ block: 'center' }), 250);
+      }
+    }
+  }
+  const fecha = qs.get('fecha');
+  const hora = qs.get('hora');
+  if (!abierto && fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    const col = document.querySelector(`.cal-col[data-date="${fecha}"]`);
+    if (col && hora && /^\d{2}:\d{2}$/.test(hora)) {
+      let marca = col.querySelector(`.cal-event[data-time="${hora}"], .cal-gcal-event[data-time="${hora}"]`);
+      if (!marca) {
+        const [h, m] = hora.split(':').map(Number);
+        const top = (h - 6) * 60 + m;
+        if (top >= 0 && top <= 1080) {
+          marca = document.createElement('div');
+          marca.className = 'deeplink-slot';
+          marca.style.top = top + 'px';
+          col.appendChild(marca);
+        }
+      }
+      if (marca) {
+        marca.classList.add('deeplink-flash');
+        setTimeout(() => marca.scrollIntoView({ block: 'center', inline: 'center' }), 50);
+      }
+    } else if (col) {
+      setTimeout(() => col.scrollIntoView({ block: 'nearest', inline: 'center' }), 50);
     }
   }
 }

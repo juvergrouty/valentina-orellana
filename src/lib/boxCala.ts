@@ -43,7 +43,7 @@ async function leerReservados(): Promise<Map<string, BoxSesion>> {
 /** Nombre del paciente desde el título del evento.
  *  Página:     "Por pagar · Sesión Individual Presencial — Nombre"
  *  Encuadrado: "Nombre Sesión individual Presencial Las Condes" */
-function paciente(titulo: string): string {
+export function pacienteDeTitulo(titulo: string): string {
   const t = titulo.replace(/\s+/g, ' ').trim();
   const guion = t.split(' — ');
   if (guion.length > 1) return guion[guion.length - 1].trim();
@@ -85,7 +85,7 @@ async function sesionesPresenciales(): Promise<Map<string, BoxSesion> | null> {
     const hora = inicio.slice(11, 16);
     const slot = `${fecha}T${hora}`;
     // Si hay evento de la página y de Encuadrado, queda el nombre del de la página (nombre completo).
-    if (!out.has(slot) || titulo.includes(' — ')) out.set(slot, { slot, fecha, hora, paciente: paciente(titulo) });
+    if (!out.has(slot) || titulo.includes(' — ')) out.set(slot, { slot, fecha, hora, paciente: pacienteDeTitulo(titulo) });
   }
   return out;
 }
