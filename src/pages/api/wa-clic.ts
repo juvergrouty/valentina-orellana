@@ -36,7 +36,10 @@ export const POST: APIRoute = async ({ request }) => {
   // Límite simple contra abuso: máximo 30 códigos nuevos por conexión por hora.
   // Solo un hash corto de la IP (para el límite de abuso), nunca la IP (dato personal).
   const ipRaw = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'desconocida';
-  const ip = createHash('sha256').update('vo-wa:' + ipRaw).digest('hex').slice(0, 12);
+  // La sal cambia cada día: sirve para el límite por hora, pero no permite seguir
+  // a una misma conexión entre días.
+  const dia = new Date().toISOString().slice(0, 10);
+  const ip = createHash('sha256').update(`vo-wa:${dia}:` + ipRaw).digest('hex').slice(0, 12);
   const desde = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const { count: recientes } = await supabase.from('admin_logs').select('id', { count: 'exact', head: true })
     .eq('context', 'wa/clic').gt('created_at', desde).eq('data->>ip_h', ip);
