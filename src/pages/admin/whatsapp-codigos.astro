@@ -1,0 +1,122 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+
+// Pacientes por canal (14 oct 2026). Cada WhatsApp que llega desde el sitio trae
+// "(código G-7K3Q)" (ver BaseLayout + /api/wa-clic). Cuando esa persona paga su
+// primera sesión, Valentina escribe aquí el código y el monto: así se ve qué
+// canal trae pacientes y se descarga el archivo para Google Ads (conversiones
+// sin conexión por GCLID). Nada de nombres: solo código, fecha y monto.
+// Registros: admin_logs context 'wa/clic' (clic) y 'wa/paciente' (pagó).
+
+const CODIGO = /^[A-Z]-[A-HJ-NP-Z2-9]{4}$/;
+let aviso = '';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const accion = String(form.get('accion') ?? '');
+  const codigo = String(form.get('codigo') ?? '').trim().toUpperCase().replace(/\s+/g, '').replace(/^([A-Z])([A-Z0-9]{4})$/, '$1-$2');
+  if (accion === 'marcar') {
+    const monto = Number(String(form.get('monto') ?? '').replace(/\D/g, ''));
+    const fecha = String(form.get('fecha') ?? '') || new Date().toISOString().slice(0, 10);
+    if (!CODIGO.test(codigo)) aviso = 'El código no es válido. Debe verse así: G-7K3Q.';
+    else if (!(monto > 0)) aviso = 'Falta el monto que pagó.';
+    else {
+      await supabase.from('admin_logs').insert({ level: 'info', context: 'wa/paciente', message: codigo, data: { codigo, monto, fecha } });
+      return Astro.redirect('/admin/whatsapp-codigos?ok=' + codigo);
+    }
+  } else if (accion === 'desmarcar' && CODIGO.test(codigo)) {
+    await supabase.from('admin_logs').delete().eq('context', 'wa/paciente').eq('message', codigo);
+    return Astro.redirect('/admin/whatsapp-codigos');
+  }
+}
+const okCodigo = Astro.url.searchParams.get('ok');
+
+const desde = new Date(Date.now() - 90 * 86400e3).toISOString();
+const { data: clics } = await supabase.from('admin_logs').select('message, created_at, data')
+  .eq('context', 'wa/clic').gte('created_at', desde).order('created_at', { ascending: false }).limit(500);
+const { data: pagos } = await supabase.from('admin_logs').select('message, created_at, data')
+  .eq('context', 'wa/paciente').order('created_at', { ascending: false }).limit(500);
+
+type Toque = { gclid?: string; gbraid?: string; wbraid?: string; utm_campaign?: string; utm_term?: string; landing_path?: string };
+const pagoPorCodigo = new Map((pagos ?? []).map(p => [p.message, p.data as { monto: number; fecha: string }]));
+const filas = (clics ?? []).map(c => {
+  const d = (c.data ?? {}) as { canal?: string; last?: Toque | null; first?: Toque | null; path?: string };
+  const t = d.last ?? d.first ?? {};
+  return { codigo: c.message as string, fecha: c.created_at as string, canal: d.canal ?? '—', campana: t.utm_campaign ?? '', termino: t.utm_term ?? '', pagina: d.path ?? '', gclid: t.gclid ?? '', pago: pagoPorCodigo.get(c.message) };
+});
+const codigosConClic = new Set(filas.map(f => f.codigo));
+const pagosSinClic = (pagos ?? []).filter(p => !codigosConClic.has(p.message));
+
+// Resumen por canal
+const resumen = new Map<string, { clics: number; pacientes: number; monto: number }>();
+for (const f of filas) {
+  const r = resumen.get(f.canal) ?? { clics: 0, pacientes: 0, monto: 0 };
+  r.clics++; if (f.pago) { r.pacientes++; r.monto += f.pago.monto; }
+  resumen.set(f.canal, r);
+}
+
+const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+---
+
+<AdminLayout title="Pacientes por canal" current="/admin/whatsapp-codigos">
+  <div class="p-6 max-w-5xl">
+    <h1 class="text-xl font-semibold mb-1">Pacientes por canal</h1>
+    <p class="text-sm text-gray-600 mb-6">Cada WhatsApp que llega desde la web trae un código, por ejemplo <b>(código G-7K3Q)</b>. Cuando esa persona paga su primera sesión, escribe aquí el código y el monto. La letra indica el canal: G Google Ads, S Google orgánico, M Meta/Facebook, I Instagram, P Psychology Today, D Doctoralia, O otro, X directo.</p>
+
+    {aviso && <p class="mb-4 p-3 rounded bg-red-50 text-red-800 text-sm">{aviso}</p>}
+    {okCodigo && <p class="mb-4 p-3 rounded bg-green-50 text-green-800 text-sm">Listo: {okCodigo} quedó marcado como paciente.</p>}
+
+    <form method="POST" class="flex flex-wrap items-end gap-3 mb-8 p-4 border rounded bg-white">
+      <input type="hidden" name="accion" value="marcar" />
+      <label class="text-sm">Código<br /><input name="codigo" required placeholder="G-7K3Q" class="border rounded px-3 py-2 w-32 uppercase" autocomplete="off" /></label>
+      <label class="text-sm">Monto pagado<br /><input name="monto" required inputmode="numeric" placeholder="65000" class="border rounded px-3 py-2 w-32" /></label>
+      <label class="text-sm">Fecha del pago<br /><input name="fecha" type="date" value={hoy} class="border rounded px-3 py-2" /></label>
+      <button class="px-4 py-2 rounded bg-indigo-600 text-white text-sm">Marcar como paciente</button>
+    </form>
+
+    <h2 class="font-semibold mb-2">Resumen (últimos 90 días)</h2>
+    <table class="w-full text-sm mb-8 border">
+      <thead class="bg-gray-50"><tr><th class="text-left p-2">Canal</th><th class="text-right p-2">WhatsApp iniciados</th><th class="text-right p-2">Pacientes</th><th class="text-right p-2">Pagado</th></tr></thead>
+      <tbody>
+        {[...resumen].sort((a, b) => b[1].clics - a[1].clics).map(([canal, r]) => (
+          <tr class="border-t"><td class="p-2">{canal}</td><td class="p-2 text-right">{r.clics}</td><td class="p-2 text-right">{r.pacientes}</td><td class="p-2 text-right">{r.monto ? clp(r.monto) : '—'}</td></tr>
+        ))}
+        {resumen.size === 0 && <tr><td colspan="4" class="p-2 text-gray-500">Todavía no hay clics registrados.</td></tr>}
+      </tbody>
+    </table>
+
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="font-semibold">Códigos</h2>
+      <a href="/api/admin/wa-conversiones.csv" class="text-sm text-indigo-600 underline">Descargar archivo para Google Ads</a>
+    </div>
+    <table class="w-full text-sm border">
+      <thead class="bg-gray-50"><tr><th class="text-left p-2">Código</th><th class="text-left p-2">Fecha</th><th class="text-left p-2">Canal</th><th class="text-left p-2">Campaña / búsqueda</th><th class="text-left p-2">Página</th><th class="text-left p-2">Paciente</th></tr></thead>
+      <tbody>
+        {filas.map(f => (
+          <tr class="border-t">
+            <td class="p-2 font-mono">{f.codigo}</td>
+            <td class="p-2">{fmt(f.fecha)}</td>
+            <td class="p-2">{f.canal}</td>
+            <td class="p-2">{[f.campana, f.termino && `'${f.termino}'`].filter(Boolean).join(' · ') || '—'}</td>
+            <td class="p-2">{f.pagina || '—'}</td>
+            <td class="p-2">{f.pago ? (
+              <form method="POST" class="inline"><input type="hidden" name="accion" value="desmarcar" /><input type="hidden" name="codigo" value={f.codigo} />
+                <span class="text-green-700">Sí · {clp(f.pago.monto)}</span> <button class="text-xs text-gray-500 underline ml-1">quitar</button></form>
+            ) : '—'}</td>
+          </tr>
+        ))}
+        {pagosSinClic.map(p => (
+          <tr class="border-t bg-yellow-50">
+            <td class="p-2 font-mono">{p.message}</td><td class="p-2">{fmt(p.created_at)}</td>
+            <td class="p-2" colspan="3">Código marcado, pero sin clic registrado (puede ser anterior a esta medición o tener un error de tipeo)</td>
+            <td class="p-2"><form method="POST" class="inline"><input type="hidden" name="accion" value="desmarcar" /><input type="hidden" name="codigo" value={p.message} /><button class="text-xs text-gray-500 underline">quitar</button></form></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</AdminLayout>

@@ -4,6 +4,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
 import { supabase } from '../lib/supabase';
 import { DIRECCION } from '../data/consulta';
+import AgendaOpciones from '../components/landing/AgendaOpciones.astro';
 
 // Página de destino de terapia de pareja (12 oct 2026, auditoría de marketing):
 // los anuncios de pareja llevaban directo a la agenda de pago; quien busca
@@ -62,6 +63,18 @@ const jsonLd = {
     imageMobile="/images/sala-espera-800.webp"
   />
 
+  <!-- Arriba del pliegue (14 oct 2026): las dos formas de agendar, lo que promete el anuncio. -->
+  <section class="bg-warm border-b border-dust py-10 md:py-14">
+    <div class="container-site grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-16 items-center">
+      <div>
+        <p class="body-text text-ink font-medium mb-2">Online a todo Chile o presencial en Las Condes · Sesión de 50 min · $75.000</p>
+        <p class="body-sm text-[#55524b] font-normal mb-2">Boleta para reembolso en tu Isapre o seguro de salud, según tu plan. Reagendas sin costo avisando con 24 horas.</p>
+        <p class="body-sm text-[#55524b] font-normal">★ 5,0 en Google · Psicóloga con registro en la Superintendencia de Salud</p>
+      </div>
+      <AgendaOpciones grupo="pareja" lugar="pareja_landing" />
+    </div>
+  </section>
+
   <section class="bg-sand py-16 md:py-24">
     <div class="container-site grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-16">
       <div class="md:col-span-5">
@@ -110,9 +123,8 @@ const jsonLd = {
         )}
         <p class="body-sm text-[#55524b] font-normal">Por cada sesión recibes boleta de honorarios para pedir reembolso en tu Isapre o seguro complementario, según tu plan.</p>
       </div>
-      <div class="flex flex-col justify-center gap-4 md:items-start">
-        <a href="/agenda?grupo=pareja" class="btn-dark justify-center" data-cta="pareja_landing_agenda">Ver horarios para pareja</a>
-        <a href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20quiero%20consultar%20por%20terapia%20de%20pareja." target="_blank" rel="noopener" class="btn-outline justify-center" data-cta="pareja_landing_whatsapp">Escribir por WhatsApp</a>
+      <div class="flex flex-col justify-center md:items-start">
+        <AgendaOpciones grupo="pareja" lugar="pareja_fin" />
       </div>
     </div>
   </section>

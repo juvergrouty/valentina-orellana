@@ -124,7 +124,8 @@ const enAgenda = ruta === '/agenda';
 // pacientes: no en páginas de pago, reagendar, confirmación ni pasos a seguir.
 const waSegunCanal = !['/reagendar', '/confirmacion', '/recuperar', '/condiciones'].includes(ruta)
   && !/^\/(pagar|consentimiento|pasos-a-seguir|admin)(\/|$)/.test(ruta);
-const mostrarAgendarFlotante = !['/agenda', '/reagendar', '/confirmacion', '/recuperar'].includes(ruta)
+// En las páginas de destino de anuncios tampoco: ya muestran sus 2 botones (14 oct 2026).
+const mostrarAgendarFlotante = !['/agenda', '/reagendar', '/confirmacion', '/recuperar', '/terapia-de-pareja-las-condes', '/terapia-individual-adultos'].includes(ruta)
   && !/^\/(pagar|consentimiento|pasos-a-seguir)\//.test(ruta) && !noindex;
 // Google Tag Manager (Analytics/Meta) NO se carga en páginas con datos de una
 // paciente o con claves en el link: pago, consentimiento (nombre y RUT), pasos
@@ -242,6 +243,40 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
         var resto=x.slice(p.length);
         a[i].href='https://wa.me/56972735696?text='+encodeURIComponent(p+f+'.'+(resto?' '+resto.charAt(0).toUpperCase()+resto.slice(1):''));
       }
+    }catch(e){}})();</script>}
+    <!-- Código de seguimiento en el WhatsApp (14 oct 2026): al tocar un botón de
+         WhatsApp se agrega "(código G-7K3Q)" al mensaje y se registra el código con
+         su origen (/api/wa-clic). Cuando esa persona paga, Valentina marca el código
+         en /admin/whatsapp-codigos y se sabe qué canal/anuncio trajo al paciente.
+         Letra: G Google Ads, S Google orgánico, M Meta/Facebook, I Instagram,
+         P Psychology Today, D Doctoralia, O otro, X directo. -->
+    {waSegunCanal && <script is:inline>(function(){try{
+      var N='https://wa.me/56972735696';
+      function letra(){var o=null;try{o=JSON.parse(localStorage.getItem('vo_origen')||'null');}catch(e){}
+        var t=o&&(o.last||o.first);if(!t||!(t.ts>Date.now()-5184e6))return 'X';
+        var s=(t.utm_source||'').toLowerCase(),m=(t.utm_medium||'').toLowerCase(),r=(t.referrer_host||'').toLowerCase();
+        if(t.gclid||t.gbraid||t.wbraid||(s==='google'&&/^(cpc|ppc|paid)$/.test(m)))return 'G';
+        if(/instagram|^ig$/.test(s)||/instagram/.test(r))return 'I';
+        if(/facebook|^fb$|^meta$/.test(s)||/facebook/.test(r))return 'M';
+        if(/psychologytoday|psicologiahoy/.test(s+r))return 'P';
+        if(/doctoralia/.test(s+r))return 'D';
+        if(/^(www\.)?google\.[a-z.]+$|googlequicksearchbox/.test(r)||s==='google')return 'S';
+        return (s||r)?'O':'X';}
+      function codigo(){var L=letra(),c=null;try{c=JSON.parse(localStorage.getItem('vo_wa_codigo')||'null');}catch(e){}
+        if(c&&c.k&&c.k.charAt(0)===L&&c.ts>Date.now()-5184e6)return c.k;
+        var A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',k=L+'-',i,b=new Uint8Array(4);(window.crypto||{}).getRandomValues?crypto.getRandomValues(b):b.forEach(function(_,j){b[j]=Math.random()*256;});
+        for(i=0;i<4;i++)k+=A.charAt(b[i]%A.length);
+        try{localStorage.setItem('vo_wa_codigo',JSON.stringify({k:k,ts:Date.now()}));}catch(e){}
+        return k;}
+      document.addEventListener('click',function(ev){
+        var a=ev.target&&ev.target.closest&&ev.target.closest('a[href^="'+N+'"]');if(!a)return;
+        var k=codigo(),u=new URL(a.href),x=u.searchParams.get('text')||'Hola Valentina.';
+        if(x.indexOf('(código ')<0){u.searchParams.set('text',x+' (código '+k+')');a.href=u.toString();}
+        try{var o=JSON.parse(localStorage.getItem('vo_origen')||'null');
+          var d=JSON.stringify({codigo:k,path:location.pathname,origen:o});
+          if(!(navigator.sendBeacon&&navigator.sendBeacon('/api/wa-clic',new Blob([d],{type:'application/json'}))))fetch('/api/wa-clic',{method:'POST',body:d,keepalive:true});
+        }catch(e){}
+      },true);
     }catch(e){}})();</script>}
   </body>
 </html>
