@@ -174,7 +174,7 @@ const faltanDatos = patient ? [
 
   <!-- Consentimiento de datos (Ley 21.719) -->
   {consentimiento ? (
-    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;border-left:4px solid var(--enc-green-dark);">
+    <div id="consentimiento" class="card anclado" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;border-left:4px solid var(--enc-green-dark);">
       <div style="font-size:0.85rem;">
         <p style="font-weight:600;color:var(--enc-green-dark);">✓ Consentimiento de datos firmado</p>
         <p style="color:var(--stone);font-size:0.78rem;margin-top:0.2rem;">
@@ -191,7 +191,7 @@ const faltanDatos = patient ? [
       </div>
     </div>
   ) : (
-    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;border-left:4px solid #b45309;background:#fffbeb;">
+    <div id="consentimiento" class="card anclado" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;border-left:4px solid #b45309;background:#fffbeb;">
       <div style="font-size:0.85rem;">
         <p style="font-weight:600;color:#b45309;">⚠ Falta el consentimiento de datos (Ley 21.719)</p>
         <p style="color:var(--stone);font-size:0.78rem;margin-top:0.2rem;">
@@ -257,7 +257,7 @@ const faltanDatos = patient ? [
             </div>
             <div>
               <label class="label" style="display:block;margin-bottom:0.3rem;">Email</label>
-              <input type="email" name="email" value={patient.email ?? ''} />
+              <input type="email" id="email" class="anclado" name="email" value={patient.email ?? ''} />
             </div>
             <div>
               <label class="label" style="display:block;margin-bottom:0.3rem;">Teléfono</label>
@@ -364,7 +364,7 @@ const faltanDatos = patient ? [
             const payBadgeClass = isVoided ? 'badge-cancelled' : isPaid ? 'badge-confirmed' : 'badge-pending';
             const payBadgeLabel = isVoided ? 'Deuda anulada' : isPaid ? (b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado') : 'Por pagar';
             return (
-              <div class="card" style="padding:0;overflow:hidden;">
+              <div id={`s-${b.id}`} class="card anclado" style="padding:0;overflow:hidden;">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;gap:1rem;flex-wrap:wrap;">
                   <div style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;">
                     <div>
@@ -755,6 +755,14 @@ const faltanDatos = patient ? [
     </form>
   </div>
 </div>
+
+<style>
+  /* Enlaces directos desde el Inicio del panel (#consentimiento, #s-<sesión>, #email):
+     el elemento queda bajo la barra superior fija y se resalta un momento. */
+  .anclado { scroll-margin-top: 72px; }
+  .anclado:target { outline: 3px solid #4f5ce8; outline-offset: 2px; animation: anclaPulso 2.4s ease-out 1; }
+  @keyframes anclaPulso { 0% { box-shadow: 0 0 0 8px rgba(79,92,232,.25); } 100% { box-shadow: 0 0 0 0 rgba(79,92,232,0); } }
+</style>
 
 <script>
   // ── Boletas de honorarios (emitir / PDF / email) ──────────────────────────
