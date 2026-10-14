@@ -1,0 +1,109 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+import { hoursUntilSessionCL } from '../../lib/dateUtils';
+import { fechaSesionLarga } from '../../lib/cobrosProximos';
+
+// "Sala online" (Valentina, 14 oct 2026). En Encuadrado era un atajo a UNA
+// sala fija de Meet para todas las sesiones; aquí cada sesión tiene su propio
+// Meet (más privado: un link guardado no sirve para entrar a la hora de otra
+// persona). Este atajo lleva directo al Meet de la sesión online que está por
+// empezar (desde 15 min antes) o en curso. Si no hay ninguna, muestra las
+// próximas sesiones online con su link.
+
+const ANTES_MIN = 15;
+
+const hoy = new Date();
+const desde = new Date(hoy.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10);
+const hasta = new Date(hoy.getTime() + 15 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+const [{ data, error }, { data: calRow }] = await Promise.all([
+  supabase.from('bookings')
+    .select('id, patient_name, session_date, session_time, session_type, duration_min, status, notes')
+    .ilike('session_type', '%online%')
+    .not('status', 'in', '(cancelled,expired)')
+    .gte('session_date', desde).lte('session_date', hasta)
+    .order('session_date').order('session_time'),
+  supabase.from('settings').select('value').eq('key', 'google_calendar_id').maybeSingle(),
+]);
+
+// Abre Meet con la cuenta de Google del calendario (la que es dueña de la reunión).
+const cuenta = String(calRow?.value ?? '');
+const conCuenta = (url: string) => cuenta.includes('@') ? `${url}${url.includes('?') ? '&' : '?'}authuser=${encodeURIComponent(cuenta)}` : url;
+const meetDe = (notes: string | null) => [...String(notes ?? '').matchAll(/(?:^|\n)Meet: (https:\/\/meet\.google\.com\/\S+)/g)].at(-1)?.[1] ?? null;
+
+type Sesion = { id: string; paciente: string; fecha: string; hora: string; meet: string | null; faltaMin: number; dur: number };
+const sesiones: Sesion[] = (data ?? [])
+  .filter((b) => b.session_time)
+  .map((b) => {
+    const hora = String(b.session_time).slice(0, 5);
+    return { id: b.id, paciente: b.patient_name, fecha: b.session_date, hora, meet: meetDe(b.notes), faltaMin: hoursUntilSessionCL(b.session_date, hora) * 60, dur: Number(b.duration_min) || 50 };
+  })
+  .filter((s) => s.faltaMin > -s.dur); // las que ya terminaron no
+
+const ahora = sesiones.find((s) => s.faltaMin <= ANTES_MIN);
+if (ahora?.meet) return Astro.redirect(conCuenta(ahora.meet), 302);
+
+const proximas = sesiones.filter((s) => s !== ahora).slice(0, 6);
+const cuando = (s: Sesion) => s.faltaMin <= 0 ? 'en curso' : s.faltaMin <= ANTES_MIN ? `empieza a las ${s.hora}` : `${fechaSesionLarga(s.fecha)} a las ${s.hora}`;
+---
+
+<AdminLayout title="Sala online" current="/admin/sala-online">
+  <div style="max-width:640px;margin:0 auto;padding:2rem 1.25rem;display:flex;flex-direction:column;gap:1.25rem;">
+    <h1 style="font-size:1.4rem;margin:0;">Sala online</h1>
+    <p style="margin:0;color:var(--stone);font-size:0.9rem;">Te lleva directo al Meet de la sesión online que empieza en los próximos {ANTES_MIN} minutos o que está en curso. Cada sesión tiene su propio link.</p>
+
+    {error && <p role="alert" style="color:#991b1b;margin:0;">⚠ No se pudieron leer tus sesiones. Recarga en un rato.</p>}
+
+    {ahora && (
+      <div style="border:1px solid var(--dust);border-radius:8px;padding:1rem;background:#fff;">
+        <p style="margin:0 0 0.5rem;font-weight:700;">Ahora: {ahora.paciente} · {cuando(ahora)}</p>
+        <button type="button" data-crear-meet={ahora.id} class="btn-primary" style="cursor:pointer;">Crear el link de Meet y entrar</button>
+      </div>
+    )}
+
+    {!error && !ahora && <p style="margin:0;font-weight:600;">No tienes una sesión online en este momento.</p>}
+
+    {proximas.length > 0 && (
+      <div style="display:flex;flex-direction:column;gap:0.6rem;">
+        <p style="margin:0;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--stone);">Próximas sesiones online</p>
+        <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:0.5rem;">
+          {proximas.map((s) => (
+            <li style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:0.5rem;border:1px solid var(--dust);border-radius:8px;padding:0.7rem 0.9rem;background:#fff;">
+              <span><strong>{s.paciente}</strong> · {cuando(s)}</span>
+              {s.meet
+                ? <a href={conCuenta(s.meet)} target="_blank" rel="noopener" style="font-weight:700;font-size:0.85rem;">Abrir Meet</a>
+                : <button type="button" data-crear-meet={s.id} style="font-weight:700;font-size:0.85rem;background:none;border:none;color:inherit;text-decoration:underline;cursor:pointer;">Crear link de Meet</button>}
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+    {!error && !ahora && proximas.length === 0 && <p style="margin:0;color:var(--stone);">No hay sesiones online agendadas en los próximos 15 días.</p>}
+  </div>
+</AdminLayout>
+
+<script define:vars={{ cuenta }}>
+  // Sesión sin Meet todavía: se crea con el mismo endpoint del calendario y se abre.
+  document.querySelectorAll('[data-crear-meet]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const original = b.textContent;
+      b.textContent = 'Creando…';
+      b.disabled = true;
+      try {
+        const res = await fetch('/api/admin/generate-meet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.crearMeet }) });
+        const data = await res.json().catch(() => ({}));
+        if (data.ok && data.meetLink) {
+          const url = cuenta.includes('@') ? `${data.meetLink}${data.meetLink.includes('?') ? '&' : '?'}authuser=${encodeURIComponent(cuenta)}` : data.meetLink;
+          location.href = url;
+          return;
+        }
+        alert(data.error || 'No se pudo crear el link de Meet. Intenta de nuevo.');
+      } catch {
+        alert('No se pudo crear el link de Meet. Intenta de nuevo.');
+      }
+      b.textContent = original;
+      b.disabled = false;
+    });
+  });
+</script>
