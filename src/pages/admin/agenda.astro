@@ -6,6 +6,8 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { pricingPlans } from '../../data/services';
 import { getValidAccessToken } from '../../lib/syncCalendar';
+import { pacienteDeTitulo } from '../../lib/boxCala';
+import { mismaPersona } from '../../lib/mismaPersona';
 import { reviewRequestUrl } from '../../lib/googleReviews';
 import { nowCL } from '../../lib/dateUtils';
 import { mensajeLinkPago } from '../../lib/cobrosProximos';
@@ -170,6 +172,7 @@ patientList.forEach((p: { id: string; email: string | null; rut: string | null }
 });
 
 // ── Eventos de Google Calendar de la semana (solo lectura) ──────────────────
+const minutosDe = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + (m || 0); };
 type GEvent = { date: string; time: string; dur: number; title: string };
 const gcalByDate: Record<string, GEvent[]> = {};
 try {
@@ -201,10 +204,6 @@ try {
       });
       for (const ev of (data.items ?? [])) {
         if (ev.id && bookedGoogleIds.has(ev.id)) continue;
-        // Eventos de Encuadrado (su descripción trae el link encuadrado.com/reagendar):
-        // NUNCA se muestran (Valentina, 15 oct 2026). El calendario muestra solo
-        // las sesiones de valentinaorellana.cl y, debajo, sus eventos personales.
-        if (/encuadrado\.com/i.test(String(ev.description ?? ''))) continue;
         const sdt = ev.start?.dateTime;
         if (!sdt) continue; // omitir eventos de todo el día
         const date = sdt.slice(0, 10);
@@ -214,6 +213,21 @@ try {
         let dur = 60;
         if (ev.end?.dateTime) {
           dur = Math.max(20, Math.round((new Date(ev.end.dateTime).getTime() - new Date(sdt).getTime()) / 60000));
+        }
+        // Encuadrado (su descripción trae el link encuadrado.com/reagendar): si
+        // coincide con una sesión de la página de la misma paciente (se cruzan
+        // en horario), se muestra solo la de valentinaorellana.cl. Si no
+        // coincide se deja a la vista: así se nota un error al agendar en una
+        // de las dos (Valentina, 15 oct 2026).
+        if (/encuadrado\.com\/reagendar/i.test(String(ev.description ?? ''))) {
+          const ini = minutosDe(time), fin = ini + dur;
+          const paciente = pacienteDeTitulo(String(ev.summary ?? ''));
+          const coincide = bookings.some((b: { session_date: string; session_time: string; duration_min?: number | null; patient_name: string }) => {
+            if (b.session_date !== date || !b.session_time) return false;
+            const bIni = minutosDe(String(b.session_time).slice(0, 5)), bFin = bIni + (b.duration_min ?? 50);
+            return bIni < fin && ini < bFin && mismaPersona(b.patient_name, paciente);
+          });
+          if (coincide) continue;
         }
         (gcalByDate[date] ??= []).push({ date, time, dur, title: ev.summary ?? 'Ocupado' });
       }

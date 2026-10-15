@@ -5,6 +5,8 @@ import { supabase } from '../../lib/supabase';
 import { todayCL, nowCL, hoursUntilSessionCL } from '../../lib/dateUtils';
 import { cargarAvisosPanel } from '../../lib/avisosPanel';
 import { sesionesPorCobrar, sesionesQueTeDeben } from '../../lib/porCobrar';
+import { getValidAccessToken } from '../../lib/syncCalendar';
+import { pacienteDeTitulo } from '../../lib/boxCala';
 import { URL_SII } from '../../lib/impuestos';
 
 // Inicio del panel (rediseño aprobado por Valentina, 14 oct 2026): TODO lleva
@@ -34,6 +36,37 @@ const domingo = sumarDias(lunes, 6);
 const fin7 = sumarDias(dia, 7);
 const hasta = domingo > fin7 ? domingo : fin7;
 
+// ── Sesiones de Google Calendar (Encuadrado) ─────────────────────────────────
+// Las sesiones agendadas en Encuadrado solo están en Google Calendar (no en la
+// tabla de reservas). Se suman a las del día y de la semana para que el conteo
+// sea el real; una sesión con evento de la página y de Encuadrado (intencional)
+// se cuenta una vez por horario. null = no se pudo leer.
+type EventoGoogle = { fecha: string; hora: string; dur: number; titulo: string };
+async function sesionesGoogle(desde: string, hastaIso: string): Promise<EventoGoogle[] | null> {
+  const auth = await getValidAccessToken();
+  if (!auth) return null;
+  const tMin = new Date(Date.parse(desde + 'T00:00:00Z') - 86400000).toISOString();
+  const tMax = new Date(Date.parse(hastaIso + 'T00:00:00Z') + 2 * 86400000).toISOString();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(auth.calendarId)}/events`
+    + `?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true&orderBy=startTime&maxResults=250&timeZone=America%2FSantiago`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` }, signal: AbortSignal.timeout(5000) });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const out: EventoGoogle[] = [];
+  for (const ev of (data.items ?? []) as Array<{ summary?: string; status?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }>) {
+    const inicio = ev.start?.dateTime;
+    const titulo = ev.summary ?? '';
+    // Solo sesiones (página: "… Sesión Individual …"; Encuadrado: "Nombre Sesión individual …").
+    if (!inicio || ev.status === 'cancelled' || !/sesi[oó]n/i.test(titulo)) continue;
+    // Con timeZone=America/Santiago, dateTime viene en hora de Chile.
+    const fecha = inicio.slice(0, 10);
+    if (fecha < desde || fecha > hastaIso) continue;
+    const dur = ev.end?.dateTime ? Math.max(20, Math.round((Date.parse(ev.end.dateTime) - Date.parse(inicio)) / 60000)) : 50;
+    out.push({ fecha, hora: inicio.slice(11, 16), dur, titulo });
+  }
+  return out;
+}
+
 // "Te deben": misma regla y agrupación por paciente que /admin/deudas (sesiones
 // sin pagar que ya empezaron, ver src/lib/porCobrar.ts).
 async function teDeben(): Promise<{ personas: number; total: number }> {
@@ -52,7 +85,7 @@ type Reserva = {
 };
 
 const hace90 = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-const [avisos, reservasRes, porCobrar, deben, recientesRes] = await Promise.all([
+const [avisos, reservasRes, google, porCobrar, deben, recientesRes] = await Promise.all([
   cargarAvisosPanel(Astro.url.origin),
   // Sesiones desde el lunes de la semana del día mirado hasta 7 días después
   // (o el domingo, lo que llegue más lejos). Sin canceladas NI vencidas.
@@ -61,6 +94,7 @@ const [avisos, reservasRes, porCobrar, deben, recientesRes] = await Promise.all(
     .gte('session_date', lunes).lte('session_date', hasta)
     .not('status', 'in', '(cancelled,expired)')
     .order('session_date').order('session_time'),
+  sesionesGoogle(lunes, hasta).catch(() => null),
   sesionesPorCobrar().catch(() => null),
   teDeben().catch(() => null),
   // Reservas por origen (últimos 90 días, por fecha en que se reservó): solo
@@ -70,7 +104,7 @@ const [avisos, reservasRes, porCobrar, deben, recientesRes] = await Promise.all(
 const errorReservas = !!reservasRes.error;
 const reservas = (reservasRes.data ?? []) as Reserva[];
 
-// ── Sesiones (solo de la página) ───────────────────────────────────
+// ── Sesiones (página + Google/Encuadrado) ───────────────────────────────────
 type Sesion = {
   id: string | null; fecha: string; hora: string; dur: number; paciente: string;
   online: boolean; tipo: string; pago: 'pagada' | 'por-pagar' | 'anulada' | 'sin-cobro' | 'externa'; href: string;
@@ -91,9 +125,31 @@ const sesiones: Sesion[] = reservas.filter((b) => b.session_date !== '2099-12-31
   pago: b.paid_at ? 'pagada' : b.debt_voided ? 'anulada' : (Number(b.amount) > 0 ? 'por-pagar' : 'sin-cobro'),
   href: `/admin/agenda?booking=${b.id}`,
 }));
-// Solo sesiones de valentinaorellana.cl: lo agendado en Encuadrado NUNCA se
-// muestra aquí (Valentina, 15 oct 2026; antes se sumaban los eventos de Google
-// Calendar de Encuadrado y aparecían sesiones duplicadas o con otra fecha/hora).
+{
+  // Una misma sesión puede estar dos veces: evento de la página y de Encuadrado
+  // (intencional), a veces a HORAS DISTINTAS (ej. Encuadrado 9:00 y página
+  // 10:00). Se reconoce por paciente + día, no por horario (14 oct 2026: antes
+  // se contaba dos veces y la semana mostraba 10 en vez de las reales).
+  const normal = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-zñ ]/g, ' ').split(/\s+/).filter((w) => w.length > 1);
+  const mismaPersona = (a: string, b: string) => {
+    const x = normal(a), y = normal(b);
+    if (!x.length || !y.length || x[0] !== y[0]) return false; // mismo primer nombre
+    const restoX = x.slice(1), restoY = y.slice(1);
+    return !restoX.length || !restoY.length || restoX.some((w) => restoY.includes(w));
+  };
+  for (const g of google ?? []) {
+    const paciente = pacienteDeTitulo(g.titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, ''));
+    if (sesiones.some((s) => s.fecha === g.fecha && mismaPersona(s.paciente, paciente))) continue; // ya está ese día (otro evento o reserva de la página)
+    const online = /online/i.test(g.titulo);
+    sesiones.push({
+      id: null, fecha: g.fecha, hora: g.hora, dur: g.dur,
+      paciente,
+      online, tipo: `${online ? 'Online' : 'Presencial'} · Google Calendar`, pago: 'externa',
+      href: `/admin/agenda?fecha=${g.fecha}&hora=${g.hora}`,
+    });
+  }
+  sesiones.sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+}
 const delDia = sesiones.filter((s) => s.fecha === dia);
 const semana = sesiones.filter((s) => s.fecha >= lunes && s.fecha <= domingo);
 const proximas = sesiones.filter((s) => s.fecha > dia && s.fecha <= fin7);
@@ -388,7 +444,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
         <span class="stat-label">Semana</span>
         <span class="stat-value">{semana.length}<small>/{META_SEMANA}</small></span>
         <span class="ini-barra" aria-hidden="true"><span style={`width:${avanceSemana}%`}></span></span>
-        <span class="stat-sub">lun {Number(lunes.slice(8))} – dom {Number(domingo.slice(8))}</span>
+        <span class="stat-sub">lun {Number(lunes.slice(8))} – dom {Number(domingo.slice(8))}{google === null ? ' · sin Google' : ''}</span>
       </a>
       <a href="/admin/por-cobrar" class="ini-stat">
         <span class="stat-label">Por cobrar</span>
@@ -499,6 +555,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
             ))}
           </ul>
         )}
+        {google === null && <p class="ini-nota">No se pudo leer Google Calendar: faltan las sesiones de Encuadrado.</p>}
       </section>
     </div>
 
