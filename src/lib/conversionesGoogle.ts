@@ -126,6 +126,12 @@ export async function csvConversiones(): Promise<string> {
     if (hora) filas.set(toque.gclid!, [toque.gclid, NOMBRE_CONVERSION, hora, String(pago.monto ?? 0), 'CLP'].join(','));
   }
 
+  // El Gestor de Datos de Google necesita al menos una fila para reconocer las
+  // columnas. Mientras no haya pacientes de anuncios va una fila de ejemplo con un
+  // identificador de clic inexistente: Google la rechaza y no cuenta nada.
+  if (filas.size === 0) {
+    filas.set('ejemplo', ['EJEMPLO-SIN-PACIENTES-AUN', NOMBRE_CONVERSION, enChile(ahora - DIA), '0', 'CLP'].join(','));
+  }
   const lineas = ['Google Click ID,Conversion Name,Conversion Time,Conversion Value,Conversion Currency', ...filas.values()];
   return lineas.join('\n') + '\n';
 }
