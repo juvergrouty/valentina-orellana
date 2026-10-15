@@ -11,6 +11,7 @@ import { avisosSalud, type AvisoSalud } from './saludSitio';
 import { avisosBoxCala, type AvisosBox } from './boxCala';
 import { avisosImpuestos, type MesImpuestos } from './impuestos';
 import { cobrosProximos, type CobroProximo } from './cobrosProximos';
+import { avisosEncuadrado, type AvisosEncuadrado } from './encuadrado';
 
 // Avisos del panel (antes calculados dentro de AdminLayout.astro). Salen a
 // este archivo (14 oct 2026) para que el Inicio (/admin) los use en su lista
@@ -106,7 +107,7 @@ function mensajeCumpleanos(nombre: string): string {
 }
 
 
-export type { BoletaAlert, ConsentAlert, BlockedDayAlert, ComprobanteAlert, AvisoTarifa, AvisoSalud, AvisosBox, MesImpuestos, CobroProximo };
+export type { BoletaAlert, ConsentAlert, BlockedDayAlert, ComprobanteAlert, AvisoTarifa, AvisoSalud, AvisosBox, MesImpuestos, CobroProximo, AvisosEncuadrado };
 
 export type AvisosPanel = {
   newErrorCount: number;
@@ -123,10 +124,12 @@ export type AvisosPanel = {
   box: AvisosBox;
   cobros: CobroProximo[] | null;
   impuestos: MesImpuestos[];
+  // null = no se pudo revisar (el panel lo dice en vez de callar).
+  encuadrado: AvisosEncuadrado | null;
 };
 
 export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
-  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos] = await Promise.all([
+  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado] = await Promise.all([
     // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
     // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
     contarErroresNuevos().catch(() => 0),
@@ -156,6 +159,9 @@ export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
     cobrosProximos(origen).catch((): CobroProximo[] | null => null),
     // Pagar impuestos desde el día 16 de cada mes, hasta "Ya lo hice" (14 oct 2026, ver src/lib/impuestos.ts).
     avisosImpuestos().catch((): MesImpuestos[] => []),
+    // Sesiones por agendar, reagendar o eliminar en Encuadrado (transcriptor),
+    // hasta que Valentina aprieta "Listo" (15 oct 2026, ver src/lib/encuadrado.ts).
+    avisosEncuadrado().catch((): AvisosEncuadrado | null => null),
   ]);
-  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos };
+  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado };
 }
