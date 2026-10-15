@@ -9,11 +9,12 @@
   "crons": [
     { "path": "/api/cron/instagram-refresh",      "schedule": "0 3 1 * *" },
     { "path": "/api/cron/google-reviews-refresh", "schedule": "0 6 * * *" },
-    { "path": "/api/cron/review-requests",        "schedule": "0 23 * * *" }
+    { "path": "/api/cron/review-requests",        "schedule": "0 23 * * *" },
+    { "path": "/api/cron/transcriptor-salud",     "schedule": "0 11 * * *" }
   ],
   "headers": [
     {
-      "source": "/(.*)",
+      "source": "/((?!admin/grabar$).*)",
       "headers": [
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
@@ -22,6 +23,17 @@
         { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), interest-cohort=()" },
         { "key": "X-DNS-Prefetch-Control", "value": "on" },
         { "key": "Content-Security-Policy", "value": "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self' https://flow.cl https://*.flow.cl https://accounts.google.com; upgrade-insecure-requests" }
+      ]
+    },
+    {
+      "source": "/admin/grabar",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(self), geolocation=(), interest-cohort=()" },
+        { "key": "X-DNS-Prefetch-Control", "value": "on" }
       ]
     },
     {

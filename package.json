@@ -11,11 +11,15 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "test:transcriptor": "npx -y tsx@4.23.15 --test src/lib/transcriptor/*.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@astrojs/tailwind": "^6.0.2",
     "@astrojs/vercel": "^11.0.12",
+    "@aws-sdk/client-s3": "^3.1151.0",
+    "@aws-sdk/s3-request-presigner": "^3.1151.0",
     "@supabase/supabase-js": "^2.69.0",
     "astro": "^7.3.8",
     "resend": "^6.12.4",
