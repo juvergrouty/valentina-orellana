@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="es-CL">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup grabador</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  /* Paleta: panel /admin (AdminLayout.astro) + marca (tailwind.config.mjs) */
+  :root{
+    --forest:#576352; --forest-dark:#46503f; --sand:#FAF7F4; --ink:#1A1A18; --stone:#6B6860;
+    --dust:#DDD8CF; --warm:#F4F0EC; --gold:#A8906C; --gold-text:#7A6544;
+    --enc-border:#e5e7eb; --enc-body:#f9fafb; --enc-text-3:#6b7280;
+    --red:#b91c1c; --red-soft:#fef2f2; --amber:#92400e; --amber-soft:#fffbeb; --amber-line:#fcd34d;
+    --ok:#15803d; --rec:#f87171; --muted-dark:#B5B0A6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;font-size:16px;line-height:1.5;color:var(--ink);background:#e9e5df;padding:24px 0 64px}
+  .intro{max-width:375px;margin:0 auto 24px;padding:0 16px;font-size:13px;color:var(--stone)}
+  .intro h1{font-family:'Cormorant Garamond',serif;font-weight:600;font-size:28px;color:var(--ink);line-height:1.1;margin-bottom:6px}
+  .estado{width:375px;max-width:100%;margin:0 auto 12px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--stone);padding:0 4px}
+  .phone{width:375px;max-width:100%;min-height:700px;margin:0 auto 40px;background:var(--enc-body);border-radius:28px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.15);display:flex;flex-direction:column;position:relative}
+  .sb{height:36px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font-size:13px;font-weight:600}
+  .sb .ic{display:flex;gap:6px;align-items:center}
+  .safari{background:#fff;border-bottom:1px solid var(--enc-border);padding:6px 16px 8px;font-size:12px;color:var(--enc-text-3);text-align:center}
+  .safari span{display:inline-block;background:#f1f1f1;border-radius:10px;padding:5px 14px}
+  .top{display:flex;align-items:center;gap:10px;padding:12px 16px;background:#fff;border-bottom:1px solid var(--enc-border)}
+  .top .menu{width:48px;height:48px;display:flex;align-items:center;justify-content:center;margin-left:-12px}
+  .top b{font-size:15px}
+  .body{padding:16px;display:flex;flex-direction:column;gap:14px;flex:1}
+  .card{background:#fff;border:1px solid var(--enc-border);border-radius:10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06)}
+  .label{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--enc-text-3);font-weight:600}
+  .paciente{font-family:'Cormorant Garamond',serif;font-size:26px;line-height:1.15;font-weight:600}
+  .sub{color:var(--stone);font-size:14px}
+  .link{color:var(--forest);font-weight:600;text-decoration:underline;background:none;border:none;font:inherit;min-height:48px;padding:0 4px;cursor:pointer}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .check{list-style:none;display:flex;flex-direction:column;gap:2px}
+  .check li{display:flex;align-items:center;gap:10px;min-height:44px;font-size:15px;border-bottom:1px solid #f3f4f6}
+  .check li:last-child{border-bottom:none}
+  .tick{width:24px;height:24px;border-radius:50%;background:var(--ok);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0}
+  .tick.no{background:#fff;border:2px solid var(--dust);color:var(--stone)}
+  .tick.warn{background:var(--amber)}
+  .meter{display:flex;gap:4px;align-items:flex-end;height:28px}
+  .meter i{display:block;width:8px;border-radius:2px;background:var(--forest)}
+  .meter i.off{background:var(--dust)}
+  .toggle{display:flex;align-items:center;justify-content:space-between;min-height:56px}
+  .sw{width:51px;height:31px;border-radius:16px;background:var(--dust);position:relative;flex-shrink:0}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+  .btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;border:none;border-radius:10px;font:inherit;font-weight:700;cursor:pointer;min-height:56px;font-size:17px}
+  .btn-rec{background:var(--forest);color:#fff;min-height:96px;font-size:24px;border-radius:14px}
+  .btn-rec .dot{width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 0 0 4px rgba(255,255,255,.35)}
+  .btn-out{background:#fff;color:var(--ink);border:1px solid var(--enc-border)}
+  .btn-dark{background:var(--ink);color:#fff}
+  .hint{font-size:13px;color:var(--stone);text-align:center}
+  .alert-amber{background:var(--amber-soft);border:1px solid var(--amber-line);color:var(--amber);border-radius:8px;padding:12px 14px;font-size:14px}
+  .alert-red{background:var(--red-soft);border:1px solid #fca5a5;color:var(--red);border-radius:8px;padding:12px 14px;font-size:14px}
+  /* hoja inferior */
+  .dim{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:18px 18px 0 0;padding:20px 16px 28px;display:flex;flex-direction:column;gap:12px}
+  .sheet h2{font-size:21px;line-height:1.25}
+  /* modo grabación */
+  .dark{background:var(--ink);color:#fff}
+  .dark .sb{color:#fff}
+  .rec-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:16px;text-align:center}
+  .rec-state{display:flex;align-items:center;gap:12px;font-size:26px;font-weight:700}
+  .pulse{width:22px;height:22px;border-radius:50%;background:var(--rec);animation:p 1.6s ease-in-out infinite}
+  @keyframes p{0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,.6)}50%{box-shadow:0 0 0 12px rgba(248,113,113,0)}}
+  @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+  .timer{font-size:60px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1}
+  .meter.big{height:44px;gap:6px}.meter.big i{width:14px;background:#86efac}.meter.big i.off{background:#3a3a36}
+  .who{color:var(--muted-dark);font-size:15px}
+  .stat{color:var(--muted-dark);font-size:13px;display:flex;flex-direction:column;gap:4px}
+  .rec-actions{padding:16px;display:flex;flex-direction:column;gap:16px}
+  .btn-ghost-dark{background:transparent;color:#fff;border:1px solid #4a4a45;min-height:52px;font-size:16px}
+  .btn-hold{background:#2c2c29;color:#fff;border:1px solid #4a4a45;min-height:72px;position:relative;overflow:hidden}
+  .btn-hold::before{content:"";position:absolute;left:0;top:0;bottom:0;width:38%;background:rgba(248,113,113,.25)}
+  .btn-hold span{position:relative}
+  .band-amber{background:#fbbf24;color:#1A1A18;font-weight:600;font-size:15px;padding:12px 16px;text-align:center}
+  /* pausa por interrupción */
+  .redfull{background:var(--red);color:#fff}
+  .redfull .sb{color:#fff}
+  .red-top{padding:28px 20px 8px;display:flex;flex-direction:column;gap:12px}
+  .red-top h2{font-size:34px;line-height:1.1}
+  .red-top p{font-size:17px}
+  .red-tap{flex:1;margin:12px 16px 0;border:3px solid #fff;border-radius:18px;background:rgba(255,255,255,.12);color:#fff;font:inherit;font-size:26px;font-weight:700;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:260px}
+  .red-tap .big{width:72px;height:72px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center}
+  .red-tap .big i{width:26px;height:26px;border-radius:50%;background:var(--red);display:block}
+  .red-foot{padding:16px}
+  .btn-red-out{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.7);min-height:52px;font-size:16px}
+  /* progreso */
+  .bar{height:10px;background:var(--warm);border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--forest)}
+  .steps{list-style:none;display:flex;flex-direction:column;gap:10px;font-size:15px}
+  .steps li{display:flex;gap:10px;align-items:center}
+  .spin{width:24px;height:24px;border-radius:50%;border:3px solid var(--dust);border-top-color:var(--forest);flex-shrink:0}
+  .big-ok{font-size:22px;font-weight:700;line-height:1.25}
+  /* ficha */
+  .tabs{display:flex;border-bottom:2px solid var(--dust);overflow-x:auto;background:#fff;padding:0 8px}
+  .tabs span{padding:12px 10px;font-size:14px;color:var(--stone);white-space:nowrap;min-height:48px}
+  .tabs span.on{color:var(--ink);font-weight:600;border-bottom:2px solid var(--ink);margin-bottom:-2px}
+  .avatar{width:48px;height:48px;border-radius:50%;background:var(--forest);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}
+  .ia{border-left:4px solid var(--gold)}
+  .ia-badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:var(--gold-text);background:#f7f1e6;border:1px solid #e6d9c2;border-radius:99px;padding:3px 10px}
+  .ia h4{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--stone);margin:14px 0 4px}
+  .ia ul{padding-left:18px;font-size:15px;line-height:1.55}
+  .disc{font-size:12.5px;color:var(--stone);margin-top:12px;border-top:1px solid #f3f4f6;padding-top:10px}
+  .two{display:flex;gap:8px;margin-top:10px}
+  .two .btn{min-height:48px;font-size:14px;font-weight:600}
+  .nota{font-size:15px;line-height:1.6;white-space:pre-wrap}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{border:1px solid var(--dust);background:var(--sand);border-radius:99px;padding:0 14px;min-height:40px;display:flex;align-items:center;font-size:13.5px}
+  .input{border:1px solid var(--enc-border);border-radius:8px;padding:12px;font:inherit;font-size:16px;color:var(--stone);min-height:52px;background:#fff}
+  select.input{color:var(--ink);appearance:none}
+  .answer{background:var(--sand);border-radius:8px;padding:12px;font-size:15px}
+  .cita{color:var(--forest);font-weight:600;text-decoration:underline}
+  .stamp{position:absolute;right:16px;top:8px;font-size:11px;color:var(--stone)}
+</style>
+</head>
+<body>
+
+<div class="intro">
+  <h1>Grabador de sesiones</h1>
+  <p>Mockup estático, iPhone 375 px, Safari. Estados uno debajo del otro. Paleta del panel (/admin) + verde de marca #576352. Textos definitivos en docs/transcriptor/40-ux-diseno.md.</p>
+</div>
+
+<!-- 1. LISTO -->
+<p class="estado">1 · Listo (sesión autoseleccionada + checklist)</p>
+<div class="phone" role="img" aria-label="Estado listo">
+  <div class="sb"><span>15:58</span><span class="ic">✈︎ <span>100%</span></span></div>
+  <div class="safari"><span>🔒 valentinaorellana.cl</span></div>
+  <div class="top"><span class="menu">☰</span><b>Grabar sesión</b></div>
+  <div class="body">
+    <div class="card">
+      <div class="row"><p class="label">Sesión de las 16:00</p><button class="link">Cambiar</button></div>
+      <p class="paciente">Camila Rojas</p>
+      <p class="sub">Individual presencial · 50 min</p>
+    </div>
+    <div class="card">
+      <p class="label" style="margin-bottom:4px">Antes de grabar</p>
+      <ul class="check">
+        <li><span class="tick">✓</span>Modo avión</li>
+        <li><span class="tick">✓</span>Wi-Fi apagado</li>
+        <li><span class="tick">✓</span><span style="flex:1">Micrófono funcionando</span><span class="meter" aria-label="Nivel de micrófono"><i style="height:30%"></i><i style="height:55%"></i><i style="height:80%"></i><i class="off" style="height:100%"></i><i class="off" style="height:100%"></i></span></li>
+        <li><span class="tick">✓</span>Modo de bajo consumo apagado</li>
+      </ul>
+      <div class="toggle" style="border-top:1px solid #f3f4f6;margin-top:4px">
+        <div><b style="font-size:15px">Lugar con ruido</b><p class="sub" style="font-size:13px">Actívalo si hay ruido de calle u obras</p></div>
+        <span class="sw" role="switch" aria-checked="false"></span>
+      </div>
+    </div>
+    <button class="btn btn-rec"><span class="dot"></span>Grabar</button>
+    <p class="hint">Deja el teléfono sobre la mesa, pantalla hacia arriba.</p>
+  </div>
+</div>
+
+<!-- 2. HOJA: AÚN CON CONEXIÓN -->
+<p class="estado">2 · Tocó Grabar, pero todavía hay conexión</p>
+<div class="phone" role="img" aria-label="Aviso de conexión">
+  <div class="sb"><span>15:58</span><span class="ic">📶 Wi-Fi 100%</span></div>
+  <div class="safari"><span>🔒 valentinaorellana.cl</span></div>
+  <div class="top"><span class="menu">☰</span><b>Grabar sesión</b></div>
+  <div class="body">
+    <div class="card"><p class="label">Sesión de las 16:00</p><p class="paciente">Camila Rojas</p></div>
+    <div class="card">
+      <ul class="check">
+        <li><span class="tick no">!</span>Modo avión</li>
+        <li><span class="tick no">!</span>Wi-Fi apagado</li>
+      </ul>
+    </div>
+  </div>
+  <div class="dim"></div>
+  <div class="sheet" role="dialog" aria-labelledby="h-con">
+    <h2 id="h-con">Todavía tienes conexión</h2>
+    <p style="font-size:16px">Si entra una llamada, el iPhone corta el micrófono aunque no contestes. Activa <b>Modo avión</b> y deja el <b>Wi-Fi apagado</b>.</p>
+    <button class="btn btn-rec" style="min-height:60px;font-size:18px">Primero activo modo avión</button>
+    <button class="btn btn-out">Grabar igual</button>
+  </div>
+</div>
+
+<!-- 3. GRABANDO -->
+<p class="estado">3 · Grabando (se lee de reojo a 1 metro)</p>
+<div class="phone dark" role="img" aria-label="Grabando">
+  <div class="sb"><span>16:24</span><span class="ic">✈︎ <span style="color:#fb923c">●</span> 82%</span></div>
+  <div class="rec-wrap">
+    <div class="rec-state" aria-live="polite"><span class="pulse"></span>Grabando</div>
+    <div class="timer">00:23:41</div>
+    <div class="meter big" aria-label="Nivel de sonido"><i style="height:35%"></i><i style="height:60%"></i><i style="height:90%"></i><i style="height:70%"></i><i class="off" style="height:100%"></i></div>
+    <p class="who">Camila Rojas · Individual presencial</p>
+    <div class="stat"><span>☀︎ Pantalla encendida</span><span>✓ Guardando en este teléfono</span></div>
+  </div>
+  <div class="rec-actions">
+    <button class="btn btn-ghost-dark">❙❙ Pausar</button>
+    <button class="btn btn-hold"><span>■ Mantén para terminar</span></button>
+  </div>
+</div>
+
+<!-- 4. SILENCIO -->
+<p class="estado">4 · Grabando, pero sin sonido hace 1 minuto</p>
+<div class="phone dark" role="img" aria-label="Aviso de silencio" style="min-height:560px">
+  <div class="sb"><span>16:31</span><span class="ic">✈︎ 80%</span></div>
+  <div class="band-amber" role="alert">No se escucha nada hace 1 minuto. Revisa que nada tape el micrófono.</div>
+  <div class="rec-wrap">
+    <div class="rec-state"><span class="pulse"></span>Grabando</div>
+    <div class="timer">00:30:02</div>
+    <div class="meter big"><i class="off" style="height:35%"></i><i class="off" style="height:60%"></i><i class="off" style="height:90%"></i><i class="off" style="height:70%"></i><i class="off" style="height:100%"></i></div>
+  </div>
+  <div class="rec-actions"><button class="btn btn-hold"><span>■ Mantén para terminar</span></button></div>
+</div>
+
+<!-- 5. PAUSADA POR INTERRUPCIÓN -->
+<p class="estado">5 · Pausada por interrupción (aviso rojo grande)</p>
+<div class="phone redfull" role="img" aria-label="La grabación se pausó">
+  <div class="sb"><span>16:25</span><span class="ic">✈︎ 81%</span></div>
+  <div class="red-top" role="alert">
+    <h2>⚠ La grabación se pausó</h2>
+    <p>Saliste de esta página o se bloqueó la pantalla.</p>
+    <p style="opacity:.9;font-size:15px">Se grabó hasta las 16:23. Toca para seguir: el resto se agrega a la misma sesión.</p>
+  </div>
+  <button class="red-tap"><span class="big"><i></i></span>Tocar para seguir grabando</button>
+  <div class="red-foot"><button class="btn btn-red-out">Terminar aquí</button></div>
+</div>
+
+<!-- 6. GUARDADA / SUBIENDO -->
+<p class="estado">6 · Terminó → guardada en el teléfono → subiendo</p>
+<div class="phone" role="img" aria-label="Subiendo" style="min-height:600px">
+  <div class="sb"><span>16:52</span><span class="ic">📶 Wi-Fi 74%</span></div>
+  <div class="safari"><span>🔒 valentinaorellana.cl</span></div>
+  <div class="top"><span class="menu">☰</span><b>Grabar sesión</b></div>
+  <div class="body">
+    <div class="card">
+      <p class="big-ok">Sesión guardada en este teléfono ✓</p>
+      <p class="sub" style="margin-top:4px">Camila Rojas · 50 min 12 s</p>
+    </div>
+    <div class="card" aria-live="polite">
+      <p style="font-weight:700;font-size:18px">Subiendo… 7 de 12 partes</p>
+      <div class="bar" style="margin:10px 0 8px"><i style="width:58%"></i></div>
+      <p class="sub">Deja esta página abierta un momento.</p>
+    </div>
+    <div class="alert-amber">Si cierras Safari ahora no se pierde nada: se sube la próxima vez que abras el panel con internet.</div>
+  </div>
+</div>
+
+<!-- 7. PROCESANDO / LISTO -->
+<p class="estado">7 · Procesando → listo</p>
+<div class="phone" role="img" aria-label="Procesando y listo" style="min-height:600px">
+  <div class="sb"><span>16:54</span><span class="ic">📶 Wi-Fi 74%</span></div>
+  <div class="safari"><span>🔒 valentinaorellana.cl</span></div>
+  <div class="top"><span class="menu">☰</span><b>Grabar sesión</b></div>
+  <div class="body">
+    <div class="card">
+      <ul class="steps">
+        <li><span class="tick">✓</span>Subida</li>
+        <li><span class="tick">✓</span>Transcrita</li>
+        <li><span class="spin" aria-hidden="true"></span><b>Escribiendo el resumen…</b></li>
+      </ul>
+      <p class="sub" style="margin-top:12px">Ya puedes cerrar esta página. El resumen aparecerá solo en la ficha, normalmente en menos de 1 hora.</p>
+    </div>
+    <p class="label" style="text-align:center">Más tarde</p>
+    <div class="card" style="border-left:4px solid var(--ok)">
+      <p class="big-ok">Listo ✓</p>
+      <p style="margin:4px 0 12px">El resumen está en la ficha de <b>Camila Rojas</b>.</p>
+      <button class="btn btn-rec" style="min-height:56px;font-size:17px">Ver ficha</button>
+      <button class="btn btn-out" style="margin-top:10px">Grabar otra sesión</button>
+    </div>
+  </div>
+</div>
+
+<!-- 8. ERROR -->
+<p class="estado">8 · Error (permiso de micrófono)</p>
+<div class="phone" role="img" aria-label="Error de micrófono" style="min-height:560px">
+  <div class="sb"><span>15:57</span><span class="ic">✈︎ 100%</span></div>
+  <div class="safari"><span>🔒 valentinaorellana.cl</span></div>
+  <div class="top"><span class="menu">☰</span><b>Grabar sesión</b></div>
+  <div class="body">
+    <div class="alert-red" role="alert">
+      <p style="font-weight:700;font-size:17px;margin-bottom:6px">Safari no tiene permiso para usar el micrófono.</p>
+      <p style="color:var(--ink)">Toca <b>aA</b> en la barra de direcciones → <b>Ajustes del sitio web</b> → <b>Micrófono</b> → <b>Permitir</b>. Después vuelve a tocar Grabar.</p>
+    </div>
+    <button class="btn btn-rec" style="min-height:64px;font-size:19px">Reintentar</button>
+    <div class="card">
+      <p class="label" style="margin-bottom:6px">Otros avisos posibles</p>
+      <p style="font-size:14px"><b>El micrófono no capta sonido.</b> Cierra WhatsApp u otras apps que lo usen, y si sigue igual, reinicia Safari.</p>
+      <p style="font-size:14px;margin-top:8px"><b>Falta el consentimiento de grabación de Diego Pérez.</b> Sin él no se puede grabar esta sesión.</p>
+    </div>
+  </div>
+</div>
+
+<!-- 9. FICHA: RESUMEN IA + PREGUNTAR -->
+<p class="estado">9 · Ficha del paciente → Notas clínicas</p>
+<div class="phone" role="img" aria-label="Ficha con resumen automático" style="min-height:auto">
+  <div class="sb"><span>18:10</span><span class="ic">📶 Wi-Fi 70%</span></div>
+  <div class="safari"><span>🔒 valentinaorellana.cl</span></div>
+  <div class="top"><span class="menu">☰</span><b>Pacientes</b></div>
+  <div style="background:#fff;padding:12px 16px;display:flex;gap:12px;align-items:center">
+    <span class="avatar">CR</span>
+    <div><p class="paciente" style="font-weight:400">Camila Rojas</p><p class="sub" style="font-size:13px">32 años · ✓ Consentimiento de grabación</p></div>
+  </div>
+  <div class="tabs"><span>Datos</span><span>Sesiones (6)</span><span class="on">Notas clínicas (6)</span></div>
+  <div class="body">
+    <div class="card ia">
+      <span class="ia-badge">✦ Resumen automático (IA)</span>
+      <p style="font-weight:600;margin-top:8px">Miércoles 15 de octubre · 16:00</p>
+      <p class="sub" style="font-size:13px">Ind. presencial · 50 min grabados</p>
+      <h4>Puntos clave</h4>
+      <ul><li>Refiere mejor sueño desde que dejó el celular fuera de la pieza.</li><li>Conflicto con su jefa sigue siendo el principal gatillante de ansiedad.</li></ul>
+      <h4>Tareas dadas</h4>
+      <ul><li>Registro de pensamientos 3 veces esta semana.</li></ul>
+      <h4>Revisar la próxima sesión</h4>
+      <ul><li>Cómo le fue con la conversación pendiente con su jefa.</li></ul>
+      <p class="disc">Generado automáticamente por IA a partir de la grabación. Puede tener errores: no reemplaza tu nota clínica.</p>
+      <div class="two"><button class="btn btn-out">Ver transcripción completa</button><button class="btn btn-out">Copiar a mi nota</button></div>
+    </div>
+
+    <div class="card">
+      <p style="font-weight:600">Miércoles 15 de octubre</p>
+      <p class="label" style="margin:2px 0 8px">Tu nota</p>
+      <p class="nota">Buena adherencia. Trabajar asertividad.</p>
+    </div>
+
+    <div class="card" style="background:var(--warm);box-shadow:none">
+      <span class="ia-badge">✦ Resumen automático (IA)</span>
+      <p class="sub" style="margin-top:8px">Sesión del 8 de octubre: en proceso. Aparecerá aquí solo.</p>
+    </div>
+
+    <div class="card">
+      <p style="font-weight:700;font-size:17px">Preguntar a la IA</p>
+      <p class="sub" style="font-size:13px;margin-bottom:10px">Sobre las sesiones grabadas de Camila Rojas</p>
+      <select class="input" style="width:100%;margin-bottom:8px" aria-label="Sesiones"><option>Todas las sesiones (6)</option></select>
+      <div class="input" style="margin-bottom:8px">Ej.: ¿Qué dijo sobre su mamá en las últimas sesiones?</div>
+      <div class="chips" style="margin-bottom:10px"><span class="chip">¿Qué tareas quedaron pendientes?</span><span class="chip">¿Cómo ha cambiado el sueño?</span><span class="chip">Temas que se repiten</span></div>
+      <button class="btn btn-dark">Preguntar</button>
+      <div class="answer" style="margin-top:12px">
+        <p class="label" style="margin-bottom:4px">¿Qué tareas quedaron pendientes?</p>
+        <p>El registro de pensamientos se dio en dos sesiones y en la última dijo que lo hizo solo una vez <span class="cita">(sesión 8 oct, min 23)</span>. Queda pendiente conversar con su jefa <span class="cita">(15 oct, min 41)</span>.</p>
+        <p class="disc" style="margin-top:8px">Respuesta de IA basada solo en las transcripciones. Revisa las citas.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
