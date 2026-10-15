@@ -161,8 +161,12 @@ export const POST: APIRoute = async ({ request }) => {
       } else if (actual.content !== content) {
         const historial = Array.isArray(actual.historial) ? actual.historial : [];
         historial.push({ content: actual.content, reemplazada: new Date().toISOString() });
-        const { error } = await supabase.from('session_notes').update({ content, historial }).eq('id', id);
+        // Solo si nadie la cambió entre la lectura y ahora (auditoría 15 oct
+        // 2026): guardando desde dos pestañas, una versión del historial se perdía.
+        const { data: guardada, error } = await supabase.from('session_notes').update({ content, historial })
+          .eq('id', id).eq('content', actual.content).select('id');
         if (error) redirect = withParam(redirect, 'error', `No se pudo guardar la nota: ${error.message}`);
+        else if (!guardada?.length) redirect = withParam(redirect, 'error', 'La nota cambió mientras la editabas (¿otra pestaña abierta?). Recarga la ficha y vuelve a guardar tu texto: no se perdió nada.');
       }
     }
   }

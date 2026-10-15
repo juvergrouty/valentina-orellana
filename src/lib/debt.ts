@@ -24,6 +24,27 @@ export function manualChargeLabel(notes: string | null | undefined): string | nu
   return line ? line.slice(MANUAL_CHARGE_PREFIX.length).trim() || null : null;
 }
 
+// ¿Esta sesión se le debe cobrar a la paciente? ÚNICA regla para el panel
+// (Inicio, Deudas, Por cobrar, Finanzas, Pacientes) y el link /pagar
+// (auditoría 15 oct 2026: antes había tres reglas distintas y los totales no
+// cuadraban entre páginas). Se cobra si no está pagada ni anulada, tiene monto
+// y es una sesión de verdad: confirmada, agendada por Valentina (aunque espere
+// el pago) o con comprobante de transferencia. NO se cobra:
+// - una reserva web recién apartada sin pagar (la paciente está pagando en su
+//   pestaña de Flow; si no paga, vence sola a los 30 min);
+// - una que Flow ya informó como pagada (PagoSinAviso: solo falta su aviso).
+export type Cobrable = {
+  status: string; paid_at?: string | null; debt_voided?: boolean | null; amount?: number | null;
+  created_by_admin?: boolean | null; notes?: string | null;
+};
+export function esCobrable(b: Cobrable): boolean {
+  if (b.paid_at || b.debt_voided === true || !((b.amount ?? 0) > 0)) return false;
+  const notas = b.notes ?? '';
+  if (notas.includes('PagoSinAviso')) return false;
+  if (b.status === 'confirmed') return true;
+  return b.status === 'pending_payment' && (b.created_by_admin === true || notas.includes('ComprobanteTransferencia'));
+}
+
 export async function getPendingDebtByEmail(email: string): Promise<DebtBooking[]> {
   const { data } = await supabase
     .from('bookings')
@@ -63,7 +84,7 @@ export async function getTotalOwedByEmail(email: string): Promise<DebtBooking[]>
     getPendingDebtByEmail(email),
     supabase
       .from('bookings')
-      .select('id, session_type, session_date, session_time, amount, notes')
+      .select('id, session_type, session_date, session_time, amount, notes, status, paid_at, debt_voided, created_by_admin')
       .eq('patient_email', email.toLowerCase())
       .eq('status', 'pending_payment')
       // Antes se excluían acá los cobros manuales (session_date='2099-12-31'):
@@ -74,7 +95,9 @@ export async function getTotalOwedByEmail(email: string): Promise<DebtBooking[]>
       // descripción real (ver manualChargeLabel) en vez de un tipo de sesión.
       .gt('amount', 0)
       .order('session_date', { ascending: true })
-      .then(r => r.data ?? []),
+      // Sin reservas web recién apartadas ni pagadas sin aviso (esCobrable):
+      // antes el link /pagar las arrastraba y se podía cobrar dos veces.
+      .then(r => (r.data ?? []).filter(esCobrable).map(({ status: _s, paid_at: _p, debt_voided: _d, created_by_admin: _c, ...b }) => b)),
   ]);
   return [...deuda, ...porCobrar].sort((a, b) => a.session_date.localeCompare(b.session_date));
 }

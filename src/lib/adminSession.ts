@@ -44,7 +44,10 @@ let cacheRevocados: { firmas: Set<string>; leido: number } | null = null;
 
 async function leerRevocados(): Promise<{ firma: string; vence: number }[]> {
   const { supabase } = await import('./supabase');
-  const { data } = await supabase.from('settings').select('value').eq('key', SETTING_REVOCADOS).maybeSingle();
+  const { data, error } = await supabase.from('settings').select('value').eq('key', SETTING_REVOCADOS).maybeSingle();
+  // Si la lectura falla se lanza (no se guarda una lista vacía 30 s, que
+  // aceptaría sesiones ya cerradas; auditoría 15 oct 2026).
+  if (error) throw new Error(error.message);
   try { const l = JSON.parse(data?.value || '[]'); return Array.isArray(l) ? l : []; } catch { return []; }
 }
 

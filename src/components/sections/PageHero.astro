@@ -3,11 +3,11 @@ interface Props {
   label: string;
   title: string;
   description?: string;
-  image?: string;        // imagen desktop, por defecto hero-paginas.jpg
+  image?: string;        // imagen desktop, por defecto hero-paginas.webp
   imageMobile?: string;  // imagen opcional para mobile (< 768px)
   imageMobilePosition?: string; // encuadre de imageMobile (CSS object-position)
 }
-const { label, title, description, image = '/images/hero-paginas.jpg', imageMobile, imageMobilePosition } = Astro.props;
+const { label, title, description, image = '/images/hero-paginas.webp', imageMobile, imageMobilePosition } = Astro.props;
 ---
 
 <section class="relative overflow-hidden min-h-[300px] md:min-h-[420px] flex items-end border-b border-dust">

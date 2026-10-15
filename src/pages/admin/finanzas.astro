@@ -4,6 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { nowCL, todayCL } from '../../lib/dateUtils';
 import { sesionYaEmpezo } from '../../lib/porCobrar';
+import { esCobrable } from '../../lib/debt';
 import { manualChargeLabel } from '../../lib/debt';
 
 const MONTHS_LONG = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -13,7 +14,6 @@ const MONTHS_SHORT = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct
 const now      = nowCL();
 const curYM    = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 const selYM    = Astro.url.searchParams.get('mes') ?? curYM;
-const todayStr = todayCL();
 const SIN_FECHA = '2099-12-31'; // cobros manuales sin fecha de sesión
 
 // Reservas que existen de verdad: sin canceladas ni vencidas (una reserva web
@@ -29,7 +29,6 @@ const bookings = all ?? [];
 // deudas anuladas: la misma sesión salía como ingreso y como deuda.
 const pagada  = (b: any) => !!b.paid_at && b.debt_voided !== true;
 const anulada = (b: any) => b.debt_voided === true;
-const sinPagar = (b: any) => !b.paid_at && !anulada(b) && (b.amount ?? 0) > 0;
 const fechaChile = (iso: string) => nowCL(new Date(iso)).toISOString().slice(0, 10);
 
 // ── Ingresos del mes: lo pagado, por el MES EN QUE SE PAGÓ ──────────────────
@@ -59,19 +58,14 @@ pagosMes.forEach(b => {
 // También las sesiones ya realizadas que quedaron "esperando pago" con un link
 // enviado por Valentina (o con comprobante sin confirmar): esas nunca vencen
 // solas y antes no salían ni aquí ni en "Por cobrar".
-const esperandoLink = (b: any) => b.status === 'pending_payment' &&
-  (b.created_by_admin === true || String(b.notes ?? '').includes('ComprobanteTransferencia'));
-const deudas = bookings.filter(b => sinPagar(b) && (
-  // Solo si la sesión YA EMPEZÓ (fecha y hora de Chile), igual que /admin/deudas:
-  // antes bastaba la fecha y una sesión de hoy en la noche salía como deuda
-  // desde la mañana (María Ignacia, 15 oct 2026).
-  ((b.status === 'confirmed' || esperandoLink(b)) && b.session_date !== SIN_FECHA && sesionYaEmpezo(b.session_date, b.session_time)) ||
-  (b.session_date === SIN_FECHA)
-));
+// Regla única de cobro (src/lib/debt.ts, esCobrable), la misma de Inicio,
+// Deudas, Por cobrar y Pacientes (auditoría 15 oct 2026). "Te deben" = la
+// sesión ya empezó (o es un cobro manual sin fecha); "Por cobrar" = aún no.
+const deudas = bookings.filter(b => esCobrable(b) && sesionYaEmpezo(b.session_date, b.session_time));
 const totalAdeudado = deudas.reduce((s, b) => s + (b.amount ?? 0), 0);
 
 // ── Por cobrar: sesiones futuras agendadas que aún no se pagan ──────────────
-const porCobrar = bookings.filter(b => sinPagar(b) && b.session_date !== SIN_FECHA && !sesionYaEmpezo(b.session_date, b.session_time));
+const porCobrar = bookings.filter(b => esCobrable(b) && !sesionYaEmpezo(b.session_date, b.session_time));
 const totalPorCobrar = porCobrar.reduce((s, b) => s + (b.amount ?? 0), 0);
 
 // Quién debe y desde cuándo, agrupado por paciente (más antiguo primero)
@@ -102,8 +96,10 @@ const deudores = [...deudoresMap.values()].sort((a, b) => a.desde.localeCompare(
 deudores.forEach(d => d.sesiones.sort((a: any, b: any) => a.session_date.localeCompare(b.session_date)));
 
 // ── Sesiones del mes seleccionado (por fecha de sesión) ─────────────────────
-const inMonth = bookings.filter(b => (b.session_date ?? '').slice(0, 7) === selYM && b.status === 'confirmed');
-const pendienteMes = inMonth.filter(sinPagar);
+// Sesiones del mes: confirmadas y también las agendadas por Valentina que
+// esperan el pago (antes no salían y "sin pagar" daba $0 con una impaga).
+const inMonth = bookings.filter(b => (b.session_date ?? '').slice(0, 7) === selYM && (b.status === 'confirmed' || esCobrable(b)));
+const pendienteMes = inMonth.filter(esCobrable);
 const byType: Record<string, number> = {};
 inMonth.forEach(b => { const k = ST_LABEL[b.session_type] ?? b.session_type ?? 'otro'; byType[k] = (byType[k] ?? 0) + 1; });
 const totalAtenciones = inMonth.length;
@@ -135,7 +131,7 @@ const formatCLP = (n: number) =>
           <div class="fin-card-label">Ingresos pagados · {mesLabel}</div>
           <div class="fin-card-value">{formatCLP(ingresosMes)}</div>
           <div class="fin-card-foot">
-            <span class="fin-muted">{pagosMes.length} pago{pagosMes.length !== 1 ? 's' : ''} recibido{pagosMes.length !== 1 ? 's' : ''} en el mes</span>
+            <span class="fin-muted">{pagosMes.length} pago{pagosMes.length !== 1 ? 's' : ''} recibido{pagosMes.length !== 1 ? 's' : ''} en el mes (por fecha de pago)</span>
           </div>
         </div>
 
@@ -247,6 +243,7 @@ const formatCLP = (n: number) =>
 
       <!-- Detalle -->
       <div class="fin-section-head" style="margin-top:1.5rem;"><span>Sesiones del mes</span></div>
+      <p class="fin-muted" style="margin:-0.25rem 0 0.6rem;font-size:0.8rem;">Por fecha de la sesión: una sesión de este mes pagada el mes anterior no suma en los ingresos de arriba, y una del próximo mes pagada ahora sí.</p>
       <div class="fin-table-wrap">
         {inMonth.length === 0 ? (
           <p class="fin-muted" style="padding:1.5rem;text-align:center;">Sin sesiones este mes.</p>

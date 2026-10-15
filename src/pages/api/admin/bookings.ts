@@ -15,6 +15,8 @@ import { todayCL } from '../../../lib/dateUtils';
 import { chocaConOtraSesion } from '../../../lib/disponibilidad';
 import { limpiarRut, rutValido, RUT_EXTRANJERO_SII } from '../../../lib/rut';
 
+import { rutaInterna } from '../../../lib/rutaInterna';
+
 export const prerender = false;
 
 export const POST: APIRoute = async ({ request, redirect }) => {
@@ -23,7 +25,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   // Solo rutas internas (no a otro sitio). conParam: agrega "?" o "&" según
   // corresponda — antes "/admin/deudas" + "&error=…" daba una página 404.
   const destRaw = form.get('redirect')?.toString() ?? '';
-  const dest    = /^\/(?!\/)/.test(destRaw) && !destRaw.includes('\\') ? destRaw : '/admin/agenda';
+  const dest    = rutaInterna(destRaw, '/admin/agenda');
   const conParam = (d: string) => d + (d.includes('?') ? '&' : '?');
 
   // ── Guardar interruptor de recordatorio (WhatsApp 4h / email 24h) ────────────

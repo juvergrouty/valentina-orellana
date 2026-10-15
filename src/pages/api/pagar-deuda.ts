@@ -51,7 +51,8 @@ export const POST: APIRoute = async ({ request }) => {
     if (cfg['flow_enabled'] === 'false') {
       return Response.json({ error: 'Flow está deshabilitado en la configuración.' }, { status: 400 });
     }
-    const baseUrl = cfg['flow_env'] === 'production' ? FLOW_URLS.production : FLOW_URLS.sandbox;
+    // Mismo criterio que la reserva: el setting manda; sin setting, la variable FLOW_ENV (undefined).
+    const baseUrl = cfg['flow_env'] === 'production' ? FLOW_URLS.production : cfg['flow_env'] === 'sandbox' ? FLOW_URLS.sandbox : undefined;
 
     const reqUrl  = new URL(request.url);
     const siteUrl = `${reqUrl.protocol}//${reqUrl.host}`;

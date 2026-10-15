@@ -201,12 +201,19 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
          el botón queda escondido tras la hamburguesa). No en las páginas del
          propio flujo de reserva/pago. -->
     {mostrarAgendarFlotante && (
-      <a href="/agenda"
-         class="md:hidden fixed bottom-6 left-6 z-50 h-14 px-6 rounded-full shadow-lg flex items-center font-body text-sm font-medium tracking-wide text-white"
+      <a href="/agenda" id="agendar-flotante"
+         class="md:hidden fixed bottom-6 left-6 z-50 h-14 px-6 rounded-full shadow-lg flex items-center font-body text-sm font-medium tracking-wide text-white transition-all duration-300"
          style="background-color:#576352;">
         Agendar sesión
       </a>
     )}
+    {/* Aparece recién al bajar (auditoría 15 oct 2026): arriba ya está el botón
+        principal de la página, y al abrir se veían dos "Agendar" tapando el texto. */}
+    {mostrarAgendarFlotante && <script is:inline>(function(){
+      var b=document.getElementById('agendar-flotante');if(!b)return;
+      function f(){var on=window.scrollY>window.innerHeight*0.6;b.style.opacity=on?'1':'0';b.style.transform=on?'none':'translateY(1rem)';b.style.pointerEvents=on?'auto':'none';b.tabIndex=on?0:-1;}
+      f();window.addEventListener('scroll',f,{passive:true});
+    })();</script>}
 
     <!-- Botón flotante WhatsApp (en /agenda más arriba: no tapa el sello de reCAPTCHA).
 -->

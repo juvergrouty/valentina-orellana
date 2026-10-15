@@ -269,9 +269,10 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
                                   {formatDate(b.session_date)}{b.session_time ? ` · ${b.session_time.slice(0,5)}` : ''} · {formatCLP(b.amount)}
                                 </p>
                               </div>
-                              <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                              <div style="display:flex;gap:0.5rem 2rem;flex-wrap:wrap;align-items:center;">
                                 <button type="button" class="btn btn-outline btn-sm btn-toggle-pay" data-bid={b.id}>💰 Marcar pagado</button>
-                                <button type="button" class="btn btn-outline btn-sm btn-void-debt" data-bid={b.id} style="color:var(--stone);">Anular deuda</button>
+                                {/* Separado de "Marcar pagado" (auditoría 15 oct 2026); pide confirmación. */}
+                                <button type="button" class="btn-void-debt" data-bid={b.id} style="background:none;border:none;padding:0.3rem 0;color:var(--stone);font-size:0.78rem;text-decoration:underline;cursor:pointer;">Anular deuda</button>
                               </div>
                             </div>
                             <div id={`pay-${b.id}`} style="display:none;margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--warm);">

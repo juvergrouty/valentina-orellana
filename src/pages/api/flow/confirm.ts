@@ -231,6 +231,14 @@ export const POST: APIRoute = async ({ request }) => {
           }
           if (disponible === false) {
             candidates = candidates.filter((x: { id: string }) => x.id !== c.id);
+            // El pago queda anotado en la reserva (igual que con una sesión
+            // cancelada) y se cierra su link de /recuperar: antes quedaba sin
+            // registro y, si la hora se liberaba después, la paciente podía
+            // volver a pagarla (auditoría 15 oct 2026). No suma en Finanzas
+            // mientras la reserva siga vencida.
+            await supabase.from('bookings')
+              .update({ mp_payment_id: String(status.flowOrder), paid_at: new Date().toISOString(), payment_note: 'Flow (hora ocupada)', recovery_token: null })
+              .eq('id', c.id).is('paid_at', null);
             await logError('flow/pago-hora-ocupada',
               `Pago recibido de ${c.patient_name} (${c.patient_email}) por la sesión del ${c.session_date} a las ${String(c.session_time).slice(0, 5)}, pero esa hora ya se había liberado y ya no está disponible (la tomó otra persona, se bloqueó o se ocupó en tu calendario). Hay que reembolsar o reagendar.`,
               { bookingId: c.id, token, flowOrder: status.flowOrder, amount: status.amount });
@@ -387,8 +395,8 @@ export const POST: APIRoute = async ({ request }) => {
         }
       }
 
-    } else if (status.status === 3 || status.status === 4) {
-      // ❌ Rechazado o anulado — cancelar SOLO si era una reserva web nueva sin
+    } else if (status.status === 4) {
+      // ❌ Anulado — cancelar SOLO si era una reserva web nueva sin
       // pagar (status='pending_payment'). Nunca tocar:
       // - una reserva de deuda que ya estaba 'confirmed' (la sesión ya ocurrió);
       // - una sesión o cobro que creó Valentina desde el panel (created_by_admin):
@@ -406,6 +414,9 @@ export const POST: APIRoute = async ({ request }) => {
         await logError('flow/cancelar-reserva', 'No se pudo marcar la reserva como cancelada tras rechazo/anulación del pago', { token, error: error.message });
       }
     }
+    // status=3 (rechazado, ej. tarjeta rechazada) → no se cancela (auditoría
+    // 15 oct 2026): la paciente puede reintentar, y si pagaba después la hora ya
+    // estaba liberada. La reserva web vence sola a los 30 min si no paga.
     // status=1 (pendiente) → no hacemos nada, esperamos otro webhook
 
   } catch (err) {

@@ -12,7 +12,7 @@ const todayStr = now.toISOString().split('T')[0];
 
 const { data: all } = await supabase
   .from('bookings')
-  .select('patient_email, amount, status, payment_method, session_type, session_date, paid_at, debt_voided')
+  .select('patient_email, amount, status, payment_method, session_type, session_date, paid_at, debt_voided, created_by_admin, notes')
   .gte('session_date', sinceStr)
   .not('status', 'in', '(cancelled,expired)') // una reserva web abandonada no es un agendamiento
   .neq('session_date', '2099-12-31');          // cobros manuales sin sesión
@@ -47,14 +47,20 @@ bookings.forEach(b => { const k = b.session_type ?? 'otro'; byType[k] = (byType[
 const topServicios = Object.entries(byType).sort((a, b) => b[1] - a[1]);
 const maxServicio = Math.max(1, ...topServicios.map(([, n]) => n));
 
-// Agendamientos por semana (últimas 12 semanas)
+// Sesiones por semana (últimas 12 semanas), de lunes a domingo como el
+// Inicio (auditoría 15 oct 2026: antes eran los 7 días hasta hoy y contaba
+// reservas web todavía sin pagar). Cuenta sesiones confirmadas o agendadas por
+// Valentina; no suma lo agendado solo en Encuadrado (eso lo muestra el Inicio).
+const sesionReal = (b: { status: string; created_by_admin?: boolean | null; notes?: string | null }) =>
+  b.status === 'confirmed' || b.created_by_admin === true || (b.notes ?? '').includes('ComprobanteTransferencia');
+const lunesActual = new Date(now); lunesActual.setDate(lunesActual.getDate() - ((lunesActual.getDay() + 6) % 7));
 const weeks: { label: string; count: number }[] = [];
 for (let i = 11; i >= 0; i--) {
-  const wEnd   = new Date(now); wEnd.setDate(wEnd.getDate() - i * 7);
-  const wStart = new Date(wEnd); wStart.setDate(wStart.getDate() - 6);
+  const wStart = new Date(lunesActual); wStart.setDate(wStart.getDate() - i * 7);
+  const wEnd   = new Date(wStart); wEnd.setDate(wEnd.getDate() + 6);
   const s = wStart.toISOString().split('T')[0];
   const e = wEnd.toISOString().split('T')[0];
-  const count = bookings.filter(b => b.session_date >= s && b.session_date <= e).length;
+  const count = bookings.filter(b => b.session_date >= s && b.session_date <= e && sesionReal(b)).length;
   weeks.push({ label: `${wStart.getDate()}/${wStart.getMonth() + 1}`, count });
 }
 const maxWeek = Math.max(1, ...weeks.map(w => w.count));
@@ -114,7 +120,7 @@ const formatCLP = (n: number) =>
       <!-- Gráficos -->
       <div class="rep-charts">
         <div class="rep-chart-card">
-          <p class="rep-chart-title">Agendamientos por semana</p>
+          <p class="rep-chart-title">Sesiones por semana (lunes a domingo)</p>
           <p class="rep-chart-sub">Últimas 12 semanas</p>
           {agendamientosTotales === 0 ? (
             <p class="rep-empty">Sin datos en este periodo.</p>

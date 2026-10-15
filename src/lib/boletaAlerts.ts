@@ -23,7 +23,10 @@ const CTX_EMISION = ['boleta/emision', 'flow/boleta-automatica', 'boleta/confirm
 // Contextos que significan "se emitió pero no se envió".
 const CTX_ENVIO = ['boleta/envio'];
 
-const DIAS = 14;
+// 90 días (antes 14): una boleta que no se emitió seguía sin emitir pasadas
+// las 2 semanas, pero el aviso desaparecía (auditoría 15 oct 2026). El aviso
+// se va solo cuando la sesión tiene folio vigente.
+const DIAS = 90;
 
 function ultimoEnvio(notes: string | null): number {
   const marcas = [...(notes ?? '').matchAll(/BoletaEmailEnviada (\S+)/g)].map(m => Date.parse(m[1])).filter(t => !isNaN(t));
@@ -40,7 +43,7 @@ export async function getBoletaAlerts(): Promise<BoletaAlert[]> {
       .in('level', ['warn', 'error'])
       .gt('created_at', desde)
       .order('created_at', { ascending: false })
-      .limit(200),
+      .limit(1000),
     supabase.from('bookings').select('id')
       .or(`notes.ilike.%${MARCA_PENDIENTE}%,notes.ilike.%${MARCA_PENDIENTE_EMISION}%,notes.ilike.%${MARCA_EMITIENDO}%`).limit(50),
   ]);

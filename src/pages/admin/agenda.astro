@@ -517,7 +517,9 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
               <label style="display:flex;align-items:center;gap:0.45rem;cursor:pointer;font-weight:600;">
                 <input type="checkbox" id="svc-all" checked /> Todos los servicios
               </label>
-              {allSvcFull.map((s) => (
+              {/* Solo servicios que se ofrecen en la web o que tienen una sesión esta
+           semana (auditoría 15 oct 2026: salían 9, varios que ya no se ofrecen). */}
+      {allSvcFull.filter((s) => serviciosEnWeb.has(s.id) || bookings.some((b) => b.service_id === s.id)).map((s) => (
                 <label style="display:flex;align-items:center;gap:0.45rem;cursor:pointer;">
                   <input type="checkbox" class="svc-cb" value={s.id} />
                   <span style={`width:10px;height:10px;border-radius:2px;flex-shrink:0;background:${(svcColor[s.id] ?? NEUTRAL_COLOR).bd};`}></span>
@@ -549,6 +551,9 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           {s.name}
         </span>
       ))}
+      <span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.72rem;color:#374151;"><span style="width:12px;height:12px;border-radius:3px;background:#dcfce7;border:1px solid #16a34a;"></span>Sesión pagada</span>
+      <span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.72rem;color:#374151;"><span style="width:12px;height:12px;border-radius:3px;background:#fee2e2;border:1px solid #dc2626;"></span>Sesión por pagar</span>
+      <span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.72rem;color:#374151;"><span style="width:12px;height:12px;border-radius:3px;background:repeating-linear-gradient(45deg,#eef1f5,#eef1f5 3px,#e5e9ef 3px,#e5e9ef 6px);border:1px dashed #9aa4b2;"></span>Google Calendar / Encuadrado</span>
     </div>
 
     {paymentLink && (
@@ -610,13 +615,13 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
                  también horarios guardados de servicios ocultos (paquetes, familia) y
                  franjas antiguas sin servicio, que a los pacientes no se les ofrecen. */}
             {(availByDow[day.dow] ?? []).filter(s => serviciosEnWeb.has(s.svc) && !quitadasSemana.has(`${day.isoDate}|${s.start}|${s.svc}`)).map(s => (
-              <div class="avail-block" data-svc={s.svc}
+              <div class="avail-block" data-svc={s.svc} data-start={s.start}
                 title={`Disponible ${s.start}${s.svc && svcMap[s.svc] ? ' · ' + svcMap[s.svc] : ''}`}
                 style={`top:${s.min - 360}px;height:${s.height - 2}px;--svcbg:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bg};--svcbd:${(s.svc && svcColor[s.svc] ? svcColor[s.svc] : NEUTRAL_COLOR).bd}`}></div>
             ))}
 
             {(extraByDate[day.isoDate] ?? []).map(x => (
-              <div class="extra-block" data-svc={x.svc} data-id={x.id} data-desc={`${x.fecha.split('-').reverse().slice(0, 2).join('/')} ${x.hora} · ${x.label}`}
+              <div class="extra-block" data-svc={x.svc} data-id={x.id} data-start={x.hora} data-desc={`${x.fecha.split('-').reverse().slice(0, 2).join('/')} ${x.hora} · ${x.label}`}
                 title={`Hora abierta solo este día · ${x.hora} · ${x.label}`}
                 style={`top:${x.min - 360}px;height:${Math.max(x.height, 24) - 2}px;--svcbg:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bg};--svcbd:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bd}`}></div>
             ))}
@@ -834,7 +839,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           </div>
           <div class="bp-field">
             <label>Hora</label>
-            <input type="time" name="session_time" id="bp-time" required step="900">
+            <input type="time" name="session_time" id="bp-time" required step="300">
           </div>
         </div>
 
@@ -2021,6 +2026,18 @@ function getTimeFromClientY(clientY) {
 let dragState = null;
 const allCols = Array.from(document.querySelectorAll('.cal-col'));
 
+// Cuadro de hora libre (horario disponible o hora abierta ese día) visible
+// bajo el punto del clic, o null.
+function bloqueLibreEn(col, clientY) {
+  if (!col) return null;
+  for (const el of col.querySelectorAll('.avail-block, .extra-block')) {
+    if (getComputedStyle(el).display === 'none') continue;
+    const r = el.getBoundingClientRect();
+    if (clientY >= r.top && clientY < r.bottom) return el;
+  }
+  return null;
+}
+
 function clearDragSel() {
   allCols.forEach(c => {
     c.classList.remove('drag-sel');
@@ -2057,7 +2074,7 @@ function applyDragSel(startIdx, endIdx, fromSnap, toSnap) {
 
 allCols.forEach(col => {
   col.addEventListener('mousedown', e => {
-    if (e.target.closest('.cal-event') || e.target.closest('.extra-block')) return;
+    if (e.target.closest('.cal-event')) return;
     if (e.button !== 0) return;
     e.preventDefault();
 
@@ -2114,12 +2131,22 @@ allCols.forEach(col => {
       } else {
         clearDragSel();
         const date = state.startDate;
-        const time = state.startTime;
+        // Clic sobre una hora libre (cuadro de color): se agenda a la hora de
+        // INICIO de ese cuadro y con su servicio, no a la altura exacta del clic
+        // redondeada a 15 min (Valentina, 15 oct 2026: si no se hacía clic en el
+        // centro exacto, el panel mostraba una hora parecida pero no igual).
+        const libre = bloqueLibreEn(allCols[state.startIdx], state.startY);
+        const time = libre?.dataset.start || state.startTime;
         document.getElementById('bp-date').value = date;
         document.getElementById('bp-time').value = time;
         document.getElementById('bp-date-label').textContent = isoToLabel(date);
         mostrarPestanaAgenda();
         openBookingPanel(date, time);
+        const svcSel = document.getElementById('bp-service-sel');
+        if (libre?.dataset.svc && svcSel && [...svcSel.options].some(o => o.value === libre.dataset.svc)) {
+          svcSel.value = libre.dataset.svc;
+          svcSel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
       }
     }
 

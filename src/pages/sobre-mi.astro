@@ -7,7 +7,7 @@ import PageHero   from '../components/sections/PageHero.astro';
 
   <!-- Celular: la foto con su hijo va en la portada y no se repite abajo; computador:
        portada del escritorio y la foto al lado del texto (Vale, 14 oct 2026). -->
-  <PageHero label="Mi historia" title="Sobre mí" image="/images/banner-sobre-mi.jpg" imageMobile="/images/sobre-mi-2.jpg" imageMobilePosition="50% 20%" />
+  <PageHero label="Mi historia" title="Sobre mí" image="/images/banner-sobre-mi.webp" imageMobile="/images/sobre-mi-2.webp" imageMobilePosition="50% 20%" />
 
   <!-- Contenido -->
   <section class="py-section bg-sand">
@@ -19,7 +19,7 @@ import PageHero   from '../components/sections/PageHero.astro';
           <!-- Medidas reales para reservar el espacio; diferida: en celular no se muestra (la foto
                va en la portada) y así no se descarga dos veces (14 oct 2026). -->
           <img
-            src="/images/sobre-mi-2.jpg"
+            src="/images/sobre-mi-2.webp"
             width="960" height="1280"
             loading="lazy" decoding="async"
             alt="Ps. Valentina Orellana"

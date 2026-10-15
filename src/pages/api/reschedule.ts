@@ -21,7 +21,7 @@ export const POST: APIRoute = async ({ request }) => {
   if (!bookingId || (!email && !conClave) || !session_date || !session_time) {
     return json({ error: 'Faltan campos obligatorios.' }, 400);
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(session_date) || !/^\d{2}:\d{2}$/.test(session_time.slice(0, 5))) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(session_date) || !/^\d{2}:\d{2}$/.test(String(session_time))) {
     return json({ error: 'Fecha u hora inválida.' }, 400);
   }
 

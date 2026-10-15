@@ -59,16 +59,19 @@ const resumenPareja     = resumenGrupo('pareja');
   title="Psicóloga Las Condes | Adultos y Parejas"
   description="Reserva tu hora con Ps. Valentina Orellana: terapia para adultos y parejas, presencial en Las Condes u online. Agenda y paga en línea, simple y seguro."
 >
-  <section class="relative overflow-hidden min-h-[300px] md:min-h-[360px] flex items-end border-b border-dust">
-    <img src="/images/hero-paginas.jpg" alt="" class="absolute inset-0 w-full h-full object-cover object-center" aria-hidden="true" />
+  <!-- Cabecera más baja en celular (auditoría 15 oct 2026): antes ocupaba más de
+       la mitad de la pantalla y no se veía ninguna opción para reservar. WebP de
+       14 KB (antes JPG de 134 KB), con medidas y prioridad de carga. -->
+  <section class="relative overflow-hidden min-h-[170px] md:min-h-[360px] flex items-end border-b border-dust">
+    <img src="/images/hero-paginas.webp" alt="" width="1000" height="336" fetchpriority="high" decoding="async" class="absolute inset-0 w-full h-full object-cover object-center" aria-hidden="true" />
     <div class="absolute inset-0 bg-gradient-to-t from-ink/80 via-ink/30 to-ink/10"></div>
-    <div class="relative z-10 container-site py-14 md:py-20 w-full">
-      <p class="label text-white/60 mb-3">Agenda en línea</p>
-      <div class="w-10 h-0.5 bg-white/30 mb-5"></div>
-      <h1 class="font-heading font-semibold text-white leading-tight mb-4" style="font-size:clamp(2rem,5vw,3.8rem);letter-spacing:-0.02em;">
+    <div class="relative z-10 container-site py-6 md:py-20 w-full">
+      <p class="label text-white/60 mb-3 hidden md:block">Agenda en línea</p>
+      <div class="w-10 h-0.5 bg-white/30 mb-5 hidden md:block"></div>
+      <h1 class="font-heading font-semibold text-white leading-tight mb-2 md:mb-4" style="font-size:clamp(1.8rem,5vw,3.8rem);letter-spacing:-0.02em;">
         Reserva tu sesión
       </h1>
-      <p class="font-body text-white/75 font-light text-lg max-w-lg leading-relaxed">Elige tu horario y paga de forma segura con Flow.</p>
+      <p class="font-body text-white/75 font-light text-base md:text-lg max-w-lg leading-relaxed">Elige tu horario y paga de forma segura con Flow.</p>
     </div>
   </section>
 

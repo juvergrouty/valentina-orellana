@@ -25,7 +25,7 @@ export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: 
   {
     const q = await supabase
       .from('bookings')
-      .select('id, patient_name, patient_email, session_date, session_time, google_event_id, created_by_admin, notes, mp_preference_id')
+      .select('id, patient_name, patient_email, session_date, session_time, google_event_id, created_by_admin, notes, mp_preference_id, created_at')
       .eq('status', 'pending_payment')
       .neq('session_date', '2099-12-31') // no tocar cobros manuales sin fecha
       .lt('created_at', cutoff);
@@ -84,7 +84,15 @@ export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: 
           }
           continue;
         }
-      } catch { /* si Flow no responde, se sigue como antes */ }
+      } catch {
+        // Flow no respondió (auditoría 15 oct 2026): antes se liberaba igual, y
+        // si la paciente sí había pagado perdía su hora y recibía "tu hora se
+        // liberó". Ahora se espera a la próxima pasada; solo si la reserva ya
+        // tiene más de 2 horas se libera igual (para que una caída larga de
+        // Flow no deje horas bloqueadas para siempre).
+        const creada = Date.parse(String(b.created_at ?? ''));
+        if (!Number.isFinite(creada) || Date.now() - creada < 2 * 60 * 60 * 1000) continue;
+      }
     }
     const token = crypto.randomUUID();
     // "Reclama" la fila de forma atómica con el propio WHERE status='pending_payment':

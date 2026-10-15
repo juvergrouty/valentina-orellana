@@ -201,6 +201,10 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
             : `Boleta no emitida automáticamente: ${res.error}`,
             { bookingId, patientEmail: b.patient_email, error: res.error });
         }
+        // Un error pasajero (no la falta de RUT) se reintenta: emitBoletaParaReserva
+        // tiene candado y folio, así que repetirla nunca emite dos boletas
+        // (auditoría 15 oct 2026: antes la tarea quedaba "hecha" y no se reintentaba).
+        if (!res.ok && !(res.error ?? '').toLowerCase().includes('rut')) return { ok: false, error: res.error ?? 'boleta no emitida' };
         return { ok: true, nota: res.ok ? undefined : res.error };
       }
       case 'pasos': {

@@ -17,6 +17,9 @@ const { data: patient } = consent?.patient_id
   ? await supabase.from('patients').select('*').eq('id', consent.patient_id).maybeSingle()
   : { data: null };
 
+// Link inválido: responde 404 (no 200) aunque muestre el mensaje (auditoría 15 oct 2026).
+if (!consent || !patient) Astro.response.status = 404;
+
 // Paciente extranjera/o sin RUT chileno: firma con su documento de identidad.
 const sinRut = patient?.sin_rut === true && !patient?.rut;
 const contactEmail = await consentContactEmail();

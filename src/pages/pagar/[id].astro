@@ -14,6 +14,8 @@ const { id } = Astro.params;
 
 const { data: patient } = await supabase
   .from('patients').select('id, name, email').eq('id', id!).maybeSingle();
+// Link inválido: responde 404 (no 200) aunque muestre el mensaje (auditoría 15 oct 2026).
+if (!patient) Astro.response.status = 404;
 
 const todo = patient?.email ? await getTotalOwedByEmail(patient.email) : [];
 // Sesiones con comprobante de transferencia esperando confirmación: no se

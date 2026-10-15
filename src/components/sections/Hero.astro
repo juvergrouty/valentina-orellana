@@ -7,8 +7,11 @@ const cache   = await getCachedReviews();
 // es un elogio y no cuenta.
 const sinTildes = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const quedaLejos = (t: string) => /lejos(?!\s+(la|el|lo)\s+mejor)/.test(sinTildes(t)) ? 1 : 0;
-const reviews = (cache?.reviews ?? []).filter(r => r.text)
-  .sort((a, b) => quedaLejos(a.text) - quedaLejos(b.text))
+// Auditoría 15 oct 2026: las que dicen "lejos" ya no salen en la portada
+// (como en la sección de opiniones), salvo que no haya otras. Los textos no se editan.
+const conTexto = (cache?.reviews ?? []).filter(r => r.text);
+const sinLejos = conTexto.filter(r => !quedaLejos(r.text));
+const reviews = (sinLejos.length >= 2 ? sinLejos : [...conTexto].sort((a, b) => quedaLejos(a.text) - quedaLejos(b.text)))
   .slice(0, 5);
 const rating  = cache?.rating ?? 5.0;
 const total   = cache?.total ?? null;
@@ -120,16 +123,18 @@ const total   = cache?.total ?? null;
               </Fragment>
             )}
           </div>
-        ) : (
+        ) : null}
+        {/* Credenciales siempre a la vista (auditoría 15 oct 2026): antes solo salían si no había reseñas. */}
+        <div class={reviews.length > 0 ? 'mt-5' : ''}>
           <div class="flex items-center gap-3">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#576352" stroke-width="1.75" class="flex-shrink-0">
               <path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c1.5 0 2.9.37 4.15 1.02"/>
             </svg>
             <p class="font-body text-sm text-stone leading-snug">
-              <span class="font-medium text-ink">Psicóloga Clínica</span> · Reg. Superintendencia de Salud N° 360070
+              <span class="font-medium text-ink">Psicóloga Clínica</span> · Universidad del Desarrollo · Reg. Superintendencia de Salud N° 360070
             </p>
           </div>
-        )}
+        </div>
 
       </div>
     </div>

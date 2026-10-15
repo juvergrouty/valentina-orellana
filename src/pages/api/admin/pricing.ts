@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
+import { rutaInterna } from '../../../lib/rutaInterna';
 
 export const prerender = false;
 
@@ -8,7 +9,7 @@ const TEXT_KEYS    = ['duration_individual', 'duration_pareja'];
 
 export const POST: APIRoute = async ({ request }) => {
   const form     = await request.formData();
-  const redirect = (form.get('redirect') as string) ?? '/admin/precios?saved=1';
+  const redirect = rutaInterna(form.get('redirect'), '/admin/precios?saved=1');
 
   // Guardar precios (numéricos)
   for (const key of NUMERIC_KEYS) {

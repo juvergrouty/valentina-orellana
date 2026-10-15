@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { todayCL, hoursUntilSessionCL } from './dateUtils';
+import { esCobrable, type Cobrable } from './debt';
 
 // Sesiones sin pagar, separadas en DOS listas que no se tocan (14 oct 2026),
 // según si la sesión ya empezó (hora de Chile):
@@ -36,7 +37,7 @@ export type SesionSinPagar = {
 export type SesionPorCobrar = SesionSinPagar;
 export type SesionAdeudada = SesionSinPagar;
 
-const COLUMNAS = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, mp_preference_id, created_at, notes, status';
+const COLUMNAS = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, mp_preference_id, created_at, notes, status, paid_at, debt_voided, created_by_admin';
 
 async function sinPagar(desde?: string): Promise<SesionSinPagar[]> {
   let q = supabase
@@ -49,7 +50,9 @@ async function sinPagar(desde?: string): Promise<SesionSinPagar[]> {
   if (desde) q = q.gte('session_date', desde);
   const { data, error } = await q.order('session_date', { ascending: true }).order('session_time', { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []) as SesionSinPagar[];
+  // Misma regla que Finanzas, Pacientes y /pagar (src/lib/debt.ts, esCobrable):
+  // sin reservas web recién apartadas ni las que Flow ya informó pagadas.
+  return ((data ?? []) as (SesionSinPagar & Cobrable)[]).filter(esCobrable);
 }
 
 /** Por cobrar: sin pagar y la sesión todavía no empieza. */

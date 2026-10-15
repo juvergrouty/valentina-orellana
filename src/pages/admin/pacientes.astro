@@ -2,7 +2,8 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { todayCL } from '../../lib/dateUtils';
+import { esCobrable } from '../../lib/debt';
+import { sesionYaEmpezo } from '../../lib/porCobrar';
 import { getConsentAlerts } from '../../lib/consent';
 
 const q      = Astro.url.searchParams.get('q') ?? '';
@@ -29,11 +30,10 @@ const [{ count: countAll }, { count: countActive }, { count: countInactive }] = 
 ]);
 
 // ── Reservas (para última/próxima sesión y cobros) ─────────────────────────
-const todayStr = todayCL();
 const { data: bookings } = await supabase
   .from('bookings')
-  .select('patient_email, session_date, status, amount, paid_at, debt_voided')
-  .neq('status', 'cancelled');
+  .select('patient_email, session_date, session_time, status, amount, paid_at, debt_voided, created_by_admin, notes')
+  .not('status', 'in', '(cancelled,expired)');
 
 type Stat = { last: string | null; next: string | null; due: number };
 const statByEmail: Record<string, Stat> = {};
@@ -41,18 +41,17 @@ const statByEmail: Record<string, Stat> = {};
   const key = (b.patient_email ?? '').toLowerCase();
   if (!key) return;
   const s = (statByEmail[key] ??= { last: null, next: null, due: 0 });
-  if (b.session_date <= todayStr) {
+  // Total por cobrar: misma regla que Inicio, Deudas y Finanzas (esCobrable,
+  // auditoría 15 oct 2026), sumando lo que ya se debe y lo agendado sin pagar.
+  if (esCobrable(b)) s.due += b.amount ?? 0;
+  // Sin cobros manuales sin fecha ni reservas web sin pagar en última/próxima.
+  if (b.session_date === '2099-12-31' || (b.status === 'pending_payment' && !esCobrable(b))) return;
+  // Una sesión de hoy que aún no empieza es la "próxima", no la "última".
+  if (sesionYaEmpezo(b.session_date, b.session_time)) {
     if (!s.last || b.session_date > s.last) s.last = b.session_date;
   } else {
     if (!s.next || b.session_date < s.next) s.next = b.session_date;
   }
-  // CORREGIDO: misma definición de deuda que /admin/deudas y finanzas.astro
-  // (confirmada + sin paid_at + sin anular) — antes contaba cualquier reserva
-  // no confirmada (incluidas pending_payment sin terminar de pagar, que no es
-  // deuda real todavía) y no descontaba las deudas ya anuladas. Por eso esta
-  // lista podía mostrar "por pagar" en rojo para algo que la ficha del
-  // paciente (que sí usaba la definición correcta) mostraba distinto.
-  if (b.status === 'confirmed' && !b.paid_at && b.debt_voided !== true && b.amount) s.due += b.amount;
 });
 
 // Pacientes activos sin consentimiento de datos firmado (Ley 21.719).

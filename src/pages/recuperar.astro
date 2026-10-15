@@ -103,7 +103,8 @@ if (token) {
               // No dejar la hora ocupada sin forma de pagarla.
               await supabase.from('bookings').update({ status: 'expired', recovery_token: crypto.randomUUID() }).eq('id', reactivated.id);
             } else {
-              const baseUrl = cfg['flow_env'] === 'production' ? FLOW_URLS.production : FLOW_URLS.sandbox;
+              // Mismo criterio que la reserva: el setting manda; sin setting, la variable FLOW_ENV (undefined).
+    const baseUrl = cfg['flow_env'] === 'production' ? FLOW_URLS.production : cfg['flow_env'] === 'sandbox' ? FLOW_URLS.sandbox : undefined;
               const siteUrl = `${Astro.url.protocol}//${Astro.url.host}`;
 
               let subject = 'Sesión — Ps. Valentina Orellana';
