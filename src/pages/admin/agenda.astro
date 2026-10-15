@@ -201,6 +201,10 @@ try {
       });
       for (const ev of (data.items ?? [])) {
         if (ev.id && bookedGoogleIds.has(ev.id)) continue;
+        // Eventos de Encuadrado (su descripción trae el link encuadrado.com/reagendar):
+        // NUNCA se muestran (Valentina, 15 oct 2026). El calendario muestra solo
+        // las sesiones de valentinaorellana.cl y, debajo, sus eventos personales.
+        if (/encuadrado\.com/i.test(String(ev.description ?? ''))) continue;
         const sdt = ev.start?.dateTime;
         if (!sdt) continue; // omitir eventos de todo el día
         const date = sdt.slice(0, 10);
@@ -1494,7 +1498,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 .h-half { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed #efefef; pointer-events: none; }
 
 /* ── Events ──────────────────────────────────────────────────────────────── */
-.cal-event { position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px; cursor: pointer; overflow: hidden; border: 1px solid; transition: filter .1s, box-shadow .1s; z-index: 1; }
+.cal-event { position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px; cursor: pointer; overflow: hidden; border: 1px solid; transition: filter .1s, box-shadow .1s; z-index: 2; }
 .cal-event:hover { filter: brightness(0.95); box-shadow: 0 2px 8px rgba(0,0,0,.1); z-index: 3; }
 .ev-confirmed { background: #dcfce7; border-color: #86efac; color: #166534; }
 .ev-pending   { background: #fef3c7; border-color: #f59e0b; color: #92400e; border-style: dashed; border-width: 2px; }
@@ -1505,9 +1509,11 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 /* Estado de pago (manda sobre el color del servicio): rojo = por pagar, verde = pagada */
 .ev-pay-red   { background: #fee2e2; border: 1px solid #dc2626; color: #991b1b; }
 .ev-pay-green { background: #dcfce7; border: 1px solid #16a34a; color: #166534; }
+/* Eventos de Google Calendar: SIEMPRE debajo de las sesiones de la página
+   (Valentina, 15 oct 2026: antes un evento a la misma hora tapaba la sesión). */
 .cal-gcal-event {
   position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px;
-  overflow: hidden; z-index: 1; pointer-events: none;
+  overflow: hidden; z-index: 0; pointer-events: none;
   background: repeating-linear-gradient(45deg, #eef1f5, #eef1f5 6px, #e5e9ef 6px, #e5e9ef 12px);
   border: 1px dashed #9aa4b2; color: #64748b;
 }
