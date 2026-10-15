@@ -222,8 +222,9 @@ try {
         if (/encuadrado\.com\/reagendar/i.test(String(ev.description ?? ''))) {
           const ini = minutosDe(time), fin = ini + dur;
           const paciente = pacienteDeTitulo(String(ev.summary ?? ''));
-          const coincide = bookings.some((b: { session_date: string; session_time: string; duration_min?: number | null; patient_name: string }) => {
-            if (b.session_date !== date || !b.session_time) return false;
+          const coincide = bookings.some((b: { session_date: string; session_time: string; duration_min?: number | null; patient_name: string; status?: string }) => {
+            // Una reserva vencida sin pagar no es una sesión: no tapa la de Encuadrado.
+            if (b.status === 'expired' || b.session_date !== date || !b.session_time) return false;
             const bIni = minutosDe(String(b.session_time).slice(0, 5)), bFin = bIni + (b.duration_min ?? 50);
             return bIni < fin && ini < bFin && mismaPersona(b.patient_name, paciente);
           });
