@@ -438,7 +438,7 @@ const faltanDatos = patient ? [
                           onclick={`toggleNota('pay-${i}')`}>💰 Marcar pagado</button>
                         {/* Separado de "Marcar pagado" (auditoría 15 oct 2026): a la derecha de la fila, para no apretarlo por error. Pide confirmación. */}
                         <button type="button" class="btn btn-outline btn-sm btn-void-debt" data-bid={b.id}
-                          style="color:var(--stone);margin-left:auto;">Anular deuda</button>
+                          style="color:var(--stone);margin-left:auto;order:99;">Anular deuda</button>
                       </>
                     )}
                     {!isCancelled && b.session_date !== '2099-12-31' && b.patient_email && (

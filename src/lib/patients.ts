@@ -153,7 +153,9 @@ export async function tieneSesionesPagadas(email: string, excluirIds: string[] =
   const { data, error } = await supabase.from('bookings').select('id')
     .ilike('patient_email', em.replace(/[\\%_]/g, (c) => `\\${c}`))
     .not('paid_at', 'is', null)
-    .neq('status', 'cancelled');
+    // Ni cancelada ni vencida: un pago de una hora que ya estaba tomada (se
+    // reembolsa, flow/confirm.ts) no es su primer pago real (15 oct 2026).
+    .not('status', 'in', '(cancelled,expired)');
   if (error) return null;
   return (data ?? []).some((r: { id: string }) => !excluirIds.includes(r.id));
 }
@@ -203,7 +205,7 @@ export async function sendStepsOnFirstPayment(b: {
     // ilike sin comodines: un "_" o "%" en el correo no debe calzar con otro.
     let qPrevios = supabase.from('bookings').select('id')
       .ilike('patient_email', email.replace(/[\\%_]/g, (c) => `\\${c}`)).not('paid_at', 'is', null)
-      .neq('status', 'cancelled'); // un pago de una sesión cancelada no cuenta como primer pago
+      .not('status', 'in', '(cancelled,expired)'); // un pago de una sesión cancelada o de una hora ya tomada no cuenta como primer pago
     // Desde la cola: solo cuentan los pagos ANTERIORES a este. Si el envío se
     // reintenta después de que la paciente pagó otra sesión, ese pago nuevo no
     // debe hacer creer que este no era el primero (8 oct 2026).

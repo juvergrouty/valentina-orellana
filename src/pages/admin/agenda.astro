@@ -545,7 +545,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 
     <!-- Leyenda de colores por servicio (visible con el toggle) -->
     <div id="svc-legend" style="display:none;flex-wrap:wrap;gap:0.5rem 1rem;padding:0.5rem 1rem;border-bottom:1px solid #e5e7eb;">
-      {allSvcFull.map((s) => (
+      {allSvcFull.filter((s) => serviciosEnWeb.has(s.id) || bookings.some((b) => b.service_id === s.id)).map((s) => (
         <span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.72rem;color:#374151;">
           <span style={`width:12px;height:12px;border-radius:3px;background:${(svcColor[s.id] ?? NEUTRAL_COLOR).bg};border-left:3px solid ${(svcColor[s.id] ?? NEUTRAL_COLOR).bd};`}></span>
           {s.name}

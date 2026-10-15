@@ -48,14 +48,15 @@ export function esCobrable(b: Cobrable): boolean {
 export async function getPendingDebtByEmail(email: string): Promise<DebtBooking[]> {
   const { data } = await supabase
     .from('bookings')
-    .select('id, session_type, session_date, session_time, amount, notes')
+    .select('id, session_type, session_date, session_time, amount, notes, status, paid_at, debt_voided, created_by_admin')
     .eq('patient_email', email.toLowerCase())
     .eq('status', 'confirmed')
     .is('paid_at', null)
     .or('debt_voided.is.null,debt_voided.eq.false')
     .gt('amount', 0)
     .order('session_date', { ascending: true });
-  return data ?? [];
+  // Misma regla única (esCobrable): sin las que Flow ya informó pagadas.
+  return (data ?? []).filter(esCobrable).map(({ status: _s, paid_at: _p, debt_voided: _d, created_by_admin: _c, ...b }) => b);
 }
 
 // Guarda un historial (en `notes`, sin pisar lo que ya había) de TODOS los

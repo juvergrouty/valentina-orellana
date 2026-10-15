@@ -68,7 +68,8 @@ export async function csvConversiones(): Promise<string> {
   // 1) Reservas pagadas con clic de anuncio.
   const { data: pagadas, error: e1 } = await supabase.from('bookings')
     .select('patient_email, amount, paid_at, origen')
-    .not('paid_at', 'is', null).not('origen', 'is', null).gte('paid_at', desde)
+    // Sin reservas vencidas: un pago de una hora ya tomada se reembolsa (15 oct 2026).
+    .not('paid_at', 'is', null).not('origen', 'is', null).neq('status', 'expired').gte('paid_at', desde)
     .order('paid_at', { ascending: true }).limit(1000);
   await revisar(e1, 'reservas pagadas');
   const conClic = (pagadas ?? [])
@@ -80,7 +81,7 @@ export async function csvConversiones(): Promise<string> {
     // Ordenado por fecha: si algún día se corta en 1000 filas, se pierden las más
     // nuevas (a lo más falta una conversión), nunca el primer pago real.
     const { data: historial, error: e2 } = await supabase.from('bookings')
-      .select('patient_email, paid_at').in('patient_email', emails).not('paid_at', 'is', null)
+      .select('patient_email, paid_at').in('patient_email', emails).not('paid_at', 'is', null).neq('status', 'expired')
       .order('paid_at', { ascending: true }).limit(1000);
     await revisar(e2, 'historial de pagos');
     const primerPago = new Map<string, number>();

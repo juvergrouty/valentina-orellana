@@ -64,12 +64,16 @@ export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: 
   const { data: envRow } = await supabase.from('settings').select('value').eq('key', 'flow_env').maybeSingle();
   const flowBase = envRow?.value === 'production' ? FLOW_URLS.production : envRow?.value === 'sandbox' ? FLOW_URLS.sandbox : undefined;
 
+  // Si Flow no responde una vez, no se le vuelve a preguntar en esta pasada (no
+  // sumar 4 s de espera por cada reserva pendiente al cargar la agenda).
+  let flowSinRespuesta = false;
   for (const b of candidates) {
     // Antes de liberarla se le pregunta a Flow si alcanzó a pagar: si el aviso
     // de Flow se atrasa, antes le llegaba "tu hora se liberó" a alguien que ya
     // pagó (y podía terminar pagando dos veces desde /recuperar).
     if (b.mp_preference_id) {
       try {
+        if (flowSinRespuesta) throw new Error('Flow sin respuesta en esta pasada');
         // Máximo 4 s por consulta: esta limpieza corre al cargar la agenda y no
         // debe dejarla esperando si Flow está lento.
         const st = await Promise.race([
@@ -85,6 +89,7 @@ export async function expireStaleBookings(siteUrl?: string): Promise<{ claimed: 
           continue;
         }
       } catch {
+        flowSinRespuesta = true;
         // Flow no respondió (auditoría 15 oct 2026): antes se liberaba igual, y
         // si la paciente sí había pagado perdía su hora y recibía "tu hora se
         // liberó". Ahora se espera a la próxima pasada; solo si la reserva ya

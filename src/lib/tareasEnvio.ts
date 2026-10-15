@@ -130,7 +130,7 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
         .select('id', { count: 'exact', head: true })
         .eq('patient_email', String(b.patient_email ?? '').toLowerCase())
         .not('paid_at', 'is', null)
-        .neq('status', 'cancelled')
+        .not('status', 'in', '(cancelled,expired)')
         .not('id', 'in', `(${ids.join(',')})`);
       return {
         patient_name:   b.patient_name,

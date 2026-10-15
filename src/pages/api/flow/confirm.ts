@@ -7,7 +7,7 @@
  * Este endpoint:
  *  1. Consulta el estado real del pago con la API de Flow
  *  2. Si está pagado (status=2), marca la reserva como 'confirmed'
- *  3. Si fue rechazado/anulado (status=3/4), marca como 'cancelled'
+ *  3. Si fue anulado (status=4), marca como 'cancelled'; si fue rechazado (status=3) no hace nada: la reserva vence sola a los 30 min (15 oct 2026)
  *  4. Devuelve 200 (Flow reintenta si recibe otro código)
  *
  * NOTA PARA DESARROLLO LOCAL:

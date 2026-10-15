@@ -211,7 +211,7 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
         principal de la página, y al abrir se veían dos "Agendar" tapando el texto. */}
     {mostrarAgendarFlotante && <script is:inline>(function(){
       var b=document.getElementById('agendar-flotante');if(!b)return;
-      function f(){var on=window.scrollY>window.innerHeight*0.6;b.style.opacity=on?'1':'0';b.style.transform=on?'none':'translateY(1rem)';b.style.pointerEvents=on?'auto':'none';b.tabIndex=on?0:-1;}
+      function f(){var h=window.innerHeight,corta=document.documentElement.scrollHeight-h<h*0.6,on=corta||window.scrollY>h*0.6;b.style.opacity=on?'1':'0';b.style.transform=on?'none':'translateY(1rem)';b.style.pointerEvents=on?'auto':'none';b.tabIndex=on?0:-1;if(on)b.removeAttribute('aria-hidden');else b.setAttribute('aria-hidden','true');}
       f();window.addEventListener('scroll',f,{passive:true});
     })();</script>}
 
