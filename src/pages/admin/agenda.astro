@@ -1524,11 +1524,12 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 /* Estado de pago (manda sobre el color del servicio): rojo = por pagar, verde = pagada */
 .ev-pay-red   { background: #fee2e2; border: 1px solid #dc2626; color: #991b1b; }
 .ev-pay-green { background: #dcfce7; border: 1px solid #16a34a; color: #166534; }
-/* Eventos de Google Calendar: SIEMPRE debajo de las sesiones de la página
-   (Valentina, 15 oct 2026: antes un evento a la misma hora tapaba la sesión). */
+/* Capas (Valentina, 15 oct 2026): franjas de horario disponible (0) < eventos
+   de Google Calendar (1) < sesiones de la página (2). Antes un evento a la misma
+   hora tapaba la sesión, y la franja verde tapaba los eventos de Google. */
 .cal-gcal-event {
   position: absolute; left: 2px; right: 2px; border-radius: 4px; padding: 2px 5px;
-  overflow: hidden; z-index: 0; pointer-events: none;
+  overflow: hidden; z-index: 1; pointer-events: none;
   background: repeating-linear-gradient(45deg, #eef1f5, #eef1f5 6px, #e5e9ef 6px, #e5e9ef 12px);
   border: 1px dashed #9aa4b2; color: #64748b;
 }
@@ -1695,7 +1696,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 /* ── Overlay de horarios disponibles (color por servicio) ───────────────── */
 .avail-block {
   position: absolute; left: 2px; right: 2px; border-radius: 4px;
-  display: none; pointer-events: none; z-index: 1;
+  display: none; pointer-events: none; z-index: 0; /* debajo de los eventos de Google (15 oct 2026) */
   background: var(--svcbg, rgba(148,163,184,0.14));
   border-left: 3px solid var(--svcbd, #94a3b8);
 }
@@ -1703,7 +1704,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
    servicio (franja suave + borde izquierdo de color, sin texto), pero siempre
    visibles. Antes tenían texto y borde y parecían una sesión agendada. */
 .extra-block {
-  position: absolute; left: 2px; right: 2px; border-radius: 4px; z-index: 1;
+  position: absolute; left: 2px; right: 2px; border-radius: 4px; z-index: 0; /* debajo de los eventos de Google */
   pointer-events: none; /* clic pasa a la celda: se puede agendar encima */
   background: var(--svcbg, rgba(148,163,184,0.14));
   border-left: 3px solid var(--svcbd, #94a3b8);
