@@ -1,7 +1,8 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { sendConsentLinkEmail } from '../../../lib/email';
-import { consentUrl, getOrCreatePendingConsent, whatsappConsentMessage } from '../../../lib/consent';
+import { consentUrl, FaltaMigracion0021, getOrCreatePendingConsent, whatsappConsentMessage } from '../../../lib/consent';
+import { fichaEsParejaPorReserva, urlWhatsAppPareja } from '../../../lib/transcriptor/pareja';
 import { auditar } from '../../../lib/transcriptor/auditoria';
 import type { AccionAuditoria } from '../../../lib/transcriptor/tipos';
 
@@ -19,7 +20,10 @@ function json(data: unknown, status = 200) {
 // Acciones: 'whatsapp' (devuelve link de wa.me y registra el envío),
 //           'email' (manda el correo con el link), 'link' (solo el link),
 //           'revoke' (el paciente retiró su consentimiento; exige consent_id),
-//           'revoke_recording' (retiró SOLO la grabación; exige consent_id y via — H1 de 81-revision).
+//           'revoke_recording' (retiró SOLO la grabación; exige consent_id y via — H1 de 81-revision),
+//           'pareja_link' / 'pareja_whatsapp' (consentimiento de la SEGUNDA persona de una pareja:
+//           otro consentimiento, persona = 2, ligado a esta ficha; solo si la ficha tiene una reserva
+//           de pareja — decisión D del 16 oct noche).
 export const POST: APIRoute = async ({ request, url }) => {
   let body: Record<string, string>;
   try { body = await request.json(); }
@@ -70,6 +74,23 @@ export const POST: APIRoute = async ({ request, url }) => {
     }
     await auditar('vale', 'retiro_grabacion' as AccionAuditoria, { patientId, request, detalle: { consent_id: firmado.id, canal: via } });
     return json({ ok: true });
+  }
+
+  if (action === 'pareja_link' || action === 'pareja_whatsapp') {
+    let esPareja: boolean;
+    try { esPareja = await fichaEsParejaPorReserva(supabase, patient.email); }
+    catch { return json({ ok: false, error: 'No se pudieron revisar las reservas. Intenta de nuevo.' }, 500); }
+    if (!esPareja) return json({ ok: false, error: 'Esta ficha no tiene reservas de pareja.' }, 409);
+    let p2: { id: string; token: string };
+    try { p2 = await getOrCreatePendingConsent(patientId, 2); }
+    catch (e) {
+      if (!(e instanceof FaltaMigracion0021)) console.warn('[admin/consent] link de la pareja:', e instanceof Error ? e.message : e);
+      return json({ ok: false, error: e instanceof FaltaMigracion0021 ? e.message : 'No se pudo crear el link de la pareja. Intenta de nuevo.' }, 500);
+    }
+    const linkP2 = consentUrl(url.origin, p2.token);
+    if (action === 'pareja_link') return json({ ok: true, url: linkP2 });
+    await supabase.from('consents').update({ sent_at: new Date().toISOString(), sent_via: 'whatsapp' }).eq('id', p2.id).is('signed_at', null);
+    return json({ ok: true, url: linkP2, waUrl: urlWhatsAppPareja(String(patient.name ?? '').split(' ')[0], linkP2) });
   }
 
   if (!['whatsapp', 'email', 'link'].includes(action)) return json({ ok: false, error: 'Acción no válida.' }, 400);

@@ -18,6 +18,9 @@ const UNICOS: Record<string, Unico[]> = {
   resumenes_ia: [{ cols: ['grabacion_id', 'version'] }],
   transcriptor_webhooks: [{ cols: ['proveedor', 'evento_id'] }],
   settings: [{ cols: ['key'] }],
+  // Añadido por t-n-pareja: únicos de 0019 (consent_avisos.consent_id) y 0021 (consent_anexos).
+  consent_avisos: [{ cols: ['consent_id'] }],
+  consent_anexos: [{ cols: ['consent_id', 'tipo'] }],
 };
 
 function defaults(t: string, ahora: string): Fila {

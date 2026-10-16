@@ -14,6 +14,7 @@ import { avisoAnexoResumen } from '../../../lib/transcriptor/resumen';
 import { conContenidoClaro } from '../../../lib/transcriptor/resumenCifrado';
 import { auditarObligatorio } from '../../../lib/transcriptor/auditoria';
 import { identidadFirmante } from '../../../lib/transcriptor/consentimiento';
+import ConsentimientoParejaAnexos from '../../../components/admin/ConsentimientoParejaAnexos.astro';
 
 const { id } = Astro.params;
 // Datos de prueba del transcriptor SOLO en `astro dev` (import.meta.env.DEV es false en el build):
@@ -186,7 +187,8 @@ if (import.meta.env.DEV && demoIA) {
 }
 const consentimiento = vigente((consentRows ?? []) as ConsentRow[]);
 const ultimoRetiro = (consentRows ?? []).find((c: any) => c.revoked_at) as ConsentRow | undefined;
-const envioPendiente = (consentRows ?? []).find((c: any) => !c.signed_at && c.sent_at) as ConsentRow | undefined;
+// Solo el link propio de la paciente (persona 1); el de la pareja (persona 2, 0021) va en su bloque.
+const envioPendiente = (consentRows ?? []).find((c: any) => !c.signed_at && c.sent_at && Number(c.persona ?? 1) !== 2) as ConsentRow | undefined;
 const firmadosHist = (consentRows ?? []).filter((c: any) => c.signed_at)
   .sort((a: any, b: any) => b.signed_at.localeCompare(a.signed_at));
 const fmtCL = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -437,6 +439,7 @@ const faltanDatos = patient ? [
       </ul>
     </section>
   )}
+  <ConsentimientoParejaAnexos patient={patient} bookings={patientBookings} consentRows={consentRows ?? []} demo={demoIA} />
   <p id="consent-status" data-patient-id={patient.id} style="font-size:0.78rem;margin:-1rem 0 1rem;"></p>
 
   <!-- Tabs -->

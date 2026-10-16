@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { supabase } from './supabase';
+import { FaltaMigracion0021, pendienteOCrear, personaDe, soloPersona1 } from './transcriptor/pareja';
 
 // Consentimiento informado de tratamiento de datos personales y de salud
 // (Ley 21.719, que modifica la Ley 19.628). Pedido por Valentina el 3 oct
@@ -126,18 +127,19 @@ export function consentUrl(origin: string, token: string) {
 
 // Link pendiente del paciente: reutiliza el último sin firmar (para que un
 // link ya enviado siga sirviendo) o crea uno nuevo.
-export async function getOrCreatePendingConsent(patientId: string): Promise<{ id: string; token: string }> {
-  const { data: existing } = await supabase.from('consents')
-    .select('id, token').eq('patient_id', patientId).is('signed_at', null)
-    .order('created_at', { ascending: false }).limit(1).maybeSingle();
-  if (existing) return existing;
-  const token = randomBytes(24).toString('base64url');
-  const { data, error } = await supabase.from('consents')
-    .insert({ patient_id: patientId, token, version: CONSENT_VERSION })
-    .select('id, token').single();
-  if (error || !data) throw new Error(error?.message ?? 'No se pudo crear el consentimiento.');
-  return data;
+// persona (0021, decisión D del 16 oct noche): 1 = la persona agendada (como
+// siempre); 2 = la segunda persona de una pareja, con su propio consentimiento
+// ligado a la misma ficha. Se lee con select('*') y se filtra aquí para que,
+// sin la migración 0021, el link de la persona 1 siga funcionando igual que hoy
+// (sin la columna, todas las filas son de la persona 1).
+export { FaltaMigracion0021 };
+
+export async function getOrCreatePendingConsent(patientId: string, persona: 1 | 2 = 1): Promise<{ id: string; token: string }> {
+  return pendienteOCrear(supabase, patientId, persona, CONSENT_VERSION, () => randomBytes(24).toString('base64url'));
 }
+
+/** Persona de una fila de consents (0021). Sin la columna: 1. */
+export const personaConsent = (r: { persona?: number | null }): 1 | 2 => personaDe(r);
 
 export interface ConsentRow {
   id: string; patient_id: string | null; token: string; version: string;
@@ -145,13 +147,17 @@ export interface ConsentRow {
   signed_at: string | null; signer_name: string | null; signer_rut: string | null;
   accept_treatment: boolean; accept_recording: boolean; accept_case_review: boolean;
   revoked_at: string | null; revoked_note: string | null;
+  /** 0021: 1 = persona agendada, 2 = segunda persona de la pareja. Sin la migración: undefined (= 1). */
+  persona?: number | null;
 }
 
 // Consentimiento vigente = el último firmado, aceptando el tratamiento, y no
 // revocado. Si el último firmado fue revocado, el paciente vuelve a quedar
 // pendiente (hay que pedirle uno nuevo).
+// Solo de la persona agendada (persona 1): la firma de la pareja (persona 2)
+// nunca reemplaza ni tapa la falta del consentimiento propio de la paciente.
 export function vigente(rows: ConsentRow[]): ConsentRow | null {
-  const firmados = rows.filter(r => r.signed_at && r.accept_treatment)
+  const firmados = soloPersona1(rows).filter(r => r.signed_at && r.accept_treatment)
     .sort((a, b) => (b.signed_at ?? '').localeCompare(a.signed_at ?? ''));
   const ultimo = firmados[0];
   return ultimo && !ultimo.revoked_at ? ultimo : null;
@@ -176,7 +182,7 @@ export async function getConsentAlerts(): Promise<ConsentAlert[]> {
   for (const p of patients ?? []) {
     const rows = porPaciente.get(p.id) ?? [];
     if (vigente(rows)) continue;
-    const enviado = rows.filter(r => !r.signed_at && r.sent_at).map(r => r.sent_at!).sort().pop() ?? null;
+    const enviado = rows.filter(r => !r.signed_at && r.sent_at && personaConsent(r) === 1).map(r => r.sent_at!).sort().pop() ?? null;
     alerts.push({ patientId: p.id, name: p.name, sentAt: enviado });
   }
   return alerts;

@@ -1,7 +1,8 @@
 ---
 export const prerender = false;
 import { supabase } from '../../../../../lib/supabase';
-import { CONSENT_OPTIONS, sha256 } from '../../../../../lib/consent';
+import { CONSENT_OPTIONS, personaConsent, sha256 } from '../../../../../lib/consent';
+import { TITULO_ANEXO } from '../../../../../lib/transcriptor/avisoV2';
 
 // Constancia completa de un consentimiento firmado, para imprimir o guardar en
 // PDF si alguna vez se pide legalmente (la carga de probar el consentimiento
@@ -10,11 +11,17 @@ import { CONSENT_OPTIONS, sha256 } from '../../../../../lib/consent';
 // comparándolo con el hash guardado al firmar.
 const { id, cid } = Astro.params;
 
-const [{ data: c }, { data: patient }] = await Promise.all([
+const [{ data: c }, { data: patient }, { data: anexosData, error: anexosError }] = await Promise.all([
   supabase.from('consents').select('*').eq('id', cid!).eq('patient_id', id!).maybeSingle(),
   supabase.from('patients').select('name').eq('id', id!).maybeSingle(),
+  // Anexos (0021, decisión E): copia fiel del correo con el aviso v2. Sin la migración: sin anexos.
+  supabase.from('consent_anexos').select('*').eq('consent_id', cid!).order('enviado_at', { ascending: true }),
 ]);
 if (!c || !c.signed_at || !patient) return Astro.redirect(`/admin/pacientes/${id}`);
+const anexos = (anexosError ? [] : (anexosData ?? [])) as {
+  id: string; tipo: string; asunto: string; destinatario: string; enviado_at: string; resend_id: string | null; html: string; html_sha256: string;
+}[];
+const esPareja2 = personaConsent(c) === 2;
 
 const integro = !!c.text_snapshot && sha256(c.text_snapshot) === c.text_sha256;
 const fmt = (iso: string | null) => iso
@@ -42,7 +49,9 @@ const ENVIO: Record<string, string> = { whatsapp: 'WhatsApp', email: 'correo ele
     .bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
     .bar a, .bar button { font: inherit; padding: 0.45rem 0.9rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #111827; text-decoration: none; cursor: pointer; }
     .bar button { background: #111827; color: #fff; border-color: #111827; }
-    @media print { .bar { display: none; } body { padding: 0; } }
+    .anexo { margin-bottom: 1.25rem; }
+    .anexo-correo { width: 100%; height: 640px; border: 1px solid #e5e7eb; background: #fff; }
+    @media print { .bar { display: none; } body { padding: 0; } .anexo-correo { break-inside: avoid; } }
   </style>
 </head>
 <body>
@@ -57,9 +66,9 @@ const ENVIO: Record<string, string> = { whatsapp: 'WhatsApp', email: 'correo ele
   <h2>Firma</h2>
   <table>
     <tr><td>Paciente (ficha)</td><td>{patient.name}</td></tr>
-    <tr><td>Firmado por</td><td>{c.signer_name}</td></tr>
+    <tr><td>Firmado por</td><td>{c.signer_name}{esPareja2 ? ' (segunda persona de la pareja, con su propio consentimiento)' : ''}</td></tr>
     <tr><td>RUT</td><td>{c.signer_rut}</td></tr>
-    <tr><td>Correo del paciente</td><td>{c.signer_email ?? '—'}</td></tr>
+    <tr><td>{esPareja2 ? 'Correo de quien firmó' : 'Correo del paciente'}</td><td>{c.signer_email ?? '—'}</td></tr>
     <tr><td>Fecha y hora de firma</td><td>{fmt(c.signed_at)}</td></tr>
     <tr><td>Enviado por</td><td>{c.sent_via ? `${ENVIO[c.sent_via] ?? c.sent_via}, el ${fmt(c.sent_at)}` : '—'}</td></tr>
     <tr><td>Versión del texto</td><td>{c.version}</td></tr>
@@ -80,6 +89,44 @@ const ENVIO: Record<string, string> = { whatsapp: 'WhatsApp', email: 'correo ele
   <h2>Texto exacto aceptado por el paciente</h2>
   <pre>{c.text_snapshot}</pre>
 
+  {anexos.length > 0 && (
+    <>
+      <h2>Anexos del consentimiento</h2>
+      {anexos.map((a, i) => {
+        const integroAnexo = sha256(a.html ?? '') === a.html_sha256;
+        const base = `/admin/pacientes/${id}/consentimiento/${cid}/anexo/${a.id}`;
+        return (
+          <div class="anexo">
+            <p><strong>Anexo {i + 1}: {TITULO_ANEXO[a.tipo] ?? 'Anexo'}</strong> (enviado el {fmt(a.enviado_at)})</p>
+            <table>
+              <tr><td>Qué es</td><td>Copia fiel del correo que se envió con el aviso, tal como salió (HTML completo).</td></tr>
+              <tr><td>Asunto</td><td>{a.asunto}</td></tr>
+              <tr><td>Destinatario</td><td>{a.destinatario}</td></tr>
+              <tr><td>Fecha y hora de envío</td><td>{fmt(a.enviado_at)}</td></tr>
+              <tr><td>Id del envío (Resend)</td><td style="word-break:break-all;">{a.resend_id ?? '—'}</td></tr>
+              <tr><td>Código de integridad (SHA-256)</td><td style="word-break:break-all;">{a.html_sha256}</td></tr>
+              <tr><td>Verificación</td><td class={integroAnexo ? 'ok' : 'bad'}>{integroAnexo ? 'Íntegro: la copia coincide exactamente con el correo enviado' : 'NO coincide con el código guardado al enviar'}</td></tr>
+            </table>
+            <p class="bar anexo-bar" style="margin:0.6rem 0;">
+              <a href={base} target="_blank" rel="noopener">Ver el correo</a>
+              <a href={`${base}?descargar=1`}>Descargar (.html)</a>
+            </p>
+            <iframe class="anexo-correo" title={`Anexo ${i + 1}: correo enviado`} sandbox="allow-same-origin" srcdoc={a.html}></iframe>
+          </div>
+        );
+      })}
+    </>
+  )}
+
   <p class="muted" style="margin-top:1.5rem;">Constancia generada el {fmt(new Date().toISOString())} desde el registro de consentimientos de Ps. Valentina Orellana.</p>
+  <script>
+    // El correo del anexo se muestra completo (y entra completo al PDF): alto según su contenido.
+    // sandbox sin allow-scripts: el HTML del correo no ejecuta nada; allow-same-origin solo para medirlo.
+    document.querySelectorAll<HTMLIFrameElement>('iframe.anexo-correo').forEach((f) => {
+      const ajustar = () => { try { const h = f.contentDocument?.documentElement?.scrollHeight; if (h) f.style.height = `${h + 16}px`; } catch { /* sin acceso: queda el alto fijo */ } };
+      f.addEventListener('load', ajustar);
+      ajustar();
+    });
+  </script>
 </body>
 </html>

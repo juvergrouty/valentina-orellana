@@ -5,7 +5,12 @@
 //   • Solo a firmas cuya ÚLTIMA versión por persona es la v2, con accept_recording = true, sin revocar
 //     y sin retiro de la grabación. Las v3 ya describen el sistema nuevo: no lo necesitan.
 //   • Queda constancia en consent_avisos (0019: consent_id único, canal, texto_version, fecha).
+//   • E (02-decisiones-16oct-noche): además se guarda una COPIA FIEL del correo que salió (HTML completo
+//     tal como se entregó a Resend, asunto, destinatario, fecha y hora, id de Resend y SHA-256 del HTML)
+//     como ANEXO del consentimiento de esa persona (consent_anexos, 0021). Se ve en la ficha y en la
+//     constancia del consentimiento. El HTML va en la base (ver 0021: ~10 KB, una vez por firma).
 // Nunca rompe el correo de confirmación: cualquier error → sin aviso (se intenta en el próximo correo).
+import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { identidadFirmante, numeroVersion, transcriptorActivo, type FilaConsentimiento } from './consentimiento';
 
@@ -59,7 +64,7 @@ export async function avisoV2ParaCorreo(email: string, cliente?: SupabaseClient)
     if (!correo.includes('@')) return null;
     const c = await db(cliente);
     if (!(await transcriptorActivo(c))) return null;
-    const { data: ps, error: ep } = await c.from('patients').select('id')
+    const { data: ps, error: ep } = await c.from('patients').select('id, rut')
       .ilike('email', correo.replace(/[\\%_]/g, (m) => `\\${m}`)).limit(2);
     if (ep || !ps || ps.length !== 1) return null; // sin ficha o ambiguo: no se arriesga
     const patientId = (ps[0] as { id: string }).id;
@@ -73,10 +78,16 @@ export async function avisoV2ParaCorreo(email: string, cliente?: SupabaseClient)
     const ya = new Set(((avisos ?? []) as { consent_id: string }[]).map((a) => a.consent_id));
     // Solo las firmas de quien recibe ESTE correo (en pareja, la otra persona no lo vio — revisión final N2).
     const destino = correo.toLowerCase();
-    const propias = (filas as Fila[]).filter((f) => {
+    let propias = (filas as Fila[]).filter((f) => {
       const e = String(f.signer_email ?? '').trim().toLowerCase();
       return e ? e === destino : (filas as Fila[]).length === 1;
     });
+    // Parejas que firmaron antes de 0021 con dos links de la ficha: ambas firmas quedaron con el correo
+    // de la ficha. Si son personas distintas y la ficha tiene RUT, el correo es de quien tiene ese RUT.
+    const rutFicha = String((ps[0] as { rut?: string | null }).rut ?? '').replace(/[^0-9kK]/g, '').toUpperCase();
+    if (new Set(propias.map((f) => identidadFirmante(f))).size > 1 && rutFicha.length >= 7) {
+      propias = propias.filter((f) => String(f.signer_rut ?? '').replace(/[^0-9kK]/g, '').toUpperCase() === rutFicha);
+    }
     const pendientes = firmasParaAviso(propias, ya);
     if (!pendientes.length) return null;
     return { patientId, consentIds: pendientes.map((f) => f.id), html: htmlAvisoV2() };
@@ -85,20 +96,75 @@ export async function avisoV2ParaCorreo(email: string, cliente?: SupabaseClient)
   }
 }
 
-/** Constancia de que se mostró (después de que el correo salió). Idempotente por consent_id. */
-export async function registrarAvisoMostrado(a: AvisoPendiente, bookingId: string | null | undefined, cliente?: SupabaseClient): Promise<number> {
+/** El correo tal como se entregó a Resend (para el anexo del consentimiento, decisión E). */
+export interface CorreoEnviado {
+  html: string;
+  asunto: string;
+  destinatario: string;
+  /** ISO de cuando Resend aceptó el envío. */
+  enviadoAt: string;
+  resendId?: string | null;
+}
+
+export const TIPO_ANEXO_AVISO_V2 = 'aviso_v2';
+export const sha256Html = (html: string) => createHash('sha256').update(html, 'utf8').digest('hex');
+
+/** Fila de consent_anexos (0021) para una firma. Función pura. */
+export function filaAnexo(a: AvisoPendiente, consentId: string, avisoId: string | null, bookingId: string | null | undefined, correo: CorreoEnviado) {
+  return {
+    consent_id: consentId, aviso_id: avisoId, patient_id: a.patientId, booking_id: bookingId ?? null,
+    tipo: TIPO_ANEXO_AVISO_V2, asunto: correo.asunto, destinatario: correo.destinatario, enviado_at: correo.enviadoAt,
+    resend_id: correo.resendId ?? null, html: correo.html, html_sha256: sha256Html(correo.html),
+  };
+}
+
+/**
+ * Constancia de que se mostró (después de que el correo salió). Idempotente por consent_id.
+ * Con `correo`, guarda además la copia fiel del correo como anexo de cada firma avisada (0021).
+ * Nunca toca la fila del consentimiento (consents): la firma v2 queda exactamente igual.
+ */
+export async function registrarAvisoMostrado(a: AvisoPendiente, bookingId: string | null | undefined, cliente?: SupabaseClient, correo?: CorreoEnviado): Promise<number> {
   try {
     const c = await db(cliente);
     let n = 0;
     for (const consentId of a.consentIds) {
-      const { error } = await c.from('consent_avisos').insert({
+      const { data, error } = await c.from('consent_avisos').insert({
         consent_id: consentId, patient_id: a.patientId, booking_id: bookingId ?? null, canal: 'correo', texto_version: TEXTO_AVISO_V2_VERSION,
-      });
-      if (!error) n++;
-      else if (error.code !== '23505') console.warn('[transcriptor/avisoV2] no se pudo registrar el aviso:', error.code);
+      }).select('id').maybeSingle();
+      if (error) {
+        if (error.code !== '23505') console.warn('[transcriptor/avisoV2] no se pudo registrar el aviso:', error.code);
+        continue; // ya registrado antes: su anexo es el de ese envío
+      }
+      n++;
+      if (!correo) continue;
+      const avisoId = (data as { id?: string } | null)?.id ?? null;
+      const { error: ex } = await c.from('consent_anexos').insert(filaAnexo(a, consentId, avisoId, bookingId, correo));
+      if (ex && ex.code !== '23505') console.warn('[transcriptor/avisoV2] no se pudo guardar el anexo del aviso (¿falta 0021?):', ex.code);
     }
     return n;
   } catch {
     return 0;
   }
 }
+
+export interface AnexoConsentimiento {
+  id: string; consent_id: string; tipo: string; asunto: string; destinatario: string;
+  enviado_at: string; resend_id: string | null; html_sha256: string; created_at?: string;
+}
+
+/** Anexos de estas firmas (sin el HTML). [] si la tabla no existe (sin 0021) o algo falla. */
+export async function anexosDeConsentimientos(consentIds: string[], cliente?: SupabaseClient): Promise<AnexoConsentimiento[]> {
+  if (!consentIds.length) return [];
+  try {
+    const c = await db(cliente);
+    const { data, error } = await c.from('consent_anexos')
+      .select('id, consent_id, tipo, asunto, destinatario, enviado_at, resend_id, html_sha256, created_at')
+      .in('consent_id', consentIds).order('enviado_at', { ascending: true });
+    if (error) return [];
+    return (data ?? []) as AnexoConsentimiento[];
+  } catch {
+    return [];
+  }
+}
+
+export const TITULO_ANEXO: Record<string, string> = { aviso_v2: 'Aviso de cambio de herramienta' };
