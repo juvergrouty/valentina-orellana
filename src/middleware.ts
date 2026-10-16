@@ -2,6 +2,7 @@ import { defineMiddleware } from 'astro:middleware';
 import type { APIContext, MiddlewareNext } from 'astro';
 import { tokenAdminValido, tokenRevocado } from './lib/adminSession';
 import { esRutaTranscriptor } from './lib/transcriptor/acceso';
+import { conVolver, destinoDePeticion } from './lib/passkey/regreso';
 
 const COOKIE = 'vo_admin_token';
 
@@ -100,7 +101,8 @@ async function protegerAdmin(context: APIContext, next: MiddlewareNext): Promise
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    return context.redirect('/admin/login');
+    // Login con regreso: después de entrar se vuelve a esta misma página (solo rutas /admin…).
+    return context.redirect(conVolver('/admin/login', destinoDePeticion(context.url, context.request.method)));
   }
 
   // Passkey obligatoria (16 oct 2026): una sesión abierta solo con contraseña
@@ -119,7 +121,7 @@ async function protegerAdmin(context: APIContext, next: MiddlewareNext): Promise
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    return context.redirect('/admin/login?passkey=1');
+    return context.redirect(conVolver('/admin/login?passkey=1', destinoDePeticion(context.url, context.request.method)));
   }
 
   return next();

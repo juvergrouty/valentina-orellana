@@ -38,6 +38,9 @@ cancelada, no admitida) o borrada cierra sus avisos (salvo el de copia en B2, qu
 | `bot-maquina:<id>` — no se pudo apagar la máquina | pipeline `vigilar` | **Apagar el asistente ahora** | `DELETE` de la máquina en Fly (Machines API, `force=true`) y revoca el token | Fly confirma (o la sesión ya salió de `bot_*`/`grabando`) |
 | `bot-vigilante:<id>` — el asistente no salió solo (informativo) | pipeline `vigilar` | Volver a revisar | Re-lee la sesión | la transcripción queda guardada (o la sesión termina) |
 | `bot:calendario` — no se pudo leer Google Calendar | pipeline `despacharBots` | Volver a revisar + instrucción (reconectar Google en Configuración) | Vuelve a pedir los eventos de la próxima hora | Calendar responde (también lo revisa el chequeo diario) |
+| `bot-error:<id>:<paso>` — el robot informó un error (evento `error`), al instante | `bot.ts` (`avisosRobot.ts`) | Volver a revisar + instrucción; si la sesión cae en error: **Reintentar** o **Cerrar con lo grabado** | Lo de cada acción | la sesión pasa ese paso (llega a la sala, entra a grabar o el audio queda subido) |
+| `robot:sesion` — el robot no tiene sesión de Google / se venció (modo cuenta), al instante | `bot.ts` (`avisosRobot.ts`) | Volver a revisar + instrucción (volver a iniciar sesión, 85-robot-meet §7.3) | Revisa que la sesión esté vigente o que el modo sea 'invitado' | se sube una sesión nueva, se pasa a modo invitado o "Volver a revisar" la ve vigente (también el chequeo diario) |
+| `robot-invitado:<id>` — el robot no quedó como invitado del evento (informativo), al instante | `bot.ts` (`avisosRobot.ts`) | Volver a revisar (admitirlo en Meet) | Re-lee la sesión | el robot entra a grabar (o la sesión termina) |
 | `subida:<id>` — no llegó audio | pipeline `reintentarEnvios` | **Cerrar la sesión como no grabada** | `error → cancelada` con nota | la sesión queda cerrada |
 | `transcripcion:<id>` — no se pudo enviar / transcribir / guardar | pipeline `enviarSegmentos`, `errorDefinitivoAAI`, `procesarTranscripciones` | **Reintentar** | `error →` paso anterior (subida/transcribiendo) con intentos en 0; el cron reenvía a AssemblyAI | la transcripción queda guardada (`transcrita`) |
 | `sin-voz:<id>` — transcripción vacía (informativo) | pipeline `guardar` | Volver a revisar | Re-lee la sesión | la sesión queda `lista` (con su nota "no se reconoció voz") |
@@ -47,7 +50,7 @@ cancelada, no admitida) o borrada cierra sus avisos (salvo el de copia en B2, qu
 | `config:apagado-con-pendientes` | pipeline `correr` | Volver a revisar + instrucción (encender en Transcriptor) | Cuenta las grabaciones a mitad de proceso | el transcriptor está encendido o no quedan pendientes |
 | `salud:config` — faltan variables | salud `config` | Volver a revisar + instrucción (agregarlas en Vercel y redeploy) | Re-ejecuta el chequeo `config` | no falta ninguna |
 | `salud:r2` / `b2` / `assemblyai` / `anthropic` — proveedor no responde | salud `chequeoProveedor` | Volver a revisar + instrucción (renovar la llave nombrada) | Re-ejecuta la prueba de ese proveedor | el proveedor responde |
-| `salud:atascadas:<id>:<paso>` — sesión detenida > 2 h (o en error sin aviso) | salud `atascadas` | **Reintentar** / **Reintentar resumen** según el paso; **Cerrar la sesión…** si el bot ya no puede volver; grabación en el teléfono: instrucción (abrir Grabar con internet) | Igual que arriba (suelta la toma vencida o sale de `error`) | la sesión pasa ese paso |
+| `salud:atascadas:<id>:<paso>` — sesión detenida > 2 h (o en error sin aviso) | salud `atascadas` | **Reintentar** / **Reintentar resumen** según el paso; **Cerrar con lo grabado** si el bot ya no puede volver; grabación en el teléfono: instrucción (abrir Grabar con internet) | Igual que arriba (suelta la toma vencida o sale de `error`) | la sesión pasa ese paso |
 | `salud:audio_borrado` — audio que debió borrarse | salud `audio_borrado` | **Borrar el audio ahora** | Borra de R2 el audio de sesiones ya transcritas con transcripción guardada (o canceladas/sin audio) y los archivos de audio de más de 26 h; luego re-ejecuta el chequeo | el chequeo sale bien |
 | `salud:aai_borrado` — AssemblyAI guarda transcripts que debían borrarse | salud `aai_borrado` | **Borrar en AssemblyAI ahora** | `borrarTranscriptTrasGuardar` (solo si la transcripción cifrada ya está guardada) o borrado directo si la sesión está cancelada/sin audio; nunca borra uno sin guardar | el chequeo sale bien |
 | `salud:aai_huerfanos` — transcripts sueltos en AssemblyAI | salud `aai_huerfanos` | **Borrar transcripciones sueltas en AssemblyAI** (pide confirmar) | Lista `GET /v2/transcript`, clasifica y borra los de > 2 h completados/con error, **incluidos los desconocidos** (decisión explícita de Vale al tocar) | el chequeo sale bien |
@@ -70,12 +73,10 @@ Si la acción del enlace ya no corresponde, ofrece las que sirven ahora.
 
 ## Pendientes (fuera de este paquete)
 
-- `FLY_API_TOKEN_RESPALDO` (token de la app `vo-respaldo-supabase`: `fly tokens create deploy -a vo-respaldo-supabase`)
-  y, opcional, `FLY_APP_RESPALDO`: agregarlos en Vercel para que "Lanzar respaldo ahora" funcione desde el
-  panel; agregar `FLY_API_TOKEN_RESPALDO` a `secretos.ts` y a `scripts/verificar-secretos-build.mjs`
-  (hoy se lee solo con `process.env` en runtime).
-- El login no vuelve a la página de acción después de entrar: si la sesión venció, Vale entra y vuelve a
-  tocar el botón del correo.
-- Los errores que el bot informa durante la sesión (`bot.ts`, evento `error`) solo quedan en la bitácora:
-  el aviso aparece recién con el chequeo diario (`salud:atascadas:<id>:grabando`).
-- La migración 0017 todavía permite `resuelta_por = 'vale'` (filas antiguas); el código ya no lo escribe.
+- Vale: agregar en Vercel `FLY_API_TOKEN_RESPALDO` (token de la app `vo-respaldo-supabase`:
+  `fly tokens create deploy -a vo-respaldo-supabase`) y, opcional, `FLY_APP_RESPALDO`, para que
+  "Lanzar respaldo ahora" funcione desde el panel. Ya está en `secretos.ts` y en
+  `scripts/verificar-secretos-build.mjs` (t-n-pulido).
+
+Resuelto en t-n-pulido: el login vuelve a la página de acción después de entrar (`?volver=`, solo rutas
+`/admin…`, `src/lib/passkey/regreso.ts`), y los errores del robot crean el aviso al instante (tabla de arriba).

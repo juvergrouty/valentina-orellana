@@ -136,9 +136,25 @@ export function rutYaFirmoEnFicha(rut: string, filas: Pick<FilaConsentimiento, '
 /** Mensaje de WhatsApp para la segunda persona (Vale elige el contacto: wa.me sin número). */
 export function mensajeWhatsAppPareja(nombrePilaFicha: string, url: string): string {
   const quien = nombrePilaFicha.trim() ? ` con ${nombrePilaFicha.trim()}` : '';
-  return `Hola, te comparto tu consentimiento informado para la terapia de pareja${quien}. Cada persona firma el suyo: lo lees, marcas lo que autorizas y firmas con tu nombre y RUT. Son 2 minutos.\n\n${url}\n\nCualquier duda me escribes. Valentina`;
+  return `Hola, ¿cómo estás? Soy Valentina Orellana, psicóloga. Te comparto tu consentimiento informado para la terapia de pareja${quien}: cada persona firma el suyo, así que este es solo para ti. Lo lees con calma, marcas lo que autorizas y firmas con tu nombre y RUT (o tu documento). Toma unos 2 minutos.\n\n${url}\n\nSi tienes cualquier duda, me escribes por aquí. Un abrazo,\nValentina`;
 }
 
 export function urlWhatsAppPareja(nombrePilaFicha: string, url: string): string {
   return `https://wa.me/?text=${encodeURIComponent(mensajeWhatsAppPareja(nombrePilaFicha, url))}`;
+}
+
+// ─── Envío del link a la segunda persona (añadido en t-n-pulido) ─────────────
+
+/** Correo para mandarle el link a la segunda persona. Solo se usa para enviar: NO se guarda en la ficha. */
+export function correoParejaValido(s: unknown): string | null {
+  if (typeof s !== 'string') return null;
+  const c = s.trim().toLowerCase();
+  if (c.length < 6 || c.length > 120 || c.includes('..')) return null;
+  return /^[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(c) ? c : null;
+}
+
+/** Lo que el panel necesita para saber si la pareja ya firmó (se consulta mientras se muestra el QR). Sin RUT. */
+export function resumenEstadoPareja(e: EstadoPareja): { firmado: boolean; nombre: string | null; firmado_at: string | null } {
+  if (!e.firma) return { firmado: false, nombre: null, firmado_at: null };
+  return { firmado: true, nombre: String(e.firma.signer_name ?? '').trim() || null, firmado_at: e.firma.signed_at ? String(e.firma.signed_at) : null };
 }

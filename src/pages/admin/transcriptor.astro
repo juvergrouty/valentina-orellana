@@ -16,6 +16,11 @@ import { AJUSTES, RUTAS, type Grabacion } from '../../lib/transcriptor/tipos';
 import { motivoBloqueoActivacion, type EstadoPasskeyActivacion } from '../../lib/transcriptor/panel';
 import { COOKIE_ADMIN, nivelTokenAdmin } from '../../lib/adminSession';
 import { estadoPasskeys } from '../../lib/passkey/servidor';
+import {
+  AJUSTE_BOT_MODO, ETIQUETA_SESION_ROBOT, TEXTO_SESION_ROBOT, estadoSesionRobot, textoAsistenteMeet,
+  type EstadoSesionRobot, type FilaSesionRobot,
+} from '../../lib/transcriptor/panel';
+import { normalizarModoBot } from '../../lib/transcriptor/botCuenta';
 
 
 type GrabLista = Pick<Grabacion, 'id' | 'patient_id' | 'origen' | 'tipo' | 'estado' | 'estado_antes_error' | 'session_date' | 'inicio_at' | 'duracion_seg' | 'created_at'>;
@@ -29,6 +34,9 @@ let instr: Record<'resumen' | 'preguntas', Version[]> = { resumen: [], preguntas
 let costo: CostoMes | null = null;
 let sesionesMes = 0;
 let errorLectura = false;
+// Robot de Meet: columnas NO secretas de su sesión (nunca sesion_cifrada).
+let filaRobot: FilaSesionRobot | null = null;
+let errorRobot = false;
 const hoy = todayCL();
 const mesIni = `${hoy.slice(0, 7)}-01T00:00:00-03:00`;
 
@@ -53,10 +61,13 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') {
   };
   costo = costoMes({ segmentos: [{ audioSeg: 30 * 3300, modelo: 'universal-2', diarizacion: false }, { audioSeg: 8 * 3300, modelo: 'universal-3-5-pro', diarizacion: true }], usdResumenes: 0.9, usdPreguntas: 0.12, botDuraciones: Array(18).fill(3000), usdClp: 950 });
   sesionesMes = 38;
+  const demoRobot = Astro.url.searchParams.get('robot');
+  ajustes[AJUSTE_BOT_MODO] = demoRobot === 'invitado' ? 'invitado' : 'cuenta';
+  filaRobot = demoRobot === 'sin' ? null : { cuenta_email: 'notas.valentinaorellana@gmail.com', estado: demoRobot === 'vencida' ? 'vencida' : 'vigente', actualizada_at: '2026-10-15T22:10:00Z', vencida_motivo: demoRobot === 'vencida' ? 'Google pidió iniciar sesión de nuevo' : null };
 } else {
   try {
     const [rAj, rGr, rPa, rIn, rGm, rRe, rPr] = await Promise.all([
-      supabase.from('settings').select('key, value').in('key', [...Object.values(AJUSTES), AJUSTE_NOMBRES_VALE]),
+      supabase.from('settings').select('key, value').in('key', [...Object.values(AJUSTES), AJUSTE_NOMBRES_VALE, AJUSTE_BOT_MODO]),
       supabase.from('grabaciones').select('id, patient_id, origen, tipo, estado, estado_antes_error, session_date, inicio_at, duracion_seg, created_at')
         .not('estado', 'in', '(creada,cancelada)').order('created_at', { ascending: false }).limit(40),
       supabase.from('patients').select('id, name, active').order('name').limit(2000),
@@ -66,6 +77,10 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') {
       supabase.from('preguntas_ia').select('costo_usd').gte('created_at', mesIni).limit(5000),
     ]);
     errorLectura = !!(rGr.error || rIn.error);
+    // Sin la migración 0022 la tabla no existe: es "sin sesión", no un error.
+    const rRb = await supabase.from('transcriptor_bot_sesion').select('cuenta_email, estado, actualizada_at, vencida_motivo').eq('id', 1).maybeSingle();
+    if (rRb.error && !['42P01', 'PGRST205', 'PGRST204'].includes(String(rRb.error.code ?? ''))) errorRobot = true;
+    filaRobot = (rRb.data as FilaSesionRobot | null) ?? null;
     for (const r of rAj.data ?? []) ajustes[r.key as string] = r.value as string;
     grabaciones = (rGr.data ?? []) as GrabLista[];
     const todos = (rPa.data ?? []) as { id: string; name: string; active: boolean | null }[];
@@ -105,6 +120,9 @@ else { try { estadoPk = await estadoPasskeys(); } catch { estadoPk = 'error'; } 
 const nivelSesion = import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia' ? 'passkey' : nivelTokenAdmin(Astro.cookies.get(COOKIE_ADMIN)?.value);
 const bloqueoEncender = motivoBloqueoActivacion(estadoPk, nivelSesion);
 const botActivo = ajustes[AJUSTES.botActivo] === 'true';
+const modoBot = normalizarModoBot(ajustes[AJUSTE_BOT_MODO]);
+const sesionRobot: EstadoSesionRobot = estadoSesionRobot(filaRobot);
+const textoBot = textoAsistenteMeet(modoBot, sesionRobot);
 const nombresVale = (ajustes[AJUSTE_NOMBRES_VALE] || NOMBRES_VALE_DEFECTO).split('|').join('\n');
 const tope = Number(ajustes[AJUSTES.presupuestoClp]) || 35000;
 const pct = costo ? porcentajeTope(costo.clp.total, tope) : 0;
@@ -150,13 +168,35 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
       <div class="tx-switch-fila">
         <div>
           <p class="tx-switch-titulo">Asistente de notas en Meet</p>
-          <p class="tx-sub">El asistente "Notas Ps. Valentina Orellana" entra solo a tus sesiones online con consentimiento de grabación. Tú lo admites en Meet.</p>
+          <p class="tx-sub" id="tx-bot-texto">{textoBot}</p>
         </div>
         <label class="tx-switch">
           <input type="checkbox" class="tx-ajuste" data-clave={AJUSTES.botActivo} checked={botActivo} aria-label="Asistente de notas en Meet" />
           <span aria-hidden="true"></span>
         </label>
       </div>
+      <fieldset class="tx-modo" aria-describedby="tx-modo-ayuda">
+        <legend class="tx-switch-titulo">Cómo entra el asistente a Meet</legend>
+        <p class="tx-sub" id="tx-modo-ayuda">Con cuenta propia entra solo, con su nombre y foto. Como invitado, Meet te pide admitirlo cada vez.</p>
+        <div class="tx-modo-opciones" role="radiogroup">
+          <label class={`tx-modo-op ${modoBot === 'invitado' ? 'tx-modo-sel' : ''}`}>
+            <input type="radio" name="tx-modo" class="tx-modo-radio" value="invitado" checked={modoBot === 'invitado'} />
+            <span><strong>Como invitado</strong><span class="tx-sub">Pide unirse y tú lo admites.</span></span>
+          </label>
+          <label class={`tx-modo-op ${modoBot === 'cuenta' ? 'tx-modo-sel' : ''}`}>
+            <input type="radio" name="tx-modo" class="tx-modo-radio" value="cuenta" checked={modoBot === 'cuenta'} disabled={sesionRobot === 'sin_sesion' && modoBot !== 'cuenta'} />
+            <span><strong>Con su cuenta de Google</strong><span class="tx-sub">Entra solo, sin pedir permiso.</span></span>
+          </label>
+        </div>
+        <div class={`tx-robot tx-robot-${sesionRobot}`} role="note">
+          <p><span class={`tx-estado ${sesionRobot === 'activa' ? 'tx-estado-listo' : sesionRobot === 'vencida' ? 'tx-estado-problema' : 'tx-estado-neutro'}`}>Sesión de la cuenta: {ETIQUETA_SESION_ROBOT[sesionRobot]}</span></p>
+          <p class="tx-sub">
+            {errorRobot ? 'No se pudo leer la sesión del robot. Recarga la página en un momento.' : TEXTO_SESION_ROBOT[sesionRobot]}
+            {filaRobot?.cuenta_email && <> Cuenta: {filaRobot.cuenta_email}{filaRobot.actualizada_at ? ` · renovada el ${fmtFechaHora(filaRobot.actualizada_at)}` : ''}.</>}
+          </p>
+        </div>
+        <p class="tx-msg" id="tx-modo-msg" role="status" aria-live="polite"></p>
+      </fieldset>
       <form id="tx-nombres" class="tx-nombres">
         <label class="tx-switch-titulo" for="tx-nombres-txt" style="display:block;">Tus nombres en Meet</label>
         <p class="tx-sub" style="margin-bottom:0.4rem;">Como apareces en Google Meet (uno por línea). El asistente se retira cuando sales tú.</p>
@@ -308,6 +348,19 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
   .tx-switch input:checked + span::after { transform: translateX(20px); }
   .tx-switch input:focus-visible + span { outline: 2px solid #4f5ce8; outline-offset: 2px; }
   .tx-nombres { padding: 0.75rem 0; }
+  .tx-modo { border: none; padding: 0.75rem 0; margin: 0; border-bottom: 1px solid var(--warm); min-width: 0; }
+  .tx-modo legend { padding: 0; margin-bottom: 0.15rem; float: left; width: 100%; }
+  .tx-modo legend + .tx-sub { clear: both; }
+  .tx-modo-opciones { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.6rem; }
+  .tx-modo-op { display: flex; gap: 0.6rem; align-items: flex-start; min-height: 48px; padding: 0.7rem 0.8rem; border: 1px solid var(--enc-border, #e5e7eb); border-radius: var(--enc-radius-lg, 10px); cursor: pointer; background: #fff; }
+  .tx-modo-op > span { display: flex; flex-direction: column; gap: 0.1rem; font-size: 0.86rem; }
+  .tx-modo-op input { margin-top: 0.2rem; width: 18px; height: 18px; accent-color: #576352; flex-shrink: 0; }
+  .tx-modo-op.tx-modo-sel { border-color: #576352; box-shadow: 0 0 0 1px #576352 inset; background: #f6f8f5; }
+  .tx-modo-op:has(input:disabled) { opacity: 0.6; cursor: not-allowed; }
+  .tx-modo-op:has(input:focus-visible) { outline: 2px solid #4f5ce8; outline-offset: 2px; }
+  .tx-robot { margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; }
+  .tx-robot .tx-sub { overflow-wrap: anywhere; }
+  @media (max-width: 600px) { .tx-modo-opciones { grid-template-columns: minmax(0, 1fr); } }
   .tx-fijos { list-style: none; font-size: 0.78rem; color: var(--stone); margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; }
 
   .tx-gasto-total { font-size: 1.35rem; margin-bottom: 0.5rem; }
@@ -370,6 +423,28 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
         pinta(msg, errorDe(e), '#dc2626');
       } finally {
         sw.disabled = false;
+      }
+    });
+  });
+
+  // Modo del robot ('invitado' | 'cuenta'): se guarda al instante; si falla, vuelve al anterior.
+  document.querySelectorAll<HTMLInputElement>('.tx-modo-radio').forEach((r) => {
+    r.addEventListener('change', async () => {
+      if (!r.checked) return;
+      const msg = document.getElementById('tx-modo-msg');
+      const radios = [...document.querySelectorAll<HTMLInputElement>('.tx-modo-radio')];
+      const anterior = radios.find((x) => x !== r)!;
+      radios.forEach((x) => { x.disabled = true; });
+      pinta(msg, 'Guardando…', '#6b7280');
+      try {
+        const d = await postPanel('/api/admin/transcriptor/ajustes', { clave: 'transcriptor_bot_modo', valor: r.value });
+        if (!d.ok) throw new Error(d.error ?? 'No se pudo guardar.');
+        pinta(msg, '✓ Guardado.', '#15803d');
+        setTimeout(() => location.reload(), 700);
+      } catch (e) {
+        anterior.checked = true;
+        pinta(msg, errorDe(e), '#dc2626');
+        radios.forEach((x) => { x.disabled = false; });
       }
     });
   });

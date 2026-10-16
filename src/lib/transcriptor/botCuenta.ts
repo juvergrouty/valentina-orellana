@@ -43,7 +43,7 @@ export function venceUsoSesion(ahora: Date, horaFinPrevista?: string | null): Da
   return Number.isNaN(fin) ? new Date(ahora.getTime() + USO_SESION_SIN_FIN_MS) : new Date(Math.max(fin + USO_SESION_TRAS_FIN_MS, ahora.getTime() + 60_000));
 }
 /** Variable de Vercel con el secreto de aprovisionamiento (lo genera Vale; mínimo 32 caracteres). */
-export const ENV_APROVISIONAR = 'BOT_APROVISIONAR_SECRET';
+export const ENV_APROVISIONAR = 'BOT_APROVISIONAR_SECRET' as const;
 
 const FORMATO = 'VOS1';
 const CORREO_RE = /^[a-z0-9](?:[a-z0-9._+-]{0,62})@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
@@ -252,8 +252,8 @@ export interface DepsAprovisionar { db?: Cliente; secretoBot?: string; secretoAp
  */
 export async function procesarSesionInicial(e: EntradaAprovisionar, deps: DepsAprovisionar = {}): Promise<{ status: number; cuerpo: Record<string, unknown> }> {
   const NO = { status: 404, cuerpo: { error: 'No encontrado' } };
-  // Leído en runtime (process.env), nunca con import.meta.env: no queda en el bundle.
-  const aprov = deps.secretoAprovisionar ?? (typeof process !== 'undefined' ? process.env?.[ENV_APROVISIONAR] : undefined);
+  // Leído en runtime (secretos.ts), nunca con import.meta.env: no queda en el bundle.
+  const aprov = deps.secretoAprovisionar ?? (await import('../secretos')).secreto(ENV_APROVISIONAR);
   if (!aprovisionamientoValido(e.authorization, aprov)) return NO;
   const secretoBot = deps.secretoBot ?? (await import('../secretos')).secreto('BOT_TOKEN_SECRET');
   if (!secretoBot) return { status: 503, cuerpo: { error: 'No configurado' } };
@@ -278,5 +278,8 @@ export async function procesarSesionInicial(e: EntradaAprovisionar, deps: DepsAp
   if (error) return { status: 503, cuerpo: { error: 'No se pudo guardar (¿falta la migración 0022?)' } };
   const { auditar } = await import('./auditoria');
   await auditar('vale', 'cambiar_ajuste', { detalle: { ajuste: 'sesion_robot_meet', cookies: estado.cookies.length }, cliente: c });
+  // Sesión nueva: el aviso "robot:sesion" (avisosRobot.ts) ya está arreglado. Nunca lanza.
+  const { crearAlertas, repoAlertasSupabase } = await import('./alertas');
+  await crearAlertas({ repo: repoAlertasSupabase(c) }).resolverPorPrefijo('robot:sesion', []);
   return { status: 200, cuerpo: { ok: true } };
 }

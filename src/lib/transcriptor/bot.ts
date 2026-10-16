@@ -23,6 +23,8 @@ import { secreto } from '../secretos';
 import {
   cuentaRobotVigente, guardarSesionRenovada, leerModoBot, liberarSesion, marcarSesionVencida, tomarSesion, type ModoBot,
 } from './botCuenta';
+import { alertaDeAvisoRobot, alertaDeErrorBot, esMotivoSinSesion } from './avisosRobot';
+import type { NuevaAlerta } from './alertas';
 import {
   BOT_NOMBRE, PREFIJO_AUDIO, RUTAS, TIEMPOS,
   type Almacenamiento, type Bot, type EventoBot, type Grabacion, type LineaHablante, type SesionOnline, type TipoSesion,
@@ -343,6 +345,29 @@ async function clientePorDefecto(): Promise<Cliente> {
   return (await import('../supabase')).supabase;
 }
 
+/** Registra un aviso (alertas.ts). */
+export type Alertar = (a: NuevaAlerta) => Promise<void>;
+
+/**
+ * Aviso INMEDIATO de un problema del robot (avisosRobot.ts), con la misma base `c` que el resto del
+ * evento. Nunca lanza: un aviso que no se pudo guardar no cambia la respuesta al robot.
+ */
+async function avisarRobot(c: Cliente, a: NuevaAlerta, propio?: Alertar): Promise<void> {
+  try {
+    if (propio) { await propio(a); return; }
+    const m = await import('./alertas');
+    await m.crearAlertas({
+      repo: m.repoAlertasSupabase(c),
+      auditarNueva: async (f) => {
+        const { auditar } = await import('./auditoria');
+        await auditar('sistema', 'alerta', { grabacionId: f.grabacion_id, detalle: { op: 'nueva', tipo: f.tipo, clave_alerta: f.clave }, cliente: c });
+      },
+    }).registrarAlerta(a);
+  } catch (e) {
+    console.warn('[transcriptor/bot] no se pudo registrar el aviso:', e instanceof Error ? e.message : e);
+  }
+}
+
 export interface DepsBot {
   db?: Cliente;
   fetch?: typeof fetch;
@@ -351,6 +376,8 @@ export interface DepsBot {
   calendario?: () => Promise<{ token: string; calendarId: string } | null>;
   /** Para pruebas: agrega el robot como invitado del evento (por defecto googleCalendar.agregarInvitadoSinAviso). */
   invitar?: (token: string, calendarId: string, eventId: string, correo: string) => Promise<string>;
+  /** Para pruebas: registro de avisos (por defecto alertas.ts con la misma base). */
+  alertar?: Alertar;
 }
 
 // Llaves (FLY_API_TOKEN, BOT_TOKEN_SECRET) SOLO en runtime vía secretos.ts. Nunca leer
@@ -479,6 +506,7 @@ export function crearBot(deps: DepsBot = {}): Bot {
       const correo = await cuentaRobotVigente(c);
       if (!correo) {
         await aviso({ aviso: 'robot_sin_sesion', texto: 'El robot de Meet no tiene una sesión de Google vigente: entra como invitado (Vale lo admite).' });
+        await avisarRobot(c, alertaDeAvisoRobot('robot_sin_sesion'), deps.alertar);
         return { modo: 'invitado', cuentaEmail: null };
       }
       if (grabacion.google_event_id) {
@@ -487,9 +515,13 @@ export function crearBot(deps: DepsBot = {}): Bot {
           if (!auth) throw new Error('Google Calendar no está conectado');
           const invitar = deps.invitar ?? (await import('../googleCalendar')).agregarInvitadoSinAviso;
           const r = await invitar(auth.token, auth.calendarId, grabacion.google_event_id, correo);
-          if (r !== 'agregado' && r !== 'ya_estaba') await aviso({ aviso: 'robot_no_invitado', resultado: r });
+          if (r !== 'agregado' && r !== 'ya_estaba') {
+            await aviso({ aviso: 'robot_no_invitado', resultado: r });
+            await avisarRobot(c, alertaDeAvisoRobot('robot_no_invitado', { grabacionId: grabacion.id }), deps.alertar);
+          }
         } catch (e) {
           await aviso({ aviso: 'robot_no_invitado', error: sanearErrorBot(e instanceof Error ? e.message : e, 160) });
+          await avisarRobot(c, alertaDeAvisoRobot('robot_no_invitado', { grabacionId: grabacion.id }), deps.alertar);
         }
       }
       return { modo: 'cuenta', cuentaEmail: correo };
@@ -587,6 +619,8 @@ export interface DepsEvento {
   /** Se carga solo si hace falta (pide_url / segmento_subido). null = no disponible. */
   almacenamiento?: () => Promise<AlmacenamientoBot | null>;
   ahora?: () => Date;
+  /** Para pruebas: registro de avisos (por defecto alertas.ts con la misma base). */
+  alertar?: Alertar;
 }
 
 export interface RespuestaEvento { status: number; cuerpo: Record<string, unknown> }
@@ -758,6 +792,8 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
     case 'error': {
       await auditar('bot', 'alerta', { ...auditoria, resultado: 'error', detalle: { aviso: ev.detalle } });
       await c.from('grabaciones').update({ ultimo_error: `Bot: ${ev.detalle}` }).eq('id', grab.id);
+      // Aviso al instante (antes quedaba solo en la bitácora hasta el chequeo diario).
+      await avisarRobot(c, alertaDeErrorBot(grab.id, grab.estado, ev.detalle), deps.alertar);
       await marcar();
       return ok();
     }
@@ -767,6 +803,8 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
       const r = await tomarSesion(c, grab.id, ahora, secretoBot, grab.hora_fin_prevista);
       if (!r.ok) {
         await auditar('bot', 'alerta', { ...auditoria, resultado: 'error', detalle: { aviso: 'robot_sin_sesion', motivo: r.motivo } });
+        // 'ocupada'/'carrera' = otro bot la usa en este momento: no es un problema de la sesión.
+        if (esMotivoSinSesion(r.motivo)) await avisarRobot(c, alertaDeAvisoRobot('robot_sin_sesion'), deps.alertar);
         return ok({ sesion: null, motivo: r.motivo });
       }
       return ok({ correo: r.correo, sesion: r.estado });
@@ -779,6 +817,7 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
     case 'sesion_invalida': {
       await marcarSesionVencida(c, grab.id, ev.motivo || 'Google pidió iniciar sesión de nuevo');
       await auditar('bot', 'alerta', { ...auditoria, resultado: 'error', detalle: { aviso: 'robot_sesion_vencida', motivo: ev.motivo } });
+      await avisarRobot(c, alertaDeAvisoRobot('robot_sesion_vencida', { motivo: ev.motivo }), deps.alertar);
       await marcar();
       return ok();
     }

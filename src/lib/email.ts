@@ -1071,7 +1071,7 @@ export async function sendConsentLinkEmail(opts: {
         ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Consentimiento informado</h1>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(opts.patientName.split(' ')[0])}, te comparto el consentimiento para el tratamiento de tus datos
+          Hola${opts.patientName.trim() ? ` ${escapeHtml(opts.patientName.trim().split(' ')[0])}` : ''}, te comparto el consentimiento para el tratamiento de tus datos
           en la terapia, que pide la nueva ley de protección de datos personales. Toma unos 2 minutos:
           lo lees, marcas lo que autorizas y firmas con tu nombre y RUT (o tu documento de identidad, si no tienes RUT chileno).
         </p>
