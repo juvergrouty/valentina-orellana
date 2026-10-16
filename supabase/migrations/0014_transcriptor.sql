@@ -133,7 +133,7 @@ create table if not exists public.resumenes_ia (
   instrucciones_id     uuid references public.instrucciones_ia(id) on delete set null,
   prompt_version       text,                    -- versión de la parte fija del prompt (trazabilidad)
   modelo               text not null default 'claude-sonnet-5-5',
-  modo                 text not null default 'batch' check (modo in ('batch','directo')),
+  modo                 text not null default 'directo' check (modo in ('batch','directo')),
   estado               text not null default 'pendiente' check (estado in ('pendiente','en_batch','listo','error')),
   batch_id             text,
   custom_id            text unique check (custom_id is null or custom_id ~ '^[A-Za-z0-9_-]{1,64}$'),
