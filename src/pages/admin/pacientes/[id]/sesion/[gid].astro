@@ -131,7 +131,7 @@ if (!(import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') && g &
     avisoResumen = 'No se pudo registrar el acceso en la bitácora. Por seguridad, el resumen no se muestra. Intenta de nuevo en un momento.';
   }
 }
-// H5: pedido del paciente sobre esta sesión (excluir de la IA). La supresión de transcripciones se
+// H5: pedido del paciente sobre esta sesión (excluir de la IA). El borrado de transcripciones a pedido se
 // eliminó (02-decisiones-16oct-noche, C: la ficha se conserva 15 años).
 let excluidaIA = false;
 if (g && !(import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia')) {

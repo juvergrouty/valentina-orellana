@@ -1,0 +1,131 @@
+---
+// "Descargar ficha completa" (02-decisiones-16oct-noche, B): exportación legal de TODO lo de un paciente.
+// Esta página no muestra contenido clínico: solo explica qué incluye y pide el archivo al endpoint
+// /api/admin/transcriptor/exportar-ficha (passkey + bitácora; el archivo se arma en memoria y se descarga
+// directo en este dispositivo, sin copias en el servidor).
+export const prerender = false;
+import AdminLayout from '../../../../components/admin/AdminLayout.astro';
+import { supabase } from '../../../../lib/supabase';
+import { URL_CONFIRMAR_PASSKEY, accesoClinicoCookies } from '../../../../lib/transcriptor/acceso';
+
+const { id } = Astro.params;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const esDemo = import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia';
+if (!id || (!esDemo && !UUID.test(id))) return Astro.redirect('/admin/pacientes');
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+
+const acceso = esDemo ? { ok: true as const } : await accesoClinicoCookies(Astro.cookies);
+if (!acceso.ok && acceso.motivo === 'sesion') return Astro.redirect('/admin/login');
+
+let nombre = 'Camila Rojas';
+let anios: number[] = [2026];
+if (!esDemo) {
+  const { data: p } = await supabase.from('patients').select('id, name').eq('id', id).maybeSingle();
+  if (!p) return Astro.redirect('/admin/pacientes');
+  nombre = p.name as string;
+  const [{ data: ns }, { data: gs }] = await Promise.all([
+    supabase.from('session_notes').select('session_date').eq('patient_id', id),
+    supabase.from('grabaciones').select('session_date').eq('patient_id', id),
+  ]);
+  anios = [...new Set([...(ns ?? []), ...(gs ?? [])].map((r: { session_date: string | null }) => Number(String(r.session_date ?? '').slice(0, 4))).filter((n) => n >= 2020))].sort((a, b) => b - a);
+}
+const fichaUrl = `/admin/pacientes/${id}`;
+---
+
+<AdminLayout title={`Descargar ficha completa · ${nombre}`} current="/admin/pacientes">
+  <a href={`${fichaUrl}?tab=notas`} class="ex-volver">← Ficha de {nombre}</a>
+  <h2 class="ex-titulo">Descargar ficha completa</h2>
+  <p class="ex-sub">Para la normativa (la ficha se conserva 15 años) o si te la piden en un proceso legal.</p>
+
+  {!acceso.ok ? (
+    <div class="card ex-card" role="alert">
+      <p>{acceso.error}</p>
+      {acceso.motivo === 'passkey' && <a class="btn btn-dark btn-sm" href={URL_CONFIRMAR_PASSKEY}>Confirmar con passkey</a>}
+    </div>
+  ) : (
+    <section class="card ex-card" id="exportar" data-patient-id={id}>
+      <p class="label">Qué incluye</p>
+      <ul class="ex-lista">
+        <li>Datos de la ficha.</li>
+        <li>Consentimientos de cada persona: el texto exacto que firmó, la verificación de su huella, retiros y anexos (copias de los avisos enviados).</li>
+        <li>Tus notas de evolución (también las archivadas).</li>
+        <li>Todos los resúmenes automáticos (IA), con todas sus versiones.</li>
+        <li>Todas las transcripciones completas, con quién habló y el minuto.</li>
+        <li>La bitácora de accesos (incluye esta descarga).</li>
+      </ul>
+      <p class="ex-nota">Todo va ordenado por fecha. Se arma en el momento, se descarga directo a este dispositivo y no queda ninguna copia en el servidor.</p>
+
+      <fieldset class="ex-grupo">
+        <legend class="label">Formato</legend>
+        <label class="ex-opcion"><input type="radio" name="ex-formato" value="zip" checked /> <span><strong>PDF + datos (ZIP)</strong> — recomendado: el PDF legible y un archivo de datos (JSON).</span></label>
+        <label class="ex-opcion"><input type="radio" name="ex-formato" value="pdf" /> <span>Solo el PDF</span></label>
+        <label class="ex-opcion"><input type="radio" name="ex-formato" value="json" /> <span>Solo los datos (JSON)</span></label>
+      </fieldset>
+
+      <div class="ex-grupo">
+        <label class="label" for="ex-anio">Período</label>
+        <select id="ex-anio">
+          <option value="">Todo el historial</option>
+          {anios.map((a) => <option value={a}>Solo {a}</option>)}
+        </select>
+        <p class="ex-nota">Si la ficha es muy larga para una sola descarga, elige un año a la vez.</p>
+      </div>
+
+      <button type="button" class="btn btn-dark" id="ex-boton">Descargar ficha completa</button>
+      <p class="ex-msg" id="ex-msg" role="status" aria-live="polite"></p>
+      <p class="ex-nota">Contiene datos sensibles de salud: guárdala en un lugar seguro y no la envíes por canales sin cifrar.</p>
+    </section>
+  )}
+</AdminLayout>
+
+<style>
+  .ex-volver { color: var(--stone); font-size: 0.85rem; text-decoration: none; }
+  .ex-titulo { font-family: 'Cormorant Garamond', serif; font-size: 1.6rem; font-weight: 400; margin-top: 0.75rem; }
+  .ex-sub { color: var(--stone); font-size: 0.85rem; margin: 0.2rem 0 1.25rem; }
+  .ex-card { max-width: 640px; display: flex; flex-direction: column; gap: 0.85rem; }
+  .ex-lista { list-style: disc; padding-left: 1.2rem; font-size: 0.86rem; line-height: 1.6; }
+  .ex-nota { font-size: 0.78rem; color: var(--stone); }
+  .ex-grupo { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+  .ex-opcion { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.86rem; cursor: pointer; }
+  .ex-opcion input { width: auto; margin-top: 0.2rem; }
+  .ex-msg { font-size: 0.82rem; }
+  .ex-msg:empty { display: none; }
+  #ex-boton { width: fit-content; }
+  @media (max-width: 600px) { #ex-boton { width: 100%; justify-content: center; min-height: 44px; } }
+</style>
+
+<script>
+  const caja = document.getElementById('exportar');
+  const boton = document.getElementById('ex-boton') as HTMLButtonElement | null;
+  const msg = document.getElementById('ex-msg');
+  const pinta = (t: string, c: string) => { if (msg) { msg.textContent = t; msg.style.color = c; } };
+  boton?.addEventListener('click', async () => {
+    const formato = (document.querySelector('input[name="ex-formato"]:checked') as HTMLInputElement | null)?.value ?? 'zip';
+    const anio = (document.getElementById('ex-anio') as HTMLSelectElement | null)?.value ?? '';
+    boton.disabled = true;
+    pinta('Armando la ficha… puede tardar un poco si hay muchas sesiones.', '#6b7280');
+    try {
+      const res = await fetch('/api/admin/transcriptor/exportar-ficha', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+        body: JSON.stringify({ patient_id: caja?.dataset.patientId, formato, anio: anio || null }),
+      });
+      if (!res.ok) {
+        let error = 'No se pudo descargar la ficha. Intenta de nuevo.';
+        try { error = (await res.json()).error ?? error; } catch { /* sin cuerpo */ }
+        throw new Error(error);
+      }
+      const nombre = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'ficha-completa';
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url; a.download = nombre;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      pinta(`✓ Descargada: ${nombre}. Quedó registrada en la bitácora.`, '#15803d');
+    } catch (e) {
+      pinta('✕ ' + (e instanceof Error ? e.message : 'Error de conexión'), '#dc2626');
+    } finally {
+      boton.disabled = false;
+    }
+  });
+</script>

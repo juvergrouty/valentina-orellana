@@ -51,7 +51,12 @@ export function tieneTexto(f: FilaArchivo): boolean {
   return !!(f.contenido || (b && b.length));
 }
 
-export const ctxArchivo = (key: string): ContextoCifrado => ({ claveObjeto: key, tipo: 'resumen' });
+/**
+ * Contexto de cifrado del objeto archivado (tipo 'resumen', 81 H7). almacenamiento.ts declara el tipo de
+ * tipos.ts (sin 'resumen'), pero solo lo pasa a cifrado.ts, que sí lo acepta: de ahí la conversión.
+ */
+export const ctxArchivo = (key: string): ContextoAlm => ({ claveObjeto: key, tipo: 'resumen' } satisfies ContextoCifrado) as unknown as ContextoAlm;
+type ContextoAlm = Parameters<AlmArchivo['leerCifrado']>[0];
 
 /** Llave opaca nueva en el bucket de transcripciones (mismo formato que validarClave exige). */
 export function nuevaClaveArchivo(): string {

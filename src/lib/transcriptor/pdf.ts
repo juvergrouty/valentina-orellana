@@ -177,7 +177,8 @@ export function generarPdf(bloques: BloquePdf[], op: OpcionesPdf): Uint8Array {
   objeto(3, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
   objeto(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
   const f = op.creado ?? new Date();
-  const fechaPdf = `D:${f.toISOString().replace(/[-:T]/g, '').slice(0, 14)}Z`;
+  // (Sin la clase de regex "guion-dos puntos-T": Tailwind la confunde con una utilidad y rompe el CSS.)
+  const fechaPdf = `D:${f.toISOString().split('-').join('').split(':').join('').replace('T', '').slice(0, 14)}Z`;
   objeto(5, `<< /Title ${cadenaPdf(normalizarTexto(op.titulo))} /Author ${cadenaPdf(normalizarTexto(op.autor ?? ''))} /Producer (valentinaorellana.cl) /CreationDate (${fechaPdf}) >>`);
   paginas.forEach((p, i) => {
     const datos = deflateSync(Buffer.from(p.ops.join('\n'), 'latin1'));

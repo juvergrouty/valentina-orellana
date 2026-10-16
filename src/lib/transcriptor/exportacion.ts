@@ -12,7 +12,7 @@
 // servidor). Quien llama (endpoint) exige passkey y registra la bitácora ANTES de leer contenido.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TranscripcionClara } from './tipos';
-import { COLUMNAS_ARCHIVO, conTextoResumen, type AlmArchivo, type FilaArchivo } from './archivo';
+import { COLUMNAS_ARCHIVO, conTextoResumen, type AlmArchivo, type FilaArchivo, type OpcionesLectura } from './archivo';
 import { lineasTranscripcion, resumenATexto } from './panel';
 import { avisoAnexoResumen } from './resumen';
 import { generarPdf, type BloquePdf } from './pdf';
@@ -29,7 +29,7 @@ export interface DepsExportacion {
   db: SupabaseClient;
   leerTranscripcion: (r2Key: string) => Promise<TranscripcionClara>;
   alm?: AlmArchivo;
-  cif?: Parameters<typeof conTextoResumen>[1]['cif'];
+  cif?: OpcionesLectura['cif'];
   ahora?: () => Date;
 }
 
@@ -50,6 +50,16 @@ export function fechaCL(ymd: string | null | undefined): string {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : (ymd ?? '—');
 }
 const sha256 = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex');
+
+/** HTML de un correo → texto legible para el PDF (el HTML exacto va en el JSON). */
+export function textoDeHtml(html: string): string {
+  return (html ?? '')
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|tr|h[1-6]|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
 
 // ─── Datos ───────────────────────────────────────────────────────────────────
 
@@ -106,7 +116,7 @@ export async function recopilarFicha(patientId: string, deps: DepsExportacion, o
   ]);
   err('consents', ec); err('session_notes', en); err('grabaciones', eg);
 
-  const consentimientos = ((cs ?? []) as Record<string, unknown>[]).map((c) => {
+  const consentimientos: Record<string, unknown>[] = ((cs ?? []) as Record<string, unknown>[]).map((c) => {
     const texto = typeof c.text_snapshot === 'string' ? c.text_snapshot : null;
     const { token: _t, ...resto } = c; // el token del link no es parte de la constancia
     return { ...resto, texto_firmado: texto, verificacion_texto: texto && c.text_sha256 ? (sha256(texto) === c.text_sha256 ? 'integro' : 'NO_COINCIDE') : 'sin_texto' };
@@ -117,7 +127,18 @@ export async function recopilarFicha(patientId: string, deps: DepsExportacion, o
   if (cids.length) {
     const { data: av, error: ea } = await db.from('consent_avisos').select('*').in('consent_id', cids).order('mostrado_at', { ascending: true });
     if (ea) avisos.push('No se pudieron leer los anexos de aviso de cambio de consentimiento (consent_avisos).');
-    anexos = ((av ?? []) as Record<string, unknown>[]).map((a) => ({ tipo: 'aviso_cambio_consentimiento', ...a }));
+    anexos = ((av ?? []) as Record<string, unknown>[]).map((a) => ({ ...a, tipo: 'aviso_cambio_consentimiento' }));
+    // 0021 (decisión E): copia fiel del correo de aviso, guardada como anexo del consentimiento.
+    const { data: ax, error: ex } = await db.from('consent_anexos').select('*').in('consent_id', cids).order('enviado_at', { ascending: true });
+    if (ex && ex.code !== '42P01') avisos.push('No se pudieron leer los anexos de consentimiento (consent_anexos).');
+    for (const a of (ax ?? []) as Record<string, unknown>[]) {
+      const html = typeof a.html === 'string' ? a.html : '';
+      anexos.push({
+        ...a, tipo: 'copia_correo_aviso', tipo_anexo: a.tipo,
+        texto_correo: textoDeHtml(html),
+        verificacion_html: html && a.html_sha256 ? (sha256(html) === a.html_sha256 ? 'integro' : 'NO_COINCIDE') : 'sin_html',
+      });
+    }
   }
 
   const notas = ((ns ?? []) as Record<string, unknown>[])
@@ -261,7 +282,13 @@ export function documentoPdf(f: FichaExportada): BloquePdf[] {
     if (c.revoked_at) par(`Retiro del consentimiento: ${fechaHoraCL(String(c.revoked_at))}${c.revoked_note ? ` — ${c.revoked_note}` : ''}`, 8);
     if (c.texto_firmado) { meta('Texto exacto aceptado:'); B.push({ tipo: 'mono', texto: String(c.texto_firmado), sangria: 8 }); }
     for (const a of f.anexos_consentimiento.filter((x) => x.consent_id === c.id)) {
-      par(`Anexo: aviso de cambio de consentimiento mostrado el ${fechaHoraCL(String(a.mostrado_at))} por ${a.canal ?? '—'} (texto ${a.texto_version ?? '—'}).`, 8);
+      if (a.tipo === 'copia_correo_aviso') {
+        par(`Anexo: copia fiel del correo "${a.asunto ?? ''}" enviado a ${a.destinatario ?? '—'} el ${fechaHoraCL(String(a.enviado_at))}`, 8);
+        meta(`Huella SHA-256 del correo: ${a.html_sha256 ?? '—'} · verificación: ${a.verificacion_html === 'integro' ? 'íntegro' : a.verificacion_html === 'NO_COINCIDE' ? 'NO COINCIDE' : 'sin copia'}`, 8);
+        if (a.texto_correo) B.push({ tipo: 'mono', texto: String(a.texto_correo), sangria: 16 });
+      } else {
+        par(`Anexo: aviso de cambio de consentimiento mostrado el ${fechaHoraCL(String(a.mostrado_at))} por ${a.canal ?? '—'} (texto ${a.texto_version ?? '—'}).`, 8);
+      }
     }
     B.push({ tipo: 'separador' });
   }
