@@ -66,11 +66,11 @@ function ops(estado: EstadoGrabacion, antes: EstadoGrabacion | null, resumenErro
   return { o, llamadas };
 }
 
-test('ejecución: error → reintentar(), resuelve la alerta y reabre el resumen si corresponde', async () => {
+test('ejecución: error → reintentar(), NO cierra el aviso (se cierra cuando el paso salga bien) y reabre el resumen', async () => {
   const a = ops('error', 'resumiendo', 'r1');
   const r = await ejecutarReintento('g1', 'reintentar_resumen', a.o);
   assert.deepEqual(a.llamadas, ['reintentar', 'reabrir:r1']);
-  assert.equal(r.ok, true); assert.equal(r.resolver, true); assert.equal(r.desde, 'error'); assert.equal(r.hacia, 'resumiendo');
+  assert.equal(r.ok, true); assert.equal(r.resolver, false); assert.equal(r.desde, 'error'); assert.equal(r.hacia, 'resumiendo');
 
   const b = ops('error', 'subida');
   const rb = await ejecutarReintento('g1', 'reintentar', b.o);
@@ -80,7 +80,8 @@ test('ejecución: error → reintentar(), resuelve la alerta y reabre el resumen
 
 test('ejecución: atascada en paso del cron → soltar; teléfono → mensaje sin tocar nada; lista → solo cerrar', async () => {
   const a = ops('transcribiendo', null);
-  assert.equal((await ejecutarReintento('g1', 'reintentar', a.o)).ok, true);
+  const ra = await ejecutarReintento('g1', 'reintentar', a.o);
+  assert.equal(ra.ok, true); assert.equal(ra.resolver, false, 'soltar no es arreglar');
   assert.deepEqual(a.llamadas, ['soltar']);
 
   const b = ops('subiendo', null);

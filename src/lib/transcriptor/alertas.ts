@@ -2,6 +2,10 @@
 // Decisión 8 (docs/transcriptor/01-decisiones-16oct.md): cada error técnico aparece en el PANEL
 // (todas las páginas de /admin, ver src/components/admin/AlertasTranscriptor.astro) hasta que se
 // resuelve; el correo a Vale es solo respaldo (máx. 1 por clave cada 6 h).
+// Decisión A (02-decisiones-16oct-noche.md): NO hay "Marcar como resuelto". Un aviso se cierra
+// SOLO cuando el problema se arregla (resuelta_por = 'sistema'): el paso de la grabación salió
+// bien (se revisa al listar, ver alertaSuperada en accionesAlerta.ts) o el chequeo volvió a OK.
+// Las acciones que reparan cada aviso están en accionesAlerta.ts.
 // NO es alerta de riesgo clínico (decisión 2: eso no se construye).
 //
 // Reglas:
@@ -15,6 +19,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { EstadoGrabacion, Origen } from './tipos';
 import { secreto } from '../secretos';
+import { accionesDisponibles, alertaSuperada, etiquetaAccion } from './accionesAlerta';
 
 // ─── Contrato (P6 y otros paquetes lo usan tal cual) ─────────────────────────
 
@@ -46,7 +51,8 @@ export interface AlertaFila {
   veces: number;
   ultima_vez: string;
   resuelta_at: string | null;
-  resuelta_por: 'vale' | 'sistema' | null;
+  /** Siempre 'sistema' (decisión A: no existe el cierre manual). Filas viejas pueden decir 'vale'. */
+  resuelta_por: 'sistema' | null;
   correo_enviado_at: string | null;
 }
 
@@ -59,10 +65,18 @@ export interface SesionDeAlerta {
   estado_antes_error: EstadoGrabacion | null;
   patient_id: string | null;
   paciente: string | null;
+  hora_fin_prevista: string | null;
+  bot_machine_id: string | null;
+  /** Segmentos de audio que alcanzaron a subir (para "Transcribir lo que alcanzó a grabarse"). */
+  segmentos_subidos: number | null;
+  /** Transcripciones de esta sesión sin copia en B2. */
+  b2_pendientes: number | null;
 }
 
 export interface AlertaAbierta extends AlertaFila {
   sesion: SesionDeAlerta | null;
+  /** true = no se pudo leer la sesión (no se cierra nada por eso). */
+  sesion_desconocida?: boolean;
 }
 
 // ─── Funciones puras (con pruebas en alertas.test.ts) ────────────────────────
@@ -123,24 +137,47 @@ export const etiquetaTipo = (t: AlertaTipo) => ETIQUETA_TIPO[t] ?? 'Transcriptor
 
 const escaparHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
-/** Correo de respaldo: SIN datos de la sesión ni del paciente; solo qué falló y el enlace al panel. */
-export function armarCorreo(f: Pick<AlertaFila, 'tipo' | 'titulo' | 'detalle' | 'veces'>, urlPanel: string): { asunto: string; html: string; texto: string } {
+/** Enlace del correo a la página de acción (exige sesión del panel; ejecuta solo por POST). */
+export function urlAccion(urlPanel: string, alertaId: string, accion: string): string {
+  let origen = 'https://www.valentinaorellana.cl';
+  try { origen = new URL(urlPanel).origin; } catch { /* se usa el sitio */ }
+  return `${origen}/admin/transcriptor/accion?alerta=${encodeURIComponent(alertaId)}&accion=${encodeURIComponent(accion)}`;
+}
+
+/**
+ * Correo de respaldo: SIN datos de la sesión ni del paciente; solo qué falló, un botón por acción
+ * (llevan a /admin/transcriptor/accion, que pide sesión y confirmar con un toque) y el panel.
+ * Sin `id` (la base no respondió) solo lleva el enlace al panel.
+ */
+export function armarCorreo(
+  f: Pick<AlertaFila, 'tipo' | 'titulo' | 'detalle' | 'veces'> & Partial<Pick<AlertaFila, 'id' | 'clave' | 'accion' | 'grabacion_id'>>,
+  urlPanel: string,
+): { asunto: string; html: string; texto: string } {
   const asunto = sanearTexto(`⚠ Transcriptor: ${f.titulo}`, 150);
+  const acciones = f.id && f.clave
+    ? accionesDisponibles({ tipo: f.tipo, clave: f.clave, accion: f.accion ?? 'revisar', grabacion_id: f.grabacion_id ?? null }, undefined)
+      .map((a) => ({ etiqueta: etiquetaAccion(a), url: urlAccion(urlPanel, f.id!, a) }))
+    : [];
   const lineas = [
     `${etiquetaTipo(f.tipo)}: ${f.titulo}`,
     f.detalle ? `Detalle técnico: ${f.detalle}` : '',
     f.veces > 1 ? `Se repitió ${f.veces} veces.` : '',
-    'El aviso está en tu panel (arriba, en rojo) con el botón para resolverlo. Este correo es solo un respaldo.',
+    acciones.length
+      ? `Para arreglarlo (te pide entrar al panel y confirmar con un toque):\n${acciones.map((a) => `• ${a.etiqueta}: ${a.url}`).join('\n')}`
+      : '',
+    'El aviso también está en tu panel (arriba, en rojo) y se cierra solo cuando el problema queda arreglado. Este correo es solo un respaldo.',
     `Abrir el panel: ${urlPanel}`,
   ].filter(Boolean);
+  const botones = acciones.map((a, i) => `<a href="${escaparHtml(a.url)}" style="display:inline-block;margin:0 0.5rem 0.5rem 0;text-decoration:none;font-weight:600;padding:0.6rem 1rem;border-radius:6px;${i === 0 ? 'background:#b91c1c;color:#fff;' : 'background:#fff;color:#b91c1c;border:2px solid #b91c1c;'}">${escaparHtml(a.etiqueta)}</a>`).join('');
   const html = `
     <div style="font-family:'Inter',sans-serif;max-width:480px;margin:0 auto;padding:1.5rem;color:#1A1A18;background:#FAF7F4;">
       <h2 style="font-size:1rem;font-weight:600;margin:0 0 1rem;border-bottom:2px solid #b91c1c;padding-bottom:0.5rem;">El transcriptor tiene un problema</h2>
       <p style="font-size:0.9rem;margin:0 0 0.5rem;"><strong>${escaparHtml(etiquetaTipo(f.tipo))}:</strong> ${escaparHtml(f.titulo)}</p>
       ${f.detalle ? `<p style="font-size:0.85rem;color:#6B6860;margin:0 0 0.5rem;">Detalle técnico: ${escaparHtml(f.detalle)}</p>` : ''}
       ${f.veces > 1 ? `<p style="font-size:0.85rem;color:#6B6860;margin:0 0 0.5rem;">Se repitió ${f.veces} veces.</p>` : ''}
-      <p style="font-size:0.85rem;margin:1rem 0;">El aviso está en tu panel (arriba, en rojo) con el botón para resolverlo. Este correo es solo un respaldo.</p>
-      <p style="margin:0;"><a href="${escaparHtml(urlPanel)}" style="display:inline-block;background:#b91c1c;color:#fff;text-decoration:none;font-weight:600;padding:0.6rem 1rem;border-radius:6px;">Abrir el panel</a></p>
+      ${botones ? `<p style="font-size:0.85rem;margin:1rem 0 0.5rem;">Para arreglarlo (te pide entrar al panel y confirmar con un toque):</p><p style="margin:0 0 0.5rem;">${botones}</p>` : ''}
+      <p style="font-size:0.85rem;margin:1rem 0;">El aviso también está en tu panel (arriba, en rojo) y se cierra solo cuando el problema queda arreglado. Este correo es solo un respaldo.</p>
+      <p style="margin:0;"><a href="${escaparHtml(urlPanel)}" style="color:#b91c1c;font-weight:600;">Abrir el panel</a></p>
     </div>`;
   return { asunto, html, texto: lineas.join('\n\n') };
 }
@@ -170,7 +207,8 @@ export interface RepoAlertas {
   liberarCorreo(id: string, previo: string | null): Promise<void>;
   obtener(id: string): Promise<AlertaFila | null>;
   listarAbiertas(limite: number): Promise<AlertaAbierta[]>;
-  resolver(filtro: FiltroResolver, por: 'vale' | 'sistema', ahoraIso: string): Promise<number>;
+  /** Cierra las abiertas que calzan (siempre resuelta_por = 'sistema'). */
+  resolver(filtro: FiltroResolver, ahoraIso: string): Promise<number>;
   correoDestino(): Promise<string | null>;
 }
 
@@ -184,6 +222,50 @@ function esTablaFaltante(e: { code?: string; message?: string } | null | undefin
 /** La tabla 0017 no existe: no se manda correo de respaldo (evita un correo por instancia nueva). */
 export class TablaAlertasFaltanteError extends Error {
   constructor() { super('falta la tabla transcriptor_alertas (migración 0017 sin aplicar)'); this.name = 'TablaAlertasFaltanteError'; }
+}
+
+/** Estado de las grabaciones de los avisos (lanza si la base falla: así no se cierra nada por error). */
+export async function leerSesiones(db: SupabaseClient, ids: string[]): Promise<Map<string, SesionDeAlerta>> {
+  const sesiones = new Map<string, SesionDeAlerta>();
+  if (!ids.length) return sesiones;
+  const { data: gs, error } = await db.from('grabaciones')
+    .select('id, session_date, inicio_at, origen, estado, estado_antes_error, patient_id, hora_fin_prevista, bot_machine_id').in('id', ids);
+  if (error) throw new Error(`grabaciones: ${error.message}`);
+  const lista = (gs ?? []) as (Omit<SesionDeAlerta, 'paciente' | 'segmentos_subidos' | 'b2_pendientes'> & { id: string })[];
+  const pids = [...new Set(lista.map((g) => g.patient_id).filter((x): x is string => !!x))];
+  const nombres = new Map<string, string>();
+  if (pids.length) {
+    const { data: ps } = await db.from('patients').select('id, name').in('id', pids);
+    for (const p of (ps ?? []) as { id: string; name: string | null }[]) if (p.name) nombres.set(p.id, p.name);
+  }
+  const contar = (filas: { grabacion_id: string }[] | null) => {
+    const m = new Map<string, number>();
+    for (const r of filas ?? []) m.set(r.grabacion_id, (m.get(r.grabacion_id) ?? 0) + 1);
+    return m;
+  };
+  const [rs, rt] = await Promise.all([
+    db.from('grabacion_segmentos').select('grabacion_id').in('grabacion_id', ids).not('subido_at', 'is', null).limit(2000),
+    db.from('transcripciones').select('grabacion_id').in('grabacion_id', ids).is('b2_key', null).is('deleted_at', null).limit(500),
+  ]);
+  if (rs.error) throw new Error(`segmentos: ${rs.error.message}`);
+  if (rt.error) throw new Error(`transcripciones: ${rt.error.message}`);
+  const subidos = contar(rs.data as { grabacion_id: string }[] | null);
+  const sinB2 = contar(rt.data as { grabacion_id: string }[] | null);
+  for (const g of lista) {
+    sesiones.set(g.id, {
+      session_date: g.session_date, inicio_at: g.inicio_at, origen: g.origen, estado: g.estado,
+      estado_antes_error: g.estado_antes_error, patient_id: g.patient_id,
+      paciente: g.patient_id ? nombres.get(g.patient_id) ?? null : null,
+      hora_fin_prevista: g.hora_fin_prevista ?? null, bot_machine_id: g.bot_machine_id ?? null,
+      segmentos_subidos: subidos.get(g.id) ?? 0, b2_pendientes: sinB2.get(g.id) ?? 0,
+    });
+  }
+  return sesiones;
+}
+
+/** Una sola sesión (null = la grabación ya no existe). Lanza si la base falla. */
+export async function leerSesionDeAlerta(db: SupabaseClient, grabacionId: string): Promise<SesionDeAlerta | null> {
+  return (await leerSesiones(db, [grabacionId])).get(grabacionId) ?? null;
 }
 
 export function repoAlertasSupabase(db: SupabaseClient): RepoAlertas {
@@ -248,27 +330,18 @@ export function repoAlertasSupabase(db: SupabaseClient): RepoAlertas {
       }
       const filas = (data ?? []) as AlertaFila[];
       const ids = [...new Set(filas.map((f) => f.grabacion_id).filter((x): x is string => !!x))];
-      const sesiones = new Map<string, SesionDeAlerta>();
+      let sesiones: Map<string, SesionDeAlerta> | null = new Map();
       if (ids.length) {
-        const { data: gs } = await db.from('grabaciones')
-          .select('id, session_date, inicio_at, origen, estado, estado_antes_error, patient_id').in('id', ids);
-        const pids = [...new Set((gs ?? []).map((g: { patient_id: string | null }) => g.patient_id).filter((x): x is string => !!x))];
-        const nombres = new Map<string, string>();
-        if (pids.length) {
-          const { data: ps } = await db.from('patients').select('id, name').in('id', pids);
-          for (const p of (ps ?? []) as { id: string; name: string | null }[]) if (p.name) nombres.set(p.id, p.name);
-        }
-        for (const g of (gs ?? []) as (Omit<SesionDeAlerta, 'paciente'> & { id: string })[]) {
-          sesiones.set(g.id, {
-            session_date: g.session_date, inicio_at: g.inicio_at, origen: g.origen, estado: g.estado,
-            estado_antes_error: g.estado_antes_error, patient_id: g.patient_id,
-            paciente: g.patient_id ? nombres.get(g.patient_id) ?? null : null,
-          });
-        }
+        try { sesiones = await leerSesiones(db, ids); }
+        catch (e) { console.error('[transcriptor/alertas] sesiones de los avisos:', e instanceof Error ? e.message : e); sesiones = null; }
       }
-      return filas.map((f) => ({ ...f, sesion: f.grabacion_id ? sesiones.get(f.grabacion_id) ?? null : null }));
+      return filas.map((f) => ({
+        ...f,
+        sesion: f.grabacion_id && sesiones ? sesiones.get(f.grabacion_id) ?? null : null,
+        ...(f.grabacion_id && !sesiones ? { sesion_desconocida: true } : {}),
+      }));
     },
-    async resolver(filtro, por, ahoraIso) {
+    async resolver(filtro, ahoraIso) {
       let q = t().select('id, clave').is('resuelta_at', null);
       if (filtro.id) q = q.eq('id', filtro.id);
       if (filtro.grabacionId) q = q.eq('grabacion_id', filtro.grabacionId);
@@ -282,7 +355,7 @@ export function repoAlertasSupabase(db: SupabaseClient): RepoAlertas {
       const salvo = new Set(filtro.salvo ?? []);
       const ids = ((data ?? []) as { id: string; clave: string }[]).filter((r) => !salvo.has(r.clave)).map((r) => r.id);
       if (!ids.length) return 0;
-      const { data: upd, error: e2 } = await t().update({ resuelta_at: ahoraIso, resuelta_por: por })
+      const { data: upd, error: e2 } = await t().update({ resuelta_at: ahoraIso, resuelta_por: 'sistema' })
         .in('id', ids).is('resuelta_at', null).select('id');
       if (e2) throw new Error(`alertas.resolver: ${e2.message}`);
       return upd?.length ?? 0;
@@ -344,8 +417,10 @@ export interface DepsAlertas {
 export interface ServicioAlertas {
   registrarAlerta(a: NuevaAlerta): Promise<void>;
   resolverAlertasDe(grabacionId: string, tipo?: AlertaTipo): Promise<void>;
+  /** Abiertas; las que ya se arreglaron (paso logrado) se cierran aquí mismo y no se devuelven. */
   listarAlertasAbiertas(limite?: number): Promise<AlertaAbierta[]>;
-  resolverAlerta(id: string, por?: 'vale' | 'sistema'): Promise<boolean>;
+  /** Cierre del SISTEMA tras verificar que el problema se arregló. No hay cierre manual. */
+  cerrarAlerta(id: string): Promise<boolean>;
   obtenerAlerta(id: string): Promise<AlertaFila | null>;
   /** Para el chequeo diario: cierra las alertas con ese prefijo que ya no fallan. */
   resolverPorPrefijo(prefijo: string, salvo: readonly string[]): Promise<number>;
@@ -427,21 +502,31 @@ export function crearAlertas(deps: DepsAlertas = {}): ServicioAlertas {
   return {
     registrarAlerta,
     async resolverAlertasDe(grabacionId, tipo) {
-      try { await (await repo()).resolver({ grabacionId, tipo }, 'sistema', ahora().toISOString()); }
+      try { await (await repo()).resolver({ grabacionId, tipo }, ahora().toISOString()); }
       catch (e) { console.error('[transcriptor/alertas] resolverAlertasDe:', e instanceof Error ? e.message : e); }
     },
     async listarAlertasAbiertas(limite = 50) {
-      try { return await (await repo()).listarAbiertas(limite); }
+      let filas: AlertaAbierta[];
+      try { filas = await (await repo()).listarAbiertas(limite); }
       catch (e) { console.error('[transcriptor/alertas] listarAlertasAbiertas:', e instanceof Error ? e.message : e); return []; }
+      const quedan: AlertaAbierta[] = [];
+      for (const f of filas) {
+        if (f.grabacion_id && !f.sesion_desconocida && alertaSuperada(f, f.sesion)) {
+          try { await (await repo()).resolver({ id: f.id }, ahora().toISOString()); continue; }
+          catch (e) { console.error('[transcriptor/alertas] cierre automático:', e instanceof Error ? e.message : e); }
+        }
+        quedan.push(f);
+      }
+      return quedan;
     },
-    async resolverAlerta(id, por = 'vale') {
-      return (await (await repo()).resolver({ id }, por, ahora().toISOString())) > 0;
+    async cerrarAlerta(id) {
+      return (await (await repo()).resolver({ id }, ahora().toISOString())) > 0;
     },
     async obtenerAlerta(id) {
       return (await repo()).obtener(id);
     },
     async resolverPorPrefijo(prefijo, salvo) {
-      try { return await (await repo()).resolver({ prefijo, salvo }, 'sistema', ahora().toISOString()); }
+      try { return await (await repo()).resolver({ prefijo, salvo }, ahora().toISOString()); }
       catch (e) { console.error('[transcriptor/alertas] resolverPorPrefijo:', e instanceof Error ? e.message : e); return 0; }
     },
   };
@@ -464,13 +549,9 @@ export async function registrarAlerta(a: NuevaAlerta): Promise<void> {
 export async function resolverAlertasDe(grabacionId: string, tipo?: AlertaTipo): Promise<void> {
   return porDefecto.resolverAlertasDe(grabacionId, tipo);
 }
-/** Alertas abiertas con la sesión asociada (para el banner del panel). Nunca lanza: [] si falla. */
+/** Alertas abiertas con la sesión asociada (para el banner del panel); cierra las ya arregladas. Nunca lanza: [] si falla. */
 export async function listarAlertasAbiertas(limite?: number): Promise<AlertaAbierta[]> {
   return porDefecto.listarAlertasAbiertas(limite);
-}
-/** "Marcar como resuelto" (Vale) o cierre automático. true si cerró una alerta abierta. Lanza si la base falla. */
-export async function resolverAlerta(id: string, por: 'vale' | 'sistema' = 'vale'): Promise<boolean> {
-  return porDefecto.resolverAlerta(id, por);
 }
 export async function obtenerAlerta(id: string): Promise<AlertaFila | null> {
   return porDefecto.obtenerAlerta(id);

@@ -1,59 +1,69 @@
-// POST /api/admin/transcriptor/alertas — botones del aviso rojo del transcriptor (paquete P8).
-// Cuerpo JSON: { id: <uuid de la alerta>, accion: 'reintentar' | 'reintentar_resumen' | 'resolver' }.
-// Protección: middleware (cookie del panel) + guardiaPanel (POST, Origin/Referer propio obligatorio,
-// cabecera X-Panel: 1, sesión válida y no revocada). Todo queda en transcriptor_auditoria.
-// "Reintentar" no ejecuta el paso: deja la grabación en el estado correcto (estados.ts) y el cron
-// la retoma en el próximo minuto (src/lib/transcriptor/reintentoAlerta.ts).
+// /api/admin/transcriptor/alertas — acciones que reparan los avisos del transcriptor (decisión A,
+// 02-decisiones-16oct-noche.md; tabla en docs/transcriptor/84-avisos-acciones.md).
+//
+// POST { id: <uuid del aviso>, accion: AccionAviso } — ejecuta la acción (Reintentar, Reintentar
+//   resumen, Rehacer copia en B2, Borrar en AssemblyAI, Lanzar respaldo ahora, Volver a revisar…).
+//   Lo usan el aviso rojo del panel y la página /admin/transcriptor/accion (enlaces del correo).
+//   Protección: middleware (cookie del panel + passkey si aplica, estricto en esta ruta) +
+//   guardiaPanel (POST, Origin/Referer propio obligatorio, cabecera X-Panel: 1, sesión no
+//   revocada). Todo queda en transcriptor_auditoria. NO existe "resolver": el aviso se cierra solo
+//   cuando el problema está arreglado.
+// GET ?id=<uuid> — ¿sigue abierto? (el aviso lo consulta tras Reintentar). Sin efectos, salvo
+//   cerrar el aviso si su paso ya salió bien (mismo cierre automático que al listar).
 import type { APIRoute } from 'astro';
 import { guardiaPanel, json, leerJson, esUuid, safeAddr } from '../../../../lib/transcriptor/peticion';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
-import { obtenerAlerta, resolverAlerta } from '../../../../lib/transcriptor/alertas';
-import { ejecutarReintento, opsReintentoSupabase, type AccionReintento } from '../../../../lib/transcriptor/reintentoAlerta';
+import { ejecutarAccionAviso, esAccionAviso, opsAccionesReales, alertaSuperada, claseDe, esDeGrabacion } from '../../../../lib/transcriptor/accionesAlerta';
 
 export const prerender = false;
 
-const ACCIONES = ['reintentar', 'reintentar_resumen', 'resolver'] as const;
-type Accion = (typeof ACCIONES)[number];
-
 export const POST: APIRoute = async (ctx) => {
   const cuerpo = await leerJson(ctx.request);
-  const accion = cuerpo?.accion as Accion | undefined;
-  const esResolver = accion === 'resolver';
-  const rechazo = await guardiaPanel(ctx, esResolver ? 'alerta' : 'reintentar');
+  const accion = cuerpo?.accion;
+  const rechazo = await guardiaPanel(ctx, accion === 'reintentar' || accion === 'reintentar_resumen' ? 'reintentar' : 'alerta');
   if (rechazo) return rechazo;
 
   const id = cuerpo?.id;
-  if (!esUuid(id) || !accion || !ACCIONES.includes(accion)) {
-    return json({ ok: false, error: 'Pedido inválido.' }, 400);
-  }
+  if (!esUuid(id) || !esAccionAviso(accion)) return json({ ok: false, error: 'Pedido inválido.' }, 400);
   const base = { request: ctx.request, clientAddress: safeAddr(ctx) };
+  const accionBitacora = accion === 'reintentar' || accion === 'reintentar_resumen' ? 'reintentar' as const : 'alerta' as const;
 
   try {
-    const alerta = await obtenerAlerta(id);
+    const ops = await opsAccionesReales();
+    const alerta = await ops.obtenerAlerta(id);
     if (!alerta) return json({ ok: false, error: 'Ese aviso ya no existe. Recarga la página.' }, 404);
-    if (alerta.resuelta_at) return json({ ok: true, mensaje: 'Ese aviso ya estaba resuelto.' });
-
-    if (esResolver) {
-      await resolverAlerta(id, 'vale');
-      await auditar('vale', 'alerta', { ...base, grabacionId: alerta.grabacion_id, detalle: { op: 'resolver', tipo: alerta.tipo, clave_alerta: alerta.clave } });
-      return json({ ok: true, mensaje: 'Marcado como resuelto.' });
-    }
-
-    if (!alerta.grabacion_id) {
-      return json({ ok: false, error: 'Este aviso no es de una sesión: revisa el detalle y márcalo como resuelto cuando esté arreglado.' }, 409);
-    }
-    const r = await ejecutarReintento(alerta.grabacion_id, accion as AccionReintento, await opsReintentoSupabase());
-    await auditar('vale', 'reintentar', {
+    const r = await ejecutarAccionAviso(id, accion, ops);
+    await auditar('vale', accionBitacora, {
       ...base,
       grabacionId: alerta.grabacion_id,
       resultado: r.ok ? 'ok' : 'error',
-      detalle: { origen: 'alerta', accion, tipo: alerta.tipo, desde: r.desde ?? null, hacia: r.hacia ?? null },
+      detalle: { origen: 'alerta', op: accion, tipo: alerta.tipo, clave_alerta: alerta.clave, cerrada: r.cerrada, ...(r.detalle ?? {}) },
     });
-    if (r.resolver) await resolverAlerta(id, 'vale');
-    return r.ok ? json({ ok: true, mensaje: r.mensaje }) : json({ ok: false, error: r.mensaje }, 409);
+    return r.ok
+      ? json({ ok: true, cerrada: r.cerrada, mensaje: r.mensaje })
+      : json({ ok: false, cerrada: r.cerrada, error: r.mensaje }, 409);
   } catch (e) {
     console.error('[api/admin/transcriptor/alertas]', e instanceof Error ? e.message : e);
-    await auditar('vale', esResolver ? 'alerta' : 'reintentar', { ...base, resultado: 'error', detalle: { accion, error: e instanceof Error ? e.message : 'desconocido' } });
+    await auditar('vale', accionBitacora, { ...base, resultado: 'error', detalle: { op: accion, error: e instanceof Error ? e.message.slice(0, 200) : 'desconocido' } });
     return json({ ok: false, error: 'No se pudo completar. Intenta de nuevo en un momento.' }, 500);
+  }
+};
+
+export const GET: APIRoute = async ({ url }) => {
+  const id = url.searchParams.get('id');
+  if (!esUuid(id)) return json({ ok: false, error: 'Pedido inválido.' }, 400);
+  try {
+    const ops = await opsAccionesReales();
+    const a = await ops.obtenerAlerta(id);
+    if (!a) return json({ ok: true, abierta: false });
+    if (a.resuelta_at) return json({ ok: true, abierta: false });
+    if (a.grabacion_id && esDeGrabacion(claseDe(a)) && alertaSuperada(a, await ops.leerSesion(a.grabacion_id))) {
+      await ops.cerrarAlerta(a.id);
+      return json({ ok: true, abierta: false });
+    }
+    return json({ ok: true, abierta: true });
+  } catch (e) {
+    console.error('[api/admin/transcriptor/alertas GET]', e instanceof Error ? e.message : e);
+    return json({ ok: false, error: 'No se pudo revisar.' }, 500);
   }
 };

@@ -14,6 +14,8 @@ export interface CrudoReporte {
   preguntas: { costo_usd: number | null; error: string | null }[];
   alertas: { tipo: AlertaTipo; veces: number; resuelta_por: string | null }[];
   reintentosManuales: number;
+  /** Acciones que Vale tocó en los avisos (bitácora 'alerta', resultado ok). */
+  accionesAvisos?: number;
   usdClp: number;
   presupuestoClp: number;
 }
@@ -87,8 +89,10 @@ export function armarReporte(c: CrudoReporte): Record<string, unknown> {
       alertas_total: c.alertas.length,
       alertas_por_tipo: contar(c.alertas.map((a) => a.tipo)),
       repeticiones_total: c.alertas.reduce((a, x) => a + (x.veces || 1), 0),
-      resueltas_por_vale: c.alertas.filter((a) => a.resuelta_por === 'vale').length,
-      resueltas_solas: c.alertas.filter((a) => a.resuelta_por === 'sistema').length,
+      // Decisión A (16 oct noche): no existe el cierre manual; todo aviso cerrado lo cerró el
+      // sistema al comprobar que el problema se arregló (con o sin una acción de Vale).
+      resueltas: c.alertas.filter((a) => !!a.resuelta_por).length,
+      acciones_desde_avisos: c.accionesAvisos ?? 0,
       abiertas: c.alertas.filter((a) => !a.resuelta_por).length,
       reintentos_manuales: c.reintentosManuales,
       grabaciones_en_error: c.grabaciones.filter((g) => g.estado === 'error').length,
@@ -136,17 +140,19 @@ export async function generarReporteMensual(mes: string): Promise<Record<string,
     segmentos.push(...await leer<CrudoReporte['segmentos'][number]>(db.from('grabacion_segmentos').select('grabacion_id, aai_audio_seg').in('grabacion_id', parte), 'segmentos'));
     resumenes.push(...await leer<CrudoReporte['resumenes'][number]>(db.from('resumenes_ia').select('grabacion_id, estado, autor, costo_usd, listo_at, intentos').in('grabacion_id', parte), 'resúmenes'));
   }
-  const [preguntas, alertas, reintentos, ajustes] = await Promise.all([
+  const [preguntas, alertas, reintentos, accionesAvisos, ajustes] = await Promise.all([
     leer<CrudoReporte['preguntas'][number]>(db.from('preguntas_ia').select('costo_usd, error').gte('created_at', desde).lt('created_at', hasta).limit(5000), 'preguntas'),
     leer<CrudoReporte['alertas'][number]>(db.from('transcriptor_alertas').select('tipo, veces, resuelta_por').gte('creada_at', desde).lt('creada_at', hasta).limit(5000), 'alertas')
       .catch(() => [] as CrudoReporte['alertas']), // 0017 sin aplicar
     db.from('transcriptor_auditoria').select('id', { count: 'exact', head: true }).eq('accion', 'reintentar').eq('actor', 'vale').eq('resultado', 'ok').gte('at', desde).lt('at', hasta),
+    db.from('transcriptor_auditoria').select('id', { count: 'exact', head: true }).eq('accion', 'alerta').eq('actor', 'vale').eq('resultado', 'ok').gte('at', desde).lt('at', hasta),
     leer<{ key: string; value: string }>(db.from('settings').select('key, value').in('key', ['transcriptor_usd_clp', 'transcriptor_presupuesto_clp']), 'ajustes'),
   ]);
   const aj = new Map(ajustes.map((a) => [a.key, Number(a.value)]));
   const datos = armarReporte({
     mes, grabaciones, segmentos, resumenes, preguntas, alertas,
     reintentosManuales: reintentos.count ?? 0,
+    accionesAvisos: accionesAvisos.count ?? 0,
     usdClp: aj.get('transcriptor_usd_clp') || 950,
     presupuestoClp: aj.get('transcriptor_presupuesto_clp') || 35000,
   });

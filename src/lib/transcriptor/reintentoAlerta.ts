@@ -7,6 +7,9 @@
 //   • Si vuelve a 'resumiendo' y el último resumen quedó en 'error' → ese resumen vuelve a
 //     'pendiente' con intentos = 0 (si no, el cron no lo vuelve a intentar).
 //   • grabando / pausada / subiendo / bot_en_lobby → no se puede desde el servidor: mensaje claro.
+// Decisión A (02-decisiones-16oct-noche.md): reintentar NO cierra el aviso. El aviso se cierra
+// solo cuando el paso sale bien (accionesAlerta.alertaSuperada, al listar o al volver a revisar).
+// `resolver` = true solo cuando ya no queda nada pendiente (la sesión está lista o terminada).
 import { TIEMPOS, type EstadoGrabacion, type Grabacion, type Origen } from './tipos';
 import { destinoReintento, TERMINALES } from './estados';
 
@@ -92,7 +95,8 @@ export interface OpsReintento {
 
 export interface ResultadoReintento {
   ok: boolean;
-  /** true = la alerta se puede cerrar (se reintentó o ya no había nada que hacer). */
+  /** true = ya no queda nada pendiente (sesión lista o terminada): el aviso se puede cerrar.
+   *  Reintentar NUNCA cuenta como arreglo: el aviso sigue abierto hasta que el paso salga bien. */
   resolver: boolean;
   mensaje: string;
   desde?: EstadoGrabacion;
@@ -116,14 +120,14 @@ export async function ejecutarReintento(grabacionId: string, accion: AccionReint
       const mensaje = plan.enTelefono
         ? 'Listo: abre la página Grabar en el teléfono con que grabaste (con internet) y el audio se sube solo.'
         : 'Listo: se vuelve a intentar en el próximo minuto.';
-      return { ok: true, resolver: true, mensaje, desde: 'error', hacia: r.estado };
+      return { ok: true, resolver: false, mensaje, desde: 'error', hacia: r.estado };
     }
     case 'soltar': {
       if (!(await ops.soltar(grabacionId))) {
         return { ok: false, resolver: false, mensaje: 'Se está procesando en este momento. Espera unos minutos y vuelve a mirar.', desde: g.estado };
       }
       if (plan.reabrirResumen && resumenErrorId) await ops.reabrirResumen(resumenErrorId);
-      return { ok: true, resolver: true, mensaje: 'Listo: se vuelve a intentar en el próximo minuto.', desde: g.estado, hacia: g.estado };
+      return { ok: true, resolver: false, mensaje: 'Listo: se vuelve a intentar en el próximo minuto.', desde: g.estado, hacia: g.estado };
     }
   }
 }
