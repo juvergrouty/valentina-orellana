@@ -1042,7 +1042,7 @@ const resumenPareja     = resumenGrupo('pareja');
 
   // Días sin ninguna hora libre para el servicio elegido (16 oct 2026): se ven
   // "Sin horas" pero se pueden tocar, para que la paciente pida sobrecupo por
-  // WhatsApp en vez de irse. Las horas quedan en caché para cuando elija el día.
+  // WhatsApp en vez de irse.
   let marcaPedida = 0;
   async function marcarDiasSinHoras(fechas) {
     if (!state.serviceId || !fechas.length) return;
@@ -1054,8 +1054,9 @@ const resumenPareja     = resumenGrupo('pareja');
       if (!res.ok || pedido !== marcaPedida) return;
       const { dias } = await res.json();
       if (pedido !== marcaPedida) return; // la paciente ya cambió de mes o de servicio
+      // Solo marca: al elegir el día las horas se consultan en vivo (esta
+      // respuesta puede venir de la caché del CDN y tener un par de minutos).
       for (const [iso, slots] of Object.entries(dias ?? {})) {
-        state.loadedSlots[`${iso}|${state.serviceId ?? ''}|${state.modalityChoice ?? ''}`] = slots;
         if (slots.length) continue;
         const b = document.querySelector(`#calendar-grid .day-btn[data-iso="${iso}"]`);
         if (!b || b.disabled) continue;

@@ -10,6 +10,7 @@ export const TIPOS_CORREO: Record<string, string> = {
   'email/confirmacion': 'Confirmación de sesión',
   'email/recordatorio': 'Recordatorio de sesión',
   'email/pasos': 'Pasos a seguir',
+  'email/pasos-automatico': 'Pasos a seguir (envío automático)',
   'email/consentimiento': 'Consentimiento de datos',
   'email/consentimiento-copia': 'Copia del consentimiento firmado',
   'email/boleta': 'Boleta',
@@ -43,11 +44,11 @@ export async function leerCorreosAutomaticos(dias = 60, soloErrores = false): Pr
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return (data ?? []).map((l) => {
-    const d = (l.data ?? {}) as { to?: string; subject?: string; ok?: boolean; error?: string | null; desactivado?: boolean };
+    const d = (l.data ?? {}) as { to?: string; email?: string; subject?: string; ok?: boolean; error?: string | null; desactivado?: boolean };
     return {
       fecha: String(l.created_at),
       tipo: tipoCorreo(String(l.context)),
-      para: String(d.to ?? ''),
+      para: String(d.to ?? d.email ?? ''),
       asunto: String(d.subject ?? ''),
       estado: d.desactivado ? 'desactivado' : l.level === 'error' ? 'fallo' : 'enviado',
       error: l.level === 'error' ? String(d.error ?? l.message ?? '') : null,

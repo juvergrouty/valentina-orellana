@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { calcularDisponibilidad } from '../../../lib/disponibilidad';
+import { todayCL } from '../../../lib/dateUtils';
 
 export const prerender = false;
 
@@ -13,10 +14,14 @@ const MAX_FECHAS = 45;
 const EN_PARALELO = 8;
 
 export const GET: APIRoute = async ({ url }) => {
-  const fechas = [...new Set((url.searchParams.get('fechas') ?? '').split(','))]
-    .filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f))
-    .slice(0, MAX_FECHAS);
   const serviceId = url.searchParams.get('service_id');
+  // Solo con servicio y fechas entre hoy y ~3 meses (lo que muestra el calendario).
+  const hoy = todayCL();
+  const tope = new Date(Date.parse(hoy + 'T12:00:00Z') + 95 * 86400000).toISOString().slice(0, 10);
+  const fechas = [...new Set((url.searchParams.get('fechas') ?? '').split(','))]
+    .filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f) && f >= hoy && f <= tope)
+    .slice(0, MAX_FECHAS);
+  if (!serviceId) return new Response(JSON.stringify({ dias: {} }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   const duration = parseInt(url.searchParams.get('duration') ?? '0') || null;
   const modality = url.searchParams.get('modality');
 
