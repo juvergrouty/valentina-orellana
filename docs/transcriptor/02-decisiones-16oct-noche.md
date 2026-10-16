@@ -21,7 +21,7 @@
 
 ## D. Parejas
 - Siempre 2 consentimientos distintos, uno por persona.
-- El de la persona agendada llega como hoy (link). El de la persona NO agendada lo llena Vale en consulta en la primera sesión: en el panel (iPhone/Mac), el paciente lee y firma en el dispositivo de Vale.
+- El de la persona agendada llega como hoy (link). El de la persona NO agendada también se firma por LINK (la persona lo firma en su propio dispositivo, normalmente en la consulta en la primera sesión): en la ficha de toda reserva de pareja hay un link clickeable/copiable "Consentimiento de la pareja" (y botones para enviarlo por WhatsApp/correo) que genera un consentimiento distinto, a nombre de la segunda persona, ligado a la misma ficha.
 - El sistema sabe que es pareja porque la reserva lo dice (servicio de pareja; además el precio es distinto). No depende de lo que se elija en pantalla.
 
 ## E. Aviso de cambio de consentimiento (v2)
