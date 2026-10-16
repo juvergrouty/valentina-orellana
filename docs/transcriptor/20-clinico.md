@@ -236,6 +236,8 @@ Notas técnicas que importan clínicamente:
 
 ## 3. Detección de riesgo
 
+> **SUPERADO por 01-decisiones-16oct.md (decisión 2): sin tamizaje, sin prioridad, sin alertas.** Ver resumen.fixtures.ts EJ3 y el prompt vigente en src/lib/transcriptor/resumen.ts (PROMPT_VERSION_RESUMEN). Lo que sigue en esta sección sobre "prioridad ALTA/REVISAR", tamizaje con Haiku, banner y correo queda solo como historia del diseño.
+
 ### 3.1 Cómo aparece en el resumen
 Ver la sección "SEÑALES DE ATENCIÓN" del prompt fijo: sección **"### Atención"** siempre primera, una viñeta por señal con **categoría, prioridad (ALTA/REVISAR), quién lo dijo, minuto, cita textual y contexto**, y la línea final fija de que la evaluación del riesgo es de la terapeuta. Si no hay señales, la sección no aparece (nunca "sin riesgo": una IA no puede descartar riesgo y una frase así genera falsa tranquilidad).
 
@@ -310,6 +312,8 @@ Ejemplos de comportamiento esperado:
 ---
 
 ## 5. Tres ejemplos sintéticos (para pruebas de calidad)
+
+> **SUPERADO por 01-decisiones-16oct.md (decisión 2): sin tamizaje, sin prioridad, sin alertas.** Ver resumen.fixtures.ts EJ3 y el prompt vigente en src/lib/transcriptor/resumen.ts (PROMPT_VERSION_RESUMEN). En el Ejemplo 3, lo que pide sobre "prioridad ALTA/REVISAR", tamizaje con Haiku, banner y correo queda solo como historia del diseño.
 
 Datos 100 % inventados. Uso: correr cada transcripción con el prompt (parte fija + instrucciones por defecto) y verificar la lista "Debe / No debe". Son transcripciones cortadas a lo esencial; las reales serán más largas.
 
@@ -489,6 +493,8 @@ Guion sugerido (2 minutos, al inicio, antes de empezar a grabar):
 
 ### 6.2 Pausar si el/la paciente lo pide
 
+- **Si el/la paciente pide que algo no quede registrado, tocar Pausar de inmediato** (81-revision H8). Si el pedido llegó tarde, el resumen automático no incluye ese tramo (regla 8 del prompt, versión resumen-2026-10-16.2) y lo indica en "Calidad de la transcripción"; la transcripción sí lo conserva (es la ficha). En online no hay Pausar todavía (81 H11): para no grabar un momento, sacar al asistente; el resto de la sesión no se graba.
+- Las interrupciones (llamada, pantalla bloqueada) quedan marcadas en la transcripción como `[pausa / interrupción mm:ss–mm:ss]` (81 H13).
 - **Botón "Pausar" grande y visible** en el grabador (iPhone) y en el panel durante sesiones online (que ordene al bot dejar de capturar). Un toque, sin confirmación. Al reanudar, otro toque.
 - La transcripción registra el tramo como `[Grabación pausada mm:ss–mm:ss]`; el resumen solo dice que hubo pausa (regla 9 del prompt).
 - **"Excluir los últimos 5 minutos"** (recomendado): a veces el/la paciente lo pide *después* de decir algo ("ojalá eso no quede grabado"). Un botón que marca ese tramo para que se corte del audio antes de transcribir evita que Vale tenga que editar nada después.

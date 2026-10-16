@@ -19,6 +19,12 @@
 //     o la revocó (revoked_at), esa persona bloquea la grabación aunque antes aceptara.
 //   - Conservador: si CUALQUIER persona de la ficha tiene su última firma revocada, sin
 //     autorizar grabación o anterior a la v2, no se graba (aunque se elija 'individual').
+//   - H1 (81-revision-etica-clinica): "Retirar solo la grabación" marca `recording_revoked_at`
+//     (0019) en la firma de ESA persona; se trata igual que una revocación para grabar
+//     (motivo 'revocado'), sin tocar el resto de su consentimiento.
+//   - H2: "pareja" lo deduce el SERVIDOR desde la ficha (reservas pareja-*, grabaciones de pareja,
+//     2+ personas firmantes o un nombre de ficha "X y Y"). Si la ficha es de pareja, se exigen 2
+//     firmas aunque la pantalla (o el evento sin tipo) diga "individual".
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AJUSTES, type PuedeGrabar, type ResultadoPuedeGrabar, type TipoSesion } from './tipos';
 
@@ -32,6 +38,8 @@ export interface FilaConsentimiento {
   signer_email?: string | null;
   accept_recording: boolean | null;
   revoked_at: string | null;
+  /** 0019: retiro SOLO de la autorización de grabación de esta persona (H1). */
+  recording_revoked_at?: string | null;
 }
 
 export const EDAD_MINIMA_GRABACION = 18;
@@ -77,12 +85,18 @@ export function edadEn(fechaNacimiento: string | null | undefined, hoy: string):
 export interface EntradaEvaluacion {
   patientId: string | null;
   tipo: TipoSesion;
+  /** H2: la ficha es de pareja según el servidor (fichaEsPareja). Manda sobre `tipo`. */
+  fichaPareja?: boolean;
   fechaNacimiento: string | null;
   filas: FilaConsentimiento[];
   hoy: string; // YYYY-MM-DD (Chile)
 }
 
 export interface EvaluacionConsentimiento extends ResultadoPuedeGrabar {
+  /** Tipo con que se evaluó (pareja si la ficha lo es, aunque se pidiera 'individual'). */
+  tipoEfectivo: TipoSesion;
+  /** true si la pantalla pidió otro tipo y el servidor dedujo pareja desde la ficha. */
+  parejaDeducida: boolean;
   /** Nombres de quienes tienen firma vigente (v2 o v3+) con grabación autorizada (para mostrar "firmado por ambos ✓"). */
   firmantes: string[];
   /** Firmas vigentes que se necesitan (pareja 2, resto 1). */
@@ -91,8 +105,10 @@ export interface EvaluacionConsentimiento extends ResultadoPuedeGrabar {
 
 /** Lógica pura (sin base de datos): pruebas en consentimiento.test.ts. */
 export function evaluarConsentimientos(e: EntradaEvaluacion): EvaluacionConsentimiento {
-  const requeridas = e.tipo === 'pareja' ? 2 : 1;
-  const base = { consentIds: [] as string[], firmantes: [] as string[], requeridas };
+  const tipoEfectivo: TipoSesion = e.fichaPareja ? 'pareja' : e.tipo;
+  const parejaDeducida = tipoEfectivo === 'pareja' && e.tipo !== 'pareja';
+  const requeridas = tipoEfectivo === 'pareja' ? 2 : 1;
+  const base = { consentIds: [] as string[], firmantes: [] as string[], requeridas, tipoEfectivo, parejaDeducida };
   if (!e.patientId) return { ...base, puede: false, motivo: 'sin_ficha' };
 
   const edad = edadEn(e.fechaNacimiento, e.hoy);
@@ -111,7 +127,7 @@ export function evaluarConsentimientos(e: EntradaEvaluacion): EvaluacionConsenti
   const validas: FilaConsentimiento[] = [];
   let hayRevocada = false, hayAntigua = false, hayNegada = false;
   for (const f of ultimas.values()) {
-    if (f.revoked_at) { hayRevocada = true; continue; }
+    if (f.revoked_at || f.recording_revoked_at) { hayRevocada = true; continue; }
     if (!esVersionGrabacion(f.version)) { hayAntigua = true; continue; }
     if (!f.accept_recording) { hayNegada = true; continue; }
     validas.push(f);
@@ -139,6 +155,7 @@ export function textoMotivo(motivo: string | undefined, nombre?: string | null):
     case 'revocado': return `Se retiró la autorización de grabación en la ficha de ${quien}. Sin ella no se puede grabar.`;
     case 'version_antigua': return `Falta el consentimiento de grabación de ${quien}. La versión que firmó no incluye la autorización de grabación; envíale el consentimiento actual.`;
     case 'falta_segunda_firma': return 'Falta el consentimiento de grabación de la otra persona de la pareja. Sin él no se puede grabar.';
+    case 'ficha_pareja': return 'Esta ficha es de pareja. Para grabar se necesita el consentimiento de las dos personas.';
     case 'transcriptor_apagado': return 'El grabador está apagado en la configuración del transcriptor.';
     case 'sin_consentimiento':
     default: return `Falta el consentimiento de grabación de ${quien}. Sin él no se puede grabar esta sesión.`;
@@ -158,24 +175,57 @@ function hoyChile(): string {
 /** Contrato P4 (tipos.ts → PuedeGrabar). */
 export const puedeGrabar: PuedeGrabar = async (patientId, tipo) => evaluarEnBase(patientId, tipo);
 
+export interface SenalesPareja {
+  /** session_type de las reservas de la ficha (por su correo). */
+  sessionTypes: (string | null | undefined)[];
+  /** grabaciones.tipo previas de la ficha. */
+  tiposGrabaciones: (string | null | undefined)[];
+  /** Firmas (para contar personas distintas). */
+  filas: Pick<FilaConsentimiento, 'id' | 'signed_at' | 'signer_rut' | 'signer_email' | 'signer_name'>[];
+  /** Nombre de la ficha ("Ana y Luis", "Ana & Luis"). */
+  nombre: string | null | undefined;
+}
+
+/** H2: ¿la ficha es de pareja? Cualquier señal basta (conservador: pide 2 firmas). Función pura. */
+export function fichaEsPareja(x: SenalesPareja): boolean {
+  if (x.sessionTypes.some((t) => String(t ?? '').startsWith('pareja'))) return true;
+  if (x.tiposGrabaciones.some((t) => t === 'pareja')) return true;
+  const personas = new Set(x.filas.filter((f) => f.signed_at).map((f) => identidadFirmante(f)));
+  if (personas.size >= 2) return true;
+  return /\S\s+(y|&|e)\s+\S/i.test(String(x.nombre ?? '').trim());
+}
+
 /** Igual que puedeGrabar pero devuelve también firmantes/requeridas. Lanza si la base falla (falla cerrado). */
 export async function evaluarEnBase(patientId: string | null, tipo: TipoSesion, cliente?: SupabaseClient): Promise<EvaluacionConsentimiento> {
   if (!patientId) return evaluarConsentimientos({ patientId: null, tipo, fechaNacimiento: null, filas: [], hoy: hoyChile() });
   const c = await db(cliente);
-  const [pac, cons] = await Promise.all([
-    c.from('patients').select('id, birthdate').eq('id', patientId).maybeSingle(),
+  const [pac, cons, grabs] = await Promise.all([
+    c.from('patients').select('id, name, email, birthdate').eq('id', patientId).maybeSingle(),
     c.from('consents')
-      .select('id, version, signed_at, signer_name, signer_rut, signer_email, accept_recording, revoked_at')
+      .select('id, version, signed_at, signer_name, signer_rut, signer_email, accept_recording, revoked_at, recording_revoked_at')
       .eq('patient_id', patientId),
+    c.from('grabaciones').select('tipo').eq('patient_id', patientId).eq('tipo', 'pareja').limit(1),
   ]);
   if (pac.error) throw new Error(`consentimiento: no se pudo leer la ficha (${pac.error.message})`);
   if (cons.error) throw new Error(`consentimiento: no se pudieron leer los consentimientos (${cons.error.message})`);
+  if (grabs.error) throw new Error(`consentimiento: no se pudieron leer las grabaciones (${grabs.error.message})`);
   if (!pac.data) return evaluarConsentimientos({ patientId: null, tipo, fechaNacimiento: null, filas: [], hoy: hoyChile() });
+  const ficha = pac.data as { name?: string | null; email?: string | null; birthdate?: string | null };
+  let sessionTypes: string[] = [];
+  const correo = String(ficha.email ?? '').trim();
+  if (correo) {
+    const { data: bs, error: eb } = await c.from('bookings').select('session_type')
+      .ilike('patient_email', correo.replace(/[\\%_]/g, (m) => `\\${m}`)).limit(200);
+    if (eb) throw new Error(`consentimiento: no se pudieron leer las reservas (${eb.message})`);
+    sessionTypes = ((bs ?? []) as { session_type?: string | null }[]).map((b) => String(b.session_type ?? ''));
+  }
+  const filas = (cons.data ?? []) as FilaConsentimiento[];
   return evaluarConsentimientos({
     patientId,
     tipo,
-    fechaNacimiento: (pac.data as { birthdate?: string | null }).birthdate ?? null,
-    filas: (cons.data ?? []) as FilaConsentimiento[],
+    fichaPareja: fichaEsPareja({ sessionTypes, tiposGrabaciones: ((grabs.data ?? []) as { tipo?: string }[]).map((g) => g.tipo), filas, nombre: ficha.name }),
+    fechaNacimiento: ficha.birthdate ?? null,
+    filas,
     hoy: hoyChile(),
   });
 }
@@ -191,13 +241,18 @@ export async function transcriptorActivo(cliente?: SupabaseClient): Promise<bool
   }
 }
 
-export type MotivoBloqueo = NonNullable<ResultadoPuedeGrabar['motivo']> | 'transcriptor_apagado';
+export type MotivoBloqueo = NonNullable<ResultadoPuedeGrabar['motivo']> | 'transcriptor_apagado' | 'ficha_pareja';
+
+/** Motivo a mostrar: si falta la 2.ª firma porque el servidor dedujo pareja, el texto lo explica (H2). */
+export function motivoVisible(v: Pick<ResultadoVerificacion, 'motivo' | 'parejaDeducida'>): MotivoBloqueo | undefined {
+  return v.motivo === 'falta_segunda_firma' && v.parejaDeducida ? 'ficha_pareja' : v.motivo;
+}
 export interface ResultadoVerificacion extends Omit<EvaluacionConsentimiento, 'motivo'> { motivo?: MotivoBloqueo }
 
 /** Chequeo completo que usan los endpoints: interruptor + consentimiento + edad. */
 export async function verificarGrabacion(patientId: string | null, tipo: TipoSesion, cliente?: SupabaseClient): Promise<ResultadoVerificacion> {
   if (!(await transcriptorActivo(cliente))) {
-    return { puede: false, motivo: 'transcriptor_apagado', consentIds: [], firmantes: [], requeridas: tipo === 'pareja' ? 2 : 1 };
+    return { puede: false, motivo: 'transcriptor_apagado', consentIds: [], firmantes: [], requeridas: tipo === 'pareja' ? 2 : 1, tipoEfectivo: tipo, parejaDeducida: false };
   }
   return evaluarEnBase(patientId, tipo, cliente);
 }

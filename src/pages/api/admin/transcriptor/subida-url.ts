@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
-import { verificarGrabacion, textoMotivo } from '../../../../lib/transcriptor/consentimiento';
+import { motivoVisible, verificarGrabacion, textoMotivo } from '../../../../lib/transcriptor/consentimiento';
 import { transicionar } from '../../../../lib/transcriptor/estados';
 import {
   MAX_BYTES_SEGMENTO, R2NoConfiguradoError, iniciarMultiparte, mimeBase, nuevaLlaveAudio, partesPara, urlsPartes,
@@ -51,7 +51,7 @@ export const POST: APIRoute = async (ctx) => {
     const v = await verificarGrabacion(g.patient_id, g.tipo as TipoSesion);
     if (!v.puede) {
       await auditar('vale', 'consentimiento_faltante', { grabacionId, patientId: g.patient_id, request, clientAddress, resultado: 'denegado', detalle: { fase: 'subida', motivo: v.motivo } });
-      return json({ ok: false, motivo: v.motivo, error: textoMotivo(v.motivo) }, 403);
+      return json({ ok: false, motivo: v.motivo, error: textoMotivo(motivoVisible(v)) }, 403);
     }
 
     // Segmento: se crea una vez (unique grabacion_id+seq); la llave la pone el servidor.

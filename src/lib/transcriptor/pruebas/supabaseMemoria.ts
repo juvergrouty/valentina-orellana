@@ -87,6 +87,12 @@ class Consulta implements PromiseLike<Resp> {
 
   eq(k: string, v: unknown) { this.filtros.push((f) => val(f, k) === v); return this; }
   neq(k: string, v: unknown) { this.filtros.push((f) => val(f, k) !== v); return this; }
+  /** ilike sin comodines (igualdad sin mayúsculas; los \% \_ escapados se tratan como literales). Añadido por t-fix-logica. */
+  ilike(k: string, v: string) {
+    const objetivo = v.replace(/\\([\\%_])/g, '$1').toLowerCase();
+    this.filtros.push((f) => String(val(f, k) ?? '').toLowerCase() === objetivo);
+    return this;
+  }
   in(k: string, v: unknown[]) { this.filtros.push((f) => v.includes(val(f, k))); return this; }
   is(k: string, v: null | boolean) { this.filtros.push((f) => val(f, k) === v); return this; }
   not(k: string, op: string, v: unknown) {

@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { todayCL } from '../../../../lib/dateUtils';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
-import { verificarGrabacion, textoMotivo } from '../../../../lib/transcriptor/consentimiento';
+import { motivoVisible, verificarGrabacion, textoMotivo } from '../../../../lib/transcriptor/consentimiento';
 import { elegirModelo, origenDesdeSessionType, tipoDesdeSessionType } from '../../../../lib/transcriptor/reglas';
 import { esUuid, guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
 import type { TipoSesion } from '../../../../lib/transcriptor/tipos';
@@ -76,10 +76,13 @@ export const POST: APIRoute = async (ctx) => {
     if (!v.puede) {
       await auditar('vale', v.motivo === 'transcriptor_apagado' ? 'grabar_inicio' : 'consentimiento_faltante', {
         patientId, request, clientAddress, resultado: 'denegado',
-        detalle: { motivo: v.motivo, tipo, origen: 'presencial', booking: bookingId, firmas_vigentes: v.consentIds.length, requeridas: v.requeridas },
+        detalle: { motivo: v.motivo, tipo, tipo_efectivo: v.tipoEfectivo, origen: 'presencial', booking: bookingId, firmas_vigentes: v.consentIds.length, requeridas: v.requeridas },
       });
-      return json({ ok: false, motivo: v.motivo, error: textoMotivo(v.motivo, nombre), firmantes: v.firmantes }, 403);
+      return json({ ok: false, motivo: v.motivo, error: textoMotivo(motivoVisible(v), nombre), firmantes: v.firmantes, tipo: v.tipoEfectivo }, 403);
     }
+    // H2: el tipo lo fija el servidor; si la ficha es de pareja, la grabación es de pareja aunque
+    // la pantalla haya elegido "individual" (ya se exigieron las 2 firmas en verificarGrabacion).
+    tipo = v.tipoEfectivo;
 
     const decision = elegirModelo({ tipo, origen: 'presencial', lugarConRuido });
     const fila = {

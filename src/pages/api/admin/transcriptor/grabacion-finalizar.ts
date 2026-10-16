@@ -1,8 +1,8 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
-import { verificarGrabacion, textoMotivo } from '../../../../lib/transcriptor/consentimiento';
-import { transicionar } from '../../../../lib/transcriptor/estados';
+import { motivoVisible, verificarGrabacion, textoMotivo } from '../../../../lib/transcriptor/consentimiento';
+import { soltar, tomar, transicionar } from '../../../../lib/transcriptor/estados';
 import { elegirModelo } from '../../../../lib/transcriptor/reglas';
 import { bytesObjeto, completarMultiparte, esSubidaInexistente, R2NoConfiguradoError, type ParteSubida } from '../../../../lib/transcriptor/multiparte';
 import { almacenamiento, assemblyai } from '../../../../lib/transcriptor/dependencias-p4';
@@ -92,7 +92,7 @@ export const POST: APIRoute = async (ctx) => {
     const v = await verificarGrabacion(g.patient_id, g.tipo as TipoSesion);
     if (!v.puede) {
       await auditar('vale', 'consentimiento_faltante', { grabacionId, patientId: g.patient_id, request, clientAddress, resultado: 'denegado', detalle: { fase: 'finalizar', motivo: v.motivo } });
-      return json({ ok: false, motivo: v.motivo, error: textoMotivo(v.motivo) }, 403);
+      return json({ ok: false, motivo: v.motivo, error: textoMotivo(motivoVisible(v)) }, 403);
     }
 
     // 1) Completar y verificar cada segmento declarado.
@@ -154,21 +154,36 @@ export const POST: APIRoute = async (ctx) => {
     if (!conAudio) return json({ ok: true, estado: 'sin_audio', patient_id: g.patient_id });
 
     // 4) Enviar a AssemblyAI (best effort; si falla, el cron reintenta desde 'subida').
+    // M4 (82-revision-codigo): se TOMA la grabación con el mismo lease que usa el orquestador
+    // (estados.tomar); si el cron ya la tiene, no se envía nada desde aquí (lo hace el cron). Además
+    // el id del transcript se guarda solo si el segmento no tenía uno: si otro proceso alcanzó a
+    // guardar el suyo, el recién creado se borra en AssemblyAI (sin huérfanos ni doble cobro).
     let enviados = 0, total = 0;
-    try {
-      const { data: segs } = await supabase.from('grabacion_segmentos')
-        .select('id, r2_key, aai_transcript_id').eq('grabacion_id', grabacionId).not('subido_at', 'is', null).order('seq');
-      total = segs?.length ?? 0;
-      for (const s of segs ?? []) {
-        if (s.aai_transcript_id) { enviados++; continue; }
-        const audioUrl = await almacenamiento.urlLectura(s.r2_key, TIEMPOS.urlLecturaAssemblyAISeg);
-        const { id } = await assemblyai.enviar({ audioUrl, decision });
-        await supabase.from('grabacion_segmentos').update({ aai_transcript_id: id, aai_estado: 'enviado', aai_enviado_at: new Date().toISOString() }).eq('id', s.id);
-        enviados++;
+    const tomada = await tomar(grabacionId).catch(() => null);
+    if (tomada) {
+      try {
+        const { data: segs } = await supabase.from('grabacion_segmentos')
+          .select('id, r2_key, aai_transcript_id').eq('grabacion_id', grabacionId).not('subido_at', 'is', null).order('seq');
+        total = segs?.length ?? 0;
+        for (const s of segs ?? []) {
+          if (s.aai_transcript_id) { enviados++; continue; }
+          const audioUrl = await almacenamiento.urlLectura(s.r2_key, TIEMPOS.urlLecturaAssemblyAISeg);
+          const { id } = await assemblyai.enviar({ audioUrl, decision });
+          const { data: guardado, error: eu } = await supabase.from('grabacion_segmentos')
+            .update({ aai_transcript_id: id, aai_estado: 'enviado', aai_enviado_at: new Date().toISOString() })
+            .eq('id', s.id).is('aai_transcript_id', null).select('id').maybeSingle();
+          if (eu || !guardado) {
+            await assemblyai.borrar(id).catch(() => console.warn('[transcriptor/grabacion-finalizar] no se pudo borrar un transcript duplicado'));
+            if (eu) throw new Error(eu.message);
+          }
+          enviados++;
+        }
+        if (total > 0 && enviados === total) await transicionar(grabacionId, ['subida'], 'transcribiendo');
+      } catch (e) {
+        console.warn('[transcriptor/grabacion-finalizar] envío a AssemblyAI pendiente:', e instanceof Error ? e.message : e);
+      } finally {
+        await soltar(grabacionId).catch(() => undefined);
       }
-      if (total > 0 && enviados === total) await transicionar(grabacionId, ['subida'], 'transcribiendo');
-    } catch (e) {
-      console.warn('[transcriptor/grabacion-finalizar] envío a AssemblyAI pendiente:', e instanceof Error ? e.message : e);
     }
     return json({ ok: true, estado: total > 0 && enviados === total ? 'transcribiendo' : 'subida', patient_id: g.patient_id });
   } catch (e) {

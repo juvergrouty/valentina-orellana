@@ -6,10 +6,14 @@ import { nowCL, todayCL } from '../../../lib/dateUtils';
 import { vigente, type ConsentRow } from '../../../lib/consent';
 import { origenTexto } from '../../../lib/origen';
 import {
-  AVISO_RESPUESTA, AVISO_RESUMEN, ROTULO_RESUMEN, duracionTexto, estadoVisible, fechaCorta, fechaLarga, resumenAHtml, resumenATexto,
+  AVISO_RESPUESTA, ROTULO_RESUMEN, duracionTexto, estadoVisible, fechaCorta, fechaLarga, resumenAHtml, resumenATexto,
   sePuedeReintentar, textoProblema, tipoTexto,
 } from '../../../lib/transcriptor/panel';
 import { URL_CONFIRMAR_PASSKEY, accesoClinicoCookies, type ResultadoAcceso } from '../../../lib/transcriptor/acceso';
+import { avisoAnexoResumen } from '../../../lib/transcriptor/resumen';
+import { conContenidoClaro } from '../../../lib/transcriptor/resumenCifrado';
+import { auditarObligatorio } from '../../../lib/transcriptor/auditoria';
+import { identidadFirmante } from '../../../lib/transcriptor/consentimiento';
 
 const { id } = Astro.params;
 // Datos de prueba del transcriptor SOLO en `astro dev` (import.meta.env.DEV es false en el build):
@@ -46,9 +50,9 @@ if (patient?.email) {
 type GrabFicha = {
   id: string; booking_id: string | null; origen: 'presencial' | 'online'; tipo: 'individual' | 'pareja' | 'sin_tipo';
   estado: string; estado_antes_error: string | null; session_date: string; inicio_at: string | null;
-  duracion_seg: number | null; nota_sistema: string | null; created_at: string;
+  duracion_seg: number | null; nota_sistema: string | null; created_at: string; excluir_ia_at?: string | null;
 };
-type ResFicha = { id: string; grabacion_id: string; version: number; autor: 'ia' | 'vale'; estado: string; rotulo: string | null; contenido: string | null; listo_at: string | null; created_at: string };
+type ResFicha = { id: string; grabacion_id: string; version: number; autor: 'ia' | 'vale'; estado: string; rotulo: string | null; contenido: string | null; contenido_cifrado?: unknown; modelo?: string | null; listo_at: string | null; created_at: string };
 let iaGrabaciones: GrabFicha[] = [];
 let iaResumenes: ResFicha[] = [];
 let iaTranscritas = new Set<string>();
@@ -72,8 +76,8 @@ if (import.meta.env.DEV && demoIA) {
     { id: '00000000-0000-4000-8000-0000000000a3', booking_id: null, origen: 'online', tipo: 'individual', estado: 'error', estado_antes_error: 'resumiendo', session_date: '2026-10-03', inicio_at: '2026-10-03T22:00:00Z', duracion_seg: 2700, nota_sistema: null, created_at: '2026-10-03T22:00:00Z' },
   ];
   iaResumenes = [{
-    id: 'r1', grabacion_id: '00000000-0000-4000-8000-0000000000a1', version: 1, autor: 'ia', estado: 'listo', rotulo: null, listo_at: '2026-10-15T20:10:00Z', created_at: '2026-10-15T20:00:00Z',
-    contenido: '## Resumen automático (IA)\n*Sesión individual · 15 oct 2026 · presencial · 50 min · Generado automáticamente a partir de la transcripción. No reemplaza el juicio clínico.*\n\n### Atención\n- Camila dijo «a veces siento que no doy más» [23:40], en el contexto de la carga laboral. No consta que se haya profundizado en ese momento.\n\n### Temas tratados\n- Conflicto con su jefa.\n- Sueño.\n\n### Puntos clave\n- Refiere dormir mejor desde que deja el celular fuera de la pieza [05:12].\n- La conversación pendiente con su jefa sigue siendo lo que más le preocupa.\n\n### Tareas y acuerdos\n- Camila: registro de pensamientos 3 veces — antes de la próxima sesión.\n\n### Para revisar la próxima sesión\n- Cómo le fue con la conversación con su jefa.',
+    id: 'r1', grabacion_id: '00000000-0000-4000-8000-0000000000a1', version: 1, autor: 'ia', estado: 'listo', rotulo: null, modelo: 'claude-sonnet-5-5', listo_at: '2026-10-15T20:10:00Z', created_at: '2026-10-15T20:00:00Z',
+    contenido: '## Resumen automático (IA)\n*Sesión individual · 15 oct 2026 · presencial · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*\n\n### Atención\n- Se habló de no dar más con el trabajo — Dicho por: Camila — [23:40]\n  «a veces siento que no doy más»\n_Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._\n\n### Temas tratados\n- Conflicto con su jefa.\n- Sueño.\n\n### Puntos clave\n- Refiere dormir mejor desde que deja el celular fuera de la pieza [05:12].\n- La conversación pendiente con su jefa sigue siendo lo que más le preocupa.\n\n### Tareas y acuerdos\n- Camila: registro de pensamientos 3 veces — antes de la próxima sesión.\n\n### Para revisar la próxima sesión\n- Cómo le fue con la conversación con su jefa.',
   }];
   iaTranscritas = new Set(['00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2']);
   notes = notasTodas as typeof notes;
@@ -87,14 +91,14 @@ if (import.meta.env.DEV && demoIA) {
 } else if (patient) {
   try {
     const { data: gs, error: eg } = await supabase.from('grabaciones')
-      .select('id, booking_id, origen, tipo, estado, estado_antes_error, session_date, inicio_at, duracion_seg, nota_sistema, created_at')
+      .select('id, booking_id, origen, tipo, estado, estado_antes_error, session_date, inicio_at, duracion_seg, nota_sistema, created_at, excluir_ia_at')
       .eq('patient_id', id!).order('session_date', { ascending: false }).order('created_at', { ascending: false }).limit(200);
     if (!eg && gs?.length) {
       iaGrabaciones = (gs as GrabFicha[]).filter((g) => !OCULTAS_EN_FICHA.has(g.estado));
       const ids = iaGrabaciones.map((g) => g.id);
       if (ids.length) {
         const [{ data: rs }, { data: ts }] = await Promise.all([
-          supabase.from('resumenes_ia').select('id, grabacion_id, version, autor, estado, rotulo, contenido, listo_at, created_at')
+          supabase.from('resumenes_ia').select('id, grabacion_id, version, autor, estado, rotulo, contenido, contenido_cifrado, modelo, listo_at, created_at')
             .in('grabacion_id', ids).is('oculto_at', null).order('version', { ascending: false }),
           supabase.from('transcripciones').select('grabacion_id').in('grabacion_id', ids).is('deleted_at', null),
         ]);
@@ -106,12 +110,45 @@ if (import.meta.env.DEV && demoIA) {
     console.warn('[ficha/transcriptor]', e instanceof Error ? e.message : e);
   }
 }
+// H6 + H7 (81-revision-etica-clinica): los resúmenes solo se muestran en la pestaña Notas. Antes de
+// descifrarlos se registra el acceso (`ver_resumen`, una fila por vista de ficha); si la bitácora
+// falla, no se muestran (igual que la transcripción).
+let iaAvisoResumenes: string | null = null;
+const tabActual = Astro.url.searchParams.get('tab') ?? 'info';
+const hayResumenListo = iaResumenes.some((r) => r.estado === 'listo' && (r.contenido || r.contenido_cifrado));
+if (!(import.meta.env.DEV && demoIA) && patient && hayResumenListo) {
+  if (tabActual !== 'notas') {
+    // Fuera de Notas no se muestra texto: no se descifra nada.
+    iaResumenes = iaResumenes.map((r) => ({ ...r, contenido: r.estado === 'listo' && (r.contenido || r.contenido_cifrado) ? '' : r.contenido }));
+  } else {
+    let registrado = true;
+    try {
+      let clientAddress: string | null = null;
+      try { clientAddress = Astro.clientAddress ?? null; } catch { /* sin IP */ }
+      await auditarObligatorio('vale', 'ver_resumen', {
+        patientId: id!, request: Astro.request, clientAddress,
+        detalle: { resumenes: iaResumenes.filter((r) => r.estado === 'listo').length, vista: 'ficha' },
+      });
+    } catch {
+      registrado = false;
+      iaAvisoResumenes = 'No se pudo registrar el acceso en la bitácora. Por seguridad, los resúmenes automáticos no se muestran. Intenta de nuevo en un momento.';
+    }
+    if (registrado) {
+      const r = await conContenidoClaro(iaResumenes);
+      // Un resumen listo que no se pudo abrir queda con texto vacío: la tarjeta muestra el aviso.
+      iaResumenes = (r.filas as ResFicha[]).map((x) => (x.estado === 'listo' && x.contenido == null && x.contenido_cifrado ? { ...x, contenido: '' } : x));
+      if (r.fallidas) iaAvisoResumenes = 'Algún resumen cifrado no se pudo abrir en este momento. Está guardado a salvo; intenta de nuevo en unos minutos.';
+    } else {
+      iaResumenes = iaResumenes.map((r) => ({ ...r, contenido: r.estado === 'listo' ? '' : null }));
+    }
+  }
+}
 const fmtHoraCL = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '';
 // Por grabación: versión vigente (la de número más alto que esté lista), si hay otra en camino
 // y si el último intento de la IA falló.
 const iaTarjetas = iaGrabaciones.map((g) => {
   const versiones = iaResumenes.filter((r) => r.grabacion_id === g.id).sort((a, b) => b.version - a.version);
-  const vigente = versiones.find((r) => r.estado === 'listo' && r.contenido) ?? null;
+  const vigente = versiones.find((r) => r.estado === 'listo' && r.contenido != null) ?? null;
   const generando = versiones.some((r) => (r.estado === 'pendiente' || r.estado === 'en_batch') && (!vigente || r.version > vigente.version));
   const estado = estadoVisible(g.estado);
   return {
@@ -120,13 +157,15 @@ const iaTarjetas = iaGrabaciones.map((g) => {
     reintentable: sePuedeReintentar(g as never),
     transcrita: iaTranscritas.has(g.id),
     hora: fmtHoraCL(g.inicio_at),
-    html: vigente ? resumenAHtml(vigente.contenido, (s) => `/admin/pacientes/${id}/sesion/${g.id}?t=${s}`) : '',
-    texto: vigente ? resumenATexto(vigente.contenido) : '',
+    html: vigente?.contenido ? resumenAHtml(vigente.contenido, (s) => `/admin/pacientes/${id}/sesion/${g.id}?t=${s}`) : '',
+    texto: vigente?.contenido ? resumenATexto(vigente.contenido) : '',
+    aviso: vigente ? avisoAnexoResumen(vigente) : '',
+    excluida: !!g.excluir_ia_at,
   };
 });
 const iaPorBooking = new Map(iaTarjetas.filter((t) => t.g.booking_id).map((t) => [t.g.booking_id as string, t]));
 // Sesiones que la IA puede leer para responder (con transcripción o con resumen listo).
-const iaConsultables = iaTarjetas.filter((t) => t.transcrita || t.vigente);
+const iaConsultables = iaTarjetas.filter((t) => (t.transcrita || t.vigente) && !t.excluida); // H5
 // Pestaña Notas clínicas: resúmenes y notas intercalados por fecha (el resumen, sobre la nota del mismo día).
 const itemsNotas = [
   ...iaTarjetas.map((t) => ({ tipo: 'ia' as const, fecha: t.g.session_date, orden: 0, t })),
@@ -136,14 +175,31 @@ const itemsNotas = [
 if (!patient) return Astro.redirect('/admin/pacientes');
 
 // Consentimiento de datos (Ley 21.719): el vigente, o el último envío pendiente.
-const { data: consentRows } = await supabase.from('consents').select('*')
+let { data: consentRows } = await supabase.from('consents').select('*')
   .eq('patient_id', id!).order('created_at', { ascending: false });
+if (import.meta.env.DEV && demoIA) {
+  // Firmas de prueba (solo `astro dev`): una vigente con grabación y otra con la grabación retirada.
+  consentRows = [
+    { id: '00000000-0000-4000-8000-0000000000c1', patient_id: id, token: 't1', version: '2026-10-v3', created_at: '2026-10-01T12:00:00Z', signed_at: '2026-10-01T12:05:00Z', signer_name: 'Camila Rojas', signer_rut: '12.345.678-5', accept_treatment: true, accept_recording: true, accept_case_review: false, revoked_at: null, recording_revoked_at: null },
+    { id: '00000000-0000-4000-8000-0000000000c2', patient_id: id, token: 't2', version: '2026-10-v2', created_at: '2026-09-20T12:00:00Z', signed_at: '2026-09-20T12:05:00Z', signer_name: 'Tomás Fuentes', signer_rut: '15.555.555-5', accept_treatment: true, accept_recording: true, accept_case_review: true, revoked_at: null, recording_revoked_at: '2026-10-12T15:00:00Z', recording_revoked_via: 'whatsapp' },
+  ] as never;
+}
 const consentimiento = vigente((consentRows ?? []) as ConsentRow[]);
 const ultimoRetiro = (consentRows ?? []).find((c: any) => c.revoked_at) as ConsentRow | undefined;
 const envioPendiente = (consentRows ?? []).find((c: any) => !c.signed_at && c.sent_at) as ConsentRow | undefined;
 const firmadosHist = (consentRows ?? []).filter((c: any) => c.signed_at)
   .sort((a: any, b: any) => b.signed_at.localeCompare(a.signed_at));
 const fmtCL = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+// H1: firma vigente de CADA persona (en pareja, dos), para retirar solo la grabación de quien lo pidió.
+const CANAL_RETIRO: Record<string, string> = { correo: 'correo', whatsapp: 'WhatsApp', presencial: 'en persona', otro: 'otro medio' };
+const firmasPersona = (() => {
+  const ultimas = new Map<string, any>();
+  for (const c of firmadosHist as any[]) {
+    const k = identidadFirmante(c);
+    if (!ultimas.has(k)) ultimas.set(k, c); // firmadosHist viene de la más reciente a la más antigua
+  }
+  return [...ultimas.values()].filter((c) => !c.revoked_at);
+})();
 
 const tab  = Astro.url.searchParams.get('tab') ?? 'info';
 const saved = Astro.url.searchParams.get('saved') === '1';
@@ -289,7 +345,6 @@ const faltanDatos = patient ? [
       </div>
       <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
         <a href={`/admin/pacientes/${patient.id}/consentimiento/${consentimiento.id}`} target="_blank" class="btn btn-outline btn-sm">Ver constancia / PDF</a>
-        <button type="button" class="btn btn-outline btn-sm consent-btn" data-consent-action="revoke">Registrar retiro</button>
       </div>
     </div>
   ) : (
@@ -320,6 +375,67 @@ const faltanDatos = patient ? [
         ))}
       </ul>
     </details>
+  )}
+  {firmasPersona.length > 0 && (
+    <section class="card firmas-persona" aria-labelledby="firmas-persona-titulo">
+      <p id="firmas-persona-titulo" class="fp-titulo">Autorizaciones por persona</p>
+      <ul class="fp-lista">
+        {firmasPersona.map((c: any) => {
+          const nombre = String(c.signer_name ?? '').trim() || 'Sin nombre';
+          const pila = nombre.split(/\s+/)[0];
+          const grabacionRetirada = !!c.recording_revoked_at;
+          return (
+            <li class="fp-item" data-consent-id={c.id}>
+              <div class="fp-datos">
+                <p class="fp-nombre">{nombre}</p>
+                <p class="fp-sub">Versión {c.version} · firmado el {fmtCL(c.signed_at)}</p>
+                <p class="fp-sub">
+                  Grabación:{' '}
+                  {grabacionRetirada
+                    ? <strong class="fp-no">retirada el {fmtCL(c.recording_revoked_at)}{c.recording_revoked_via ? ` (por ${CANAL_RETIRO[c.recording_revoked_via] ?? c.recording_revoked_via})` : ''}</strong>
+                    : c.accept_recording ? <strong class="fp-si">sí autoriza</strong> : <strong class="fp-no">no autoriza</strong>}
+                </p>
+              </div>
+              <div class="fp-botones">
+                {c.accept_recording && !grabacionRetirada && (
+                  <button type="button" class="btn btn-outline btn-sm fp-abrir" data-panel={`fp-grab-${c.id}`}>Retirar solo la grabación</button>
+                )}
+                <button type="button" class="btn btn-outline btn-sm fp-abrir" data-panel={`fp-todo-${c.id}`}>Registrar retiro del consentimiento</button>
+              </div>
+              {c.accept_recording && !grabacionRetirada && (
+                <div class="fp-confirmar" id={`fp-grab-${c.id}`} hidden>
+                  <p class="fp-texto">Desde ahora no se graban las sesiones de {pila}. Lo ya transcrito queda en la ficha con la misma confidencialidad. Su consentimiento para la atención sigue vigente.</p>
+                  <label class="fp-label" for={`fp-via-${c.id}`}>¿Cómo lo pidió?</label>
+                  <select id={`fp-via-${c.id}`} class="fp-via">
+                    <option value="">Elige…</option>
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="correo">Correo</option>
+                    <option value="presencial">En persona</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                  <label class="fp-label" for={`fp-nota-${c.id}`}>Nota (opcional: cuándo y qué pidió)</label>
+                  <input id={`fp-nota-${c.id}`} class="fp-nota" type="text" maxlength="500" />
+                  <div class="fp-acciones">
+                    <button type="button" class="btn btn-dark btn-sm fp-enviar" data-accion="revoke_recording" data-consent-id={c.id}>Confirmar: retirar solo la grabación</button>
+                    <button type="button" class="btn btn-outline btn-sm fp-cancelar">Cancelar</button>
+                  </div>
+                </div>
+              )}
+              <div class="fp-confirmar" id={`fp-todo-${c.id}`} hidden>
+                <p class="fp-texto">Se registra que {pila} retiró su consentimiento de datos completo (atención, grabación y revisión de casos). Lo hecho antes no cambia. Si solo pidió dejar de grabar, usa "Retirar solo la grabación".</p>
+                <label class="fp-label" for={`fp-notatodo-${c.id}`}>Nota (opcional: cómo y cuándo lo pidió)</label>
+                <input id={`fp-notatodo-${c.id}`} class="fp-nota" type="text" maxlength="500" />
+                <div class="fp-acciones">
+                  <button type="button" class="btn btn-danger btn-sm fp-enviar" data-accion="revoke" data-consent-id={c.id}>Confirmar retiro del consentimiento</button>
+                  <button type="button" class="btn btn-outline btn-sm fp-cancelar">Cancelar</button>
+                </div>
+              </div>
+              <p class="fp-msg" role="status" aria-live="polite"></p>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   )}
   <p id="consent-status" data-patient-id={patient.id} style="font-size:0.78rem;margin:-1rem 0 1rem;"></p>
 
@@ -682,7 +798,9 @@ const faltanDatos = patient ? [
             </div>
             <p class="ia-fecha">{fechaLarga(it.t.g.session_date)}{it.t.hora ? ` · ${it.t.hora}` : ''}</p>
             <p class="ia-sub">{tipoTexto(it.t.g)}{it.t.g.duracion_seg ? ` · ${duracionTexto(it.t.g.duracion_seg)} grabados` : ''}{it.t.vigente && it.t.vigente.version > 1 ? ` · versión ${it.t.vigente.version}` : ''}</p>
-            {it.t.vigente ? (
+            {it.t.vigente && !it.t.html && iaAvisoResumenes ? (
+              <p class="ia-texto">{iaAvisoResumenes}</p>
+            ) : it.t.vigente ? (
               <div class="ia-cuerpo" set:html={it.t.html} />
             ) : it.t.problema ? (
               <p class="ia-texto">{it.t.problema}</p>
@@ -692,12 +810,13 @@ const faltanDatos = patient ? [
             {it.t.vigente && it.t.problema && <p class="ia-nota">{it.t.problema}</p>}
             {it.t.generando && it.t.vigente && <p class="ia-nota">Se está escribiendo una versión nueva; esta sigue visible mientras tanto.</p>}
             {it.t.g.nota_sistema && <p class="ia-nota">{it.t.g.nota_sistema}</p>}
-            {it.t.vigente && <p class="ia-aviso">{AVISO_RESUMEN}</p>}
+            {it.t.excluida && <p class="ia-nota">Excluida de las preguntas a la IA a pedido del paciente.</p>}
+            {it.t.vigente && <p class="ia-aviso">{it.t.aviso}</p>}
             <div class="ia-acciones">
               {it.t.transcrita && (
                 <a class="btn btn-outline btn-sm" href={`/admin/pacientes/${patient.id}/sesion/${it.t.g.id}`}>Ver transcripción</a>
               )}
-              {it.t.vigente && (
+              {it.t.vigente && it.t.texto && (
                 <button type="button" class="btn btn-outline btn-sm ia-copiar" data-texto={it.t.texto} data-fecha={it.t.g.session_date}
                   data-tipo={it.t.g.tipo === 'pareja' ? `pareja-${it.t.g.origen}` : it.t.g.origen}>Copiar a mi nota</button>
               )}
@@ -989,6 +1108,26 @@ const faltanDatos = patient ? [
   .ia-cuerpo :global(p.ia-meta) { font-size: 0.76rem; color: var(--stone); font-style: italic; }
   .ia-cuerpo :global(a.ia-min) { color: #576352; font-weight: 600; text-decoration: underline; white-space: nowrap; }
   .ia-aviso { font-size: 0.75rem; color: var(--stone); border-top: 1px solid var(--warm); margin-top: 0.85rem; padding-top: 0.6rem; }
+  /* H1: autorizaciones por persona */
+  .firmas-persona { margin: -0.75rem 0 1.5rem; padding: 1rem 1.1rem; }
+  .fp-titulo { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: var(--stone); margin-bottom: 0.6rem; }
+  .fp-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+  .fp-item { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: flex-start; justify-content: space-between; border-top: 1px solid var(--warm); padding-top: 0.75rem; }
+  .fp-item:first-child { border-top: 0; padding-top: 0; }
+  .fp-datos { min-width: 0; flex: 1 1 14rem; }
+  .fp-nombre { font-weight: 600; font-size: 0.88rem; overflow-wrap: anywhere; }
+  .fp-sub { font-size: 0.78rem; color: var(--stone); margin-top: 0.15rem; }
+  .fp-si { color: var(--enc-green-dark); }
+  .fp-no { color: var(--red); }
+  .fp-botones { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .fp-confirmar { flex: 1 1 100%; background: #fffbeb; border-left: 3px solid #b45309; padding: 0.75rem 0.85rem; display: flex; flex-direction: column; gap: 0.4rem; }
+  .fp-confirmar[hidden] { display: none; }
+  .fp-texto { font-size: 0.82rem; line-height: 1.5; color: var(--ink); }
+  .fp-label { font-size: 0.75rem; color: var(--stone); margin-top: 0.2rem; }
+  .fp-via, .fp-nota { width: 100%; max-width: 26rem; font-size: 0.85rem; }
+  .fp-acciones { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.3rem; }
+  .fp-msg { flex: 1 1 100%; font-size: 0.78rem; }
+  .fp-msg:empty { display: none; }
   .ia-acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; align-items: center; }
   .ia-msg { font-size: 0.78rem; }
   .ia-badge-sesion { color: #7A6544 !important; border-color: #e6d9c2 !important; background: #f7f1e6 !important; text-decoration: none; }
@@ -1172,7 +1311,45 @@ const faltanDatos = patient ? [
     submitBookingAction({ action: 'change_service', id: select.dataset.bid, service_id: select.value });
   });
 
-  // ── Consentimiento de datos: enviar (WhatsApp / correo / link) o registrar retiro ──
+  // ── H1: retiro por persona (solo grabación, o consentimiento completo). Confirmación escrita en la página. ──
+  document.addEventListener('click', async (e) => {
+    const t = e.target;
+    const abrir = t.closest('.fp-abrir');
+    if (abrir) {
+      const item = abrir.closest('.fp-item');
+      item.querySelectorAll('.fp-confirmar').forEach((p) => { p.hidden = p.id !== abrir.dataset.panel || !p.hidden; });
+      const abierto = document.getElementById(abrir.dataset.panel);
+      if (abierto && !abierto.hidden) abierto.querySelector('select, input')?.focus();
+      return;
+    }
+    if (t.closest('.fp-cancelar')) { t.closest('.fp-confirmar').hidden = true; return; }
+    const enviar = t.closest('.fp-enviar');
+    if (!enviar) return;
+    const item = enviar.closest('.fp-item');
+    const panel = enviar.closest('.fp-confirmar');
+    const msg = item.querySelector('.fp-msg');
+    const pinta = (txt, color) => { msg.textContent = txt; msg.style.color = color; };
+    const accion = enviar.dataset.accion;
+    const body = { action: accion, patient_id: document.getElementById('consent-status')?.dataset.patientId, consent_id: enviar.dataset.consentId, note: panel.querySelector('.fp-nota')?.value ?? '' };
+    if (accion === 'revoke_recording') {
+      body.via = panel.querySelector('.fp-via')?.value ?? '';
+      if (!body.via) { pinta('Indica cómo lo pidió.', '#dc2626'); panel.querySelector('.fp-via')?.focus(); return; }
+    }
+    enviar.disabled = true;
+    pinta('Guardando…', '#6b7280');
+    try {
+      const res = await fetch('/api/admin/consent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error ?? 'No se pudo registrar.');
+      pinta(accion === 'revoke_recording' ? '✓ Retiro de la grabación registrado.' : '✓ Retiro registrado.', '#15803d');
+      setTimeout(() => location.reload(), 900);
+    } catch (err) {
+      pinta('✕ ' + (err instanceof Error ? err.message : 'Error de conexión'), '#dc2626');
+      enviar.disabled = false;
+    }
+  });
+
+  // ── Consentimiento de datos: enviar (WhatsApp / correo / link) ──
   document.addEventListener('click', async (e) => {
     const btn = e.target.closest('.consent-btn');
     if (!btn) return;
@@ -1182,11 +1359,6 @@ const faltanDatos = patient ? [
     const body = { action, patient_id: status?.dataset.patientId };
 
     if (action === 'email' && !confirm('¿Enviar el consentimiento por correo al paciente?')) return;
-    if (action === 'revoke') {
-      const note = prompt('El paciente retiró su consentimiento. Nota opcional (cómo y cuándo lo pidió):');
-      if (note === null) return;
-      body.note = note;
-    }
     // La ventana de WhatsApp se abre antes del fetch: si se abre después, el
     // navegador la bloquea como popup.
     const waWin = action === 'whatsapp' ? window.open('about:blank', '_blank') : null;
@@ -1391,7 +1563,7 @@ const faltanDatos = patient ? [
       try {
         const d = await postPanel('/api/admin/transcriptor/reintentar', { grabacion_id: gid });
         if (!d.ok) throw new Error(d.error ?? 'No se pudo reintentar.');
-        if (msg) { msg.textContent = '✓ Se volverá a procesar. Aparecerá aquí solo.'; msg.style.color = '#15803d'; }
+        if (msg) { msg.textContent = '✓ ' + (d.mensaje || 'Se volverá a procesar. Aparecerá aquí solo.'); msg.style.color = '#15803d'; }
         setTimeout(() => location.reload(), 1500);
       } catch (err) {
         if (msg) { msg.textContent = '✕ ' + (err instanceof Error ? err.message : 'Error de conexión'); msg.style.color = '#dc2626'; }

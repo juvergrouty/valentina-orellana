@@ -144,6 +144,22 @@ export async function marcarError(
   return (data as Grabacion | null) ?? null;
 }
 
+/**
+ * Columnas que "Reintentar" deja en limpio al volver a `destino` (función pura, con pruebas).
+ *  - intentos = 0 y proximo_intento_at = null: el reintento manual vuelve a tener TODOS sus intentos
+ *    y su backoff (82-revision-codigo M2: antes quedaba intentos = máximo y el primer fallo era definitivo).
+ *  - Hacia bot_lanzando: bot_machine_id = null para que el orquestador relance el bot (M3). La máquina
+ *    anterior, si seguía viva, la apaga antes quien llama (reintentoAlerta.opsReintentoSupabase) y su
+ *    token ya no sirve (lanzarBot genera uno nuevo).
+ */
+export function limpiezaReintento(destino: EstadoGrabacion): Record<string, null | number> {
+  const base: Record<string, null | number> = {
+    estado_antes_error: null, ultimo_error: null, tomada_en: null, intentos: 0, proximo_intento_at: null,
+  };
+  if (destino === 'bot_lanzando') base.bot_machine_id = null;
+  return base;
+}
+
 /** "Reintentar": vuelve de 'error' a estado_antes_error (atómico). null si no aplica o ya lo hizo otro. */
 export async function reintentar(id: string, cliente?: Cliente): Promise<Grabacion | null> {
   const db = cliente ?? (await clientePorDefecto());
@@ -155,7 +171,7 @@ export async function reintentar(id: string, cliente?: Cliente): Promise<Grabaci
   if (!destino) return null;
   const { data, error } = await db
     .from('grabaciones')
-    .update({ estado: destino, estado_antes_error: null, ultimo_error: null, tomada_en: null })
+    .update({ ...limpiezaReintento(destino), estado: destino })
     .eq('id', id)
     .eq('estado', 'error')
     .select('*')

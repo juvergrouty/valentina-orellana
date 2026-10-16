@@ -123,6 +123,11 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
     : `Pagado · ${escapeHtml(data.payment_method)}`; // ej. "Efectivo" desde Marcar como pagado
 
   const subject = `Sesión confirmada — Ps. Valentina Orellana`;
+  // Transcriptor (decisión 13 del 16 oct): aviso único a quien firmó la v2 con grabación, abajo del
+  // correo. Nunca bloquea la confirmación: si algo falla, el correo sale sin el aviso.
+  const avisoV2 = await import('./transcriptor/avisoV2')
+    .then((m) => m.avisoV2ParaCorreo(data.patient_email))
+    .catch(() => null);
   const res = await client.emails.send({
     from: FROM,
     replyTo: PATIENT_REPLY_TO,
@@ -209,7 +214,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
                   letter-spacing:0.1em;text-transform:uppercase;">
           Escribir por WhatsApp
         </a>
-
+${avisoV2 ? avisoV2.html : ''}
         <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
                   padding-top:1.5rem;border-top:1px solid #DDD8CF;">
           Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
@@ -220,6 +225,9 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
   // Misma llave con otro contenido = ese correo YA se envió en un intento anterior
   // (Resend lo rechaza para no duplicar): cuenta como enviado, no como falla.
   if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
+  if (!res.error && avisoV2) {
+    await import('./transcriptor/avisoV2').then((m) => m.registrarAvisoMostrado(avisoV2, data.booking_id)).catch(() => undefined);
+  }
   await logEmail('email/confirmacion', data.patient_email, subject, !res.error, res.error?.message);
   return res.error ? { sent: false, reason: res.error.message } : { sent: true };
 }

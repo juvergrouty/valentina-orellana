@@ -13,7 +13,9 @@ import { procesarWebhookAssemblyAI, repoWebhookSupabase } from './assemblyai';
 import { crearBot, procesarEventoBot } from './bot';
 import { evaluarEnBase } from './consentimiento';
 import { reintentar, transicionar } from './estados';
-import { crearPipeline, esperaTrasFallos, etiquetaSesion, MAX_RESUMEN, type PipelineP6 } from './pipeline';
+import { crearPipeline, esperaTrasFallos, etiquetaSesion, MAX_GUARDADO, MAX_RESUMEN, type PipelineP6 } from './pipeline';
+import { PROMPT_VERSION_RESUMEN } from './resumen';
+import { leerContenidoResumen } from './resumenCifrado';
 import { HABLANTE_SIN_SEPARAR } from './hablantes';
 import type { NuevaAlerta } from './alertas';
 import type { AssemblyAI, PalabraAAI, ResultadoTranscripcion } from './tipos';
@@ -118,7 +120,8 @@ function escenario(planClaude: (string | number)[] = [RESUMEN]) {
 
   const r2 = s3Falso(), b2 = s3Falso();
   const KEK = new Uint8Array(randomBytes(32));
-  const almacenamiento = crearAlmacenamiento({ r2: r2.cliente, b2: b2.cliente, buckets: BUCKETS, cifrado: crearCifrado({ activa: 1, obtener: (v) => (v === 1 ? KEK : undefined) }) });
+  const cifrado = crearCifrado({ activa: 1, obtener: (v) => (v === 1 ? KEK : undefined) });
+  const almacenamiento = crearAlmacenamiento({ r2: r2.cliente, b2: b2.cliente, buckets: BUCKETS, cifrado });
   const aai = new AAIFalso();
   const claude = claudeFalso(planClaude);
   const alertas: NuevaAlerta[] = [];
@@ -147,7 +150,7 @@ function escenario(planClaude: (string | number)[] = [RESUMEN]) {
   });
 
   const pipeline: PipelineP6 = crearPipeline({
-    db: db.cliente, almacenamiento, aai, bot, claude: claude.cliente,
+    db: db.cliente, almacenamiento, aai, bot, claude: claude.cliente, cifrado,
     puedeGrabar: (p, tipo) => evaluarEnBase(p, tipo, db.cliente),
     alertas: { registrarAlerta: async (a) => { alertas.push(a); }, resolverAlertasDe: async (id) => { resueltas.push(id); } },
   });
@@ -163,8 +166,9 @@ function escenario(planClaude: (string | number)[] = [RESUMEN]) {
   /** Lo que hacen grabacion-iniciar + subida-url + grabacion-finalizar (P4) con la base. */
   async function grabarPresencial(patientId: string, tipo: 'individual' | 'pareja', segundos: number[]): Promise<string> {
     const pareja = tipo === 'pareja';
+    const consentIds = db.tabla('consents').filter((c) => c.patient_id === patientId).map((c) => c.id);
     const g = await db.from('grabaciones').insert({
-      patient_id: patientId, origen: 'presencial', tipo, modelo: pareja ? 'universal-3-5-pro' : 'universal-2', diarizacion: pareja,
+      patient_id: patientId, consent_ids: consentIds, origen: 'presencial', tipo, modelo: pareja ? 'universal-3-5-pro' : 'universal-2', diarizacion: pareja,
       session_date: '2026-10-20', inicio_at: ahora().toISOString(), estado: 'creada', creada_por: 'vale',
     }).select('*').single();
     const id = g.data.id as string;
@@ -186,7 +190,7 @@ function escenario(planClaude: (string | number)[] = [RESUMEN]) {
   const segs = (id: string) => db.tabla('grabacion_segmentos').filter((s) => s.grabacion_id === id).sort((a, b) => a.seq - b.seq);
   const correr = async () => { const r = await pipeline.correr(ahora()); assert.deepEqual(r.errores, []); return r; };
 
-  return { db, ahora, avanzar, r2, b2, aai, claude, alertas, resueltas, eventos, maquinas, matadas, BOT_SECRETO, almacenamiento, pipeline, paciente, firma, grabarPresencial, grab, segs, correr };
+  return { db, ahora, avanzar, r2, b2, aai, claude, alertas, resueltas, eventos, maquinas, matadas, BOT_SECRETO, almacenamiento, cifrado, pipeline, paciente, firma, grabarPresencial, grab, segs, correr };
 }
 
 // ─── Pruebas ─────────────────────────────────────────────────────────────────
@@ -232,10 +236,13 @@ test('E2E presencial individual: subida → transcribiendo → transcrita (cifra
   const r = e.db.tabla('resumenes_ia').find((x) => x.grabacion_id === id)!;
   assert.equal(r.estado, 'listo');
   assert.equal(r.modo, 'directo');
-  assert.equal(r.prompt_version, 'resumen-2026-10-16.1');
+  assert.equal(r.prompt_version, PROMPT_VERSION_RESUMEN);
   assert.equal(r.plantilla, 'individual');
   assert.ok(r.costo_usd > 0 && r.tokens_salida === 300);
-  assert.match(r.contenido, /Tareas y acuerdos/);
+  // H7: el contenido va cifrado (VOT1) y en claro queda null; se abre con la misma KEK.
+  assert.equal(r.contenido, null);
+  assert.match(String(r.contenido_cifrado), /^\\x564f5431/); // 'VOT1'
+  assert.match(String(await leerContenidoResumen(r as never, e.cifrado)), /Tareas y acuerdos/);
   // Al modelo solo va el nombre de pila (sin apellido) y sin Batch.
   const enviado = JSON.stringify(e.claude.llamadas[0]);
   assert.ok(enviado.includes('Camila') && !enviado.includes('Rojas'));
@@ -281,7 +288,11 @@ test('E2E presencial pareja (2 segmentos): error de AssemblyAI → reintento con
   e.avanzar(1); await e.correr();
   assert.equal(e.grab(id).estado, 'lista');
   assert.equal(e.db.tabla('resumenes_ia')[0].plantilla, 'pareja');
-  assert.ok(!JSON.stringify(e.claude.llamadas[0]).includes('Ana'), 'pareja: sin nombres de pila al modelo');
+  // H14: al modelo van los nombres de pila de las dos personas que firmaron (sin apellidos).
+  const enviadoPareja = JSON.stringify(e.claude.llamadas[0]);
+  assert.ok(enviadoPareja.includes('Miembro: Ana') && enviadoPareja.includes('Miembro: Luis'), 'pareja: nombres de pila de ambos');
+  assert.ok(!/Pérez|Soto/.test(enviadoPareja), 'sin apellidos');
+  assert.match(enviadoPareja, /orden no determinado/);
   assert.equal(e.alertas.length, 0);
 });
 
@@ -360,7 +371,8 @@ test('E2E online (consentimiento v2, decisión 9): bot → sondeo sin webhook �
   assert.deepEqual([a.tipo, a.accion, a.grabacionId, a.clave], ['resumen', 'reintentar_resumen', id, `resumen:${id}`]);
   assert.equal(a.titulo, `No se pudo generar el resumen automático de la ${etiquetaSesion(e.grab(id) as never)}`);
   assert.ok(!/Diego|Soto|hola/.test(`${a.titulo} ${a.detalle}`), 'la alerta no lleva nombres ni contenido');
-  assert.match(a.titulo, /sesión individual online del 20\/10 a las 10:01/);
+  assert.match(a.titulo, /sesión online del 20\/10 a las 10:01/);
+  assert.doesNotMatch(a.titulo, /individual|pareja/, 'H17: el tipo de terapia no va en el título (viaja en el asunto del correo)');
 
   // 6) Vale toca "Reintentar resumen" (P7 → estados.reintentar); Anthropic ya responde.
   e.claude.plan.splice(0, e.claude.plan.length, RESUMEN);
@@ -446,4 +458,130 @@ test('transcriptor apagado: no despacha ni procesa; avisa si hay grabaciones det
   assert.equal(e.aai.envios.length, 0);
   assert.deepEqual(e.alertas.map((a) => a.clave), ['config:apagado-con-pendientes']);
   assert.ok(e.db.tabla('settings').some((s) => s.key === 'transcriptor_latido'));
+});
+
+
+// ─── Correcciones 81/82-revision (16 oct) ────────────────────────────────────
+
+test('M1: Regenerar inserta la fila pendiente ANTES de pasar a resumiendo; el cron en medio no la deja huérfana', async () => {
+  const e = escenario([RESUMEN, RESUMEN.replace('Registrar momentos de calma.', 'Anotar dos momentos de calma.')]);
+  const p = e.paciente('Rosa Vidal', 'rosa@ejemplo.cl');
+  e.firma(p, 'Rosa Vidal', '18.888.888-8');
+  const id = await e.grabarPresencial(p, 'individual', [600]);
+  await e.correr();
+  const tr = e.segs(id)[0].aai_transcript_id;
+  e.aai.completar(tr, palabras('hola cómo estás bien gracias'));
+  await webhook(e.db, e.aai, tr, 'completed');
+  e.avanzar(1); await e.correr();
+  e.avanzar(1); await e.correr();
+  assert.equal(e.grab(id).estado, 'lista');
+  // Lo que hace regenerar-resumen.ts: 1) fila v2 pendiente  2) (el cron corre justo aquí)  3) lista → resumiendo.
+  const t = e.db.tabla('transcripciones')[0];
+  await e.db.from('resumenes_ia').insert({ grabacion_id: id, patient_id: p, transcripcion_id: t.id, version: 2, autor: 'ia', plantilla: 'individual', modo: 'directo', estado: 'pendiente' });
+  e.avanzar(1); await e.correr();
+  assert.equal(e.grab(id).estado, 'lista', 'con la grabación en lista el cron no toca la fila nueva');
+  assert.ok(await transicionar(id, ['lista'], 'resumiendo', {}, e.db.cliente));
+  e.avanzar(1); await e.correr();
+  assert.equal(e.grab(id).estado, 'lista');
+  const v2 = e.db.tabla('resumenes_ia').find((r) => r.grabacion_id === id && r.version === 2)!;
+  assert.equal(v2.estado, 'listo', 'la v2 la tomó el cron (no quedó pendiente para siempre)');
+  assert.match(String(await leerContenidoResumen(v2 as never, e.cifrado)), /Anotar dos momentos/);
+  assert.equal(e.db.tabla('resumenes_ia').filter((r) => r.grabacion_id === id).length, 2, 'no se creó otra fila');
+});
+
+test('M3: Reintentar un bot caído antes de grabar lo relanza (sin exigir intentos > 0)', async () => {
+  const e = escenario();
+  const p = e.paciente('Iván Mora', 'ivan@ejemplo.cl');
+  e.firma(p, 'Iván Mora', '19.999.999-9');
+  const g = (await e.db.from('grabaciones').insert({
+    patient_id: p, origen: 'online', tipo: 'individual', modelo: 'universal-2', session_date: '2026-10-20', estado: 'error',
+    estado_antes_error: 'bot_lanzando', intentos: 3, bot_machine_id: 'maqvieja1', google_event_id: 'evx',
+    meet_url: 'https://meet.google.com/abc-defg-hij', hora_fin_prevista: new Date(e.ahora().getTime() + 40 * 60_000).toISOString(),
+  }).select('*').single()).data;
+  assert.ok(await reintentar(g.id, e.db.cliente));
+  assert.equal(e.grab(g.id).bot_machine_id, null);
+  assert.equal(e.grab(g.id).intentos, 0);
+  await e.correr();
+  assert.equal(e.maquinas.length, 1, 'se lanzó un bot nuevo');
+  assert.equal(e.grab(g.id).bot_machine_id, e.maquinas[0].id);
+  e.avanzar(1); await e.correr();
+  assert.equal(e.maquinas.length, 1, 'y no se relanza en cada minuto');
+});
+
+test('M4: si otro proceso ya guardó un transcript para el segmento, el nuevo se borra en AssemblyAI', async () => {
+  const e = escenario();
+  const p = e.paciente('Lía Paz', 'lia@ejemplo.cl');
+  e.firma(p, 'Lía Paz', '10.101.010-1');
+  const id = await e.grabarPresencial(p, 'individual', [600]);
+  // Mientras el cron enviaba, grabacion-finalizar alcanzó a guardar el suyo.
+  const enviarReal = e.aai.enviar.bind(e.aai);
+  e.aai.enviar = async (x) => {
+    const r = await enviarReal(x);
+    e.segs(id)[0].aai_transcript_id = 'tr_de_finalizar';
+    return r;
+  };
+  await e.correr();
+  assert.equal(e.segs(id)[0].aai_transcript_id, 'tr_de_finalizar', 'no se pisa el id guardado');
+  assert.deepEqual(e.aai.borrados, ['tr_1'], 'el transcript duplicado se borró en AssemblyAI');
+});
+
+test('B4: si la copia a B2 falla, el audio NO se borra hasta reintentarla; agotada, sigue con aviso y el paso respaldos la completa', async () => {
+  const e = escenario();
+  const p = e.paciente('Tere Luna', 'tere@ejemplo.cl');
+  e.firma(p, 'Tere Luna', '12.121.212-2');
+  const id = await e.grabarPresencial(p, 'individual', [600]);
+  await e.correr();
+  const tr = e.segs(id)[0].aai_transcript_id;
+  e.aai.completar(tr, palabras('hola cómo has estado esta semana'));
+  await webhook(e.db, e.aai, tr, 'completed');
+  // B2 caído: toda escritura en el bucket de respaldo falla.
+  const sendB2 = (e.b2.cliente as unknown as { send: (c: unknown) => Promise<unknown> }).send;
+  (e.b2.cliente as unknown as { send: (c: unknown) => Promise<unknown> }).send = async () => { throw Object.assign(new Error('B2 caído'), { $metadata: { httpStatusCode: 503 } }); };
+  const audio = () => [...e.r2.objetos.keys()].filter((k) => k.startsWith('vo-audio/')).length;
+  e.avanzar(1); await e.correr();
+  assert.equal(e.grab(id).estado, 'transcribiendo');
+  assert.equal(e.db.tabla('transcripciones')[0].b2_key, null);
+  assert.equal(audio(), 1, 'el audio sigue guardado mientras falte la copia en B2');
+  assert.deepEqual(e.aai.borrados, [], 'ni se borra en AssemblyAI');
+  for (let i = 1; i < MAX_GUARDADO; i++) { e.avanzar(esperaTrasFallos(i) / 60_000); await e.correr(); }
+  assert.equal(e.grab(id).estado, 'transcrita', 'agotados los intentos sigue (R2 verificada) con la copia pendiente');
+  assert.equal(audio(), 0);
+  assert.ok(e.alertas.some((a) => a.tipo === 'respaldo' && a.grabacionId === id));
+  // B2 vuelve: el paso respaldos completa la copia y cierra el aviso.
+  (e.b2.cliente as unknown as { send: (c: unknown) => Promise<unknown> }).send = sendB2;
+  e.avanzar(1); await e.correr();
+  assert.ok(e.db.tabla('transcripciones')[0].b2_key, 'copia en B2 hecha');
+  assert.ok(e.resueltas.includes(id));
+});
+
+test('H2: evento online sin tipo de una ficha de pareja con UNA firma → no se envía el bot', async () => {
+  const e = escenario();
+  const p = e.paciente('Clara y Tomás', 'clara@ejemplo.cl');
+  e.firma(p, 'Clara Ríos', '13.131.313-3');
+  const inicio = new Date(e.ahora().getTime() + 60_000).toISOString();
+  e.eventos.push({ id: 'evpareja1', start: { dateTime: inicio }, end: { dateTime: new Date(e.ahora().getTime() + 51 * 60_000).toISOString() }, hangoutLink: 'https://meet.google.com/xyz-abcd-efg', attendees: [{ email: 'clara@ejemplo.cl' }] });
+  await e.correr();
+  assert.equal(e.maquinas.length, 0);
+  const g = e.db.tabla('grabaciones')[0];
+  assert.equal(g.estado, 'sin_consentimiento');
+  assert.equal(g.tipo, 'pareja', 'el servidor dedujo pareja desde la ficha');
+});
+
+test('H13: hueco entre segmentos sin pausa registrada → tramo "[pausa / interrupción …]" en la transcripción', async () => {
+  const e = escenario();
+  const p = e.paciente('Nora Gil', 'nora@ejemplo.cl');
+  e.firma(p, 'Nora Gil', '14.141.414-4');
+  const id = await e.grabarPresencial(p, 'individual', [10, 10]); // 2 segmentos con 60 s entre ambos (interrupción)
+  await e.correr();
+  const [a, b] = e.segs(id).map((s) => s.aai_transcript_id);
+  e.aai.completar(a, palabras('primera parte de la sesión'));
+  e.aai.completar(b, palabras('segunda parte después de la llamada'));
+  await webhook(e.db, e.aai, a, 'completed');
+  await webhook(e.db, e.aai, b, 'completed');
+  e.avanzar(1); await e.correr();
+  const clara = await e.almacenamiento.leerTranscripcion(e.db.tabla('transcripciones')[0].r2_key);
+  const marca = clara.segmentos.find((t) => t.texto.startsWith('[pausa / interrupción'));
+  assert.ok(marca, 'hay marca de hueco');
+  assert.equal(marca!.hablante, '');
+  assert.equal(e.db.tabla('transcripciones')[0].palabras, 11, 'la marca no cuenta como voz (5 + 6 palabras)');
 });

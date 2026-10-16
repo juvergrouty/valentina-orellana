@@ -257,6 +257,48 @@ function agrupar(palabras: PalabraAbs[], hablantes: string[]): TramoTranscrito[]
   return out;
 }
 
+// ─── Huecos de la grabación (81-revision-etica-clinica H13) ───────────────────
+// En presencial, cada pausa o interrupción (llamada, pantalla bloqueada, micrófono tomado) cierra el
+// segmento y la continuación abre otro. Las pausas voluntarias ya quedan en grabaciones.pausas y se
+// muestran como "Grabación pausada a pedido"; las interrupciones no. Para que nadie (ni el resumen)
+// lea como continuo algo que no lo fue, cada hueco entre segmentos que NO coincide con una pausa
+// registrada se marca en la transcripción con un tramo sin hablante:
+//   "[pausa / interrupción mm:ss–mm:ss]"
+
+/** Hueco mínimo entre segmentos para marcarlo (evita marcar el corte técnico entre archivos). */
+export const HUECO_MINIMO_MS = 5_000;
+/** Prefijo de los tramos-marca (sin hablante). */
+export const PREFIJO_HUECO = '[pausa / interrupción';
+
+export function textoHueco(desdeMs: number, hastaMs: number): string {
+  return `${PREFIJO_HUECO} ${formatearTiempo(desdeMs)}–${formatearTiempo(hastaMs)}]`;
+}
+
+export function esTramoHueco(t: Pick<TramoTranscrito, 'hablante' | 'texto'>): boolean {
+  return !t.hablante && t.texto.startsWith(PREFIJO_HUECO);
+}
+
+/** Huecos entre segmentos presenciales que no son una pausa registrada (función pura). */
+export function huecosSinPausa(
+  origen: 'presencial' | 'online',
+  segmentos: { offset_ms: number; resultado: ResultadoTranscripcion }[],
+  pausas: { desde_ms: number; hasta_ms: number }[] = [],
+): { desde_ms: number; hasta_ms: number }[] {
+  if (origen !== 'presencial' || segmentos.length < 2) return [];
+  const segs = segmentos.map((s, i) => ({ ...s, i })).sort((a, b) => a.offset_ms - b.offset_ms || a.i - b.i);
+  const offs = desfases(origen, segs, pausas);
+  const ps = (pausas ?? []).filter((p) => Number.isFinite(p.desde_ms) && Number.isFinite(p.hasta_ms));
+  const out: { desde_ms: number; hasta_ms: number }[] = [];
+  for (let k = 1; k < segs.length; k++) {
+    const desde = offs[k - 1] + duracionSegmento(segs[k - 1].resultado);
+    const hasta = offs[k];
+    if (hasta - desde < HUECO_MINIMO_MS) continue;
+    const esPausa = ps.some((p) => p.desde_ms <= hasta && p.hasta_ms >= desde);
+    if (!esPausa) out.push({ desde_ms: Math.round(desde), hasta_ms: Math.round(hasta) });
+  }
+  return out;
+}
+
 /** Implementación de UnirTranscripcion (contrato de tipos.ts). */
 export const unirTranscripcion: UnirTranscripcion = ({ grabacion, segmentos }) => {
   const ok = segmentos.filter((s) => s.resultado.status === 'completed');
@@ -291,7 +333,13 @@ export function armarTranscripcionClara(params: {
   segmentos: { offset_ms: number; resultado: ResultadoTranscripcion }[];
   modelo?: ModeloTranscripcion;
 }): TranscripcionClara {
-  const tramos = unirTranscripcion({ grabacion: params.grabacion, segmentos: params.segmentos });
+  const voz = unirTranscripcion({ grabacion: params.grabacion, segmentos: params.segmentos });
+  // H13: huecos (interrupciones) como tramos-marca sin hablante, solo si hubo voz.
+  const huecos = voz.length
+    ? huecosSinPausa(params.grabacion.origen, params.segmentos.filter((s) => s.resultado.status === 'completed'), params.grabacion.pausas ?? [])
+    : [];
+  const tramos = [...voz, ...huecos.map((h) => ({ inicio_ms: h.desde_ms, fin_ms: h.hasta_ms, hablante: '', texto: textoHueco(h.desde_ms, h.hasta_ms) }))]
+    .sort((a, b) => a.inicio_ms - b.inicio_ms);
   const fin = Math.max(
     0,
     ...params.segmentos.map((s) => s.offset_ms + (typeof s.resultado.audio_duration === 'number' ? s.resultado.audio_duration * 1000 : 0)),
@@ -302,7 +350,7 @@ export function armarTranscripcionClara(params: {
     idioma: 'es',
     modelo: params.modelo ?? params.grabacion.modelo,
     duracion_s: Math.round(fin / 1000),
-    hablantes: [...new Set(tramos.map((t) => t.hablante))],
+    hablantes: [...new Set(tramos.map((t) => t.hablante).filter(Boolean))],
     segmentos: tramos,
   };
 }

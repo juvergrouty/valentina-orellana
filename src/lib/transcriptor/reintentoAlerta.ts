@@ -26,10 +26,12 @@ export interface EstadoParaReintento {
   estado: EstadoGrabacion;
   estado_antes_error: EstadoGrabacion | null;
   origen: Origen;
+  /** Online: término previsto de la sesión (si ya pasó, el asistente no puede volver a entrar). */
+  hora_fin_prevista?: string | null;
 }
 
 /** Decide qué hacer (función pura, con pruebas para cada estado). */
-export function planReintento(g: EstadoParaReintento, accion: AccionReintento, resumenEnError: boolean): PlanReintento {
+export function planReintento(g: EstadoParaReintento, accion: AccionReintento, resumenEnError: boolean, ahora: Date = new Date()): PlanReintento {
   if (g.estado === 'error') {
     const destino = destinoReintento(g);
     if (!destino) {
@@ -46,6 +48,10 @@ export function planReintento(g: EstadoParaReintento, accion: AccionReintento, r
     }
     if (!RETOMABLES_POR_CRON.includes(destino)) {
       return { tipo: 'manual', mensaje: 'No se puede reintentar desde aquí. Revísala en la página Transcriptor.' };
+    }
+    if (destino === 'bot_lanzando' && g.origen === 'online' && (!g.hora_fin_prevista || Date.parse(g.hora_fin_prevista) <= ahora.getTime())) {
+      // El orquestador solo relanza el bot antes del término previsto (después lo cierra el vigilante).
+      return { tipo: 'manual', mensaje: 'La sesión online ya terminó: el asistente de notas no puede volver a entrar. Esa sesión no quedó grabada.' };
     }
     return { tipo: 'reintentar_error', destino, reabrirResumen: destino === 'resumiendo' && resumenEnError };
   }
@@ -128,7 +134,7 @@ export async function opsReintentoSupabase(): Promise<OpsReintento> {
   const estados = await import('./estados');
   return {
     async leer(id) {
-      const { data: g, error } = await db.from('grabaciones').select('id, estado, estado_antes_error, origen').eq('id', id).maybeSingle();
+      const { data: g, error } = await db.from('grabaciones').select('id, estado, estado_antes_error, origen, hora_fin_prevista').eq('id', id).maybeSingle();
       if (error) throw new Error(`leer grabación: ${error.message}`);
       if (!g) return null;
       const { data: rs } = await db.from('resumenes_ia').select('id, estado').eq('grabacion_id', id)
@@ -136,7 +142,22 @@ export async function opsReintentoSupabase(): Promise<OpsReintento> {
       const ultimo = (rs?.[0] as { id: string; estado: string } | undefined) ?? null;
       return { grabacion: g as EstadoParaReintento, resumenErrorId: ultimo?.estado === 'error' ? ultimo.id : null };
     },
-    reintentar: (id) => estados.reintentar(id, db),
+    async reintentar(id) {
+      // M3 (82-revision-codigo): antes de relanzar un bot caído se apaga la máquina anterior, si
+      // quedó registrada (estados.reintentar la deja en null para que el orquestador lance otra).
+      const { data: g } = await db.from('grabaciones').select('estado, estado_antes_error, bot_machine_id').eq('id', id).maybeSingle();
+      const previa = g as { estado?: string; estado_antes_error?: string | null; bot_machine_id?: string | null } | null;
+      if (previa?.estado === 'error' && previa.estado_antes_error === 'bot_lanzando' && previa.bot_machine_id) {
+        try {
+          const { crearBot } = await import('./bot');
+          await crearBot({ db }).matarBot(previa.bot_machine_id);
+        } catch (e) {
+          // Su token de un uso queda inválido al relanzar (lanzarBot genera otro): no puede subir audio.
+          console.warn('[transcriptor/reintento] no se pudo apagar la máquina anterior:', e instanceof Error ? e.name : 'error');
+        }
+      }
+      return estados.reintentar(id, db);
+    },
     async soltar(id) {
       // Condicional en la misma consulta: solo si nadie tiene una toma vigente (lease de estados.ts).
       const limite = new Date(Date.now() - TIEMPOS.leaseTomaMs).toISOString();
