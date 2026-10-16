@@ -12,6 +12,7 @@ import { avisosBoxCala, type AvisosBox } from './boxCala';
 import { avisosImpuestos, type MesImpuestos } from './impuestos';
 import { cobrosProximos, type CobroProximo } from './cobrosProximos';
 import { avisosEncuadrado, type AvisosEncuadrado } from './encuadrado';
+import { contarCorreosFallidos } from './correosAutomaticos';
 
 // Avisos del panel (antes calculados dentro de AdminLayout.astro). Salen a
 // este archivo (14 oct 2026) para que el Inicio (/admin) los use en su lista
@@ -126,10 +127,12 @@ export type AvisosPanel = {
   impuestos: MesImpuestos[];
   // null = no se pudo revisar (el panel lo dice en vez de callar).
   encuadrado: AvisosEncuadrado | null;
+  // Correos automáticos que fallaron desde la última vez que se miró la pestaña.
+  correosFallidos: number;
 };
 
 export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
-  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado] = await Promise.all([
+  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado, correosFallidos] = await Promise.all([
     // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
     // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
     contarErroresNuevos().catch(() => 0),
@@ -162,6 +165,8 @@ export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
     // Sesiones por agendar, reagendar o eliminar en Encuadrado (transcriptor),
     // hasta que Valentina aprieta "Listo" (15 oct 2026, ver src/lib/encuadrado.ts).
     avisosEncuadrado().catch((): AvisosEncuadrado | null => null),
+    // Correos automáticos que no se pudieron enviar (16 oct 2026, ver src/lib/correosAutomaticos.ts).
+    contarCorreosFallidos().catch(() => 0),
   ]);
-  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado };
+  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado, correosFallidos };
 }

@@ -23,7 +23,7 @@ const path = current ?? '';
 
 // Avisos: ver src/lib/avisosPanel.ts. Si la página ya los cargó (el Inicio
 // los usa en su lista "Para hacer"), llegan por props y no se consultan de nuevo.
-const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado }
+const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado, correosFallidos }
   = avisosPrecargados ?? await cargarAvisosPanel(Astro.url.origin);
 // Passkey (16 oct 2026): franja para registrarla / hacerla obligatoria (src/lib/passkey/servidor.ts).
 const passkeyAviso = current === '/admin/seguridad' ? null : await avisoPasskey(Astro.cookies.get('vo_admin_token')?.value);
@@ -112,6 +112,18 @@ import AlertasTranscriptor from './AlertasTranscriptor.astro';
 ---
 
 <style is:global>
+/* Avisos más compactos (Valentina, 16 oct 2026): mismos avisos, botones y
+   enlaces, en todas las páginas; solo menos alto. */
+.enc-main > [role="status"], .enc-main > [role="alert"] {
+  padding: 0.45rem 1rem !important; font-size: 0.8rem !important; line-height: 1.35 !important;
+}
+.enc-main > [role="status"] p, .enc-main > [role="alert"] p { margin-bottom: 0.15rem !important; }
+.enc-main > [role="status"] ul, .enc-main > [role="alert"] ul { gap: 0.2rem !important; }
+.enc-main > [role="status"] li, .enc-main > [role="alert"] li { margin: 0.1rem 0 !important; }
+.enc-main > [role="status"] button, .enc-main > [role="alert"] button,
+.enc-main > [role="status"] a[style*="border-radius"], .enc-main > [role="alert"] a[style*="border-radius"] {
+  padding: 0.12rem 0.5rem !important; font-size: 0.74rem !important;
+}
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -975,6 +987,12 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
             </li>
           ))}
         </ul>
+      </div>
+    )}
+    {correosFallidos > 0 && current !== '/admin/comunicaciones' && (
+      <div role="alert" id="correos-fallidos-alert" style="background:#b91c1c;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
+        ✉ {correosFallidos === 1 ? '1 correo automático no se pudo enviar' : `${correosFallidos} correos automáticos no se pudieron enviar`} ·{' '}
+        <a href="/admin/comunicaciones?tab=automaticos&solo=errores" style="color:#fff;font-weight:700;text-decoration:underline;">Ver cuáles</a>
       </div>
     )}
     {!ocultarAvisosDeInicio && (encuadrado === null || encuadrado.agendar.length > 0 || encuadrado.reagendar.length > 0 || encuadrado.eliminar.length > 0) && (

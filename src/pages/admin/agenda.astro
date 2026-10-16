@@ -120,12 +120,15 @@ const { data: allSvcFullRes } = await supabase
 const allSvcFull = (allSvcFullRes ?? []) as Array<{ id: string; name: string }>;
 
 // Paleta de colores por servicio (para el modo "Colores por servicio" del calendario)
+// Sin verdes ni rojos (Valentina, 16 oct 2026): el verde es "sesión pagada" y
+// el rojo "por pagar"; un servicio de esos colores se confundía con el pago.
+// Se cambian en su misma posición para que los demás servicios no cambien de color.
 const SVC_PALETTE = [
-  { bg: '#e0e7ff', bd: '#4f5ce8' }, { bg: '#dcfce7', bd: '#16a34a' },
+  { bg: '#e0e7ff', bd: '#4f5ce8' }, { bg: '#e0f2fe', bd: '#0284c7' },
   { bg: '#fef3c7', bd: '#d97706' }, { bg: '#fce7f3', bd: '#db2777' },
   { bg: '#cffafe', bd: '#0891b2' }, { bg: '#f3e8ff', bd: '#9333ea' },
   { bg: '#ffedd5', bd: '#ea580c' }, { bg: '#dbeafe', bd: '#2563eb' },
-  { bg: '#fee2e2', bd: '#dc2626' }, { bg: '#d1fae5', bd: '#059669' },
+  { bg: '#f1f5f9', bd: '#475569' }, { bg: '#fdf4ff', bd: '#c026d3' },
 ];
 const svcColor: Record<string, { bg: string; bd: string }> = {};
 allSvcFull.forEach((s, i) => { svcColor[s.id] = SVC_PALETTE[i % SVC_PALETTE.length]; });
