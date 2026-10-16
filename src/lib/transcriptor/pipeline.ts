@@ -1,0 +1,832 @@
+// Transcriptor IA — orquestador (paquete P6). Lo llama /api/cron/transcriptor cada minuto (pg_cron).
+// Diseño: 50-arquitectura §3.7, §4 (estados y errores), §5; decisiones de 01-decisiones-16oct.md
+// (1: resumen por Messages API directa, sin Batch; 8: cada error definitivo → aviso en el panel).
+//
+// Pasos (cada uno acotado por tiempo y con toma atómica por fila — estados.tomar —, así dos
+// ejecuciones solapadas nunca hacen dos veces lo mismo):
+//   1. vigilar        bots vivos después de HORA_FIN + 40 min → se apaga la máquina y se cierra la grabación.
+//   2. despacharBots  sesiones online que empiezan en [ahora−5, ahora+4] min (si transcriptor_bot_activo):
+//                     INSERT en bot_lanzando (google_event_id único: solo quien inserta lanza) → lanzarBot.
+//   3. resumir        transcrita → resumiendo → lista (resumen.resumirSesion, modo 'directo', guarda prompt_version).
+//   4. reintentarEnvios  segmentos subidos sin transcript en AssemblyAI → enviar (backoff 1/5/15/60 min, máx. 6).
+//   5. procesarTranscripciones  sondeo sin webhook (> 30 min), errores de AssemblyAI (decisionTrasErrorAAI),
+//                     todos completed → unir (hablantes) → cifrar y guardar → borrar en AssemblyAI → borrar audio.
+//   6. limpiar        'creada' huérfanas (sin audio, > 72 h) → cancelada; tomas vencidas → liberadas.
+// Cada error definitivo o reintento agotado → registrarAlerta (alertas.ts, P8) + estado 'error'.
+// Nunca contenido clínico en alertas, errores ni bitácora: solo fecha, hora y tipo de sesión.
+import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  AJUSTES, MODELO_RESUMEN, MODELO_U35_PRO, TIEMPOS,
+  type AccionAuditoria, type AssemblyAI, type Bot, type DecisionModelo, type EstadoGrabacion, type Grabacion,
+  type Pipeline, type PuedeGrabar, type ResultadoTranscripcion, type ResumenIA, type Segmento, type SesionOnline,
+} from './tipos';
+import { leaseVencido, marcarError, soltar, tomar, transicionar } from './estados';
+import { elegirModelo } from './reglas';
+import { borrarTranscriptTrasGuardar, decisionTrasErrorAAI, ErrorAssemblyAI, sanearMensaje } from './assemblyai';
+import { armarTranscripcionClara } from './hablantes';
+import {
+  cargarInstrucciones, contextoSesionAnterior, nombreDePila, plantillaDesdeTipo, resumirSesion,
+  type Participante, type PeticionResumenCompleta, type ResultadoResumen,
+} from './resumen';
+import { clasificarError, type ClienteMensajes, type OpcionesReintento } from './claude';
+import { auditar } from './auditoria';
+import { registrarAlerta as registrarAlertaP8, resolverAlertasDe as resolverAlertasDeP8, type NuevaAlerta, type AlertaTipo } from './alertas';
+import type { AlmacenamientoTranscriptor, ResultadoGuardado } from './almacenamiento';
+
+// ─── Constantes ───────────────────────────────────────────────────────────────
+
+/** Tiempo de trabajo por ejecución (maxDuration de Vercel = 60 s; margen para responder). */
+export const PRESUPUESTO_MS = 50_000;
+/** Un resumen no se empieza si quedan menos de esto (Sonnet tarda ~20–40 s). */
+export const MIN_RESUMEN_MS = 30_000;
+/** Mínimo para empezar a guardar una transcripción (descargar, unir, cifrar, borrar). */
+export const MIN_GUARDAR_MS = 12_000;
+/** Ventana del despacho de bots (50-arquitectura §1.3). */
+export const VENTANA_BOT_ANTES_MS = 5 * 60_000;
+export const VENTANA_BOT_DESPUES_MS = 4 * 60_000;
+/** Vigilante: máquina del bot viva después de HORA_FIN + 40 min (el bot se corta solo a +30). */
+export const VIGILANTE_TRAS_FIN_MS = 40 * 60_000;
+/** Sondeo cuando el webhook de AssemblyAI no llegó. */
+export const SONDEO_SIN_WEBHOOK_MS = 30 * 60_000;
+/** 'creada' sin audio por más de esto → cancelada (el iPhone pudo grabar sin red: margen amplio). */
+export const HUERFANA_MS = 72 * 60 * 60_000;
+/** Backoff (min) por intento fallido: 1, 5, 15, 60, 60… (regla 3 de §4). */
+export const ESPERAS_MIN = [1, 5, 15, 60] as const;
+export const MAX_ENVIOS = 6;
+export const MAX_GUARDADO = 5;
+export const MAX_RESUMEN = 4;
+export const MAX_LANZAR_BOT = 3;
+const LOTE = 20;
+
+/** Ajuste de P5 (bot.ts) con los nombres de Vale en Meet; se repite aquí para no cargar bot.ts. */
+const AJUSTE_NOMBRES_VALE = 'transcriptor_bot_nombres_vale';
+const NOMBRES_VALE_DEFECTO = 'Valentina Orellana|Vínculos que sostienen';
+const NOMBRE_VALE_EN_TRANSCRIPCION = 'Ps. Valentina';
+
+/** Acciones de bitácora del orquestador que no están en AccionAuditoria (tipos.ts): texto libre ≤ 80. */
+const ACC = {
+  enviarAAI: 'enviar_assemblyai' as AccionAuditoria,
+  resumen: 'resumen_generado' as AccionAuditoria,
+  cancelarHuerfana: 'cancelar_huerfana' as AccionAuditoria,
+};
+
+const ACTIVOS_AAI = ['enviado', 'queued', 'processing'] as const;
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+
+/** Columnas que agrega 0016_transcriptor_ajustes.sql. */
+export type GrabacionP6 = Grabacion & { proximo_intento_at?: string | null };
+export type SegmentoP6 = Segmento & { aai_errores?: number | null };
+
+export interface AlertasDeps {
+  registrarAlerta(a: NuevaAlerta): Promise<void>;
+  resolverAlertasDe(grabacionId: string, tipo?: AlertaTipo): Promise<void>;
+}
+
+export interface DepsPipeline {
+  db: SupabaseClient;
+  almacenamiento: Pick<AlmacenamientoTranscriptor, 'urlLectura' | 'guardarTranscripcion' | 'leerTranscripcion' | 'borrarAudio'>;
+  aai: AssemblyAI;
+  bot: Bot;
+  puedeGrabar: PuedeGrabar;
+  /** Cliente de mensajes de Anthropic (pruebas). Sin esto, resumirSesion usa el SDK real. */
+  claude?: ClienteMensajes;
+  /** Reemplazo completo del resumen (pruebas). */
+  resumir?: (p: PeticionResumenCompleta, op: Partial<OpcionesReintento> & { cliente?: ClienteMensajes }) => Promise<ResultadoResumen>;
+  alertas?: AlertasDeps;
+  /** Reloj para el presupuesto de tiempo (ms). */
+  reloj?: () => number;
+  presupuestoMs?: number;
+}
+
+export interface Ajustes {
+  activo: boolean;
+  botActivo: boolean;
+  resumenModo: string;
+  nombresVale: string[];
+}
+
+export interface ResultadoCorrida {
+  ok: boolean;
+  apagado: boolean;
+  pasos: Record<string, number>;
+  errores: string[];
+  ms: number;
+}
+
+export interface PipelineP6 extends Pipeline {
+  resumir(ahora: Date): Promise<number>;
+  limpiar(ahora: Date): Promise<number>;
+  correr(ahora?: Date): Promise<ResultadoCorrida>;
+}
+
+// ─── Utilidades puras ─────────────────────────────────────────────────────────
+
+const TZ = 'America/Santiago';
+
+/** YYYY-MM-DD en Chile. */
+export function fechaChile(iso: string | Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+}
+
+function horaChile(iso: string): string {
+  return new Intl.DateTimeFormat('es-CL', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+}
+
+/** "sesión individual presencial del 16/10 a las 15:00" — sin nombres ni contenido. */
+export function etiquetaSesion(g: Pick<Grabacion, 'tipo' | 'origen' | 'session_date' | 'inicio_at' | 'hora_fin_prevista'>): string {
+  const tipo = g.tipo === 'pareja' ? 'de pareja ' : g.tipo === 'individual' ? 'individual ' : '';
+  const [, m, d] = String(g.session_date ?? '').split('-');
+  const fecha = d && m ? `${d}/${m}` : String(g.session_date ?? '');
+  const hora = g.inicio_at ? horaChile(g.inicio_at) : null;
+  return `sesión ${tipo}${g.origen} del ${fecha}${hora ? ` a las ${hora}` : ''}`;
+}
+
+/** Espera antes del intento n+1 tras n fallos (n ≥ 1). */
+export function esperaTrasFallos(n: number): number {
+  const i = Math.min(Math.max(n, 1), ESPERAS_MIN.length) - 1;
+  return ESPERAS_MIN[i] * 60_000;
+}
+
+/** ¿Le toca a la grabación? Sin toma vigente y con su próximo intento vencido. */
+export function disponible(g: GrabacionP6, ahora: Date): boolean {
+  if (!leaseVencido(g.tomada_en, ahora)) return false;
+  return !g.proximo_intento_at || Date.parse(g.proximo_intento_at) <= ahora.getTime();
+}
+
+/** Decisión de modelo por la regla fija (reglas.ts), según la grabación. */
+export function decisionBase(g: Pick<Grabacion, 'tipo' | 'origen' | 'lugar_con_ruido'>): DecisionModelo {
+  return elegirModelo({ tipo: g.tipo, origen: g.origen, lugarConRuido: g.lugar_con_ruido });
+}
+
+/** Mapa por defecto para online: los nombres de Vale en Meet → "Ps. Valentina" (Vale lo puede editar). */
+export function mapaPorDefecto(g: Pick<Grabacion, 'origen' | 'mapa_hablantes'>, nombresVale: string[]): Record<string, string> | null {
+  if (g.mapa_hablantes && Object.keys(g.mapa_hablantes).length) return g.mapa_hablantes;
+  if (g.origen !== 'online' || !nombresVale.length) return g.mapa_hablantes ?? null;
+  return Object.fromEntries(nombresVale.map((n) => [n, NOMBRE_VALE_EN_TRANSCRIPCION]));
+}
+
+const msg = (e: unknown): string => sanearMensaje(e instanceof Error ? e.message : e);
+const hex = (b: Uint8Array) => `\\x${Buffer.from(b).toString('hex')}`;
+
+// ─── Implementación ───────────────────────────────────────────────────────────
+
+export function crearPipeline(deps: DepsPipeline): PipelineP6 {
+  const db = deps.db;
+  const reloj = deps.reloj ?? (() => Date.now());
+  const alertas: AlertasDeps = deps.alertas ?? { registrarAlerta: registrarAlertaP8, resolverAlertasDe: resolverAlertasDeP8 };
+  let limite = reloj() + (deps.presupuestoMs ?? PRESUPUESTO_MS);
+  const queda = () => limite - reloj();
+  let ajustesCache: Ajustes | null = null;
+
+  async function alerta(a: NuevaAlerta): Promise<void> {
+    try { await alertas.registrarAlerta(a); } catch (e) { console.warn('[transcriptor/pipeline] no se pudo registrar la alerta:', a.tipo, msg(e)); }
+  }
+
+  async function ajustes(): Promise<Ajustes> {
+    if (ajustesCache) return ajustesCache;
+    const { data, error } = await db.from('settings').select('key, value')
+      .in('key', [AJUSTES.activo, AJUSTES.botActivo, AJUSTES.resumenModo, AJUSTE_NOMBRES_VALE]);
+    if (error) throw new Error(`settings: ${error.message}`);
+    const v = new Map((data ?? []).map((r: { key: string; value: string }) => [r.key, String(r.value ?? '').trim()]));
+    ajustesCache = {
+      activo: v.get(AJUSTES.activo)?.toLowerCase() === 'true',
+      botActivo: v.get(AJUSTES.botActivo)?.toLowerCase() === 'true',
+      resumenModo: v.get(AJUSTES.resumenModo) || 'directo',
+      nombresVale: (v.get(AJUSTE_NOMBRES_VALE) || NOMBRES_VALE_DEFECTO).split('|').map((x) => x.trim()).filter(Boolean),
+    };
+    return ajustesCache;
+  }
+
+  async function grabacionesEn(estados: EstadoGrabacion[], ahora: Date, extra?: (q: any) => any): Promise<GrabacionP6[]> {
+    let q = db.from('grabaciones').select('*').in('estado', estados);
+    if (extra) q = extra(q);
+    const { data, error } = await q.order('updated_at', { ascending: true }).limit(LOTE * 3);
+    if (error) throw new Error(`grabaciones: ${error.message}`);
+    return ((data ?? []) as GrabacionP6[]).filter((g) => disponible(g, ahora)).slice(0, LOTE);
+  }
+
+  async function segmentosDe(grabacionId: string): Promise<SegmentoP6[]> {
+    const { data, error } = await db.from('grabacion_segmentos').select('*')
+      .eq('grabacion_id', grabacionId).not('subido_at', 'is', null).order('seq', { ascending: true });
+    if (error) throw new Error(`segmentos: ${error.message}`);
+    return (data ?? []) as SegmentoP6[];
+  }
+
+  async function actualizarGrabacion(id: string, cambios: Record<string, unknown>): Promise<void> {
+    const { error } = await db.from('grabaciones').update(cambios).eq('id', id);
+    if (error) throw new Error(`grabaciones update: ${error.message}`);
+  }
+
+  async function actualizarSegmento(id: string, cambios: Record<string, unknown>): Promise<void> {
+    const { error } = await db.from('grabacion_segmentos').update(cambios).eq('id', id);
+    if (error) throw new Error(`segmentos update: ${error.message}`);
+  }
+
+  /** Toma la fila, corre fn y suelta la toma pase lo que pase. false si otro proceso la tenía. */
+  async function conToma(g: GrabacionP6, ahora: Date, fn: (g: GrabacionP6) => Promise<void>): Promise<boolean> {
+    const tomada = (await tomar(g.id, ahora, db)) as GrabacionP6 | null;
+    if (!tomada) return false;
+    try {
+      await fn(tomada);
+    } finally {
+      try { await soltar(g.id, db); } catch (e) { console.warn('[transcriptor/pipeline] soltar:', msg(e)); }
+    }
+    return true;
+  }
+
+  /**
+   * Fallo de un paso. Si es recuperable y quedan intentos → programa el siguiente con backoff.
+   * Si no → 'error' (Reintentar vuelve al estado actual) + alerta en el panel.
+   */
+  async function fallo(g: GrabacionP6, ahora: Date, de: EstadoGrabacion, e: unknown, op: {
+    max: number; recuperable?: boolean; definitivo?: boolean; tipo: AlertaTipo; titulo: string; detalle: string;
+    accion?: NuevaAlerta['accion'];
+  }): Promise<'reintento' | 'error'> {
+    const texto = msg(e) || 'Error sin detalle';
+    let n = (g.intentos ?? 0) + 1;
+    // Un error "no recuperable" (p. ej. 4xx) se reintenta una sola vez más (regla 3 de §4).
+    if (op.recuperable === false) n = Math.max(n, op.max - 1);
+    if (!op.definitivo && n < op.max) {
+      await actualizarGrabacion(g.id, {
+        intentos: n, ultimo_error: texto.slice(0, 2000),
+        proximo_intento_at: new Date(ahora.getTime() + esperaTrasFallos(n)).toISOString(),
+      });
+      return 'reintento';
+    }
+    await marcarError(g.id, de, texto, db);
+    await actualizarGrabacion(g.id, { intentos: n, proximo_intento_at: null });
+    await alerta({
+      tipo: op.tipo, grabacionId: g.id, clave: `${op.tipo}:${g.id}`, accion: op.accion ?? 'reintentar',
+      titulo: `${op.titulo} ${etiquetaSesion(g)}`, detalle: op.detalle,
+    });
+    return 'error';
+  }
+
+  // ── 1. Vigilante de bots ─────────────────────────────────────────────────────
+
+  async function vigilar(ahora: Date): Promise<number> {
+    const corte = new Date(ahora.getTime() - VIGILANTE_TRAS_FIN_MS).toISOString();
+    const lista = await grabacionesEn(['bot_lanzando', 'bot_en_lobby', 'grabando'], ahora,
+      (q) => q.eq('origen', 'online').lt('hora_fin_prevista', corte));
+    let n = 0;
+    for (const g0 of lista) {
+      if (queda() < 3_000) break;
+      await conToma(g0, ahora, async (g) => {
+        if (g.bot_machine_id) {
+          try {
+            await deps.bot.matarBot(g.bot_machine_id);
+          } catch (e) {
+            await alerta({
+              tipo: 'bot', grabacionId: g.id, clave: `bot-maquina:${g.id}`, accion: 'revisar',
+              titulo: `No se pudo apagar la máquina del asistente de notas: ${etiquetaSesion(g)}`,
+              detalle: `Se reintenta cada minuto. Detalle técnico: ${msg(e)}`,
+            });
+            return; // se reintenta en el minuto siguiente (la máquina podría seguir subiendo audio)
+          }
+        }
+        const finAt = ahora.toISOString();
+        const revocar = { bot_token_vence_at: finAt };
+        if (g.estado === 'grabando') {
+          const inicio = g.inicio_at ? Date.parse(g.inicio_at) : ahora.getTime();
+          const movida = await transicionar(g.id, ['grabando'], 'subiendo', {
+            ...revocar, fin_at: finAt, duracion_seg: Math.max(0, Math.round((ahora.getTime() - inicio) / 1000)),
+            nota_sistema: 'Grabación cerrada automáticamente: el asistente de notas no terminó solo. Se transcribe lo que alcanzó a subir.',
+          } as Partial<Grabacion>, db);
+          if (movida) {
+            await db.from('grabacion_segmentos').delete().eq('grabacion_id', g.id).is('subido_at', null);
+            const subidos = await segmentosDe(g.id);
+            await transicionar(g.id, ['subiendo'], subidos.length ? 'subida' : 'sin_audio', {}, db);
+            await alerta({
+              tipo: 'bot', grabacionId: g.id, clave: `bot-vigilante:${g.id}`, accion: 'ninguna',
+              titulo: `El asistente de notas no salió solo de la ${etiquetaSesion(g)}`,
+              detalle: subidos.length
+                ? 'Se apagó automáticamente 40 minutos después del término previsto. Lo grabado se está transcribiendo.'
+                : 'Se apagó automáticamente 40 minutos después del término previsto. No alcanzó a subir audio.',
+            });
+          }
+        } else if (g.estado === 'bot_en_lobby') {
+          await transicionar(g.id, ['bot_en_lobby'], 'bot_no_admitido', { ...revocar, fin_at: finAt } as Partial<Grabacion>, db);
+        } else {
+          await actualizarGrabacion(g.id, revocar);
+          await marcarError(g.id, 'bot_lanzando', 'El asistente de notas nunca llegó a la sala de espera de Meet', db);
+          await alerta({
+            tipo: 'bot', grabacionId: g.id, clave: `bot:${g.id}`, accion: 'revisar',
+            titulo: `El asistente de notas no llegó a la ${etiquetaSesion(g)}`,
+            detalle: 'La máquina se creó pero nunca avisó que estaba en la sala de espera. Esa sesión no quedó grabada.',
+          });
+        }
+        n++;
+      });
+    }
+    return n;
+  }
+
+  // ── 2. Despacho de bots ──────────────────────────────────────────────────────
+
+  async function lanzar(g: GrabacionP6, ahora: Date): Promise<boolean> {
+    try {
+      await deps.bot.lanzarBot(g);
+      await actualizarGrabacion(g.id, { intentos: 0, proximo_intento_at: null, ultimo_error: null });
+      return true;
+    } catch (e) {
+      const r = await fallo(g, ahora, 'bot_lanzando', e, {
+        max: MAX_LANZAR_BOT, tipo: 'bot', titulo: 'No se pudo enviar el asistente de notas a la',
+        detalle: `Se intentó ${MAX_LANZAR_BOT} veces. Puedes reintentar o grabar esa sesión de otra forma.`,
+      });
+      if (r === 'reintento') await actualizarGrabacion(g.id, { proximo_intento_at: new Date(ahora.getTime() + 60_000).toISOString() });
+      return false;
+    }
+  }
+
+  async function despacharBots(ahora: Date): Promise<number> {
+    const aj = await ajustes();
+    if (!aj.activo || !aj.botActivo) return 0;
+    let sesiones: SesionOnline[];
+    try {
+      sesiones = await deps.bot.sesionesOnlineProximas(new Date(ahora.getTime() - VENTANA_BOT_ANTES_MS), new Date(ahora.getTime() + VENTANA_BOT_DESPUES_MS));
+    } catch (e) {
+      await alerta({
+        tipo: 'bot', clave: 'bot:calendario', accion: 'revisar',
+        titulo: 'No se pudo revisar Google Calendar para enviar el asistente de notas',
+        detalle: `Mientras no se resuelva, las sesiones online no se graban solas. Detalle técnico: ${msg(e)}`,
+      });
+      throw e;
+    }
+    let n = 0;
+    for (const s of sesiones) {
+      if (queda() < 5_000) break;
+      const { data: previa, error: e0 } = await db.from('grabaciones').select('id')
+        .eq('google_event_id', s.googleEventId).eq('origen', 'online').maybeSingle();
+      if (e0) throw new Error(`grabaciones: ${e0.message}`);
+      if (previa) continue;
+      const v = await deps.puedeGrabar(s.patientId, s.tipo);
+      const d = elegirModelo({ tipo: s.tipo, origen: 'online', lugarConRuido: false });
+      const fila = {
+        patient_id: s.patientId, booking_id: s.bookingId, google_event_id: s.googleEventId,
+        consent_ids: v.consentIds, origen: 'online', tipo: s.tipo, modelo: d.modelo, diarizacion: d.diarizacion,
+        session_date: fechaChile(s.inicio), hora_fin_prevista: s.fin, meet_url: s.meetUrl, creada_por: 'cron',
+        estado: v.puede ? 'bot_lanzando' : 'sin_consentimiento',
+        nota_sistema: v.puede ? null : 'No se envió el asistente de notas: falta el consentimiento de grabación o la ficha.',
+        tomada_en: v.puede ? ahora.toISOString() : null,
+      };
+      const { data: g, error } = await db.from('grabaciones').insert(fila).select('*').maybeSingle();
+      if (error) {
+        if (error.code === '23505') continue; // otro proceso la insertó: solo ese lanza
+        throw new Error(`grabaciones insert: ${error.message}`);
+      }
+      if (!g) continue;
+      if (!v.puede) {
+        await auditar('cron', 'consentimiento_faltante', { grabacionId: g.id, patientId: s.patientId, resultado: 'denegado', detalle: { fase: 'bot', motivo: v.motivo }, cliente: db });
+        continue;
+      }
+      try {
+        if (await lanzar(g as GrabacionP6, ahora)) n++;
+      } finally {
+        await soltar(g.id, db);
+      }
+    }
+    // Reintentos de lanzamiento (Fly falló en un minuto anterior).
+    const pendientes = await grabacionesEn(['bot_lanzando'], ahora, (q) => q.eq('origen', 'online').is('bot_machine_id', null).gt('intentos', 0));
+    for (const g0 of pendientes) {
+      if (queda() < 5_000) break;
+      if (!g0.hora_fin_prevista || Date.parse(g0.hora_fin_prevista) <= ahora.getTime()) continue; // lo cierra el vigilante
+      await conToma(g0, ahora, async (g) => { if (await lanzar(g, ahora)) n++; });
+    }
+    return n;
+  }
+
+  // ── 3/4. Envío a AssemblyAI ──────────────────────────────────────────────────
+
+  /**
+   * Envía los segmentos subidos que aún no tienen transcript. Devuelve 'listo' si todos quedaron
+   * enviados, 'esperar' si hubo un fallo con reintento programado y 'error' si se agotó.
+   */
+  async function enviarSegmentos(g: GrabacionP6, ahora: Date): Promise<'listo' | 'esperar' | 'error'> {
+    const segs = await segmentosDe(g.id);
+    if (!segs.length) return 'listo';
+    const base = decisionBase(g);
+    for (const s of segs) {
+      if (s.aai_transcript_id) continue;
+      const errores = s.aai_errores ?? 0;
+      const decision = errores > 0 ? decisionTrasErrorAAI(base, errores) : base;
+      if (!decision) {
+        await errorDefinitivoAAI(g, ahora, segs);
+        return 'error';
+      }
+      try {
+        const audioUrl = await deps.almacenamiento.urlLectura(s.r2_key, TIEMPOS.urlLecturaAssemblyAISeg);
+        const { id } = await deps.aai.enviar({ audioUrl, decision });
+        await actualizarSegmento(s.id, { aai_transcript_id: id, aai_estado: 'enviado', aai_enviado_at: ahora.toISOString(), aai_error: null, aai_completado_at: null });
+        if (decision.modelo !== g.modelo) {
+          await actualizarGrabacion(g.id, { modelo: decision.modelo });
+          g.modelo = decision.modelo;
+        }
+        await auditar('cron', ACC.enviarAAI, { grabacionId: g.id, patientId: g.patient_id, detalle: { seq: s.seq, modelo: decision.modelo, reintento: errores }, cliente: db });
+      } catch (e) {
+        const recuperable = e instanceof ErrorAssemblyAI ? e.recuperable : true;
+        const r = await fallo(g, ahora, g.estado, e, {
+          max: MAX_ENVIOS, recuperable, tipo: 'transcripcion', titulo: 'No se pudo enviar a transcribir el audio de la',
+          detalle: 'El audio sigue guardado (se borra solo a las 24 h). Toca Reintentar; si vuelve a fallar, revisa la configuración de AssemblyAI.',
+        });
+        return r === 'reintento' ? 'esperar' : 'error';
+      }
+    }
+    return 'listo';
+  }
+
+  async function errorDefinitivoAAI(g: GrabacionP6, ahora: Date, segs: SegmentoP6[]): Promise<void> {
+    // "Reintentar" desde el panel vuelve a empezar el ciclo (mismo modelo → Pro): se reinicia el conteo.
+    for (const s of segs) if ((s.aai_errores ?? 0) > 0) await actualizarSegmento(s.id, { aai_errores: 0 });
+    await fallo(g, ahora, g.estado, new Error('AssemblyAI no pudo transcribir el audio (3 intentos, incluido Universal-3.5 Pro)'), {
+      max: 1, definitivo: true, tipo: 'transcripcion', titulo: 'No se pudo transcribir la',
+      detalle: `AssemblyAI devolvió error en los 3 intentos (el último con ${MODELO_U35_PRO}). El audio se borra solo a las 24 h: reintenta antes.`,
+    });
+  }
+
+  async function reintentarEnvios(ahora: Date): Promise<number> {
+    // Grabaciones en 'subida' + 'transcribiendo' que tengan segmentos sin transcript (reenvíos tras error).
+    const { data: sueltos, error } = await db.from('grabacion_segmentos').select('grabacion_id')
+      .is('aai_transcript_id', null).not('subido_at', 'is', null).limit(200);
+    if (error) throw new Error(`segmentos: ${error.message}`);
+    const conPendientes = new Set((sueltos ?? []).map((s: { grabacion_id: string }) => s.grabacion_id));
+    const lista = (await grabacionesEn(['subida', 'transcribiendo'], ahora))
+      .filter((g) => g.estado === 'subida' || conPendientes.has(g.id));
+    let n = 0;
+    for (const g0 of lista) {
+      if (queda() < 4_000) break;
+      await conToma(g0, ahora, async (g) => {
+        if (g.estado !== 'subida' && g.estado !== 'transcribiendo') return;
+        const r = await enviarSegmentos(g, ahora);
+        if (r !== 'listo') return;
+        if (g.estado === 'subida') {
+          const segs = await segmentosDe(g.id);
+          if (!segs.length) {
+            // 'subida' sin ningún segmento con audio: no hay nada que transcribir.
+            await marcarError(g.id, 'subida', 'La grabación quedó sin segmentos de audio', db);
+            await alerta({ tipo: 'subida', grabacionId: g.id, clave: `subida:${g.id}`, accion: 'revisar', titulo: `No llegó audio de la ${etiquetaSesion(g)}`, detalle: 'Revisa en el teléfono si quedó algo "Pendiente de subir".' });
+            return;
+          }
+          await transicionar(g.id, ['subida'], 'transcribiendo', { intentos: 0, ultimo_error: null, proximo_intento_at: null } as Partial<Grabacion>, db);
+        } else {
+          await actualizarGrabacion(g.id, { intentos: 0, proximo_intento_at: null });
+        }
+        n++;
+      });
+    }
+    return n;
+  }
+
+  // ── 5. Transcripciones listas → cifrar, guardar, borrar ──────────────────────
+
+  async function sondear(s: SegmentoP6, ahora: Date): Promise<void> {
+    const r = await deps.aai.obtener(s.aai_transcript_id!);
+    if (r.status === 'completed') {
+      await db.from('grabacion_segmentos').update({ aai_estado: 'completed', aai_completado_at: ahora.toISOString(), aai_audio_seg: r.audio_duration ?? null, aai_error: null })
+        .eq('id', s.id).in('aai_estado', [...ACTIVOS_AAI]);
+      s.aai_estado = 'completed';
+    } else if (r.status === 'error') {
+      await db.from('grabacion_segmentos').update({ aai_estado: 'error', aai_error: sanearMensaje(r.error || 'error sin detalle') })
+        .eq('id', s.id).in('aai_estado', [...ACTIVOS_AAI]);
+      s.aai_estado = 'error';
+    } else if (s.aai_estado !== r.status) {
+      await db.from('grabacion_segmentos').update({ aai_estado: r.status }).eq('id', s.id).in('aai_estado', [...ACTIVOS_AAI]);
+      s.aai_estado = r.status;
+    }
+  }
+
+  async function guardar(g: GrabacionP6, segs: SegmentoP6[], ahora: Date): Promise<void> {
+    const { data: previa, error: e0 } = await db.from('transcripciones').select('id, palabras')
+      .eq('grabacion_id', g.id).is('deleted_at', null).maybeSingle();
+    if (e0) throw new Error(`transcripciones: ${e0.message}`);
+    let palabras = (previa as { palabras?: number } | null)?.palabras ?? 0;
+    let duracionS: number | null = null;
+    if (!previa) {
+      const resultados: { offset_ms: number; resultado: ResultadoTranscripcion }[] = [];
+      for (const s of segs) {
+        const r = await deps.aai.obtener(s.aai_transcript_id!);
+        if (r.status !== 'completed') throw new Error(`El segmento ${s.seq} ya no aparece completado en AssemblyAI`);
+        resultados.push({ offset_ms: s.offset_ms ?? 0, resultado: r });
+      }
+      const mapa = mapaPorDefecto(g, (await ajustes()).nombresVale);
+      if (mapa !== g.mapa_hablantes) await actualizarGrabacion(g.id, { mapa_hablantes: mapa });
+      const clara = armarTranscripcionClara({ grabacion: { ...g, mapa_hablantes: mapa }, segmentos: resultados });
+      palabras = clara.segmentos.reduce((a, t) => a + (t.texto.trim() ? t.texto.trim().split(/\s+/).length : 0), 0);
+      duracionS = clara.duracion_s;
+      const res: ResultadoGuardado = await deps.almacenamiento.guardarTranscripcion(clara);
+      const largo = clara.segmentos.reduce((a, t) => a + t.texto.length, 0);
+      const { error } = await db.from('transcripciones').insert({
+        grabacion_id: g.id, r2_key: res.r2Key, b2_key: res.b2Key, b2_copiada_at: res.b2Key ? ahora.toISOString() : null,
+        formato_v: res.formatoV, kek_v: res.kekV, dek_envuelta: hex(res.dekEnvuelta), sha256_cifrado: res.sha256,
+        bytes: res.bytes, palabras, tokens_aprox: Math.ceil(largo / 3.5), duracion_s: clara.duracion_s,
+        modelo: g.modelo, idioma: clara.idioma,
+      });
+      if (error && error.code !== '23505') throw new Error(`transcripciones insert: ${error.message}`);
+      await auditar('cron', 'transcripcion_guardada', { grabacionId: g.id, patientId: g.patient_id, detalle: { palabras, bytes: res.bytes, segmentos: segs.length, copia_b2: !!res.b2Key }, cliente: db });
+      if (res.b2Error) await auditar('cron', 'copia_b2', { grabacionId: g.id, resultado: 'error', detalle: { error: res.b2Error }, cliente: db });
+    }
+    // Recién con la transcripción cifrada guardada se borra en AssemblyAI y el audio (regla 5 de §4).
+    for (const s of segs) {
+      const ok = await borrarTranscriptTrasGuardar(s, { aai: deps.aai, db, ahora });
+      if (!ok) throw new Error('La transcripción aún no figura guardada; no se borra nada');
+    }
+    let borrados = 0;
+    for (const s of segs) {
+      if (s.audio_borrado_at) continue;
+      await deps.almacenamiento.borrarAudio(s.r2_key);
+      await actualizarSegmento(s.id, { audio_borrado_at: ahora.toISOString() });
+      borrados++;
+    }
+    if (borrados) await auditar('cron', 'borrar_audio', { grabacionId: g.id, detalle: { segmentos: borrados }, cliente: db });
+    await transicionar(g.id, ['transcribiendo'], 'transcrita', {
+      audio_borrado_at: ahora.toISOString(), intentos: 0, ultimo_error: null, proximo_intento_at: null,
+      ...(g.duracion_seg == null && duracionS != null ? { duracion_seg: duracionS } : {}),
+    } as Partial<Grabacion>, db);
+    if (!palabras) {
+      await alerta({
+        tipo: 'transcripcion', grabacionId: g.id, clave: `sin-voz:${g.id}`, accion: 'revisar',
+        titulo: `No se reconoció voz en la ${etiquetaSesion(g)}`,
+        detalle: 'La grabación llegó, pero la transcripción quedó vacía (¿micrófono tapado o en silencio?). No se genera resumen.',
+      });
+    }
+  }
+
+  async function procesarTranscripciones(ahora: Date): Promise<number> {
+    const lista = await grabacionesEn(['transcribiendo'], ahora);
+    let n = 0;
+    for (const g0 of lista) {
+      if (queda() < MIN_GUARDAR_MS) break;
+      await conToma(g0, ahora, async (g) => {
+        if (g.estado !== 'transcribiendo') return;
+        const segs = await segmentosDe(g.id);
+        if (!segs.length || segs.some((s) => !s.aai_transcript_id)) return; // lo envía reintentarEnvios
+        try {
+          // a) Sondeo de los que llevan > 30 min sin webhook.
+          for (const s of segs) {
+            const activo = (ACTIVOS_AAI as readonly string[]).includes(String(s.aai_estado));
+            const enviado = s.aai_enviado_at ? Date.parse(s.aai_enviado_at) : 0;
+            if (activo && ahora.getTime() - enviado >= SONDEO_SIN_WEBHOOK_MS) await sondear(s, ahora);
+          }
+          // b) Errores de AssemblyAI → reintento (mismo modelo, luego Pro) o error definitivo.
+          const conError = segs.filter((s) => s.aai_estado === 'error');
+          if (conError.length) {
+            for (const s of conError) {
+              try { await deps.aai.borrar(s.aai_transcript_id!); } catch { /* transcript con error: sin datos que proteger */ }
+              const errores = (s.aai_errores ?? 0) + 1;
+              await actualizarSegmento(s.id, { aai_errores: errores, aai_transcript_id: null, aai_estado: null, aai_enviado_at: null });
+              s.aai_errores = errores;
+              s.aai_transcript_id = null;
+            }
+            const r = await enviarSegmentos(g, ahora);
+            if (r === 'listo') n++;
+            return;
+          }
+          // c) Todos completos → unir, cifrar, guardar y borrar.
+          if (segs.every((s) => s.aai_estado === 'completed')) {
+            await guardar(g, segs, ahora);
+            n++;
+          }
+        } catch (e) {
+          await fallo(g, ahora, 'transcribiendo', e, {
+            max: MAX_GUARDADO, recuperable: true, tipo: 'transcripcion', titulo: 'No se pudo guardar la transcripción de la',
+            detalle: 'Se reintentó varias veces. El audio no se borra hasta que la transcripción quede guardada y cifrada. Toca Reintentar.',
+          });
+        }
+      });
+    }
+    return n;
+  }
+
+  // ── 3. Resumen (Messages API directa) ────────────────────────────────────────
+
+  async function filaResumen(g: GrabacionP6, transcripcionId: string): Promise<ResumenIA | null> {
+    const { data, error } = await db.from('resumenes_ia').select('*').eq('grabacion_id', g.id).eq('autor', 'ia')
+      .order('version', { ascending: false }).limit(1).maybeSingle();
+    if (error) throw new Error(`resumenes_ia: ${error.message}`);
+    const ultima = data as ResumenIA | null;
+    if (ultima?.estado === 'listo') return ultima; // ya estaba: solo falta cerrar la grabación
+    if (ultima) {
+      if (ultima.estado === 'error') {
+        // Vale tocó Reintentar en el panel: vuelve a empezar.
+        await db.from('resumenes_ia').update({ estado: 'pendiente', intentos: 0, ultimo_error: null }).eq('id', ultima.id).eq('estado', 'error');
+        return { ...ultima, estado: 'pendiente', intentos: 0 };
+      }
+      return ultima;
+    }
+    const nueva = {
+      grabacion_id: g.id, patient_id: g.patient_id, booking_id: g.booking_id, transcripcion_id: transcripcionId,
+      version: 1, autor: 'ia', plantilla: plantillaDesdeTipo(g.tipo), modelo: MODELO_RESUMEN, modo: 'directo', estado: 'pendiente',
+    };
+    const { data: ins, error: e2 } = await db.from('resumenes_ia').insert(nueva).select('*').maybeSingle();
+    if (e2 && e2.code !== '23505') throw new Error(`resumenes_ia insert: ${e2.message}`);
+    if (ins) return ins as ResumenIA;
+    const { data: otra } = await db.from('resumenes_ia').select('*').eq('grabacion_id', g.id).eq('version', 1).maybeSingle();
+    return (otra as ResumenIA | null) ?? null;
+  }
+
+  async function participantes(g: GrabacionP6): Promise<Participante[]> {
+    const out: Participante[] = [{ rol: 'Terapeuta', nombre: 'Valentina' }];
+    if (g.tipo === 'pareja' || !g.patient_id) return out; // pareja: una ficha para dos personas, sin nombres
+    const { data } = await db.from('patients').select('name').eq('id', g.patient_id).maybeSingle();
+    const pila = nombreDePila((data as { name?: string } | null)?.name);
+    if (pila) out.push({ rol: 'Paciente', nombre: pila });
+    return out;
+  }
+
+  async function resumirUna(g: GrabacionP6, ahora: Date): Promise<boolean> {
+    if (g.estado === 'transcrita') {
+      const m = await transicionar(g.id, ['transcrita'], 'resumiendo', { intentos: 0 } as Partial<Grabacion>, db);
+      if (!m) return false;
+      g = { ...g, ...(m as GrabacionP6) };
+    }
+    if (g.estado !== 'resumiendo') return false;
+    let fila: ResumenIA | null;
+    let peticion: PeticionResumenCompleta;
+    let instruccionesId: string | null;
+    let transcripcionId: string;
+    try {
+      const { data: tr, error } = await db.from('transcripciones').select('id, r2_key')
+        .eq('grabacion_id', g.id).is('deleted_at', null).maybeSingle();
+      if (error) throw new Error(`transcripciones: ${error.message}`);
+      if (!tr) throw new Error('No hay transcripción guardada para resumir');
+      transcripcionId = tr.id as string;
+      fila = await filaResumen(g, transcripcionId);
+      if (!fila) throw new Error('No se pudo crear la fila del resumen');
+      if (fila.estado === 'listo') {
+        await transicionar(g.id, ['resumiendo'], 'lista', { intentos: 0, ultimo_error: null, proximo_intento_at: null } as Partial<Grabacion>, db);
+        await alertas.resolverAlertasDe(g.id).catch(() => undefined);
+        return true;
+      }
+      const tramos = (await deps.almacenamiento.leerTranscripcion(tr.r2_key as string)).segmentos;
+      if (!tramos.length) {
+        await db.from('resumenes_ia').update({ estado: 'error', ultimo_error: 'sin_voz' }).eq('id', fila.id);
+        await transicionar(g.id, ['resumiendo'], 'lista', { nota_sistema: 'No se reconoció voz en la grabación; no hay resumen.', intentos: 0, proximo_intento_at: null } as Partial<Grabacion>, db);
+        return true;
+      }
+      const instr = await cargarInstrucciones('resumen', db);
+      instruccionesId = instr.id;
+      const previo = await contextoSesionAnterior(g, db).catch(() => null);
+      peticion = {
+        resumenId: fila.id, customId: `res_${fila.id.replace(/-/g, '')}`.slice(0, 64),
+        plantilla: plantillaDesdeTipo(g.tipo), instrucciones: instr.texto, transcripcion: tramos, contextoPrevio: previo,
+        sesion: {
+          fecha: g.session_date, modalidad: g.origen,
+          duracionMin: g.duracion_seg ? g.duracion_seg / 60 : null,
+          participantes: await participantes(g), pausas: g.pausas ?? [],
+        },
+      };
+    } catch (e) {
+      await fallo(g, ahora, 'resumiendo', e, {
+        max: MAX_RESUMEN, recuperable: true, tipo: 'resumen', accion: 'reintentar_resumen',
+        titulo: 'No se pudo preparar el resumen de la', detalle: 'La transcripción está guardada. Toca Reintentar resumen.',
+      });
+      return false;
+    }
+
+    const intento = (fila.intentos ?? 0) + 1;
+    try {
+      const resumir = deps.resumir ?? resumirSesion;
+      // Un solo intento por minuto y con el tiempo que queda: los reintentos los da el cron (backoff).
+      const r = await resumir(peticion, { intentos: 1, timeoutMs: Math.max(5_000, queda() - 2_000), ...(deps.claude ? { cliente: deps.claude } : {}) });
+      const { error } = await db.from('resumenes_ia').update({
+        estado: 'listo', contenido: r.contenido, modelo: r.modelo, modo: 'directo', prompt_version: r.promptVersion,
+        instrucciones_id: instruccionesId, transcripcion_id: transcripcionId, intentos: intento, ultimo_error: null,
+        tokens_entrada: r.uso.entrada + r.uso.cacheEscritura + r.uso.cacheLectura, tokens_salida: r.uso.salida,
+        costo_usd: Number(r.costoUsd.toFixed(5)), listo_at: ahora.toISOString(),
+      }).eq('id', fila.id).neq('estado', 'listo');
+      if (error) throw new Error(`resumenes_ia update: ${error.message}`);
+      await auditar('anthropic', ACC.resumen, {
+        grabacionId: g.id, patientId: g.patient_id,
+        detalle: { modelo: r.modelo, prompt_version: r.promptVersion, tokens_salida: r.uso.salida, costo_usd: r.costoUsd, truncado: r.truncado, citas_eliminadas: r.verificacion.eliminadas },
+        cliente: db,
+      });
+      await transicionar(g.id, ['resumiendo'], 'lista', { intentos: 0, ultimo_error: null, proximo_intento_at: null } as Partial<Grabacion>, db);
+      await alertas.resolverAlertasDe(g.id).catch(() => undefined);
+      return true;
+    } catch (e) {
+      const err = clasificarError(e);
+      const definitivo = !err.recuperable || intento >= MAX_RESUMEN;
+      await db.from('resumenes_ia').update({ intentos: intento, ultimo_error: err.codigo, estado: definitivo ? 'error' : 'pendiente' }).eq('id', fila.id).neq('estado', 'listo');
+      await fallo({ ...g, intentos: intento - 1 }, ahora, 'resumiendo', new Error(`Claude: ${err.codigo}${err.status ? ` (HTTP ${err.status})` : ''}`), {
+        max: MAX_RESUMEN, definitivo, tipo: 'resumen', accion: 'reintentar_resumen',
+        titulo: 'No se pudo generar el resumen automático de la',
+        detalle: err.recuperable
+          ? `Anthropic no respondió en ${intento} intentos. La transcripción está guardada; toca Reintentar resumen.`
+          : 'Anthropic rechazó la petición (revisa la llave ANTHROPIC_API_KEY o el modelo). La transcripción está guardada.',
+      });
+      return false;
+    }
+  }
+
+  async function resumir(ahora: Date): Promise<number> {
+    const aj = await ajustes();
+    if (aj.resumenModo !== 'directo') {
+      await alerta({
+        tipo: 'config', clave: 'config:resumen-modo', accion: 'revisar',
+        titulo: `El ajuste transcriptor_resumen_modo dice "${aj.resumenModo.slice(0, 20)}"; se usa "directo"`,
+        detalle: 'Decisión del 16 oct: sin Batch (modo HIPAA). Cambia el ajuste a "directo" para quitar este aviso.',
+      });
+    }
+    const lista = await grabacionesEn(['transcrita', 'resumiendo'], ahora);
+    let n = 0;
+    for (const g0 of lista) {
+      if (queda() < MIN_RESUMEN_MS) break;
+      await conToma(g0, ahora, async (g) => { if (await resumirUna(g, ahora)) n++; });
+    }
+    return n;
+  }
+
+  // ── 6. Limpieza ──────────────────────────────────────────────────────────────
+
+  async function limpiar(ahora: Date): Promise<number> {
+    let n = 0;
+    const corte = new Date(ahora.getTime() - HUERFANA_MS).toISOString();
+    const viejas = await grabacionesEn(['creada'], ahora, (q) => q.lt('created_at', corte));
+    for (const g0 of viejas) {
+      if (queda() < 2_000) break;
+      await conToma(g0, ahora, async (g) => {
+        const { count } = await db.from('grabacion_segmentos').select('id', { count: 'exact', head: true }).eq('grabacion_id', g.id);
+        if ((count ?? 0) > 0) return; // tiene audio en camino: no es huérfana
+        const m = await transicionar(g.id, ['creada'], 'cancelada', { nota_sistema: 'Cancelada automáticamente: se preparó la grabación pero no llegó audio en 72 horas.' } as Partial<Grabacion>, db);
+        if (m) {
+          await auditar('cron', ACC.cancelarHuerfana, { grabacionId: g.id, patientId: g.patient_id, cliente: db });
+          n++;
+        }
+      });
+    }
+    // Tomas vencidas (proceso cortado por maxDuration): se liberan para que el panel no las vea "ocupadas".
+    const lease = new Date(ahora.getTime() - TIEMPOS.leaseTomaMs).toISOString();
+    await db.from('grabaciones').update({ tomada_en: null }).lt('tomada_en', lease);
+    return n;
+  }
+
+  // ── Corrida completa ────────────────────────────────────────────────────────
+
+  async function correr(ahora: Date = new Date()): Promise<ResultadoCorrida> {
+    const t0 = reloj();
+    limite = t0 + (deps.presupuestoMs ?? PRESUPUESTO_MS);
+    ajustesCache = null;
+    const pasos: Record<string, number> = {};
+    const errores: string[] = [];
+    const paso = async (nombre: string, fn: (a: Date) => Promise<number>) => {
+      if (queda() <= 1_000) return;
+      try { pasos[nombre] = await fn(ahora); } catch (e) {
+        errores.push(`${nombre}: ${msg(e)}`);
+        console.warn(`[transcriptor/pipeline] ${nombre}:`, msg(e));
+      }
+    };
+    await db.from('settings').upsert({ key: AJUSTES.latido, value: ahora.toISOString() }, { onConflict: 'key' });
+    const aj = await ajustes();
+    // El vigilante corre siempre: apagar máquinas huérfanas evita costo aunque el transcriptor esté apagado.
+    await paso('vigilar', vigilar);
+    if (!aj.activo) {
+      const { count } = await db.from('grabaciones').select('id', { count: 'exact', head: true })
+        .in('estado', ['subida', 'transcribiendo', 'transcrita', 'resumiendo']);
+      if ((count ?? 0) > 0) {
+        await alerta({
+          tipo: 'config', clave: 'config:apagado-con-pendientes', accion: 'revisar',
+          titulo: `El transcriptor está apagado y hay ${count} grabación(es) detenidas a mitad de proceso`,
+          detalle: 'El audio temporal se borra solo a las 24 h. Enciende el transcriptor para terminarlas.',
+        });
+      }
+      return { ok: errores.length === 0, apagado: true, pasos, errores, ms: reloj() - t0 };
+    }
+    await paso('bots', despacharBots);
+    await paso('resumenes', resumir);
+    await paso('envios', reintentarEnvios);
+    await paso('transcripciones', procesarTranscripciones);
+    await paso('limpieza', limpiar);
+    return { ok: errores.length === 0, apagado: false, pasos, errores, ms: reloj() - t0 };
+  }
+
+  return {
+    despacharBots,
+    reintentarEnvios,
+    procesarTranscripciones,
+    /** Contrato de tipos.ts: con modo 'directo' (decisión 1) "crear batch" = resumir directo. */
+    crearBatchResumenes: resumir,
+    /** Sin Batch (decisión 1, modo HIPAA): no hay batches que revisar. */
+    revisarBatches: async () => 0,
+    vigilar,
+    resumir,
+    limpiar,
+    correr,
+  };
+}
+
+/** Dependencias reales (Supabase service_role, R2/B2, AssemblyAI, Fly, Anthropic). */
+export async function depsProduccion(): Promise<DepsPipeline> {
+  const [{ supabase }, { almacenamiento, assemblyai }, { crearBot }, { evaluarEnBase }] = await Promise.all([
+    import('../supabase'),
+    import('./dependencias-p4'),
+    import('./bot'),
+    import('./consentimiento'),
+  ]);
+  return {
+    db: supabase,
+    almacenamiento,
+    aai: assemblyai,
+    bot: crearBot({ db: supabase }),
+    puedeGrabar: (patientId, tipo) => evaluarEnBase(patientId, tipo, supabase),
+  };
+}

@@ -11,7 +11,7 @@ export const prerender = false;
 
 // POST /api/admin/transcriptor/grabacion-iniciar — P4 (50-arquitectura §3.5).
 // Se llama CON internet al elegir la sesión (antes de que Vale active el modo avión):
-// verifica en el servidor interruptor + consentimiento v3 (pareja: ambos) + mayoría de
+// verifica en el servidor interruptor + consentimiento con grabación autorizada, v2 o v3 (pareja: ambos) + mayoría de
 // edad y deja la grabación en estado 'creada' con su modelo (regla fija reglas.ts).
 // Sin esta respuesta el botón Grabar no se habilita, y subida-url/finalizar vuelven a
 // verificar todo antes de aceptar audio. Idempotente: si ya hay una 'creada' de la misma

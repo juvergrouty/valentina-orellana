@@ -14,7 +14,7 @@ export const TRANSICIONES: Readonly<Record<EstadoGrabacion, readonly EstadoGraba
   bot_no_admitido:    [],
   grabando:           ['pausada', 'subiendo', 'cancelada', 'error'],
   pausada:            ['grabando', 'subiendo', 'cancelada', 'error'],
-  subiendo:           ['subida', 'sin_audio', 'error'],
+  subiendo:           ['subida', 'sin_audio', 'cancelada', 'error'],  // cancelada: Vale descarta una subida que nunca llegará (añadido por P6)
   subida:             ['transcribiendo', 'error'],
   transcribiendo:     ['transcrita', 'error'],
   transcrita:         ['resumiendo', 'error'],
