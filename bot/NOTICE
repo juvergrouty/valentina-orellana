@@ -1,4 +1,4 @@
-Bot de notas de la Ps. Valentina Orellana ("Notas de Ps. Valentina Orellana")
+Bot de notas de la Ps. Valentina Orellana ("Notas Ps. Valentina Orellana")
 Copyright 2026 Valentina Orellana
 
 Este producto incluye software derivado de Vexa (https://github.com/Vexa-ai/vexa),
@@ -61,4 +61,6 @@ Archivos derivados y cambios realizados (Apache-2.0, sección 4(b)):
   esperados" y hora máxima.
 
 Todo lo demás (src/index.ts, src/config.ts, src/sitio.ts, src/linea.ts,
-src/segmentos.ts, Dockerfile, fly.toml) es código propio.
+src/segmentos.ts, src/sesion.ts, Dockerfile, fly.toml) es código propio, igual
+que el modo 'cuenta' agregado al final de src/meet/entrar.ts (entrarConCuenta)
+y de src/meet/selectores.ts (indicadoresConSesion, botonesUnirseConCuenta).

@@ -487,7 +487,7 @@ Guion sugerido (2 minutos, al inicio, antes de empezar a grabar):
 > "Antes de empezar, te cuento cómo funciona la grabación que aceptaste al reservar. Grabo la sesión solo para tener notas más completas y poder estar más presente contigo en vez de escribir. El audio se transforma en texto y se borra; el texto queda guardado cifrado y solo yo puedo verlo, desde mi sistema. Una inteligencia artificial me hace un resumen, pero las decisiones clínicas son mías. El procesamiento se hace en servidores de EE.UU. con empresas que firmaron compromisos de confidencialidad. Si en algún momento quieres que pause, me lo dices o me haces una seña y pauso, sin necesidad de explicar nada. ¿Tienes alguna pregunta?"
 
 - **Pareja:** decirlo a ambos y mirar a ambos; preguntar a cada uno por separado "¿estás de acuerdo?" (ambos firmaron, pero el asentimiento verbal de cada uno importa). Aclarar que ninguno de los dos tiene acceso a la grabación ni al resumen.
-- **Online:** avisar que entrará "Notas de Ps. Valentina Orellana" y que ella lo admite; el/la paciente lo verá en la lista de participantes.
+- **Online:** avisar que entrará "Notas Ps. Valentina Orellana" y que ella lo admite; el/la paciente lo verá en la lista de participantes.
 - Revisar el tema a los 2–3 meses o si nota incomodidad: "¿Cómo te has sentido con la grabación?"
 - **Retiro del consentimiento:** el/la paciente puede retirarlo (Ley 21.719). El sistema necesita una forma simple de marcar "no grabar más" en la ficha; qué pasa después con la atención es una decisión de Vale (y del abogado), pero el retiro tiene que estar disponible.
 

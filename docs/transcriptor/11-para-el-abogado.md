@@ -10,7 +10,7 @@ Este documento resume el sistema y lo que necesito validar. No es asesoría lega
 **Qué hace.** Graba solo el **audio** de la sesión (nunca video), lo pasa a texto, y una IA prepara un resumen breve (temas, tareas acordadas, qué retomar). Yo puedo hacerle preguntas a la IA sobre sesiones anteriores. Todo se ve solo dentro del panel privado de mi sitio web, con mi clave y una llave de acceso biométrica (Face ID o huella).
 
 **Cómo funciona una sesión.**
-1. **Presencial**: grabo con mi iPhone desde el sitio web. **Online (Google Meet)**: entra un asistente llamado “Notas de Ps. Valentina Orellana”, que yo admito y que se va al terminar.
+1. **Presencial**: grabo con mi iPhone desde el sitio web. **Online (Google Meet)**: entra un asistente llamado “Notas Ps. Valentina Orellana”, que yo admito y que se va al terminar.
 2. El audio va a **AssemblyAI** (EE.UU.), que lo transcribe. El audio **se borra** apenas está la transcripción, en mi sistema y en AssemblyAI (que además lo borra solo en 1 día como máximo).
 3. La transcripción va a **Anthropic** (EE.UU., la IA Claude), que hace el resumen. Anthropic guarda lo procesado hasta 30 días y no permite borrarlo antes. Si su sistema de seguridad marca algo como posible infracción, puede guardarlo hasta 2 años.
 4. La transcripción y el resumen se guardan **cifrados** en dos almacenamientos en el extranjero (Cloudflare y Backblaze). Los proveedores no tienen la clave.

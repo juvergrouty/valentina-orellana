@@ -127,6 +127,25 @@ export const matchersSalir: MatcherBoton[] = [
   { css: '[role="dialog"] button', text: 'Leave' },
 ];
 
+// ─── Modo 'cuenta' (código propio, no viene de Vexa; docs/transcriptor/85-robot-meet.md) ──────
+
+/** Antesala con sesión iniciada: Meet muestra la cuenta y "Switch account" (el invitado anónimo no). */
+export const indicadoresConSesion: string[] = [
+  'text=Switch account',
+  '[aria-label*="Switch account"]',
+];
+
+/**
+ * Entrar con cuenta: "Join now" si la cuenta está invitada en el calendario (acceso "Trusted",
+ * entra sin pedir permiso); "Ask to join" si no (Vale lo admite, como al invitado).
+ */
+export const botonesUnirseConCuenta: string[] = [
+  '//button[.//span[text()="Join now"]]',
+  'button:has-text("Join now")',
+  '//button[.//span[text()="Ask to join"]]',
+  'button:has-text("Ask to join")',
+];
+
 /** Clases "hablando" conocidas del tile (ofuscadas: pueden rotar con Meet). */
 export const clasesHablando: string[] = [
   'Oaajhc', 'HX2H7', 'wEsLMd', 'OgVli',

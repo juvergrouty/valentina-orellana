@@ -4,6 +4,7 @@
 import type { LineaHablante } from './linea.js';
 import type { MotivoFin } from './vigia.js';
 import { sanearError } from './saneo.js';
+import { estadoSesionValido, type EstadoSesion } from './sesion.js';
 
 export type EventoBot =
   | { tipo: 'lobby' }
@@ -11,7 +12,11 @@ export type EventoBot =
   | { tipo: 'pide_url'; seq: number }
   | { tipo: 'segmento_subido'; seq: number; bytes: number; offset_ms: number; duracion_ms: number }
   | { tipo: 'fin'; motivo: MotivoFin; linea_hablantes: LineaHablante[] }
-  | { tipo: 'error'; detalle: string };
+  | { tipo: 'error'; detalle: string }
+  // Modo 'cuenta' (EventoBotCuenta de src/lib/transcriptor/bot.ts).
+  | { tipo: 'pide_sesion' }
+  | { tipo: 'sesion_actualizada'; sesion: EstadoSesion }
+  | { tipo: 'sesion_invalida'; motivo: string };
 
 /** El sitio respondió 404/401: el token no sirve (vencido, revocado o falso). No reintentar. */
 export class TokenRechazadoError extends Error {
@@ -71,6 +76,16 @@ export class Sitio {
       await dormir(this.espera * 2 ** i);
     }
     throw new Error(`No se pudo enviar el evento ${evento.tipo}: ${ultimo}`);
+  }
+
+  /**
+   * Pide la sesión de Google del robot (modo 'cuenta'). null si el sitio no tiene una vigente, está
+   * en uso o no es de la cuenta esperada: el bot entra como invitado.
+   */
+  async pedirSesion(cuentaEsperada: string): Promise<EstadoSesion | null> {
+    const r = await this.enviar({ tipo: 'pide_sesion' });
+    if (typeof r.correo !== 'string' || r.correo.toLowerCase() !== cuentaEsperada.toLowerCase()) return null;
+    return estadoSesionValido(r.sesion) ? r.sesion : null;
   }
 
   /** Pide la URL PUT prefirmada para el segmento `seq`. */

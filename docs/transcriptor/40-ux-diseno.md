@@ -96,7 +96,7 @@ Orden de búsqueda automático al abrir `/admin/grabar` (sin `?sesion=`):
 ## 3. Flujo online (bot en Meet, Mac Chrome)
 
 1. **Nada que hacer antes.** Toda sesión online con consentimiento de grabación firmado queda con el bot programado. En el Inicio, la tarjeta de la próxima sesión online dice **"Asistente de notas: entrará a las 16:00"**.
-2. Vale entra por **Sala online** como siempre. A la hora, en Meet aparece *"Notas de Ps. Valentina Orellana quiere unirse"* → ella toca **Admitir** (único paso).
+2. Vale entra por **Sala online** como siempre. A la hora, en Meet aparece *"Notas Ps. Valentina Orellana quiere unirse"* → ella toca **Admitir** (único paso).
 3. Estado en el panel (Inicio y Sala online, se actualiza solo cada 15 s):
    - **"Esperando que lo admitas en Meet"** (ámbar)
    - **"● Grabando · 00:12:05"** (verde)

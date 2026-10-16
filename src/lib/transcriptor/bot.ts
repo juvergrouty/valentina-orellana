@@ -11,12 +11,18 @@
 //    + 2 h. Se revoca (vence ya) al recibir `fin`.
 //  - procesarEventoBot: lógica de /api/transcriptor/bot-evento. El bot solo puede avanzar SU
 //    grabación y pedir URLs PUT de SU audio; ninguna respuesta trae datos de pacientes.
+//  - Modo 'cuenta' (decisión G, docs/transcriptor/85-robot-meet.md): el robot entra con su propia
+//    cuenta de Google, invitada al evento por el sitio; la sesión cifrada la entrega `pide_sesion`
+//    (botCuenta.ts). Por defecto 'invitado' (anónimo, Vale lo admite), como siempre.
 //
 // Las funciones puras van arriba y tienen pruebas en bot.test.ts (sin red ni base).
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { tipoDesdeSessionType } from './reglas';
 import { secreto } from '../secretos';
+import {
+  cuentaRobotVigente, guardarSesionRenovada, leerModoBot, liberarSesion, marcarSesionVencida, tomarSesion, type ModoBot,
+} from './botCuenta';
 import {
   BOT_NOMBRE, PREFIJO_AUDIO, RUTAS, TIEMPOS,
   type Almacenamiento, type Bot, type EventoBot, type Grabacion, type LineaHablante, type SesionOnline, type TipoSesion,
@@ -107,7 +113,20 @@ export function tokenVigente(venceAt: string | null, ahora: Date = new Date()): 
 
 // ─── Eventos del bot (puro) ──────────────────────────────────────────────────
 
-export type ResultadoParseo = { ok: true; evento: EventoBot } | { ok: false; error: string };
+/**
+ * Eventos del bot = EventoBot de tipos.ts + los del modo 'cuenta' (P-bot, decisión G). Se definen
+ * aquí para no tocar el contrato de tipos.ts; el bot (bot/src/sitio.ts) usa los mismos.
+ *  - pide_sesion: el bot pide la sesión de Google del robot (solo en bot_lanzando, uno a la vez).
+ *  - sesion_actualizada: al salir, devuelve la sesión renovada (Google rota cookies).
+ *  - sesion_invalida: la sesión no sirvió; el bot entró como invitado y la sesión queda vencida.
+ */
+export type EventoBotCuenta =
+  | { tipo: 'pide_sesion' }
+  | { tipo: 'sesion_actualizada'; sesion: unknown }
+  | { tipo: 'sesion_invalida'; motivo: string };
+export type EventoBotSitio = EventoBot | EventoBotCuenta;
+
+export type ResultadoParseo = { ok: true; evento: EventoBotSitio } | { ok: false; error: string };
 
 const MOTIVOS = new Set(['vale_salio', 'solo', 'hora_fin', 'no_admitido', 'expulsado', 'participantes_extra', 'error']);
 const esEntero = (x: unknown, min: number, max: number): x is number =>
@@ -152,6 +171,13 @@ export function parsearEventoBot(cuerpo: unknown): ResultadoParseo {
     case 'error':
       if (typeof c.detalle !== 'string') return { ok: false, error: 'detalle inválido' };
       return { ok: true, evento: { tipo: 'error', detalle: sanearErrorBot(c.detalle) } };
+    case 'pide_sesion':
+      return { ok: true, evento: { tipo: 'pide_sesion' } };
+    case 'sesion_actualizada':
+      if (!c.sesion || typeof c.sesion !== 'object') return { ok: false, error: 'sesion inválida' };
+      return { ok: true, evento: { tipo: 'sesion_actualizada', sesion: c.sesion } };
+    case 'sesion_invalida':
+      return { ok: true, evento: { tipo: 'sesion_invalida', motivo: sanearErrorBot(typeof c.motivo === 'string' ? c.motivo : '', 200) } };
     default:
       return { ok: false, error: 'tipo desconocido' };
   }
@@ -161,9 +187,10 @@ export function parsearEventoBot(cuerpo: unknown): ResultadoParseo {
  * evento_id para transcriptor_webhooks (idempotencia): '<grabacion_id>:<tipo>:<seq>'.
  * pide_url no se deduplica (es idempotente por sí mismo y el bot lo repite al reintentar).
  */
-export function idEventoBot(grabacionId: string, e: EventoBot): string | null {
+export function idEventoBot(grabacionId: string, e: EventoBotSitio): string | null {
   switch (e.tipo) {
     case 'pide_url': return null;
+    case 'pide_sesion': return null; // el candado de la sesión ya lo hace idempotente
     case 'segmento_subido': return `${grabacionId}:segmento_subido:${e.seq}`;
     case 'error': return `${grabacionId}:error:${createHash('sha256').update(e.detalle).digest('hex').slice(0, 12)}`;
     default: return `${grabacionId}:${e.tipo}:`;
@@ -171,8 +198,11 @@ export function idEventoBot(grabacionId: string, e: EventoBot): string | null {
 }
 
 /** Payload que se guarda del evento: sin nombres ni línea de hablantes (sin contenido clínico). */
-export function payloadSeguro(e: EventoBot): Record<string, unknown> {
+export function payloadSeguro(e: EventoBotSitio): Record<string, unknown> {
   switch (e.tipo) {
+    // Nunca se guardan las cookies del robot en la bitácora de eventos.
+    case 'sesion_actualizada': return { tipo: e.tipo };
+    case 'sesion_invalida': return { tipo: e.tipo, motivo: e.motivo };
     case 'fin': return { tipo: e.tipo, motivo: e.motivo, entradas_linea: e.linea_hablantes.length };
     case 'segmento_subido': return { tipo: e.tipo, seq: e.seq, bytes: e.bytes, offset_ms: e.offset_ms, duracion_ms: e.duracion_ms };
     case 'pide_url': return { tipo: e.tipo, seq: e.seq };
@@ -261,6 +291,10 @@ export interface ParamsMaquina {
   eventoUrl: string;
   nombresVale: string;
   sufijo?: string;
+  /** 'cuenta': el bot pide la sesión del robot (pide_sesion) y entra con ella. Default 'invitado'. */
+  modo?: ModoBot;
+  /** Correo de la cuenta del robot (el bot comprueba que la sesión sea de esa cuenta). */
+  cuentaEmail?: string | null;
 }
 
 /** Cuerpo de POST /v1/apps/{app}/machines (docs.fly.io/machines/api/machines-resource). */
@@ -291,6 +325,8 @@ export function cuerpoMaquina(p: ParamsMaquina): Record<string, unknown> {
         SOLAPAMIENTO_MS: String(TIEMPOS.solapamientoBotMs),
         MAX_HUMANOS: String(maxHumanosPorTipo(p.grabacion.tipo)),
         VALE_NOMBRES: p.nombresVale,
+        BOT_MODO: p.modo === 'cuenta' && p.cuentaEmail ? 'cuenta' : 'invitado',
+        ...(p.modo === 'cuenta' && p.cuentaEmail ? { BOT_CUENTA_EMAIL: p.cuentaEmail } : {}),
       },
       guest: { cpu_kind: 'shared', cpus: 2, memory_mb: 2048 },
       // "If true, the Machine destroys itself once it's complete." (Machines API)
@@ -313,6 +349,8 @@ export interface DepsBot {
   env?: Partial<Record<'FLY_API_TOKEN' | 'FLY_APP_BOT' | 'FLY_IMAGEN' | 'BOT_TOKEN_SECRET' | 'PUBLIC_SITE_URL', string | undefined>>;
   /** Para pruebas: token de Google y calendario. */
   calendario?: () => Promise<{ token: string; calendarId: string } | null>;
+  /** Para pruebas: agrega el robot como invitado del evento (por defecto googleCalendar.agregarInvitadoSinAviso). */
+  invitar?: (token: string, calendarId: string, eventId: string, correo: string) => Promise<string>;
 }
 
 // Llaves (FLY_API_TOKEN, BOT_TOKEN_SECRET) SOLO en runtime vía secretos.ts. Nunca leer
@@ -427,6 +465,39 @@ export function crearBot(deps: DepsBot = {}): Bot {
     return [...salida.values()];
   }
 
+  /**
+   * Modo del robot para esta grabación. En 'cuenta' agrega el correo del robot como invitado del
+   * evento (sin avisar a nadie) para que Meet lo deje entrar sin pedir permiso. Si algo falla, el
+   * bot igual entra con su cuenta (pedirá unirse y Vale lo admite) o, sin sesión, como invitado.
+   * Nunca impide lanzar el bot.
+   */
+  async function prepararCuenta(grabacion: Grabacion, c: Cliente): Promise<{ modo: ModoBot; cuentaEmail: string | null }> {
+    const { auditar } = await import('./auditoria');
+    const aviso = (detalle: Record<string, unknown>) => auditar('cron', 'alerta', { grabacionId: grabacion.id, patientId: grabacion.patient_id, resultado: 'error', detalle, cliente: c });
+    try {
+      if ((await leerModoBot(c)) !== 'cuenta') return { modo: 'invitado', cuentaEmail: null };
+      const correo = await cuentaRobotVigente(c);
+      if (!correo) {
+        await aviso({ aviso: 'robot_sin_sesion', texto: 'El robot de Meet no tiene una sesión de Google vigente: entra como invitado (Vale lo admite).' });
+        return { modo: 'invitado', cuentaEmail: null };
+      }
+      if (grabacion.google_event_id) {
+        try {
+          const auth = deps.calendario ? await deps.calendario() : await (await import('../syncCalendar')).getValidAccessToken();
+          if (!auth) throw new Error('Google Calendar no está conectado');
+          const invitar = deps.invitar ?? (await import('../googleCalendar')).agregarInvitadoSinAviso;
+          const r = await invitar(auth.token, auth.calendarId, grabacion.google_event_id, correo);
+          if (r !== 'agregado' && r !== 'ya_estaba') await aviso({ aviso: 'robot_no_invitado', resultado: r });
+        } catch (e) {
+          await aviso({ aviso: 'robot_no_invitado', error: sanearErrorBot(e instanceof Error ? e.message : e, 160) });
+        }
+      }
+      return { modo: 'cuenta', cuentaEmail: correo };
+    } catch {
+      return { modo: 'invitado', cuentaEmail: null };
+    }
+  }
+
   async function lanzarBot(grabacion: Grabacion): Promise<{ machineId: string }> {
     const env = envBot(deps);
     if (!env.FLY_API_TOKEN) throw new Error('Falta FLY_API_TOKEN');
@@ -439,10 +510,13 @@ export function crearBot(deps: DepsBot = {}): Bot {
     const { data: ajuste } = await c.from('settings').select('value').eq('key', AJUSTE_NOMBRES_VALE).maybeSingle();
     const nombresVale = (ajuste?.value as string | undefined)?.trim() || NOMBRES_VALE_DEFECTO;
 
+    // 0) Modo 'cuenta': solo si hay una sesión vigente del robot; si no, invitado (y queda en la bitácora).
+    const { modo, cuentaEmail } = await prepararCuenta(grabacion, c);
+
     // 1) Token nuevo: se guarda SOLO su HMAC, y únicamente si la grabación sigue en bot_lanzando.
     const token = generarTokenBot();
     const cuerpo = cuerpoMaquina({
-      grabacion, token, imagen: env.FLY_IMAGEN, nombresVale,
+      grabacion, token, imagen: env.FLY_IMAGEN, nombresVale, modo, cuentaEmail,
       eventoUrl: new URL(RUTAS.botEvento, env.PUBLIC_SITE_URL).toString(),
     });
     const { data: fila, error } = await c.from('grabaciones')
@@ -520,7 +594,7 @@ export interface RespuestaEvento { status: number; cuerpo: Record<string, unknow
 const NO_ENCONTRADO: RespuestaEvento = { status: 404, cuerpo: { error: 'No encontrado' } };
 const ok = (extra: Record<string, unknown> = {}): RespuestaEvento => ({ status: 200, cuerpo: { ok: true, ...extra } });
 
-type FilaBot = Pick<Grabacion, 'id' | 'patient_id' | 'estado' | 'inicio_at' | 'bot_token_vence_at' | 'bot_machine_id'>;
+type FilaBot = Pick<Grabacion, 'id' | 'patient_id' | 'estado' | 'inicio_at' | 'bot_token_vence_at' | 'bot_machine_id' | 'hora_fin_prevista'>;
 
 /**
  * Lógica completa de POST /api/transcriptor/bot-evento. Nunca devuelve datos de pacientes:
@@ -549,7 +623,7 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
 
   const hmac = hmacTokenBot(token, secretoBot);
   const { data: g, error: eG } = await c.from('grabaciones')
-    .select('id, patient_id, estado, inicio_at, bot_token_vence_at, bot_machine_id')
+    .select('id, patient_id, estado, inicio_at, bot_token_vence_at, bot_machine_id, hora_fin_prevista')
     .eq('bot_token_sha256', hmac).maybeSingle();
   if (eG) return { status: 503, cuerpo: { error: 'Intenta de nuevo' } };
   if (!g || !tokenVigente((g as FilaBot).bot_token_vence_at, ahora)) {
@@ -643,6 +717,7 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
       return ok();
     }
     case 'fin': {
+      await liberarSesion(c, grab.id).catch(() => {}); // por si el bot no alcanzó a devolverla
       const finAt = ahora.toISOString();
       const revocar = { bot_token_vence_at: finAt };
       if (grab.estado === 'bot_lanzando' || grab.estado === 'bot_en_lobby') {
@@ -683,6 +758,27 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
     case 'error': {
       await auditar('bot', 'alerta', { ...auditoria, resultado: 'error', detalle: { aviso: ev.detalle } });
       await c.from('grabaciones').update({ ultimo_error: `Bot: ${ev.detalle}` }).eq('id', grab.id);
+      await marcar();
+      return ok();
+    }
+    // ── Modo 'cuenta' (botCuenta.ts). La sesión es del ROBOT (sin datos de pacientes). ──
+    case 'pide_sesion': {
+      if (grab.estado !== 'bot_lanzando') return { status: 409, cuerpo: { error: 'La sesión solo se entrega antes de entrar' } };
+      const r = await tomarSesion(c, grab.id, ahora, secretoBot, grab.hora_fin_prevista);
+      if (!r.ok) {
+        await auditar('bot', 'alerta', { ...auditoria, resultado: 'error', detalle: { aviso: 'robot_sin_sesion', motivo: r.motivo } });
+        return ok({ sesion: null, motivo: r.motivo });
+      }
+      return ok({ correo: r.correo, sesion: r.estado });
+    }
+    case 'sesion_actualizada': {
+      const guardada = await guardarSesionRenovada(c, grab.id, ev.sesion, ahora, secretoBot);
+      await marcar();
+      return ok({ guardada });
+    }
+    case 'sesion_invalida': {
+      await marcarSesionVencida(c, grab.id, ev.motivo || 'Google pidió iniciar sesión de nuevo');
+      await auditar('bot', 'alerta', { ...auditoria, resultado: 'error', detalle: { aviso: 'robot_sesion_vencida', motivo: ev.motivo } });
       await marcar();
       return ok();
     }

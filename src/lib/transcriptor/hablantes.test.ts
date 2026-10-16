@@ -71,7 +71,7 @@ test('online: línea de hablantes del bot asigna nombres; sin intervalo → no i
   const linea = validarLineaHablantes([
     { t_ms: 0, nombre: 'Valentina Orellana', on: true }, { t_ms: 2000, nombre: 'Valentina Orellana', on: false },
     { t_ms: 2300, nombre: 'Paciente X', on: true }, { t_ms: 5000, nombre: 'Paciente X', on: false },
-    { t_ms: 100, nombre: 'Notas de Ps. Valentina Orellana', on: true }, // el bot se ignora
+    { t_ms: 100, nombre: 'Notas Ps. Valentina Orellana', on: true }, // el bot se ignora
   ]);
   const g: G = { origen: 'online', tipo: 'individual', linea_hablantes: linea, pausas: [], mapa_hablantes: { 'Paciente X': 'P.' } };
   const r = res('t', [

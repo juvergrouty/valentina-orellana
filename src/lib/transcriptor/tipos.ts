@@ -8,7 +8,7 @@
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 /** Nombre visible del bot en Google Meet (Vale lo admite a mano). */
-export const BOT_NOMBRE = 'Notas de Ps. Valentina Orellana';
+export const BOT_NOMBRE = 'Notas Ps. Valentina Orellana'; // nombre cambiado por P-bot (decisión G, 16 oct noche)
 
 /** Rótulo fijo del resumen IA: interfaz, exportaciones y PDF (10-etica-legal §4.6). */
 export const ROTULO_RESUMEN = 'Resumen automático (IA) — no revisado';

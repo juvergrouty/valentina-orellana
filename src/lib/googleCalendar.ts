@@ -277,6 +277,32 @@ export async function agregarMeetAEvento(accessToken: string, calendarId: string
   return data.hangoutLink ?? data.conferenceData?.entryPoints?.find((e: any) => e.entryPointType === 'video')?.uri ?? null;
 }
 
+/** Transcriptor (robot de Meet con cuenta propia, docs/transcriptor/85-robot-meet.md): agrega un
+ *  invitado al evento SIN avisar a nadie (sendUpdates=none). events.patch reemplaza el arreglo
+ *  de invitados completo, por eso se lee la lista actual y se le suma el correo. Solo si Vale es
+ *  la organizadora (en un evento ajeno el cambio no llega a la reunión). No toca nada más. */
+export async function agregarInvitadoSinAviso(
+  accessToken: string, calendarId: string, eventId: string, email: string,
+): Promise<'agregado' | 'ya_estaba' | 'no_organizadora' | 'no_existe'> {
+  const base = `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
+  const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+  const getRes = await fetch(base, { headers, signal: AbortSignal.timeout(6000) });
+  if (getRes.status === 404 || getRes.status === 410) return 'no_existe';
+  if (!getRes.ok) throw new Error(`Google Calendar get event failed (${getRes.status})`);
+  const ev = await getRes.json();
+  if (ev.status === 'cancelled') return 'no_existe';
+  if (ev.organizer && ev.organizer.self !== true) return 'no_organizadora';
+  const correo = email.trim().toLowerCase();
+  const actuales: any[] = ev.attendees ?? [];
+  if (actuales.some((a) => String(a.email ?? '').toLowerCase() === correo)) return 'ya_estaba';
+  const res = await fetch(`${base}?sendUpdates=none`, {
+    method: 'PATCH', headers, body: JSON.stringify({ attendees: [...actuales, { email: correo }] }),
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!res.ok) throw new Error(`Google Calendar no pudo agregar el invitado (${res.status})`);
+  return 'agregado';
+}
+
 /** Deuda anulada (no se cobrará): sin "Por pagar" y en gris (Grafito), ni
  *  rojo de deuda ni verde de pagado. No avisa a los invitados (8 oct 2026). */
 export const VOIDED_COLOR_ID = '8';

@@ -32,10 +32,13 @@ export interface Pagina {
 
 export interface Contexto {
   newPage(): Promise<Pagina>;
+  /** storageState de Playwright (cookies + localStorage). Modo 'cuenta': se devuelve al sitio. */
+  storageState(): Promise<unknown>;
   close(): Promise<void>;
 }
 
 export interface Navegador {
+  /** `storageState` (objeto) restaura la sesión de Google del robot (modo 'cuenta'). */
   newContext(o: Record<string, unknown>): Promise<Contexto>;
   close(): Promise<void>;
 }

@@ -1,7 +1,8 @@
 // Pruebas unitarias del bot (sin navegador ni red). Correr: cd bot && npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esNombreDeBot, esVale, leerConfig, normalizarNombre } from './config.js';
+import { esNombreDeBot, esVale, leerConfig, normalizarNombre, NOMBRE_ROBOT } from './config.js';
+import { estadoSesionValido, muestraCorreo, soloGoogle } from './sesion.js';
 import { LineaHablantes } from './linea.js';
 import { Vigia } from './vigia.js';
 import { Segmentos } from './segmentos.js';
@@ -21,7 +22,7 @@ const ENV_OK = {
 
 test('leerConfig acepta la configuración mínima y aplica valores por defecto', () => {
   const c = leerConfig(ENV_OK);
-  assert.equal(c.botNombre, 'Notas de Ps. Valentina Orellana');
+  assert.equal(c.botNombre, 'Notas Ps. Valentina Orellana');
   assert.equal(c.esperaAdmisionMs, 20 * 60_000);
   assert.equal(c.soloMs, 60_000);
   assert.equal(c.maxExtraMs, 30 * 60_000);
@@ -43,14 +44,14 @@ test('leerConfig rechaza enlaces que no son de Meet, http y tokens raros', () =>
 
 test('nombres: normaliza tildes y reconoce bots y a Vale', () => {
   assert.equal(normalizarNombre('  Valentína   ORELLANA '), 'valentina orellana');
-  assert.ok(esNombreDeBot('Notas de Ps. Valentina Orellana', 'Notas de Ps. Valentina Orellana'));
+  assert.ok(esNombreDeBot('Notas Ps. Valentina Orellana', 'Notas Ps. Valentina Orellana'));
   assert.ok(esNombreDeBot('Otter.ai Notetaker', 'x'));
-  assert.ok(!esNombreDeBot('Camila Rojas', 'Notas de Ps. Valentina Orellana'));
+  assert.ok(!esNombreDeBot('Camila Rojas', 'Notas Ps. Valentina Orellana'));
   assert.ok(esVale('Valentina Orellana', ['Valentina Orellana']));
   assert.ok(!esVale('Valentina Pérez', ['Valentina Orellana']));
 });
 
-const VIGIA = { botNombre: 'Notas de Ps. Valentina Orellana', valeNombres: ['Valentina Orellana'], soloMs: 60_000, maxHumanos: 2, limiteMs: 10_000_000 };
+const VIGIA = { botNombre: 'Notas Ps. Valentina Orellana', valeNombres: ['Valentina Orellana'], soloMs: 60_000, maxHumanos: 2, limiteMs: 10_000_000 };
 
 test('vigía: sale cuando Vale se va (tras la gracia) y no antes', () => {
   const v = new Vigia(VIGIA);
@@ -92,10 +93,10 @@ test('vigía: pasada la hora límite sale con hora_fin', () => {
 });
 
 test('línea de hablantes: ignora bots y repetidos, ordena y cierra al final', () => {
-  const l = new LineaHablantes('Notas de Ps. Valentina Orellana');
+  const l = new LineaHablantes('Notas Ps. Valentina Orellana');
   l.registrar(100, 'Valentina Orellana', true);
   l.registrar(150, 'Valentina Orellana', true); // repetido
-  l.registrar(200, 'Notas de Ps. Valentina Orellana', true); // el propio bot
+  l.registrar(200, 'Notas Ps. Valentina Orellana', true); // el propio bot
   l.registrar(900, 'Camila', true);
   l.registrar(800, 'Valentina Orellana', false); // llega desordenado → se pega a 900
   l.registrar(-5, 'Camila', false); // t inválido
@@ -188,4 +189,52 @@ test('sanearError quita el enlace y el código de Meet (B8)', () => {
   assert.ok(!/[\n\r]/.test(m));
   assert.ok(m.includes('[url]'));
   assert.equal(sanearError('x'.repeat(500)).length, 300);
+});
+
+// ─── Modo 'cuenta' (robot con cuenta de Google propia) ────────────────────────
+
+const CORREO = 'notas.valentinaorellana@gmail.com';
+const SESION = {
+  cookies: [
+    { name: 'SID', value: 'v', domain: '.google.com', path: '/', expires: -1, httpOnly: true, secure: true, sameSite: 'Lax' as const },
+    { name: 'otra', value: 'v', domain: '.evil.com', path: '/', expires: -1, httpOnly: false, secure: true, sameSite: 'Lax' as const },
+  ],
+  origins: [{ origin: 'https://meet.google.com', localStorage: [] }, { origin: 'https://evil.com', localStorage: [] }],
+};
+
+test('config: modo invitado por defecto; cuenta exige correo válido', () => {
+  const c = leerConfig(ENV_OK);
+  assert.equal(c.modo, 'invitado');
+  assert.equal(c.cuentaEmail, null);
+  const k = leerConfig({ ...ENV_OK, BOT_MODO: 'cuenta', BOT_CUENTA_EMAIL: ' Notas.ValentinaOrellana@gmail.com ' });
+  assert.equal(k.modo, 'cuenta');
+  assert.equal(k.cuentaEmail, CORREO);
+  assert.throws(() => leerConfig({ ...ENV_OK, BOT_MODO: 'cuenta' }), /BOT_CUENTA_EMAIL/);
+  assert.equal(leerConfig({ ...ENV_OK, BOT_CUENTA_EMAIL: CORREO }).cuentaEmail, null); // sin BOT_MODO=cuenta no se usa
+});
+
+test('sesión: valida, filtra a google.com y reconoce el correo en la antesala', () => {
+  assert.ok(estadoSesionValido(SESION));
+  assert.ok(!estadoSesionValido({ cookies: [SESION.cookies[1]], origins: [] }));
+  assert.ok(!estadoSesionValido(null));
+  const g = soloGoogle(SESION);
+  assert.deepEqual(g.cookies.map((c) => c.name), ['SID']);
+  assert.deepEqual(g.origins.map((o) => o.origin), ['https://meet.google.com']);
+  assert.ok(muestraCorreo(`Ready to join?\n${CORREO.toUpperCase()}\nSwitch account`, CORREO));
+  assert.ok(!muestraCorreo('Your name', CORREO));
+});
+
+test('sitio: pedirSesion solo acepta la sesión de la cuenta esperada', async () => {
+  const respuesta = (cuerpo: unknown) => (async () => new Response(JSON.stringify(cuerpo), { status: 200 })) as unknown as typeof fetch;
+  const pedir = (cuerpo: unknown) => new Sitio({ eventoUrl: 'https://x.cl/e', token: 'T'.repeat(43), fetch: respuesta(cuerpo), esperaBaseMs: 1 }).pedirSesion(CORREO);
+  assert.deepEqual(await pedir({ ok: true, correo: CORREO, sesion: SESION }), SESION);
+  assert.equal(await pedir({ ok: true, correo: 'otra@gmail.com', sesion: SESION }), null);
+  assert.equal(await pedir({ ok: true, sesion: null, motivo: 'sin_sesion' }), null);
+  assert.equal(await pedir({ ok: true, correo: CORREO, sesion: { cookies: [], origins: [] } }), null);
+});
+
+test('nombre del robot: "Notas Ps. Valentina Orellana" y no cuenta como humano', () => {
+  assert.equal(NOMBRE_ROBOT, 'Notas Ps. Valentina Orellana');
+  assert.ok(esNombreDeBot('Notas Ps. Valentina Orellana', 'otro nombre'));
+  assert.ok(!esVale('Notas Ps. Valentina Orellana', ['Valentina Orellana']));
 });

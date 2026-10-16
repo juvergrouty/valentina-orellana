@@ -129,7 +129,7 @@ sequenceDiagram
   C->>DB: INSERT grabación (unique google_event_id) estado=bot_lanzando (solo el que inserta lanza)
   C->>F: POST /v1/apps/{app}/machines {region iad, auto_destroy, restart no, env}
   F-->>C: machine_id → DB
-  B->>M: abre meet_url, nombre "Notas de Ps. Valentina Orellana", "Pedir unirse"
+  B->>M: abre meet_url, nombre "Notas Ps. Valentina Orellana", "Pedir unirse"
   B->>C: POST bot-evento {lobby}
   M-->>B: Vale admite
   B->>C: POST bot-evento {activo}
@@ -433,7 +433,7 @@ Convención: todo el código nuevo de servidor en `src/lib/transcriptor/` (carpe
 | Archivo | Responsabilidad |
 |---|---|
 | `supabase/migrations/0014_transcriptor.sql` | §2. |
-| `src/lib/transcriptor/tipos.ts` | Tipos compartidos (`Grabacion`, `Segmento`, `Estado`, `ResultadoTranscripcion`, `LineaHablante`), **firmas** de las funciones que cada paquete implementa (contrato), constantes (`BOT_NOMBRE = 'Notas de Ps. Valentina Orellana'`, prefijos de llaves R2). |
+| `src/lib/transcriptor/tipos.ts` | Tipos compartidos (`Grabacion`, `Segmento`, `Estado`, `ResultadoTranscripcion`, `LineaHablante`), **firmas** de las funciones que cada paquete implementa (contrato), constantes (`BOT_NOMBRE = 'Notas Ps. Valentina Orellana'`, prefijos de llaves R2). |
 | `src/lib/transcriptor/reglas.ts` | Regla FIJA de modelo: `elegirModelo({tipo, origen, lugarConRuido})` → pareja ⇒ `universal-3-5-pro` + `speaker_labels` (solo presencial; online sin diarización); individual/sin tipo ⇒ `universal-2`; ruido ⇒ `universal-3-5-pro`. `tipoDesdeSessionType('pareja-online') → 'pareja'`. Sin IA. Con pruebas de tabla. |
 | `src/lib/transcriptor/estados.ts` | `transicionar(id, de[], a, cambios)` = `update … where id=? and estado in (de) returning *` (0 filas ⇒ otro proceso ya lo hizo); `tomar(id)` con lease 10 min (`tomada_en`). |
 | `src/lib/transcriptor/auditoria.ts` | `auditar(actor, accion, {grabacion_id, patient_id, request, detalle})`. |
@@ -579,7 +579,7 @@ Authorization: Bearer <FLY_API_TOKEN>
     "image": "registry.fly.io/<FLY_APP>:<tag>",
     "env": {
       "GRABACION_ID": "<uuid>", "MEET_URL": "https://meet.google.com/xxx-xxxx-xxx",
-      "BOT_NOMBRE": "Notas de Ps. Valentina Orellana",
+      "BOT_NOMBRE": "Notas Ps. Valentina Orellana",
       "EVENTO_URL": "https://www.valentinaorellana.cl/api/transcriptor/bot-evento",
       "BOT_TOKEN": "<HMAC un solo uso>", "HORA_FIN": "<ISO inicio+duración>",
       "ESPERA_ADMISION_MS": "1200000", "SOLO_MS": "60000", "MAX_EXTRA_MS": "1800000"

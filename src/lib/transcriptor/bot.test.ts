@@ -10,6 +10,7 @@ import {
   type EventoCalendario,
 } from './bot';
 import { BOT_NOMBRE, type Grabacion } from './tipos';
+import { cifrarSesion, filtrarEstadoSesion, TABLA_SESION_BOT } from './botCuenta';
 
 const SECRETO = 's'.repeat(32);
 const GID = '3f2b8a1e-0c4d-4e5f-9a6b-7c8d9e0f1a2b';
@@ -164,7 +165,7 @@ test('máquina: región iad, auto_destroy, sin reinicio, imagen fija y env compl
   assert.equal(c.config.env.HORA_FIN, '2026-10-16T22:50:00.000Z');
   // El env solo lleva lo que el bot necesita: nada de llaves de proveedores.
   assert.deepEqual(Object.keys(c.config.env).sort(), [
-    'BOT_NOMBRE', 'BOT_TOKEN', 'ESPERA_ADMISION_MS', 'EVENTO_URL', 'GRABACION_ID', 'HORA_FIN', 'MAX_EXTRA_MS',
+    'BOT_MODO', 'BOT_NOMBRE', 'BOT_TOKEN', 'ESPERA_ADMISION_MS', 'EVENTO_URL', 'GRABACION_ID', 'HORA_FIN', 'MAX_EXTRA_MS',
     'MAX_HUMANOS', 'MEET_URL', 'SEGMENTO_MS', 'SOLAPAMIENTO_MS', 'SOLO_MS', 'VALE_NOMBRES',
   ]);
 });
@@ -429,4 +430,107 @@ test('sanearErrorBot: el error guardado no lleva el enlace ni el código de Meet
   assert.ok(!String(s.g().ultimo_error).includes('meet.google.com'));
   assert.ok(!String(s.g().ultimo_error).includes('xyz-abcd-efg'));
   assert.ok(!JSON.stringify(s.db.tablas.transcriptor_auditoria).includes('xyz-abcd-efg'));
+});
+
+// ─── Modo 'cuenta' (robot con cuenta de Google propia; botCuenta.ts) ─────────
+
+const CORREO_ROBOT = 'notas.valentinaorellana@gmail.com';
+const ESTADO_ROBOT = {
+  cookies: [{ name: 'SID', value: 'v-SID', domain: '.google.com', path: '/', expires: 2_000_000_000, httpOnly: true, secure: true, sameSite: 'Lax' }],
+  origins: [],
+};
+function sesionGuardada(db: BaseFalsa, extra: Record<string, unknown> = {}) {
+  db.tablas[TABLA_SESION_BOT] = [{
+    id: 1, cuenta_email: CORREO_ROBOT, estado: 'vigente', version: 1, en_uso_por: null, en_uso_hasta: null,
+    sesion_cifrada: cifrarSesion(filtrarEstadoSesion(ESTADO_ROBOT)!, CORREO_ROBOT, SECRETO), ...extra,
+  }];
+}
+
+test('nombre del robot: "Notas Ps. Valentina Orellana" (decisión G)', () => {
+  assert.equal(BOT_NOMBRE, 'Notas Ps. Valentina Orellana');
+});
+
+test('parser: eventos del modo cuenta; la bitácora nunca guarda la sesión', () => {
+  assert.deepEqual(parsearEventoBot({ tipo: 'pide_sesion' }), { ok: true, evento: { tipo: 'pide_sesion' } });
+  assert.equal(parsearEventoBot({ tipo: 'sesion_actualizada' }).ok, false);
+  const p = parsearEventoBot({ tipo: 'sesion_actualizada', sesion: ESTADO_ROBOT });
+  assert.ok(p.ok);
+  if (p.ok) assert.ok(!JSON.stringify(payloadSeguro(p.evento)).includes('v-SID'));
+  const inv = parsearEventoBot({ tipo: 'sesion_invalida', motivo: 'ver https://meet.google.com/abc-defg-hij' });
+  assert.ok(inv.ok && inv.evento.tipo === 'sesion_invalida' && !inv.evento.motivo.includes('meet.google.com'));
+  assert.equal(idEventoBot(GID, { tipo: 'pide_sesion' }), null);
+});
+
+test('máquina: modo cuenta solo con correo; por defecto invitado', () => {
+  const base = { grabacion: GRAB, token: 't', imagen: 'registry.fly.io/vo-bot-meet:v1', eventoUrl: 'https://x.cl/e', nombresVale: 'V' };
+  const env = (o: Record<string, unknown>) => (cuerpoMaquina({ ...base, ...o }) as { config: { env: Record<string, string> } }).config.env;
+  assert.equal(env({}).BOT_MODO, 'invitado');
+  assert.equal(env({}).BOT_CUENTA_EMAIL, undefined);
+  assert.equal(env({ modo: 'cuenta', cuentaEmail: null }).BOT_MODO, 'invitado');
+  assert.equal(env({ modo: 'cuenta', cuentaEmail: CORREO_ROBOT }).BOT_MODO, 'cuenta');
+  assert.equal(env({ modo: 'cuenta', cuentaEmail: CORREO_ROBOT }).BOT_CUENTA_EMAIL, CORREO_ROBOT);
+});
+
+test('endpoint: pide_sesion entrega la sesión solo antes de entrar; renovación y vencimiento', async () => {
+  const s = escenario();
+  sesionGuardada(s.db);
+  const r = await s.enviar({ tipo: 'pide_sesion' });
+  assert.equal(r.status, 200);
+  assert.equal(r.cuerpo.correo, CORREO_ROBOT);
+  assert.equal((r.cuerpo.sesion as { cookies: { name: string }[] }).cookies[0].name, 'SID');
+  assert.equal(s.db.tablas[TABLA_SESION_BOT][0].en_uso_por, GID);
+  await s.enviar({ tipo: 'lobby' });
+  assert.equal((await s.enviar({ tipo: 'pide_sesion' })).status, 409); // ya en la sala: no se vuelve a entregar
+  const g = await s.enviar({ tipo: 'sesion_actualizada', sesion: { ...ESTADO_ROBOT, cookies: [...ESTADO_ROBOT.cookies, { ...ESTADO_ROBOT.cookies[0], name: 'NID' }] } });
+  assert.deepEqual(g.cuerpo, { ok: true, guardada: true });
+  assert.equal(s.db.tablas[TABLA_SESION_BOT][0].en_uso_por, null);
+  assert.ok(!JSON.stringify(s.db.tablas.transcriptor_webhooks).includes('v-SID'));
+
+  const t = escenario();
+  sesionGuardada(t.db, { estado: 'vencida' });
+  assert.deepEqual((await t.enviar({ tipo: 'pide_sesion' })).cuerpo, { ok: true, sesion: null, motivo: 'sin_sesion' });
+
+  const u = escenario();
+  sesionGuardada(u.db);
+  await u.enviar({ tipo: 'pide_sesion' });
+  await u.enviar({ tipo: 'sesion_invalida', motivo: 'Meet pidió iniciar sesión de nuevo' });
+  assert.equal(u.db.tablas[TABLA_SESION_BOT][0].estado, 'vencida');
+  assert.ok(u.db.tablas.transcriptor_auditoria.some((f) => (f.detalle as Record<string, unknown> | null)?.aviso === 'robot_sesion_vencida'));
+
+  const v = escenario('grabando');
+  sesionGuardada(v.db, { en_uso_por: GID, en_uso_hasta: '2026-10-17T03:00:00.000Z' });
+  await v.enviar({ tipo: 'fin', motivo: 'vale_salio', linea_hablantes: [] });
+  assert.equal(v.db.tablas[TABLA_SESION_BOT][0].en_uso_por, null); // fin suelta el candado
+});
+
+test('lanzarBot: modo cuenta invita al robot al evento y lanza con BOT_MODO=cuenta; sin sesión → invitado', async () => {
+  const preparar = (conSesion: boolean) => {
+    const db = new BaseFalsa();
+    db.tablas.grabaciones.push({ id: GID, estado: 'bot_lanzando', patient_id: 'p1' });
+    db.tablas.settings.push({ key: 'transcriptor_bot_modo', value: 'cuenta' });
+    if (conSesion) sesionGuardada(db); else db.tablas[TABLA_SESION_BOT] = [];
+    const invitaciones: string[] = [];
+    let cuerpo: { config: { env: Record<string, string> } } | null = null;
+    const f = (async (_u: string, init: RequestInit) => { cuerpo = JSON.parse(String(init.body)); return new Response(JSON.stringify({ id: 'e2865013a1b2c3' }), { status: 200 }); }) as unknown as typeof fetch;
+    const bot = crearBot({
+      db: db as never, fetch: f,
+      env: { FLY_API_TOKEN: 't', FLY_APP_BOT: 'vo-bot-meet', FLY_IMAGEN: 'registry.fly.io/vo-bot-meet:v1', BOT_TOKEN_SECRET: SECRETO, PUBLIC_SITE_URL: 'https://www.valentinaorellana.cl' },
+      calendario: async () => ({ token: 'g', calendarId: 'primary' }),
+      invitar: async (_t, _c, ev, correo) => { invitaciones.push(`${ev}:${correo}`); return 'agregado'; },
+    });
+    const g = { ...GRAB, origen: 'online', patient_id: 'p1', estado: 'bot_lanzando', google_event_id: 'ev123' } as unknown as Grabacion;
+    return { db, bot, g, invitaciones, cuerpo: () => cuerpo! };
+  };
+  const a = preparar(true);
+  await a.bot.lanzarBot(a.g);
+  assert.deepEqual(a.invitaciones, [`ev123:${CORREO_ROBOT}`]);
+  assert.equal(a.cuerpo().config.env.BOT_MODO, 'cuenta');
+  assert.equal(a.cuerpo().config.env.BOT_CUENTA_EMAIL, CORREO_ROBOT);
+  assert.ok(!JSON.stringify(a.cuerpo()).includes('v-SID')); // la sesión NO viaja en la config de la máquina
+
+  const b = preparar(false);
+  await b.bot.lanzarBot(b.g);
+  assert.deepEqual(b.invitaciones, []);
+  assert.equal(b.cuerpo().config.env.BOT_MODO, 'invitado');
+  assert.ok(b.db.tablas.transcriptor_auditoria.some((f) => (f.detalle as Record<string, unknown> | null)?.aviso === 'robot_sin_sesion'));
 });
