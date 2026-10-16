@@ -60,6 +60,9 @@ const navSecondary = [
   { href: '/admin/vitrina',       label: 'Vitrina',        icon: 'store'   },
   // Abre el Meet de la sesión online en curso o por empezar (14 oct 2026).
   { href: '/admin/sala-online',   label: 'Sala online',    icon: 'video',      target: '_blank' },
+  // Transcriptor IA (P7, 16 oct 2026): grabador presencial y ajustes/instrucciones del resumen.
+  { href: '/admin/grabar',        label: 'Grabar sesión',  icon: 'mic'     },
+  { href: '/admin/transcriptor',  label: 'Transcriptor',   icon: 'wave'    },
 ];
 
 const navBottom = [
@@ -77,7 +80,7 @@ function isActive(href: string) {
   return path === href || path.startsWith(href + '/');
 }
 
-type IconName = 'home' | 'calendar' | 'briefcase' | 'users' | 'message' | 'dollar' | 'clipboard' | 'bar-chart' | 'store' | 'video' | 'clock' | 'settings' | 'file' | 'logout' | 'link' | 'help' | 'search' | 'chevron-left' | 'menu' | 'lock';
+type IconName = 'home' | 'calendar' | 'briefcase' | 'users' | 'message' | 'dollar' | 'clipboard' | 'bar-chart' | 'store' | 'video' | 'clock' | 'settings' | 'file' | 'logout' | 'link' | 'help' | 'search' | 'chevron-left' | 'menu' | 'lock' | 'mic' | 'wave';
 
 const icons: Record<IconName, string> = {
   home: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1h-5v-6h-6v6H4a1 1 0 01-1-1z"/></svg>`,
@@ -100,6 +103,8 @@ const icons: Record<IconName, string> = {
   'chevron-left': `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`,
   menu: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>`,
   lock: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>`,
+  mic: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>`,
+  wave: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10M21 12h0"/></svg>`,
 };
 import CamposContacto from '../CamposContacto.astro';
 ---

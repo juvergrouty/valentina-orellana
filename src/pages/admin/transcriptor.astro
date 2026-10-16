@@ -1,0 +1,443 @@
+---
+// Transcriptor IA — ajustes, instrucciones del resumen, grabaciones recientes y gasto del mes
+// (paquete P7; 50-arquitectura §3.8, 20-clinico §2). Protegido por la sesión del panel.
+// Decisiones 16 oct: sin alertas de riesgo; resumen por Messages API directa; grabación opcional.
+// Esos ajustes NO se editan aquí (solo se muestran): los fija Vale con su abogada.
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+import { todayCL } from '../../lib/dateUtils';
+import { INSTRUCCIONES_RESUMEN_POR_DEFECTO, MAX_INSTRUCCIONES } from '../../lib/transcriptor/resumen';
+import {
+  AJUSTE_NOMBRES_VALE, NOMBRES_VALE_DEFECTO, costoMes, duracionTexto, estadoVisible, fechaCorta, porcentajeTope, sePuedeReintentar,
+  textoProblema, tipoTexto, type CostoMes,
+} from '../../lib/transcriptor/panel';
+import { AJUSTES, RUTAS, type Grabacion } from '../../lib/transcriptor/tipos';
+
+
+type GrabLista = Pick<Grabacion, 'id' | 'patient_id' | 'origen' | 'tipo' | 'estado' | 'estado_antes_error' | 'session_date' | 'inicio_at' | 'duracion_seg' | 'created_at'>;
+type Version = { id: string; texto: string; activa: boolean; created_at: string };
+
+let ajustes: Record<string, string> = {};
+let grabaciones: GrabLista[] = [];
+let nombres = new Map<string, string>();
+let pacientes: { id: string; name: string }[] = [];
+let instr: Record<'resumen' | 'preguntas', Version[]> = { resumen: [], preguntas: [] };
+let costo: CostoMes | null = null;
+let sesionesMes = 0;
+let errorLectura = false;
+const hoy = todayCL();
+const mesIni = `${hoy.slice(0, 7)}-01T00:00:00-03:00`;
+
+if (import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') {
+  // Datos de prueba SOLO en `astro dev` (nombres inventados).
+  ajustes = { [AJUSTES.activo]: 'true', [AJUSTES.botActivo]: 'false', [AJUSTE_NOMBRES_VALE]: NOMBRES_VALE_DEFECTO, [AJUSTES.presupuestoClp]: '35000', [AJUSTES.usdClp]: '950', [AJUSTES.grabacionRequisito]: 'opcional', [AJUSTES.resumenModo]: 'directo', [AJUSTES.alertaRiesgo]: 'false' };
+  const id = (n: number) => `00000000-0000-4000-8000-0000000000a${n}`;
+  grabaciones = [
+    { id: id(1), patient_id: 'p1', origen: 'presencial', tipo: 'individual', estado: 'lista', estado_antes_error: null, session_date: hoy, inicio_at: `${hoy}T19:00:00Z`, duracion_seg: 3012, created_at: `${hoy}T19:00:00Z` },
+    { id: id(2), patient_id: 'p2', origen: 'online', tipo: 'pareja', estado: 'transcribiendo', estado_antes_error: null, session_date: hoy, inicio_at: `${hoy}T17:00:00Z`, duracion_seg: 3300, created_at: `${hoy}T17:00:00Z` },
+    { id: id(3), patient_id: null, origen: 'presencial', tipo: 'individual', estado: 'lista', estado_antes_error: null, session_date: '2026-10-14', inicio_at: '2026-10-14T21:00:00Z', duracion_seg: 2900, created_at: '2026-10-14T21:00:00Z' },
+    { id: id(4), patient_id: 'p1', origen: 'online', tipo: 'individual', estado: 'error', estado_antes_error: 'resumiendo', session_date: '2026-10-03', inicio_at: '2026-10-03T22:00:00Z', duracion_seg: 2700, created_at: '2026-10-03T22:00:00Z' },
+  ];
+  pacientes = [{ id: 'p1', name: 'Camila Rojas' }, { id: 'p2', name: 'Diego Pérez y Ana Soto' }, { id: 'p3', name: 'Josefa Muñoz' }];
+  nombres = new Map(pacientes.map((p) => [p.id, p.name]));
+  instr = {
+    resumen: [
+      { id: 'i2', texto: INSTRUCCIONES_RESUMEN_POR_DEFECTO, activa: true, created_at: '2026-10-16T12:00:00Z' },
+      { id: 'i1', texto: 'Resume la sesión…', activa: false, created_at: '2026-10-15T12:00:00Z' },
+    ],
+    preguntas: [{ id: 'i3', texto: 'Responde solo con lo que está en las transcripciones entregadas, citando fecha de sesión. Si no está, dilo.', activa: true, created_at: '2026-10-15T12:00:00Z' }],
+  };
+  costo = costoMes({ segmentos: [{ audioSeg: 30 * 3300, modelo: 'universal-2', diarizacion: false }, { audioSeg: 8 * 3300, modelo: 'universal-3-5-pro', diarizacion: true }], usdResumenes: 0.9, usdPreguntas: 0.12, botDuraciones: Array(18).fill(3000), usdClp: 950 });
+  sesionesMes = 38;
+} else {
+  try {
+    const [rAj, rGr, rPa, rIn, rGm, rRe, rPr] = await Promise.all([
+      supabase.from('settings').select('key, value').in('key', [...Object.values(AJUSTES), AJUSTE_NOMBRES_VALE]),
+      supabase.from('grabaciones').select('id, patient_id, origen, tipo, estado, estado_antes_error, session_date, inicio_at, duracion_seg, created_at')
+        .not('estado', 'in', '(creada,cancelada)').order('created_at', { ascending: false }).limit(40),
+      supabase.from('patients').select('id, name, active').order('name').limit(2000),
+      supabase.from('instrucciones_ia').select('id, uso, texto, activa, created_at').order('created_at', { ascending: false }).limit(40),
+      supabase.from('grabaciones').select('id, origen, modelo, diarizacion, duracion_seg, estado').gte('created_at', mesIni).limit(1000),
+      supabase.from('resumenes_ia').select('costo_usd').gte('created_at', mesIni).limit(5000),
+      supabase.from('preguntas_ia').select('costo_usd').gte('created_at', mesIni).limit(5000),
+    ]);
+    errorLectura = !!(rGr.error || rIn.error);
+    for (const r of rAj.data ?? []) ajustes[r.key as string] = r.value as string;
+    grabaciones = (rGr.data ?? []) as GrabLista[];
+    const todos = (rPa.data ?? []) as { id: string; name: string; active: boolean | null }[];
+    nombres = new Map(todos.map((p) => [p.id, p.name]));
+    pacientes = todos.filter((p) => p.active !== false).map((p) => ({ id: p.id, name: p.name }));
+    for (const v of (rIn.data ?? []) as (Version & { uso: 'resumen' | 'preguntas' })[]) instr[v.uso]?.push(v);
+    if (!rGm.error) {
+      const delMes = (rGm.data ?? []) as Pick<Grabacion, 'id' | 'origen' | 'modelo' | 'diarizacion' | 'duracion_seg' | 'estado'>[];
+      sesionesMes = delMes.filter((g) => g.estado === 'lista').length;
+      const porId = new Map(delMes.map((g) => [g.id, g]));
+      const ids = delMes.map((g) => g.id);
+      const segs = ids.length
+        ? ((await supabase.from('grabacion_segmentos').select('grabacion_id, aai_audio_seg').in('grabacion_id', ids).limit(5000)).data ?? [])
+        : [];
+      costo = costoMes({
+        segmentos: segs.map((s: { grabacion_id: string; aai_audio_seg: number | null }) => {
+          const g = porId.get(s.grabacion_id);
+          return { audioSeg: s.aai_audio_seg, modelo: g?.modelo ?? '', diarizacion: !!g?.diarizacion };
+        }),
+        usdResumenes: (rRe.data ?? []).reduce((a: number, r: { costo_usd: number | null }) => a + (Number(r.costo_usd) || 0), 0),
+        usdPreguntas: (rPr.data ?? []).reduce((a: number, r: { costo_usd: number | null }) => a + (Number(r.costo_usd) || 0), 0),
+        botDuraciones: delMes.filter((g) => g.origen === 'online').map((g) => g.duracion_seg),
+        usdClp: Number(ajustes[AJUSTES.usdClp]) || 950,
+      });
+    }
+  } catch (e) {
+    console.warn('[admin/transcriptor]', e instanceof Error ? e.message : e);
+    errorLectura = true;
+  }
+}
+
+const activo = ajustes[AJUSTES.activo] === 'true';
+const botActivo = ajustes[AJUSTES.botActivo] === 'true';
+const nombresVale = (ajustes[AJUSTE_NOMBRES_VALE] || NOMBRES_VALE_DEFECTO).split('|').join('\n');
+const tope = Number(ajustes[AJUSTES.presupuestoClp]) || 35000;
+const pct = costo ? porcentajeTope(costo.clp.total, tope) : 0;
+const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+const fmtFechaHora = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const fmtHora = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '';
+const activaResumen = instr.resumen.find((v) => v.activa) ?? null;
+const activaPreguntas = instr.preguntas.find((v) => v.activa) ?? null;
+const sinAsignar = grabaciones.filter((g) => !g.patient_id).length;
+const conProblema = grabaciones.filter((g) => estadoVisible(g.estado).tono === 'problema').length;
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
+---
+
+<AdminLayout title="Transcriptor" current="/admin/transcriptor">
+  <div class="tx">
+    <header style="margin-bottom:1.5rem;">
+      <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">Transcriptor</h2>
+      <p class="tx-sub">Grabación de sesiones, transcripción y resumen automático (IA) en la ficha. El resumen es un anexo rotulado: nunca reemplaza tu nota de evolución.</p>
+    </header>
+
+    {errorLectura && <div class="alert-error">✕ No se pudieron leer todos los datos del transcriptor. Recarga la página en un momento.</div>}
+
+    <!-- ── Ajustes ─────────────────────────────────────────────────────── -->
+    <section class="card tx-card" aria-labelledby="tx-aj">
+      <h3 id="tx-aj" class="tx-h3">Ajustes</h3>
+      <div class="tx-switch-fila">
+        <div>
+          <p class="tx-switch-titulo">Transcriptor activo</p>
+          <p class="tx-sub">Muestra el botón "Grabar" y procesa las grabaciones (transcripción y resumen). Apagado: no se puede grabar.</p>
+        </div>
+        <label class="tx-switch">
+          <input type="checkbox" class="tx-ajuste" data-clave={AJUSTES.activo} checked={activo} aria-label="Transcriptor activo" />
+          <span aria-hidden="true"></span>
+        </label>
+      </div>
+      <div class="tx-switch-fila">
+        <div>
+          <p class="tx-switch-titulo">Asistente de notas en Meet</p>
+          <p class="tx-sub">El asistente "Notas de Ps. Valentina Orellana" entra solo a tus sesiones online con consentimiento de grabación. Tú lo admites en Meet.</p>
+        </div>
+        <label class="tx-switch">
+          <input type="checkbox" class="tx-ajuste" data-clave={AJUSTES.botActivo} checked={botActivo} aria-label="Asistente de notas en Meet" />
+          <span aria-hidden="true"></span>
+        </label>
+      </div>
+      <form id="tx-nombres" class="tx-nombres">
+        <label class="tx-switch-titulo" for="tx-nombres-txt" style="display:block;">Tus nombres en Meet</label>
+        <p class="tx-sub" style="margin-bottom:0.4rem;">Como apareces en Google Meet (uno por línea). El asistente se retira cuando sales tú.</p>
+        <textarea id="tx-nombres-txt" rows="2" maxlength="400">{nombresVale}</textarea>
+        <div class="tx-acciones">
+          <button type="submit" class="btn btn-outline btn-sm">Guardar nombres</button>
+          <span class="tx-msg" id="tx-nombres-msg" role="status" aria-live="polite"></span>
+        </div>
+      </form>
+      <p class="tx-msg" id="tx-ajustes-msg" role="status" aria-live="polite"></p>
+      <ul class="tx-fijos">
+        <li>Grabación: <strong>{ajustes[AJUSTES.grabacionRequisito] === 'obligatoria' ? 'obligatoria' : 'opcional'}</strong> (tú decides en cada sesión).</li>
+        <li>Resumen: <strong>Claude Sonnet 5.5</strong>, envío directo con protección máxima (sin lotes).</li>
+        <li>Alertas de riesgo: <strong>desactivadas</strong>. Si aparece un tema de riesgo, el resumen solo lo consigna en "Atención", con su minuto.</li>
+      </ul>
+    </section>
+
+    <!-- ── Gasto del mes ───────────────────────────────────────────────── -->
+    <section class="card tx-card" aria-labelledby="tx-gasto">
+      <h3 id="tx-gasto" class="tx-h3">Gasto de {nombreMes}</h3>
+      {costo ? (
+        <>
+          <p class="tx-gasto-total"><strong>{clp(costo.clp.total)}</strong> <span class="tx-sub">de {clp(tope)} · {pct}%</span></p>
+          <div class="tx-barra" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.min(pct, 100)} aria-label="Gasto del mes respecto del tope">
+            <i style={`width:${Math.min(pct, 100)}%;background:${pct >= 90 ? '#b45309' : '#576352'};`}></i>
+          </div>
+          {pct >= 90 && <p class="tx-nota" style="color:#92400e;">Vas en el {pct}% del tope mensual.</p>}
+          <dl class="tx-desglose">
+            <div><dt>Transcripción</dt><dd>{clp(costo.clp.transcripcion)}</dd></div>
+            <div><dt>Resúmenes</dt><dd>{clp(costo.clp.resumenes)}</dd></div>
+            <div><dt>Preguntas a la IA</dt><dd>{clp(costo.clp.preguntas)}</dd></div>
+            <div><dt>Asistente de Meet</dt><dd>{clp(costo.clp.bot)}</dd></div>
+          </dl>
+          <p class="tx-nota">{sesionesMes} {sesionesMes === 1 ? 'sesión lista' : 'sesiones listas'} este mes. Estimado con los precios publicados + IVA; la cifra final es la de cada factura.</p>
+        </>
+      ) : (
+        <p class="tx-sub">Sin datos de gasto todavía.</p>
+      )}
+    </section>
+
+    <!-- ── Grabaciones recientes ───────────────────────────────────────── -->
+    <section class="card tx-card" aria-labelledby="tx-grab">
+      <div class="tx-cab-fila">
+        <h3 id="tx-grab" class="tx-h3" style="margin:0;">Grabaciones recientes</h3>
+        <a href={RUTAS.grabador} class="btn btn-dark btn-sm">Grabar sesión</a>
+      </div>
+      {(sinAsignar > 0 || conProblema > 0) && (
+        <p class="tx-sub" style="margin:0.5rem 0 0;">
+          {sinAsignar > 0 && `${sinAsignar} sin ficha asignada. `}{conProblema > 0 && `${conProblema} con problema.`}
+        </p>
+      )}
+      {!grabaciones.length ? (
+        <p class="tx-sub" style="margin-top:0.75rem;">Todavía no hay grabaciones.</p>
+      ) : (
+        <ul class="tx-lista">
+          {grabaciones.map((g) => {
+            const e = estadoVisible(g.estado);
+            const prob = textoProblema(g);
+            return (
+              <li class="tx-fila">
+                <div class="tx-fila-datos">
+                  <p class="tx-fila-titulo">
+                    {g.patient_id
+                      ? <a href={`/admin/pacientes/${g.patient_id}?tab=notas#ia-${g.id}`}>{nombres.get(g.patient_id) ?? 'Ficha'}</a>
+                      : <span>Sin asignar</span>}
+                  </p>
+                  <p class="tx-sub">{fechaCorta(g.session_date)}{g.inicio_at ? ` · ${fmtHora(g.inicio_at)}` : ''} · {tipoTexto(g)}{g.duracion_seg ? ` · ${duracionTexto(g.duracion_seg)}` : ''}</p>
+                  {prob && <p class="tx-nota">{prob}</p>}
+                </div>
+                <div class="tx-fila-acciones">
+                  <span class={`tx-estado tx-estado-${e.tono}`}>{e.texto}</span>
+                  {sePuedeReintentar(g) && <button type="button" class="btn btn-outline btn-sm tx-reintentar" data-gid={g.id}>Reintentar</button>}
+                  {!g.patient_id && (
+                    <span class="tx-asignar">
+                      <select class="tx-asignar-sel" data-gid={g.id} aria-label="Elegir ficha">
+                        <option value="">Elegir ficha…</option>
+                        {pacientes.map((p) => <option value={p.id}>{p.name}</option>)}
+                      </select>
+                      <button type="button" class="btn btn-outline btn-sm tx-asignar-btn" data-gid={g.id}>Asignar</button>
+                    </span>
+                  )}
+                  <span class="tx-msg" data-gid={g.id} role="status" aria-live="polite"></span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+
+    <!-- ── Mis instrucciones para el resumen ───────────────────────────── -->
+    <section class="card tx-card" aria-labelledby="tx-instr">
+      <h3 id="tx-instr" class="tx-h3">Mis instrucciones para el resumen</h3>
+      <p class="tx-sub" style="margin-bottom:0.6rem;">Secciones, orden, tono y largo del resumen. Lo que no se puede cambiar desde aquí: no inventar, no diagnosticar, la sección "Atención" cuando corresponde y el rótulo de IA. Los cambios valen para los resúmenes nuevos.</p>
+      <form class="tx-instr-form" data-uso="resumen">
+        <textarea id="tx-instr-resumen" rows="16" maxlength={MAX_INSTRUCCIONES} style="resize:vertical;font-size:0.85rem;line-height:1.55;">{activaResumen?.texto ?? INSTRUCCIONES_RESUMEN_POR_DEFECTO}</textarea>
+        <p class="tx-nota"><span class="tx-contador" data-para="tx-instr-resumen"></span> · {activaResumen ? `Versión vigente desde ${fmtFechaHora(activaResumen.created_at)}` : 'Usando el texto original'}</p>
+        <div class="tx-acciones">
+          <button type="submit" class="btn btn-dark btn-sm">Guardar</button>
+          <button type="button" class="btn btn-outline btn-sm tx-restaurar" data-uso="resumen">Restaurar original</button>
+          <span class="tx-msg" role="status" aria-live="polite"></span>
+        </div>
+      </form>
+      {instr.resumen.length > 1 && (
+        <details class="tx-hist">
+          <summary>Versiones anteriores ({instr.resumen.length - 1})</summary>
+          <ul>
+            {instr.resumen.filter((v) => !v.activa).slice(0, 10).map((v) => (
+              <li>{fmtFechaHora(v.created_at)} · {v.texto.length.toLocaleString('es-CL')} caracteres</li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <details class="tx-hist" style="margin-top:1rem;">
+        <summary>Instrucciones para "Preguntar a la IA"</summary>
+        <form class="tx-instr-form" data-uso="preguntas" style="margin-top:0.6rem;">
+          <textarea id="tx-instr-preguntas" rows="4" maxlength={MAX_INSTRUCCIONES} style="resize:vertical;font-size:0.85rem;">{activaPreguntas?.texto ?? ''}</textarea>
+          <p class="tx-nota"><span class="tx-contador" data-para="tx-instr-preguntas"></span></p>
+          <div class="tx-acciones">
+            <button type="submit" class="btn btn-dark btn-sm">Guardar</button>
+            <button type="button" class="btn btn-outline btn-sm tx-restaurar" data-uso="preguntas">Restaurar original</button>
+            <span class="tx-msg" role="status" aria-live="polite"></span>
+          </div>
+        </form>
+      </details>
+    </section>
+  </div>
+</AdminLayout>
+
+<style>
+  .tx { max-width: 880px; }
+  .tx-card { margin-bottom: 1.25rem; }
+  .tx-h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem; }
+  .tx-sub { font-size: 0.8rem; color: var(--stone); line-height: 1.5; }
+  .tx-nota { font-size: 0.76rem; color: var(--stone); margin-top: 0.4rem; line-height: 1.5; }
+  .tx-msg { font-size: 0.78rem; }
+  .tx-msg:empty { display: none; }
+  .tx-acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
+  .tx-cab-fila { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+
+  .tx-switch-fila { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 0; border-bottom: 1px solid var(--warm); }
+  .tx-switch-titulo { font-weight: 600; font-size: 0.88rem; }
+  .tx-switch { position: relative; flex-shrink: 0; width: 48px; height: 28px; cursor: pointer; }
+  .tx-switch input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .tx-switch span { position: absolute; inset: 0; background: #d1d5db; border-radius: 99px; transition: background .15s; pointer-events: none; }
+  .tx-switch span::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .15s; }
+  .tx-switch input:checked + span { background: #576352; }
+  .tx-switch input:checked + span::after { transform: translateX(20px); }
+  .tx-switch input:focus-visible + span { outline: 2px solid #4f5ce8; outline-offset: 2px; }
+  .tx-nombres { padding: 0.75rem 0; }
+  .tx-fijos { list-style: none; font-size: 0.78rem; color: var(--stone); margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; }
+
+  .tx-gasto-total { font-size: 1.35rem; margin-bottom: 0.5rem; }
+  .tx-barra { height: 10px; background: var(--warm); border-radius: 6px; overflow: hidden; }
+  .tx-barra i { display: block; height: 100%; }
+  .tx-desglose { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.85rem; }
+  .tx-desglose dt { font-size: 0.72rem; color: var(--stone); text-transform: uppercase; letter-spacing: 0.04em; }
+  .tx-desglose dd { font-size: 0.92rem; font-weight: 600; }
+  @media (max-width: 600px) { .tx-desglose { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+  .tx-lista { list-style: none; margin-top: 0.75rem; }
+  .tx-fila { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; justify-content: space-between; align-items: center; padding: 0.75rem 0; border-top: 1px solid var(--warm); }
+  .tx-fila-datos { min-width: 0; flex: 1 1 260px; }
+  .tx-fila-titulo { font-weight: 600; font-size: 0.88rem; }
+  .tx-fila-titulo a { color: var(--ink); text-decoration: none; }
+  .tx-fila-titulo a:hover { text-decoration: underline; }
+  .tx-fila-acciones { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+  .tx-estado { font-size: 0.72rem; font-weight: 600; border-radius: 99px; padding: 0.15rem 0.6rem; border: 1px solid; white-space: nowrap; }
+  .tx-estado-listo { color: #15803d; background: #f0fdf4; border-color: #86efac; }
+  .tx-estado-proceso, .tx-estado-neutro { color: #374151; background: #f3f4f6; border-color: #e5e7eb; }
+  .tx-estado-problema { color: #92400e; background: #fffbeb; border-color: #fcd34d; }
+  .tx-asignar { display: inline-flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; }
+  .tx-asignar select { max-width: 200px; font-size: 0.78rem; padding: 0.3rem 0.4rem; }
+  .tx-hist { font-size: 0.8rem; color: var(--stone); margin-top: 0.6rem; }
+  .tx-hist > summary { cursor: pointer; }
+  .tx-hist ul { margin: 0.4rem 0 0 1.1rem; }
+  @media (max-width: 600px) {
+    .tx-acciones .btn, .tx-fila-acciones .btn { min-height: 40px; }
+    .tx-asignar select { max-width: 100%; min-height: 40px; }
+  }
+</style>
+
+<script>
+  async function postPanel(url: string, body: unknown): Promise<{ ok: boolean; error?: string; [k: string]: unknown }> {
+    const res = await fetch(url, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+      body: JSON.stringify(body),
+    });
+    try { return await res.json(); } catch { return { ok: false, error: 'Respuesta inesperada del servidor.' }; }
+  }
+  const pinta = (el: Element | null | undefined, texto: string, color: string) => {
+    if (el instanceof HTMLElement) { el.textContent = texto; el.style.color = color; }
+  };
+  const errorDe = (e: unknown) => '✕ ' + (e instanceof Error ? e.message : 'Error de conexión');
+
+  // Interruptores: se guardan al instante; si falla, vuelven a su posición.
+  document.querySelectorAll<HTMLInputElement>('.tx-ajuste').forEach((sw) => {
+    sw.addEventListener('change', async () => {
+      const msg = document.getElementById('tx-ajustes-msg');
+      const valor = sw.checked;
+      sw.disabled = true;
+      pinta(msg, 'Guardando…', '#6b7280');
+      try {
+        const d = await postPanel('/api/admin/transcriptor/ajustes', { clave: sw.dataset.clave, valor });
+        if (!d.ok) throw new Error(d.error ?? 'No se pudo guardar.');
+        pinta(msg, '✓ Guardado.', '#15803d');
+      } catch (e) {
+        sw.checked = !valor;
+        pinta(msg, errorDe(e), '#dc2626');
+      } finally {
+        sw.disabled = false;
+      }
+    });
+  });
+
+  document.getElementById('tx-nombres')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const msg = document.getElementById('tx-nombres-msg');
+    const valor = (document.getElementById('tx-nombres-txt') as HTMLTextAreaElement).value;
+    pinta(msg, 'Guardando…', '#6b7280');
+    try {
+      const d = await postPanel('/api/admin/transcriptor/ajustes', { clave: 'transcriptor_bot_nombres_vale', valor });
+      if (!d.ok) throw new Error(d.error ?? 'No se pudo guardar.');
+      pinta(msg, '✓ Guardado.', '#15803d');
+    } catch (err) { pinta(msg, errorDe(err), '#dc2626'); }
+  });
+
+  // Contadores de caracteres de las instrucciones.
+  document.querySelectorAll<HTMLElement>('.tx-contador').forEach((c) => {
+    const area = document.getElementById(c.dataset.para ?? '') as HTMLTextAreaElement | null;
+    if (!area) return;
+    const pintar = () => { c.textContent = `${area.value.length.toLocaleString('es-CL')} de ${Number(area.maxLength).toLocaleString('es-CL')} caracteres`; };
+    area.addEventListener('input', pintar); pintar();
+  });
+
+  // Guardar instrucciones (versión nueva) / restaurar el texto original.
+  document.querySelectorAll<HTMLFormElement>('.tx-instr-form').forEach((f) => {
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = f.querySelector('.tx-msg');
+      const texto = f.querySelector('textarea')!.value;
+      pinta(msg, 'Guardando…', '#6b7280');
+      try {
+        const d = await postPanel('/api/admin/transcriptor/instrucciones', { uso: f.dataset.uso, accion: 'guardar', texto });
+        if (!d.ok) throw new Error(d.error ?? 'No se pudo guardar.');
+        pinta(msg, d.sin_cambios ? 'Sin cambios.' : '✓ Guardado. Vale para los resúmenes nuevos.', '#15803d');
+        if (!d.sin_cambios) setTimeout(() => location.reload(), 1200);
+      } catch (err) { pinta(msg, errorDe(err), '#dc2626'); }
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>('.tx-restaurar').forEach((b) => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Volver a las instrucciones originales? Tu versión actual queda guardada en el historial.')) return;
+      const msg = b.closest('form')?.querySelector('.tx-msg');
+      b.disabled = true;
+      pinta(msg, 'Restaurando…', '#6b7280');
+      try {
+        const d = await postPanel('/api/admin/transcriptor/instrucciones', { uso: b.dataset.uso, accion: 'restaurar' });
+        if (!d.ok) throw new Error(d.error ?? 'No se pudo restaurar.');
+        pinta(msg, d.sin_cambios ? 'Ya estabas usando el texto original.' : '✓ Restaurado.', '#15803d');
+        if (!d.sin_cambios) setTimeout(() => location.reload(), 900);
+      } catch (err) { pinta(msg, errorDe(err), '#dc2626'); }
+      finally { b.disabled = false; }
+    });
+  });
+
+  // Reintentar y asignar ficha en la lista de grabaciones.
+  document.addEventListener('click', async (e) => {
+    const t = e.target as HTMLElement;
+    const re = t.closest<HTMLButtonElement>('.tx-reintentar');
+    const as = t.closest<HTMLButtonElement>('.tx-asignar-btn');
+    const b = re ?? as;
+    if (!b) return;
+    const gid = b.dataset.gid ?? '';
+    const msg = document.querySelector(`.tx-msg[data-gid="${gid}"]`);
+    let url = '/api/admin/transcriptor/reintentar';
+    let body: Record<string, string> = { grabacion_id: gid };
+    if (as) {
+      const sel = document.querySelector<HTMLSelectElement>(`.tx-asignar-sel[data-gid="${gid}"]`);
+      if (!sel?.value) { pinta(msg, 'Elige una ficha.', '#dc2626'); return; }
+      if (!confirm(`¿Asignar esta grabación a ${sel.selectedOptions[0]?.textContent ?? 'esa ficha'}? Su resumen pasará a esa ficha.`)) return;
+      url = '/api/admin/transcriptor/asignar';
+      body = { grabacion_id: gid, patient_id: sel.value };
+    }
+    b.disabled = true;
+    pinta(msg, as ? 'Asignando…' : 'Reintentando…', '#6b7280');
+    try {
+      const d = await postPanel(url, body);
+      if (!d.ok) throw new Error(d.error ?? 'No se pudo completar.');
+      pinta(msg, '✓ Listo.', '#15803d');
+      setTimeout(() => location.reload(), 900);
+    } catch (err) {
+      pinta(msg, errorDe(err), '#dc2626');
+      b.disabled = false;
+    }
+  });
+</script>

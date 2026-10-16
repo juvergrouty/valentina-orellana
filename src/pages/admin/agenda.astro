@@ -1160,6 +1160,11 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 
       <!-- Acciones -->
       <div class="sp-section">
+        <!-- Transcriptor (P7): solo en sesiones presenciales de hoy; lo muestra openSessionDetail. -->
+        <a href="/admin/grabar" id="sp-btn-grabar" class="sp-action-row" style="display:none;font-weight:600;color:#576352;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>
+          Grabar
+        </a>
         <a href="#" id="sp-btn-ficha" class="sp-action-row">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
           Ver ficha del paciente
@@ -2635,6 +2640,15 @@ function openSessionDetail(b) {
   document.getElementById('sp-no-show-id').value = b.id;
   document.getElementById('sp-no-show-action').value = isNoShow ? 'unmark_no_show' : 'mark_no_show';
   document.getElementById('sp-btn-no-show-label').textContent = isNoShow ? 'Quitar marca de inasistencia' : 'Marcar inasistencia';
+
+  // Grabar (transcriptor, P7): sesiones presenciales de HOY (fecha de Chile) no canceladas.
+  const grabarBtn = document.getElementById('sp-btn-grabar');
+  if (grabarBtn) {
+    const hoyCL = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+    const esPresencialHoy = !isOnlineSession && b.session_date === hoyCL && b.status !== 'cancelled';
+    grabarBtn.style.display = esPresencialHoy ? '' : 'none';
+    grabarBtn.href = `/admin/grabar?sesion=${encodeURIComponent(b.id)}`;
+  }
 
   // Ver ficha link
   const fichaBtn = document.getElementById('sp-btn-ficha');
