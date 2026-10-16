@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { secreto } from './secretos';
 import { sendBoletaEmail, ADMIN_EMAIL_FALLBACK } from './email';
 import { todayCL } from './dateUtils';
 import { logError, logWarn } from './logger';
@@ -38,10 +39,10 @@ export async function getAgwConfig(): Promise<AgwConfig | null> {
   const s: Record<string, string> = {};
   (data ?? []).forEach((r: { key: string; value: string }) => { s[r.key] = r.value; });
 
-  const apikey   = import.meta.env.APIGATEWAY_APIKEY   || s.apigateway_apikey   || '';
+  const apikey   = secreto('APIGATEWAY_APIKEY')   || s.apigateway_apikey   || '';
   const baseUrl  = (import.meta.env.APIGATEWAY_BASE_URL || s.apigateway_base_url || 'https://app.apigateway.cl').replace(/\/$/, '');
   const siiRut   = import.meta.env.SII_RUT             || s.sii_rut             || '';
-  const siiClave = import.meta.env.SII_CLAVE           || s.sii_clave           || '';
+  const siiClave = secreto('SII_CLAVE')           || s.sii_clave           || '';
 
   // La cuenta se autentica solo con el token; el RUT/clave SII se necesitan
   // únicamente para acciones sobre la cuenta SII (ej. emitir boleta).

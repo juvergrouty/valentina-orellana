@@ -3,6 +3,8 @@
  * Documentación: https://developers.google.com/calendar/api/v3/reference/events/insert
  */
 
+import { secreto } from './secretos';
+
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const CALENDAR_API     = 'https://www.googleapis.com/calendar/v3';
 const TIMEZONE         = 'America/Santiago';
@@ -23,7 +25,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       client_id:     import.meta.env.GOOGLE_CLIENT_ID,
-      client_secret: import.meta.env.GOOGLE_CLIENT_SECRET,
+      client_secret: secreto('GOOGLE_CLIENT_SECRET') as string,
       refresh_token: refreshToken,
       grant_type:    'refresh_token',
     }),
@@ -44,7 +46,7 @@ export async function exchangeCodeForTokens(code: string): Promise<{
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       client_id:     import.meta.env.GOOGLE_CLIENT_ID,
-      client_secret: import.meta.env.GOOGLE_CLIENT_SECRET,
+      client_secret: secreto('GOOGLE_CLIENT_SECRET') as string,
       redirect_uri:  import.meta.env.GOOGLE_REDIRECT_URI,
       code,
       grant_type: 'authorization_code',

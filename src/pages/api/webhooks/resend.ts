@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { agregarRebote } from '../../../lib/rebotes';
+import { secreto as leerSecreto } from '../../../lib/secretos';
 import { logError, logWarn } from '../../../lib/logger';
 
 export const prerender = false;
@@ -22,7 +23,7 @@ function firmaValida(secreto: string, id: string, ts: string, cuerpo: string, ca
 }
 
 export const POST: APIRoute = async ({ request }) => {
-  const secreto = import.meta.env.RESEND_WEBHOOK_SECRET;
+  const secreto = leerSecreto('RESEND_WEBHOOK_SECRET');
   if (!secreto) {
     await logError('correo/webhook', 'Falta RESEND_WEBHOOK_SECRET en Vercel: no se pueden recibir avisos de rebote');
     return new Response('No configurado', { status: 503 });

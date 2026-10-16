@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { secreto } from './secretos';
 
 // Link confirmado por Vale para pedir la reseña (el que se arma con el Place ID
 // vía search.google.com/local/writereview a veces cae en la ficha equivocada).
@@ -32,7 +33,7 @@ async function getConfig() {
   const s: Record<string, string> = {};
   (data ?? []).forEach((r: { key: string; value: string }) => { s[r.key] = r.value; });
   const placeId = s.google_place_id ?? '';
-  const apiKey  = s.google_places_api_key ?? import.meta.env.GOOGLE_PLACES_API_KEY ?? '';
+  const apiKey  = s.google_places_api_key ?? secreto('GOOGLE_PLACES_API_KEY') ?? '';
   return { placeId, apiKey };
 }
 

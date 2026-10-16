@@ -10,6 +10,7 @@
  */
 
 import { createHmac } from 'node:crypto';
+import { secreto } from './secretos';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -23,10 +24,10 @@ export const FLOW_BASE_URL = IS_SANDBOX ? FLOW_URLS.sandbox : FLOW_URLS.producti
 
 // Keys por defecto según env var FLOW_ENV
 // En sandbox usa FLOW_SANDBOX_API_KEY si existe, si no cae en FLOW_API_KEY
-const API_KEY    = import.meta.env.FLOW_API_KEY;
-const SECRET_KEY = import.meta.env.FLOW_SECRET_KEY;
-const SANDBOX_API_KEY    = import.meta.env.FLOW_SANDBOX_API_KEY    ?? API_KEY;
-const SANDBOX_SECRET_KEY = import.meta.env.FLOW_SANDBOX_SECRET_KEY ?? SECRET_KEY;
+const API_KEY    = secreto('FLOW_API_KEY') as string;    // as string: igual que antes (import.meta.env era any)
+const SECRET_KEY = secreto('FLOW_SECRET_KEY') as string;
+const SANDBOX_API_KEY    = secreto('FLOW_SANDBOX_API_KEY')    ?? API_KEY;
+const SANDBOX_SECRET_KEY = secreto('FLOW_SANDBOX_SECRET_KEY') ?? SECRET_KEY;
 
 // ─── Firma ───────────────────────────────────────────────────────────────────
 
