@@ -1,0 +1,185 @@
+---
+// Bloque de consentimientos de la ficha (decisiones D y E de docs/transcriptor/02-decisiones-16oct-noche.md):
+//   D. "Consentimiento de la pareja": en toda ficha con una reserva de pareja (session_type 'pareja-*'
+//      o servicio de pareja), un link propio para la SEGUNDA persona (consents.persona = 2, 0021),
+//      clickeable y copiable, con botones "Enviar por WhatsApp" y "Copiar link", y su estado.
+//   E. Anexos: la copia fiel del correo con el aviso de cambio de herramienta (consent_anexos, 0021).
+// Componente aparte para tocar lo mínimo de pacientes/[id].astro. Sin la migración 0021 el bloque
+// avisa que falta y el resto de la ficha queda igual.
+import { supabase } from '../../lib/supabase';
+import { consentUrl, FaltaMigracion0021, getOrCreatePendingConsent } from '../../lib/consent';
+import { estadoPareja, fichaConReservaPareja, urlWhatsAppPareja, type ReservaMinima } from '../../lib/transcriptor/pareja';
+import { anexosDeConsentimientos, TITULO_ANEXO, type AnexoConsentimiento } from '../../lib/transcriptor/avisoV2';
+
+interface Props {
+  patient: { id: string; name: string; rut?: string | null };
+  bookings: ReservaMinima[];
+  consentRows: any[];
+  /** Solo `astro dev` (?demo=ia): datos de prueba, sin base de datos. */
+  demo?: boolean;
+}
+const { patient, bookings, consentRows, demo = false } = Astro.props;
+const esDemo = import.meta.env.DEV && demo;
+const demoFalta = esDemo && Astro.url.searchParams.get('pareja') === 'falta';
+
+const fmtCL = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+// ── D: ¿la reserva es de pareja? (session_type o tipo del servicio reservado) ──
+let esPareja = false;
+let errorReservas = false;
+if (esDemo) {
+  esPareja = true;
+} else {
+  try {
+    const ids = [...new Set(bookings.map((b) => String(b.service_id ?? '')).filter(Boolean))];
+    const tipoServicio = new Map<string, string | null>();
+    if (ids.length) {
+      const { data, error } = await supabase.from('services_catalog').select('id, type').in('id', ids);
+      if (error) throw new Error(error.message);
+      for (const s of (data ?? []) as { id: string; type: string | null }[]) tipoServicio.set(String(s.id), s.type);
+    }
+    esPareja = fichaConReservaPareja(bookings, tipoServicio);
+  } catch {
+    // Solo por session_type si no se pudo leer el catálogo (no se esconde el bloque de una pareja).
+    errorReservas = true;
+    esPareja = fichaConReservaPareja(bookings, new Map());
+  }
+}
+
+const filas = esDemo && demoFalta ? consentRows.filter((r) => r.id.endsWith('c1')) : consentRows;
+const estado = estadoPareja(filas, patient.rut, patient.name);
+let link: string | null = null;
+let errorLink: string | null = null;
+if (esPareja && !estado.firma) {
+  if (esDemo) {
+    link = consentUrl(Astro.url.origin, 'demo-pareja-Xx7Qm2LpR4vN9sKe1Tz0aB3c');
+  } else if (estado.pendiente?.token) {
+    link = consentUrl(Astro.url.origin, estado.pendiente.token);
+  } else {
+    // Se crea al abrir la ficha (una vez; después se reutiliza) para que el link esté a la vista en la consulta.
+    try { link = consentUrl(Astro.url.origin, (await getOrCreatePendingConsent(patient.id, 2)).token); }
+    catch (e) { errorLink = e instanceof FaltaMigracion0021 ? e.message : 'No se pudo preparar el link de la pareja. Recarga la página.'; }
+  }
+}
+const pilaFicha = String(patient.name ?? '').trim().split(/\s+/)[0] ?? '';
+const waHref = link ? urlWhatsAppPareja(pilaFicha, link) : null;
+
+// ── E: anexos (copia fiel del correo con el aviso v2) de las firmas de esta ficha ──
+const firmadas = filas.filter((r) => r.signed_at);
+const nombrePorConsent = new Map<string, string>(firmadas.map((r) => [String(r.id), String(r.signer_name ?? '').trim() || 'Sin nombre']));
+let anexos: AnexoConsentimiento[] = [];
+if (esDemo) {
+  const v2 = firmadas.find((r) => String(r.version).endsWith('v2'));
+  if (v2) anexos = [{ id: '00000000-0000-4000-8000-0000000000e1', consent_id: v2.id, tipo: 'aviso_v2', asunto: 'Sesión confirmada — Ps. Valentina Orellana', destinatario: 'tomas@example.com', enviado_at: '2026-10-14T13:20:00Z', resend_id: 'demo', html_sha256: '0'.repeat(64) }];
+} else {
+  anexos = await anexosDeConsentimientos(firmadas.map((r) => String(r.id)));
+}
+---
+
+{esPareja && (
+  <section class="card cp" aria-labelledby="cp-titulo" data-patient-id={patient.id}>
+    <p id="cp-titulo" class="cp-titulo">Consentimiento de la pareja</p>
+    {estado.firma ? (
+      <>
+        <p class="cp-estado cp-ok">✓ Firmado por {String(estado.firma.signer_name ?? '').trim() || 'la pareja'} el {fmtCL(String(estado.firma.signed_at))}</p>
+        <p class="cp-sub">
+          Versión {estado.firma.version} · Grabación: {estado.firma.recording_revoked_at
+            ? <strong class="cp-no">retirada</strong>
+            : estado.firma.accept_recording ? <strong class="cp-si">sí autoriza</strong> : <strong class="cp-no">no autoriza</strong>}
+          {' · '}<a href={`/admin/pacientes/${patient.id}/consentimiento/${estado.firma.id}`} target="_blank">ver constancia</a>
+        </p>
+      </>
+    ) : (
+      <>
+        <p class="cp-estado cp-falta">Falta la firma de la pareja</p>
+        <p class="cp-sub">
+          {estado.retirada ? `${String(estado.retirada.signer_name ?? 'La pareja').trim()} retiró su consentimiento el ${fmtCL(String(estado.retirada.revoked_at))}. ` : ''}
+          La segunda persona firma su propio consentimiento en su teléfono (por ejemplo, en la consulta). Sin las dos firmas no se puede grabar.
+        </p>
+        {link ? (
+          <div class="cp-link">
+            <a class="cp-url" href={link} target="_blank" rel="noopener">{link}</a>
+            <div class="cp-botones">
+              <a class="btn btn-dark btn-sm cp-wa" href={waHref} target="_blank" rel="noopener" data-url={link}>Enviar por WhatsApp</a>
+              <button type="button" class="btn btn-outline btn-sm cp-copiar" data-url={link}>Copiar link</button>
+            </div>
+            <p class="cp-msg" role="status" aria-live="polite"></p>
+          </div>
+        ) : (
+          <p class="cp-sub cp-no">{errorLink}</p>
+        )}
+      </>
+    )}
+    {errorReservas && <p class="cp-sub">No se pudo leer el catálogo de servicios: se revisó solo el tipo de sesión de las reservas.</p>}
+  </section>
+)}
+
+{anexos.length > 0 && (
+  <section class="card cp" aria-labelledby="cp-anexos-titulo">
+    <p id="cp-anexos-titulo" class="cp-titulo">Anexos de los consentimientos</p>
+    <ul class="cp-anexos">
+      {anexos.map((a) => {
+        const base = `/admin/pacientes/${patient.id}/consentimiento/${a.consent_id}/anexo/${a.id}`;
+        return (
+          <li class="cp-anexo">
+            <p class="cp-anexo-txt">
+              <strong>Anexo: {(TITULO_ANEXO[a.tipo] ?? 'anexo').toLowerCase()}</strong> (enviado el {fmtCL(a.enviado_at)})
+              <span class="cp-sub"> · consentimiento de {nombrePorConsent.get(String(a.consent_id)) ?? '—'} · a {a.destinatario}</span>
+            </p>
+            <div class="cp-botones">
+              <a class="btn btn-outline btn-sm" href={base} target="_blank" rel="noopener">Ver</a>
+              <a class="btn btn-outline btn-sm" href={`${base}?descargar=1`}>Descargar</a>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  </section>
+)}
+
+<style>
+  .cp { margin: -0.75rem 0 1.5rem; padding: 1rem 1.1rem; border-left: 4px solid var(--dust, #ddd8cf); }
+  .cp-titulo { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: var(--stone); margin-bottom: 0.5rem; }
+  .cp-estado { font-weight: 600; font-size: 0.9rem; }
+  .cp-ok { color: var(--enc-green-dark); }
+  .cp-falta { color: #b45309; }
+  .cp-sub { font-size: 0.78rem; color: var(--stone); margin-top: 0.2rem; line-height: 1.5; }
+  .cp-sub a { color: var(--enc-blue-dark); }
+  .cp-si { color: var(--enc-green-dark); }
+  .cp-no { color: var(--red); }
+  .cp-link { margin-top: 0.7rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  .cp-url { display: block; font-size: 0.8rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--enc-blue-dark); background: #f9fafb; border: 1px solid var(--warm, #e5e7eb); border-radius: 6px; padding: 0.5rem 0.65rem; overflow-wrap: anywhere; word-break: break-all; text-decoration: underline; }
+  .cp-botones { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .cp-msg { font-size: 0.78rem; }
+  .cp-msg:empty { display: none; }
+  .cp-anexos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+  .cp-anexo { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; align-items: center; justify-content: space-between; }
+  .cp-anexo-txt { font-size: 0.82rem; flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+</style>
+
+<script>
+  // "Copiar link" y "Enviar por WhatsApp" del consentimiento de la pareja.
+  document.addEventListener('click', async (e) => {
+    const t = e.target as HTMLElement | null;
+    const copiar = t?.closest<HTMLButtonElement>('.cp-copiar');
+    const wa = t?.closest<HTMLAnchorElement>('.cp-wa');
+    if (!copiar && !wa) return;
+    const caja = (copiar ?? wa)!.closest('.cp-link');
+    const msg = caja?.querySelector<HTMLElement>('.cp-msg');
+    const pinta = (txt: string, color: string) => { if (msg) { msg.textContent = txt; msg.style.color = color; } };
+    if (copiar) {
+      const url = copiar.dataset.url ?? '';
+      try { await navigator.clipboard.writeText(url); pinta('✓ Link copiado.', '#15803d'); }
+      catch { prompt('Copia este link:', url); }
+      return;
+    }
+    // WhatsApp: el enlace abre wa.me con el mensaje listo (Vale elige el contacto). Además se deja
+    // registrado el envío, sin bloquear la apertura.
+    const pid = wa!.closest<HTMLElement>('[data-patient-id]')?.dataset.patientId;
+    pinta('✓ WhatsApp abierto con el mensaje listo — elige a la persona y apreta enviar.', '#15803d');
+    if (pid) {
+      fetch('/api/admin/consent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pareja_whatsapp', patient_id: pid }) })
+        .catch(() => undefined);
+    }
+  });
+</script>

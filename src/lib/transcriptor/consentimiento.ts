@@ -25,8 +25,14 @@
 //   - H2: "pareja" lo deduce el SERVIDOR desde la ficha (reservas pareja-*, grabaciones de pareja,
 //     2+ personas firmantes o un nombre de ficha "X y Y"). Si la ficha es de pareja, se exigen 2
 //     firmas aunque la pantalla (o el evento sin tipo) diga "individual".
+//   - D (02-decisiones-16oct-noche, manda): la fuente de verdad de "pareja" es LA RESERVA: su
+//     session_type 'pareja-*' o el servicio reservado (services_catalog.type = 'pareja'), ver
+//     pareja.ts. Las otras señales se mantienen solo para pedir MÁS firmas, nunca menos. La segunda
+//     persona firma por su link (consents.persona = 2, 0021); cuenta como persona distinta solo si su
+//     identidad (RUT) es distinta: dos filas de la misma persona nunca suman dos firmas.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AJUSTES, type PuedeGrabar, type ResultadoPuedeGrabar, type TipoSesion } from './tipos';
+import { reservasDeFicha, fichaConReservaPareja } from './pareja';
 
 /** Fila mínima de `consents` que se necesita (subconjunto de ConsentRow). */
 export interface FilaConsentimiento {
@@ -178,6 +184,8 @@ export const puedeGrabar: PuedeGrabar = async (patientId, tipo) => evaluarEnBase
 export interface SenalesPareja {
   /** session_type de las reservas de la ficha (por su correo). */
   sessionTypes: (string | null | undefined)[];
+  /** D: alguna reserva de la ficha es de un servicio de pareja (services_catalog.type), ver pareja.ts. */
+  servicioPareja?: boolean;
   /** grabaciones.tipo previas de la ficha. */
   tiposGrabaciones: (string | null | undefined)[];
   /** Firmas (para contar personas distintas). */
@@ -188,6 +196,7 @@ export interface SenalesPareja {
 
 /** H2: ¿la ficha es de pareja? Cualquier señal basta (conservador: pide 2 firmas). Función pura. */
 export function fichaEsPareja(x: SenalesPareja): boolean {
+  if (x.servicioPareja) return true;
   if (x.sessionTypes.some((t) => String(t ?? '').startsWith('pareja'))) return true;
   if (x.tiposGrabaciones.some((t) => t === 'pareja')) return true;
   const personas = new Set(x.filas.filter((f) => f.signed_at).map((f) => identidadFirmante(f)));
@@ -211,19 +220,15 @@ export async function evaluarEnBase(patientId: string | null, tipo: TipoSesion, 
   if (grabs.error) throw new Error(`consentimiento: no se pudieron leer las grabaciones (${grabs.error.message})`);
   if (!pac.data) return evaluarConsentimientos({ patientId: null, tipo, fechaNacimiento: null, filas: [], hoy: hoyChile() });
   const ficha = pac.data as { name?: string | null; email?: string | null; birthdate?: string | null };
-  let sessionTypes: string[] = [];
-  const correo = String(ficha.email ?? '').trim();
-  if (correo) {
-    const { data: bs, error: eb } = await c.from('bookings').select('session_type')
-      .ilike('patient_email', correo.replace(/[\\%_]/g, (m) => `\\${m}`)).limit(200);
-    if (eb) throw new Error(`consentimiento: no se pudieron leer las reservas (${eb.message})`);
-    sessionTypes = ((bs ?? []) as { session_type?: string | null }[]).map((b) => String(b.session_type ?? ''));
-  }
+  // D: la reserva manda (session_type o servicio de pareja). Si no se pueden leer, falla cerrado.
+  const { reservas, tipoServicio } = await reservasDeFicha(c, ficha.email);
+  const sessionTypes = reservas.map((b) => String(b.session_type ?? ''));
+  const servicioPareja = fichaConReservaPareja(reservas, tipoServicio);
   const filas = (cons.data ?? []) as FilaConsentimiento[];
   return evaluarConsentimientos({
     patientId,
     tipo,
-    fichaPareja: fichaEsPareja({ sessionTypes, tiposGrabaciones: ((grabs.data ?? []) as { tipo?: string }[]).map((g) => g.tipo), filas, nombre: ficha.name }),
+    fichaPareja: fichaEsPareja({ sessionTypes, servicioPareja, tiposGrabaciones: ((grabs.data ?? []) as { tipo?: string }[]).map((g) => g.tipo), filas, nombre: ficha.name }),
     fechaNacimiento: ficha.birthdate ?? null,
     filas,
     hoy: hoyChile(),

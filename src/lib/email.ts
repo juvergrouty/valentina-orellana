@@ -128,12 +128,9 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
   const avisoV2 = await import('./transcriptor/avisoV2')
     .then((m) => m.avisoV2ParaCorreo(data.patient_email))
     .catch(() => null);
-  const res = await client.emails.send({
-    from: FROM,
-    replyTo: PATIENT_REPLY_TO,
-    to:   data.patient_email,
-    subject,
-    html: `
+  // El HTML se arma antes de enviar para guardar, con el aviso v2, una copia fiel del correo
+  // como anexo del consentimiento (decisión E del 16 oct noche).
+  const html = `
       <div style="font-family:'Georgia',serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         ${LOGO_HEADER}
         <h1 style="font-size:1.6rem;font-weight:400;margin-bottom:0.5rem;color:#1A1A18;">
@@ -220,13 +217,23 @@ ${avisoV2 ? avisoV2.html : ''}
           Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
         </p>
       </div>
-    `,
+    `;
+  const res = await client.emails.send({
+    from: FROM,
+    replyTo: PATIENT_REPLY_TO,
+    to:   data.patient_email,
+    subject,
+    html,
   }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
   // Misma llave con otro contenido = ese correo YA se envió en un intento anterior
   // (Resend lo rechaza para no duplicar): cuenta como enviado, no como falla.
-  if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
-  if (!res.error && avisoV2) {
-    await import('./transcriptor/avisoV2').then((m) => m.registrarAvisoMostrado(avisoV2, data.booking_id)).catch(() => undefined);
+  // En ese caso ESTE html no es el que salió: no se deja constancia del aviso ni anexo
+  // (el aviso irá, con su copia fiel, en el próximo correo de confirmación).
+  const reenvioIdempotente = (res.error as { name?: string } | null)?.name === 'invalid_idempotent_request';
+  if (reenvioIdempotente) (res as { error: unknown }).error = null;
+  if (!res.error && avisoV2 && !reenvioIdempotente) {
+    const correo = { html, asunto: subject, destinatario: data.patient_email, enviadoAt: new Date().toISOString(), resendId: res.data?.id ?? null };
+    await import('./transcriptor/avisoV2').then((m) => m.registrarAvisoMostrado(avisoV2, data.booking_id, undefined, correo)).catch(() => undefined);
   }
   await logEmail('email/confirmacion', data.patient_email, subject, !res.error, res.error?.message);
   return res.error ? { sent: false, reason: res.error.message } : { sent: true };

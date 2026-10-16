@@ -4,7 +4,8 @@ import { logError, logInfo } from '../../lib/logger';
 import { normalizeRut } from '../../lib/apigateway';
 import { rutValido } from '../../lib/rut';
 import { sendConsentSignedCopy } from '../../lib/email';
-import { CONSENT_OPTIONS, CONSENT_VERSION, consentContactEmail, consentPlainText, sha256 } from '../../lib/consent';
+import { CONSENT_OPTIONS, CONSENT_VERSION, consentContactEmail, consentPlainText, personaConsent, sha256 } from '../../lib/consent';
+import { rutYaFirmoEnFicha } from '../../lib/transcriptor/pareja';
 
 export const prerender = false;
 
@@ -36,20 +37,38 @@ export const POST: APIRoute = async ({ request }) => {
   if (name.length < 3) return json({ ok: false, error: 'Escribe tu nombre completo.' }, 400);
   if (!acc.accept_treatment) return json({ ok: false, error: 'La autorización 1 es necesaria para poder atenderte.' }, 400);
 
+  // select('*'): sin la migración 0021 (columna persona) la firma de siempre sigue funcionando.
   const { data: consent } = await supabase.from('consents')
-    .select('id, patient_id, signed_at').eq('token', token).maybeSingle();
+    .select('*').eq('token', token).maybeSingle();
   if (!consent || !consent.patient_id) return json({ ok: false, error: 'Link no válido.' }, 404);
   if (consent.signed_at) return json({ ok: false, error: 'Este consentimiento ya fue firmado.' }, 409);
 
   const { data: patient } = await supabase.from('patients')
     .select('*').eq('id', consent.patient_id).maybeSingle();
 
+  // Segunda persona de una pareja (0021, decisión D): firma SU consentimiento, ligado a la misma
+  // ficha. No se usan los datos de la ficha (son de la persona agendada) ni se copian a ella.
+  const esPareja2 = personaConsent(consent) === 2;
+
   // Con RUT chileno: formato y dígito verificador. Extranjera/o sin RUT
-  // (marcado en su ficha): firma con su documento de identidad.
-  const sinRut = patient?.sin_rut === true && !patient?.rut;
+  // (marcado en su ficha; la pareja lo marca en la página): firma con su documento de identidad.
+  const sinRut = esPareja2 ? body.sin_rut === true : (patient?.sin_rut === true && !patient?.rut);
   const rut = sinRut ? rutTexto : normalizeRut(rutTexto).toUpperCase();
   if (sinRut ? !/^[\w.\- ]{4,40}$/.test(rut) : !rutValido(rut)) {
     return json({ ok: false, error: sinRut ? 'Escribe el número de tu documento.' : 'Revisa tu RUT: escríbelo con guion, por ejemplo 12345678-9.' }, 400);
+  }
+  let correoPareja: string | null = null;
+  if (esPareja2) {
+    // Dos firmas de la misma persona no valen como dos (consentimiento.ts agrupa por RUT): se avisa aquí.
+    const { data: otras, error: eo } = await supabase.from('consents')
+      .select('id, signed_at, signer_rut, signer_email, signer_name').eq('patient_id', consent.patient_id).neq('id', consent.id);
+    if (eo) return json({ ok: false, error: 'No se pudo guardar tu firma. Intenta de nuevo.' }, 500);
+    if (rutYaFirmoEnFicha(rut, otras ?? [], patient?.rut)) {
+      return json({ ok: false, error: 'Ese RUT o documento ya firmó en esta ficha. Cada persona de la pareja firma con el suyo.' }, 409);
+    }
+    const e = String(body.signer_email ?? '').trim().toLowerCase().slice(0, 200);
+    if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return json({ ok: false, error: 'Revisa tu correo (o déjalo en blanco).' }, 400);
+    correoPareja = e || null;
   }
 
   const contactEmail = await consentContactEmail();
@@ -63,7 +82,7 @@ export const POST: APIRoute = async ({ request }) => {
     signed_at:     signedAt,
     signer_name:   name,
     signer_rut:    rut,
-    signer_email:  patient?.email ?? null,
+    signer_email:  esPareja2 ? correoPareja : (patient?.email ?? null),
     text_snapshot: plainText,
     text_sha256:   sha256(plainText),
     ip:            request.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? null,
@@ -77,15 +96,15 @@ export const POST: APIRoute = async ({ request }) => {
   if (!updated) return json({ ok: false, error: 'Este consentimiento ya fue firmado.' }, 409);
 
   // Guardar el RUT en la ficha si no lo tenía (sirve también para las boletas).
-  if (patient && !patient.rut && !sinRut) await supabase.from('patients').update({ rut }).eq('id', patient.id);
+  if (patient && !patient.rut && !sinRut && !esPareja2) await supabase.from('patients').update({ rut }).eq('id', patient.id);
 
-  await logInfo('consentimiento/firma', `Consentimiento firmado por ${name}`, { consentId: consent.id, patientId: consent.patient_id, ...acc });
+  await logInfo('consentimiento/firma', `Consentimiento firmado por ${name}${esPareja2 ? ' (pareja)' : ''}`, { consentId: consent.id, patientId: consent.patient_id, persona: esPareja2 ? 2 : 1, ...acc });
 
   try {
     const fecha = new Date(signedAt).toLocaleString('es-CL', { timeZone: 'America/Santiago', dateStyle: 'long', timeStyle: 'short' });
     const marcadas = CONSENT_OPTIONS.map(o => `${acc[o.key] ? 'Sí' : 'No'} — ${o.titulo}`);
     await sendConsentSignedCopy({
-      to: [...new Set([patient?.email, contactEmail].filter(Boolean) as string[])],
+      to: [...new Set([esPareja2 ? correoPareja : patient?.email, contactEmail].filter(Boolean) as string[])],
       signerName: name, signerRut: rut, signedAt: fecha, plainText, marcadas,
     });
   } catch (e) {

@@ -2,15 +2,16 @@
 export const prerender = false;
 import Layout from '../../layouts/BaseLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { consentSections, CONSENT_OPTIONS, CONSENT_VERSION, consentContactEmail } from '../../lib/consent';
+import { consentSections, CONSENT_OPTIONS, CONSENT_VERSION, consentContactEmail, personaConsent } from '../../lib/consent';
 
 // Página pública (sin login) que el paciente abre desde el link que Valentina
 // le manda por WhatsApp o correo. El token es aleatorio e irrepetible: es lo
 // único que da acceso a este consentimiento.
 const { token } = Astro.params;
 
+// select('*'): sin la migración 0021 (columna persona) la página sigue igual que siempre.
 const { data: consent } = await supabase.from('consents')
-  .select('id, patient_id, signed_at, signer_name, accept_recording, accept_case_review, revoked_at')
+  .select('*')
   .eq('token', token!).maybeSingle();
 
 const { data: patient } = consent?.patient_id
@@ -20,8 +21,14 @@ const { data: patient } = consent?.patient_id
 // Link inválido: responde 404 (no 200) aunque muestre el mensaje (auditoría 15 oct 2026).
 if (!consent || !patient) Astro.response.status = 404;
 
+// Segunda persona de una pareja (0021, decisión D del 16 oct noche): firma SU propio consentimiento,
+// normalmente en su teléfono durante la primera sesión. No se le muestran ni precargan los datos de la
+// ficha (son de la persona agendada).
+const esPareja2 = !!consent && personaConsent(consent) === 2;
 // Paciente extranjera/o sin RUT chileno: firma con su documento de identidad.
-const sinRut = patient?.sin_rut === true && !patient?.rut;
+// La pareja lo indica ella misma en la página (casilla "No tengo RUT chileno").
+const sinRut = !esPareja2 && patient?.sin_rut === true && !patient?.rut;
+const sinRutFicha = sinRut;
 const contactEmail = await consentContactEmail();
 const sections = consentSections(contactEmail);
 const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -37,7 +44,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
     ) : consent.signed_at ? (
       <div class="text-center">
         <p class="font-heading text-2xl mb-3">Consentimiento firmado ✓</p>
-        <p class="text-stone mb-6">Firmado por {consent.signer_name} el {fmt(consent.signed_at)}<br />Te llegó una copia a tu correo.</p>
+        <p class="text-stone mb-6">Firmado por {consent.signer_name} el {fmt(consent.signed_at)}<br />{esPareja2 && !consent.signer_email ? 'La copia queda guardada en la ficha de la terapia.' : 'Te llegó una copia a tu correo.'}</p>
         <ul class="text-sm text-stone text-left inline-block space-y-1">
           <li>✓ Tratamiento de datos para tu atención</li>
           <li>{consent.accept_recording ? '✓' : '✕'} Grabación de sesiones para notas clínicas</li>
@@ -48,8 +55,9 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
       </div>
     ) : (
       <>
-        <p class="label text-stone mb-1">Hola {patient.name.split(' ')[0]}</p>
+        <p class="label text-stone mb-1">{esPareja2 ? 'Terapia de pareja' : `Hola ${patient.name.split(' ')[0]}`}</p>
         <h1 class="font-heading text-2xl md:text-3xl mb-2">Consentimiento informado</h1>
+        {esPareja2 && <p class="text-sm mb-4 border-l-2 border-dust pl-3">Este consentimiento es tuyo. En la terapia de pareja cada persona firma el suyo, con su nombre y su RUT.</p>}
         <p class="text-stone text-sm mb-10">Para el tratamiento de tus datos personales y de salud en la terapia con Ps. Valentina Orellana, según la Ley 21.719 de protección de datos personales. Puedes leer la <a href="/condiciones#privacidad" target="_blank" class="underline">política de privacidad completa</a>.</p>
 
         <div class="space-y-7 mb-10">
@@ -76,14 +84,25 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
           <div class="grid md:grid-cols-2 gap-4 pt-2">
             <div>
               <label class="label text-stone block mb-2" for="signer_name">Nombre completo *</label>
-              <input id="signer_name" name="signer_name" type="text" required value={patient.name} class="w-full border border-dust rounded px-3 py-2 text-sm" />
+              <input id="signer_name" name="signer_name" type="text" required value={esPareja2 ? '' : patient.name} autocomplete={esPareja2 ? 'name' : undefined} class="w-full border border-dust rounded px-3 py-2 text-sm" />
             </div>
             <div>
-              <label class="label text-stone block mb-2" for="signer_rut">{sinRut ? `${patient.doc_tipo || 'Documento de identidad'} *` : 'RUT *'}</label>
-              <input id="signer_rut" name="signer_rut" type="text" required value={sinRut ? (patient.doc_numero ?? '') : (patient.rut ?? '')} placeholder={sinRut ? 'Número de documento' : '12345678-9'} autocomplete="off" class="w-full border border-dust rounded px-3 py-2 text-sm" />
+              <label class="label text-stone block mb-2" for="signer_rut" id="signer_rut_label">{sinRut ? `${patient.doc_tipo || 'Documento de identidad'} *` : 'RUT *'}</label>
+              <input id="signer_rut" name="signer_rut" type="text" required value={esPareja2 ? '' : sinRut ? (patient.doc_numero ?? '') : (patient.rut ?? '')} placeholder={sinRut ? 'Número de documento' : '12345678-9'} autocomplete="off" class="w-full border border-dust rounded px-3 py-2 text-sm" />
+              {esPareja2 && (
+                <label class="flex gap-2 items-center mt-2 text-xs text-stone cursor-pointer">
+                  <input type="checkbox" id="sin_rut" name="sin_rut" class="w-4 h-4" /> No tengo RUT chileno (uso otro documento)
+                </label>
+              )}
             </div>
+            {esPareja2 && (
+              <div class="md:col-span-2">
+                <label class="label text-stone block mb-2" for="signer_email">Tu correo (opcional, para recibir tu copia)</label>
+                <input id="signer_email" name="signer_email" type="email" autocomplete="email" class="w-full border border-dust rounded px-3 py-2 text-sm" />
+              </div>
+            )}
           </div>
-          <p class="text-xs text-stone">Al apretar "Firmar" declaro que leí este documento y que firmo electrónicamente. Se guardará la fecha, la hora y el dispositivo desde donde firmo, y me llegará una copia por correo.</p>
+          <p class="text-xs text-stone">Al apretar "Firmar" declaro que leí este documento y que firmo electrónicamente. Se guardará la fecha, la hora y el dispositivo desde donde firmo{esPareja2 ? ', y si escribo mi correo me llegará una copia.' : ', y me llegará una copia por correo.'}</p>
 
           <button type="submit" id="btn-firmar" class="btn-dark w-full justify-center text-center">Firmar</button>
           <p id="consent-error" class="hidden text-sm text-red-600 text-center"></p>
@@ -93,17 +112,25 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
   </section>
 </Layout>
 
-<script define:vars={{ token, sinRut, version: CONSENT_VERSION }}>
+<script define:vars={{ token, sinRutFicha, esPareja2, version: CONSENT_VERSION }}>
 (function () {
   const form = document.getElementById('consent-form');
   if (!form) return;
   const btn = document.getElementById('btn-firmar');
   const errEl = document.getElementById('consent-error');
   const showErr = (t) => { errEl.textContent = t; errEl.classList.remove('hidden'); };
+  const casillaSinRut = document.getElementById('sin_rut');
+  const sinRutAhora = () => sinRutFicha || !!casillaSinRut?.checked;
+  casillaSinRut?.addEventListener('change', () => {
+    const l = document.getElementById('signer_rut_label');
+    if (l) l.textContent = casillaSinRut.checked ? 'Documento de identidad *' : 'RUT *';
+    form.signer_rut.placeholder = casillaSinRut.checked ? 'Número de documento' : '12345678-9';
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errEl.classList.add('hidden');
+    const sinRut = sinRutAhora();
     const rut = sinRut ? form.signer_rut.value.trim() : form.signer_rut.value.replace(/\./g, '').replace(/\s/g, '');
     if (sinRut ? rut.length < 4 : !/^\d{7,8}-[\dkK]$/.test(rut)) return showErr(sinRut ? 'Escribe el número de tu documento.' : 'Escribe tu RUT con guion, por ejemplo 12345678-9.');
     btn.disabled = true;
@@ -120,6 +147,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
           accept_treatment: form.accept_treatment.checked,
           accept_recording: form.accept_recording.checked,
           accept_case_review: form.accept_case_review.checked,
+          ...(esPareja2 ? { sin_rut: sinRut, signer_email: form.signer_email?.value.trim() ?? '' } : {}),
         }),
       });
       const d = await res.json();
