@@ -76,6 +76,8 @@ revoke all on public.consent_avisos from anon, authenticated;
 grant select, insert on public.consent_avisos to service_role; -- constancia: no se edita ni se borra
 
 -- ── Seg. M3: supresión de una transcripción a pedido del paciente ──
+-- SIN USO desde 02-decisiones-16oct-noche (C): se eliminó la supresión (la ficha se conserva 15 años).
+-- La columna se deja (no se borran columnas); 0020 le agrega el comentario en la base.
 -- Usa las columnas que ya trae 0014 (transcripciones.deleted_at, motivo_borrado, dek_envuelta) y
 -- deja quién la pidió y por qué canal. La fila queda como prueba; el texto se borra en R2 y B2.
 alter table public.transcripciones add column if not exists borrado_canal text;

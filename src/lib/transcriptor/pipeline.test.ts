@@ -100,13 +100,13 @@ const palabras = (texto: string, desde = 0, speaker?: string): PalabraAAI[] =>
 
 const RESUMEN = `## Resumen automático (IA)
 
-### Puntos clave
+### Puntos más importantes
 - Se conversó sobre la semana y el trabajo.
 
-### Tareas y acuerdos
+### Tareas
 - Registrar momentos de calma.
 
-### Para revisar la próxima sesión
+### Para trabajar en la próxima sesión
 - Cómo resultó el registro.`;
 
 // ─── Escenario ───────────────────────────────────────────────────────────────
@@ -242,7 +242,7 @@ test('E2E presencial individual: subida → transcribiendo → transcrita (cifra
   // H7: el contenido va cifrado (VOT1) y en claro queda null; se abre con la misma KEK.
   assert.equal(r.contenido, null);
   assert.match(String(r.contenido_cifrado), /^\\x564f5431/); // 'VOT1'
-  assert.match(String(await leerContenidoResumen(r as never, e.cifrado)), /Tareas y acuerdos/);
+  assert.match(String(await leerContenidoResumen(r as never, e.cifrado)), /### Tareas\n- Registrar momentos de calma/);
   // Al modelo solo va el nombre de pila (sin apellido) y sin Batch.
   const enviado = JSON.stringify(e.claude.llamadas[0]);
   assert.ok(enviado.includes('Camila') && !enviado.includes('Rojas'));

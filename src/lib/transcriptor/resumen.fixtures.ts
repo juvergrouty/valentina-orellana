@@ -1,4 +1,5 @@
 // Los 3 ejemplos sintéticos de 20-clinico.md §5 (datos 100 % inventados), como fixtures de prueba.
+// Resúmenes esperados con la estructura fija de Vale (02-decisiones-16oct-noche, B; prompt resumen-2026-10-16.3).
 import type { TramoTranscrito } from './tipos';
 
 /** "[hh:mm:ss] Hablante: texto" o "[hh:mm:ss] texto" → tramos (fin = inicio del siguiente). */
@@ -26,35 +27,22 @@ export const EJ1_TRANSCRIPCION = `
 [00:38:30] Camila: Sí, lo anoto en el celular.
 [00:47:00] Valentina: La próxima vez retomamos lo de "la que puede con todo", que quedó abierto.`;
 
+/** Ejemplo 1 con la estructura fija de Vale (02-decisiones-16oct-noche, B). */
 export const EJ1_RESUMEN = `## Resumen automático (IA)
 *Sesión individual · 3 oct 2026 · online · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*
 
-### Temas tratados
-- Sobrecarga y plazos en el trabajo.
-- Dificultad para negarse a pedidos.
+### Puntos más importantes
+- Camila cuenta que el lunes su jefa le pidió un informe para el mismo día; dice que se bloqueó y se quedó hasta las once en la oficina [01:14].
+- Relata opresión en el pecho y dificultad para pensar en ese momento; esa noche durmió alrededor de cuatro horas [02:35].
+- Dice temer que, si se niega, la vean como floja: «Siempre he sido la que puede con todo.» [09:50]
+- Cuenta que el miércoles avisó que otro informe estaría el viernes «y no pasó nada» [25:40].
+- La terapeuta propuso ver qué pasaría si Camila le dice a su jefa cuándo sí puede entregar [12:05].
 
-### Puntos clave
-- Camila cuenta que el lunes su jefa le pidió un informe para el mismo día; dice que "se bloqueó" y se quedó hasta las 23:00 en la oficina.
-- Relata opresión en el pecho y dificultad para pensar en ese momento; esa noche durmió alrededor de cuatro horas.
-- Dice temer que, si se niega, la vean como "floja", y se describe como "la que puede con todo".
-- Cuenta que el miércoles avisó que un informe estaría el viernes "y no pasó nada".
+### Tareas
+- Camila: anotar en el celular cada vez que diga que sí a algo que no quería y qué sintió — durante la semana [38:15].
 
-### En sus palabras
-- «Siento que si digo que no, me van a ver como floja.» [09:50]
-- «Siempre he sido la que puede con todo.» [09:50]
-
-### Cambios y datos mencionados
-- Sueño: durmió alrededor de cuatro horas la noche del lunes.
-
-### Intervenciones de la terapeuta
-- Preguntó por las sensaciones corporales en el momento del pedido.
-- Propuso explorar qué pasaría si Camila indica a su jefa cuándo sí puede entregar.
-
-### Tareas y acuerdos
-- Camila: anotar en el celular cada vez que acepte algo que no quería y qué sintió — durante la semana.
-
-### Para revisar la próxima sesión
-- Retomar "la que puede con todo" (la terapeuta dijo que quedó abierto).
+### Para trabajar en la próxima sesión
+- Retomar "la que puede con todo", que la terapeuta dijo que quedó abierto [47:00].
 - Revisar el registro de la semana.`;
 
 export const EJ2_TRANSCRIPCION = `
@@ -71,39 +59,24 @@ export const EJ2_TRANSCRIPCION = `
 [00:52:40] C: Yo elijo [inaudible] y las compras.
 [00:58:00] A: La próxima vez vemos cómo les fue y lo de los horarios, que no alcanzamos.`;
 
-/** Extracto de lo crítico (20-clinico §5, ejemplo 2) + una sección "En sus palabras" con citas reales. */
-export const EJ2_RESUMEN = `### Temas tratados
-- Distribución de las tareas del hogar y de la "carga de acordarse".
-- Horarios laborales de ambos (quedó pendiente).
+/** Ejemplo 2 (pareja) con la estructura fija: tareas por persona y "no consta" cuando falta. */
+export const EJ2_RESUMEN = `### Puntos más importantes
+- Javiera cuenta que discutieron otra vez por la casa; dice que llega a las siete y encuentra a Diego en el sillón [00:45].
+- Diego cuenta que trabaja desde las seis de la mañana y llega «muerto» [01:20]; dice sentir que lo que hace «nunca es suficiente» [03:15].
+- Javiera plantea que no se trata de cocinar el fin de semana: «se trata de que yo tengo que acordarme de todo» [04:02]
+- Tras hacer en sesión la lista de lo que hay que hacer en la casa, ambos dijeron que verla escrita les sirvió [31:00].
 
-### Perspectiva de Javiera
-- Cuenta que discutieron nuevamente por las tareas de la casa; dice que llega a las 19:00 y encuentra a Diego en el sillón.
-- Plantea que el tema no es cocinar el fin de semana sino que ella "tiene que acordarse de todo".
-- Dice que ver la lista escrita le sirvió.
-
-### Perspectiva de Diego
-- Cuenta que trabaja desde las 6:00 y llega "muerto".
-- Dice sentir que "nunca es suficiente" lo que hace; menciona que cocinó ambos días del fin de semana.
-- Dice que no sabía que ella se encargaba siempre de lo del pediatra.
-
-### En sus palabras
-- Javiera: «se trata de que yo tengo que acordarme de todo» [04:02]
-- Diego: «Siento que nunca es suficiente lo que hago.» [03:15]
-
-### Momentos de la interacción
-- Tras construir la lista en sesión, ambos dijeron que verla escrita les sirvió [31:00–31:10].
-
-### Tareas y acuerdos
-- De la pareja: cada uno elige dos tareas de la lista de las que se hace cargo completo, incluido acordarse — próxima semana.
+### Tareas
+- De la pareja: cada uno elige dos cosas de la lista de las que se hace cargo completo, incluido acordarse — próxima semana [52:20].
 - Diego: las compras y una segunda tarea que no se entiende en la transcripción [52:40].
 - Javiera: no consta en la transcripción qué tareas eligió.
 
-### Para revisar la próxima sesión
-- Cómo les fue con las tareas elegidas.
-- Horarios (la terapeuta dijo que no alcanzaron).
+### Para trabajar en la próxima sesión
+- Cómo les fue con las tareas elegidas [58:00].
+- Los horarios de ambos (la terapeuta dijo que no alcanzaron) [58:00].
 
-### Calidad de la transcripción
-- Hablantes inferidos: A = terapeuta (dirige preguntas y propone ejercicios), B = Javiera (Diego le dice "Javi"), C = Diego (la terapeuta se dirige a él por nombre y él responde).
+### Notas sobre la transcripción
+- Hablantes inferidos: A = terapeuta, B = Javiera (Diego le dice "Javi"), C = Diego (la terapeuta se dirige a él por nombre).
 - [52:40] tramo inaudible en la tarea elegida por Diego.`;
 
 export const EJ3_TRANSCRIPCION = `
@@ -118,27 +91,29 @@ export const EJ3_TRANSCRIPCION = `
 [00:45:00] Quedamos en que si se pone más fuerte llamas a tu hermano o al *4141, y nos vemos el jueves.`;
 
 /**
- * Ejemplo 3 reescrito según 01-decisiones-16oct (Atención neutra: sin prioridad, sin evaluación).
- * H15 (81-revision): Temas sin inferencias ("se fue" no dice separación): cita literal.
- * Las citas son las del ejemplo original de 20-clinico §5.
+ * Ejemplo 3 con la estructura fija: los temas de riesgo van PRIMERO dentro de "Puntos más importantes",
+ * literales y neutros, con minuto (01-decisiones-16oct, decisión 2; 02-decisiones-16oct-noche, B).
+ * H15 (81-revision): sin inferencias ("se fue" no dice separación): cita literal.
  */
 export const EJ3_RESUMEN = `## Resumen automático (IA)
 *Sesión individual · 10 oct 2026 · presencial · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*
 
-### Atención
+### Puntos más importantes
 - Se habló de ideas de no despertar — Dicho por: Tomás (inferido) — [15:40]
   «A veces pienso que sería más fácil no despertar. No es que vaya a hacer algo, pero lo pienso.»
 - Se habló de pastillas guardadas — Dicho por: Tomás (inferido) — [33:10]
   «Tengo guardadas las pastillas que me dio el doctor el año pasado, las [inaudible].»
 _Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._
+- Habla de su ánimo desde que, en sus palabras, «se fue la Fran» [02:05].
+- Dice que cuenta con su hermano [16:25].
 
-### Temas tratados
-- Ánimo desde que, en sus palabras, «se fue la Fran» [02:05].
+### Tareas
+- Tomás: si "se pone más fuerte", llamar a su hermano o al *4141 — hasta la próxima sesión [45:00].
+- Acuerdo: volver a verse el jueves [45:00].
 
-### Tareas y acuerdos
-- Tomás: si "se pone más fuerte", llamar a su hermano o al *4141 — hasta la próxima sesión.
-- Próxima sesión: jueves.
+### Para trabajar en la próxima sesión
+- No consta en la transcripción.
 
-### Calidad de la transcripción
-- La transcripción no identifica hablantes; la asignación terapeuta/paciente fue inferida por el contenido (preguntas y acuerdos vs. relato).
+### Notas sobre la transcripción
+- La transcripción no identifica hablantes; la asignación terapeuta/paciente fue inferida por el contenido.
 - [33:10] nombre del medicamento inaudible.`;

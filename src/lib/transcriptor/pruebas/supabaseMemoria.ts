@@ -179,8 +179,16 @@ class Consulta implements PromiseLike<Resp> {
       const cambios = this.valores as Fila;
       const afectadas = coincide();
       for (const f of afectadas) {
+        // 0020 (añadido por t-n-ficha): archivar vacía contenido/contenido_cifrado en la misma
+        // actualización que marca archivado_at con sus dos copias; un archivado no cambia su archivo.
+        const archivando = this.t === 'resumenes_ia' && !f.archivado_at && !!cambios.archivado_at
+          && !!(cambios.archivo_r2_key ?? f.archivo_r2_key) && !!cambios.archivo_b2_key && cambios.contenido === null && cambios.contenido_cifrado === null;
+        if (this.t === 'resumenes_ia' && f.archivado_at
+          && ['archivado_at', 'archivo_r2_key', 'archivo_b2_key', 'archivo_sha256', 'contenido', 'contenido_cifrado'].some((k) => k in cambios && cambios[k] !== f[k])) {
+          return { data: null, error: { message: 'un resumen archivado no cambia su archivo' } };
+        }
         if (this.t === 'resumenes_ia' && f.estado === 'listo'
-          && ['contenido', 'estado', 'grabacion_id', 'version', 'autor', 'modelo', 'rotulo'].some((k) => k in cambios && cambios[k] !== f[k])) {
+          && ['contenido', 'contenido_cifrado', 'estado', 'grabacion_id', 'version', 'autor', 'modelo', 'rotulo'].some((k) => k in cambios && cambios[k] !== f[k] && !(archivando && (k === 'contenido' || k === 'contenido_cifrado')))) {
           return { data: null, error: { message: 'un resumen listo no se modifica: crear una nueva versión' } };
         }
         const nueva = { ...f, ...structuredClone(cambios) };

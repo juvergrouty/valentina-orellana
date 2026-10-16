@@ -17,7 +17,7 @@ import {
 import type { Grabacion, PausaGrabacion, ResumenIA, TramoTranscrito } from '../../../../../lib/transcriptor/tipos';
 import { URL_CONFIRMAR_PASSKEY, accesoClinicoCookies } from '../../../../../lib/transcriptor/acceso';
 import { avisoAnexoResumen } from '../../../../../lib/transcriptor/resumen';
-import { FRASE_CONFIRMAR_SUPRESION } from '../../../../../lib/transcriptor/supresion';
+import { COLUMNAS_ARCHIVO, tieneTexto, type FilaArchivo } from '../../../../../lib/transcriptor/archivo';
 
 const { id, gid } = Astro.params;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,7 +33,7 @@ const bloqueoAcceso = acceso.ok ? null : acceso;
 if (bloqueoAcceso) Astro.response.status = bloqueoAcceso.status;
 
 type GrabVista = Pick<Grabacion, 'id' | 'patient_id' | 'origen' | 'tipo' | 'estado' | 'estado_antes_error' | 'session_date' | 'inicio_at' | 'duracion_seg' | 'pausas' | 'mapa_hablantes' | 'nota_sistema'>;
-type ResVista = Pick<ResumenIA, 'id' | 'version' | 'autor' | 'estado' | 'rotulo' | 'contenido' | 'listo_at' | 'created_at' | 'basado_en'> & { modelo?: string | null; contenido_cifrado?: unknown };
+type ResVista = Pick<ResumenIA, 'id' | 'version' | 'autor' | 'estado' | 'rotulo' | 'contenido' | 'listo_at' | 'created_at' | 'basado_en'> & { modelo?: string | null; contenido_cifrado?: unknown; archivo_r2_key?: string | null; archivo_b2_key?: string | null; archivado_at?: string | null };
 
 let nombrePaciente = '';
 let g: GrabVista | null = null;
@@ -79,7 +79,7 @@ if (bloqueoAcceso) {
       nombrePaciente = p.name as string;
       const [{ data: tr }, { data: rs }] = await Promise.all([
         supabase.from('transcripciones').select('id, r2_key').eq('grabacion_id', gid).is('deleted_at', null).maybeSingle(),
-        supabase.from('resumenes_ia').select('id, version, autor, estado, rotulo, contenido, contenido_cifrado, modelo, listo_at, created_at, basado_en')
+        supabase.from('resumenes_ia').select(`id, version, autor, estado, rotulo, contenido, contenido_cifrado, modelo, listo_at, created_at, basado_en, ${COLUMNAS_ARCHIVO}`)
           .eq('grabacion_id', gid).is('oculto_at', null).order('version', { ascending: false }),
       ]);
       versiones = (rs ?? []) as ResVista[];
@@ -113,15 +113,17 @@ if (bloqueoAcceso) {
 }
 
 // H6 + H7: los resúmenes se guardan cifrados; antes de abrirlos se registra `ver_resumen`.
+// 02-decisiones-16oct-noche B: los de sesiones fuera de las 4 últimas están archivados en R2 (+B2) y se
+// traen de ahí (archivo.ts), en memoria, solo para esta vista.
 let avisoResumen: string | null = null;
-if (!(import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') && g && versiones.some((r) => r.estado === 'listo' && (r.contenido || r.contenido_cifrado))) {
+if (!(import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') && g && versiones.some((r) => r.estado === 'listo' && tieneTexto(r as FilaArchivo))) {
   const { auditarObligatorio: registrar } = await import('../../../../../lib/transcriptor/auditoria');
   let ip: string | null = null;
   try { ip = Astro.clientAddress ?? null; } catch { /* sin IP */ }
   try {
     await registrar('vale', 'ver_resumen', { grabacionId: gid, patientId: id, request: Astro.request, clientAddress: ip, detalle: { vista: 'sesion' } });
-    const { conContenidoClaro } = await import('../../../../../lib/transcriptor/resumenCifrado');
-    const r = await conContenidoClaro(versiones);
+    const { conTextoResumen } = await import('../../../../../lib/transcriptor/archivo');
+    const r = await conTextoResumen(versiones as (ResVista & FilaArchivo)[]);
     versiones = r.filas as ResVista[];
     if (r.fallidas) avisoResumen = 'Algún resumen cifrado no se pudo abrir en este momento. Está guardado a salvo; intenta de nuevo en unos minutos.';
   } catch {
@@ -129,7 +131,8 @@ if (!(import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') && g &
     avisoResumen = 'No se pudo registrar el acceso en la bitácora. Por seguridad, el resumen no se muestra. Intenta de nuevo en un momento.';
   }
 }
-// H5 / seg. M3: pedidos del paciente sobre esta sesión.
+// H5: pedido del paciente sobre esta sesión (excluir de la IA). La supresión de transcripciones se
+// eliminó (02-decisiones-16oct-noche, C: la ficha se conserva 15 años).
 let excluidaIA = false;
 if (g && !(import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia')) {
   const { data: ex } = await supabase.from('grabaciones').select('excluir_ia_at').eq('id', gid).maybeSingle();
@@ -245,15 +248,12 @@ const fmtFechaHora = (iso: string | null) => iso ? new Date(iso).toLocaleString(
           )}
 
           <details class="card" id="ses-pedidos">
-            <summary class="ses-summary"><span class="label">Pedidos del paciente sobre esta sesión</span></summary>
+            <summary class="ses-summary"><span class="label">Pedido del paciente sobre esta sesión</span></summary>
             <div class="ped-cuerpo" data-patient-id={id}>
               {excluidaIA ? (
                 <p class="ia-nota">Esta sesión está excluida de las preguntas a la IA.</p>
               ) : (
                 <button type="button" class="btn btn-outline btn-sm ped-abrir" data-panel="ped-excluir">Excluir de las preguntas a la IA</button>
-              )}
-              {hayTranscripcion && (
-                <button type="button" class="btn btn-outline btn-sm ped-abrir ped-peligro" data-panel="ped-borrar">Borrar la transcripción (supresión)</button>
               )}
               {!excluidaIA && (
                 <div class="ped-panel" id="ped-excluir" hidden>
@@ -264,21 +264,6 @@ const fmtFechaHora = (iso: string | null) => iso ? new Date(iso).toLocaleString(
                   <textarea id="ped-excluir-motivo" class="ped-motivo" rows="3" maxlength="500"></textarea>
                   <div class="ia-acciones">
                     <button type="button" class="btn btn-dark btn-sm ped-enviar" data-accion="excluir_ia">Confirmar exclusión</button>
-                    <button type="button" class="btn btn-outline btn-sm ped-cancelar">Cancelar</button>
-                  </div>
-                </div>
-              )}
-              {hayTranscripcion && (
-                <div class="ped-panel" id="ped-borrar" hidden>
-                  <p class="ped-texto"><strong>Esto borra la transcripción de esta sesión de forma definitiva</strong> (el archivo cifrado y todas sus copias de respaldo). No se puede deshacer. Tus notas y el resumen automático no se borran. Queda constancia en la bitácora con el motivo.</p>
-                  <label class="label" for="ped-borrar-canal">¿Cómo lo pidió?</label>
-                  <select id="ped-borrar-canal" class="ped-canal"><option value="">Elige…</option><option value="whatsapp">WhatsApp</option><option value="correo">Correo</option><option value="presencial">En persona</option><option value="otro">Otro</option></select>
-                  <label class="label" for="ped-borrar-motivo">Motivo (quién lo pidió, cuándo y qué pidió)</label>
-                  <textarea id="ped-borrar-motivo" class="ped-motivo" rows="3" maxlength="500"></textarea>
-                  <label class="label" for="ped-borrar-frase">Para confirmar, escribe {FRASE_CONFIRMAR_SUPRESION}</label>
-                  <input id="ped-borrar-frase" class="ped-frase" type="text" autocomplete="off" autocapitalize="characters" />
-                  <div class="ia-acciones">
-                    <button type="button" class="btn btn-danger btn-sm ped-enviar" data-accion="suprimir_transcripcion">Borrar la transcripción</button>
                     <button type="button" class="btn btn-outline btn-sm ped-cancelar">Cancelar</button>
                   </div>
                 </div>
@@ -381,11 +366,10 @@ const fmtFechaHora = (iso: string | null) => iso ? new Date(iso).toLocaleString(
   .ia-aviso { font-size: 0.75rem; color: var(--stone); border-top: 1px solid var(--warm); margin-top: 0.85rem; padding-top: 0.6rem; }
   .ia-acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; align-items: center; }
   .ped-cuerpo { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; margin-top: 0.75rem; }
-  .ped-peligro { color: var(--red); border-color: currentColor; }
   .ped-panel { align-self: stretch; background: #fffbeb; border-left: 3px solid #b45309; padding: 0.75rem 0.85rem; display: flex; flex-direction: column; gap: 0.35rem; }
   .ped-panel[hidden] { display: none; }
   .ped-texto { font-size: 0.82rem; line-height: 1.5; color: var(--ink); }
-  .ped-canal, .ped-motivo, .ped-frase { width: 100%; font-size: 0.85rem; }
+  .ped-canal, .ped-motivo { width: 100%; font-size: 0.85rem; }
   @media (max-width: 600px) {
     .ia-acciones .btn, #hab-form .btn { min-height: 40px; }
     .tr-linea { grid-template-columns: minmax(0, 1fr); }
@@ -459,7 +443,7 @@ const fmtFechaHora = (iso: string | null) => iso ? new Date(iso).toLocaleString(
     }
   });
 
-  // ── Pedidos del paciente: excluir de la IA / suprimir la transcripción (confirmación escrita) ──
+  // ── Pedido del paciente: excluir esta sesión de las preguntas a la IA (confirmación escrita en la página) ──
   document.querySelectorAll<HTMLButtonElement>('.ped-abrir').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll<HTMLElement>('.ped-panel').forEach((p) => { p.hidden = p.id !== b.dataset.panel || !p.hidden; });
     document.getElementById(b.dataset.panel ?? '')?.querySelector<HTMLElement>('select')?.focus();
@@ -473,11 +457,10 @@ const fmtFechaHora = (iso: string | null) => iso ? new Date(iso).toLocaleString(
     const patientId = document.querySelector<HTMLElement>('.ped-cuerpo')?.dataset.patientId;
     const canal = panel?.querySelector<HTMLSelectElement>('.ped-canal')?.value ?? '';
     const motivo = panel?.querySelector<HTMLTextAreaElement>('.ped-motivo')?.value ?? '';
-    const confirmacion = panel?.querySelector<HTMLInputElement>('.ped-frase')?.value ?? '';
     b.disabled = true;
     pinta(msg, 'Guardando…', '#6b7280');
     try {
-      const d = await postPanel('/api/admin/transcriptor/suprimir', { accion: b.dataset.accion, grabacion_id: gid, patient_id: patientId, canal, motivo, confirmacion }) as { ok: boolean; error?: string; mensaje?: string };
+      const d = await postPanel('/api/admin/transcriptor/excluir-ia', { grabacion_id: gid, patient_id: patientId, canal, motivo }) as { ok: boolean; error?: string; mensaje?: string };
       if (!d.ok) throw new Error(d.error ?? 'No se pudo completar.');
       pinta(msg, '✓ ' + (d.mensaje ?? 'Listo.'), '#15803d');
       setTimeout(() => location.reload(), 1500);
