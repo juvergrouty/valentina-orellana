@@ -1,0 +1,135 @@
+---
+// Aviso rojo del transcriptor en TODAS las páginas del panel (decisión 8, 16 oct 2026).
+// Muestra cada error técnico abierto (qué falló, de qué sesión) con su botón para resolverlo ahí
+// mismo. Queda hasta que se resuelve. Datos: src/lib/transcriptor/alertas.ts (tabla 0017).
+// Si la tabla aún no existe o la base falla, no muestra nada (nunca rompe el panel).
+// `alertas` por props solo para la vista previa/pruebas visuales.
+import { listarAlertasAbiertas, etiquetaTipo, type AlertaAbierta } from '../../lib/transcriptor/alertas';
+
+interface Props { alertas?: AlertaAbierta[] }
+const MAX_VISIBLES = 6;
+const alertas = Astro.props.alertas ?? await listarAlertasAbiertas(MAX_VISIBLES + 20);
+const visibles = alertas.slice(0, MAX_VISIBLES);
+const n = alertas.length;
+
+const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+function fechaSesion(a: AlertaAbierta): string | null {
+  const s = a.sesion;
+  if (!s) return null;
+  const [y, m, d] = s.session_date.split('-').map(Number);
+  let txt = `${DIAS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d} ${MESES[m - 1]}`;
+  if (s.inicio_at) {
+    txt += `, ${new Date(s.inicio_at).toLocaleTimeString('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hour12: false })}`;
+  }
+  return `${txt} · ${s.origen === 'online' ? 'online' : 'presencial'}`;
+}
+const cuando = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+const BOTON: Record<string, string> = { reintentar: 'Reintentar', reintentar_resumen: 'Reintentar resumen' };
+---
+{n > 0 && (
+  <section id="tr-alertas" class="tr-alertas" role="alert" aria-labelledby="tr-alertas-titulo">
+    <p id="tr-alertas-titulo" class="tr-titulo">
+      ⚠ El transcriptor tiene <span id="tr-alertas-n">{n}</span> <span id="tr-alertas-pal">{n === 1 ? 'problema' : 'problemas'}</span>
+    </p>
+    <ul class="tr-lista">
+      {visibles.map((a) => {
+        const fecha = fechaSesion(a);
+        return (
+          <li class="tr-item" data-id={a.id}>
+            <div class="tr-texto">
+              <p class="tr-que"><span class="tr-tipo">{etiquetaTipo(a.tipo)}:</span> {a.titulo}</p>
+              <p class="tr-meta">
+                {fecha ? <>Sesión {fecha}{a.sesion?.paciente && a.sesion.patient_id
+                  ? <> · <a href={`/admin/pacientes/${a.sesion.patient_id}?tab=ia`}>{a.sesion.paciente}</a></> : ''}</>
+                  : 'Sin sesión asociada'}
+                {' · '}{a.veces > 1 ? `${a.veces} veces, la última el ${cuando(a.ultima_vez)}` : `el ${cuando(a.ultima_vez)}`}
+              </p>
+              {a.detalle && <p class="tr-detalle">{a.detalle}</p>}
+              <p class="tr-estado" aria-live="polite"></p>
+            </div>
+            <div class="tr-botones">
+              {(a.accion === 'reintentar' || a.accion === 'reintentar_resumen') && a.grabacion_id && (
+                <button type="button" class="tr-btn tr-btn-principal" data-accion={a.accion}>{BOTON[a.accion]}</button>
+              )}
+              <button type="button" class="tr-btn tr-btn-sec" data-accion="resolver">Marcar como resuelto</button>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+    {n > MAX_VISIBLES && (
+      <p class="tr-mas">…y {n - MAX_VISIBLES} más en <a href="/admin/transcriptor">Transcriptor</a>.</p>
+    )}
+  </section>
+)}
+
+<style>
+  .tr-alertas { background: #b91c1c; color: #fff; padding: 0.85rem 1.25rem; font-size: 0.875rem; line-height: 1.5; border-bottom: 3px solid #7f1d1d; }
+  .tr-titulo { font-weight: 700; font-size: 0.95rem; margin: 0 0 0.6rem; }
+  .tr-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+  .tr-item { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem 1rem; flex-wrap: wrap;
+    background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.22); border-radius: 8px; padding: 0.65rem 0.8rem; }
+  .tr-texto { flex: 1 1 320px; min-width: 0; }
+  .tr-que { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+  .tr-tipo { font-weight: 700; }
+  .tr-meta, .tr-detalle { margin: 0.15rem 0 0; font-size: 0.8rem; color: rgba(255,255,255,.88); overflow-wrap: anywhere; }
+  .tr-detalle { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
+  .tr-meta a, .tr-mas a { color: #fff; font-weight: 600; text-decoration: underline; }
+  .tr-estado { margin: 0.25rem 0 0; font-size: 0.8rem; font-weight: 600; }
+  .tr-estado:empty { display: none; }
+  .tr-botones { display: flex; flex-wrap: wrap; gap: 0.5rem; flex: 0 1 auto; }
+  .tr-btn { min-height: 48px; min-width: 48px; padding: 0 1rem; border-radius: 6px; font: inherit; font-size: 0.85rem; font-weight: 700;
+    cursor: pointer; touch-action: manipulation; }
+  .tr-btn-principal { background: #fff; color: #b91c1c; border: 2px solid #fff; }
+  .tr-btn-principal:hover { background: #fee2e2; }
+  .tr-btn-sec { background: transparent; color: #fff; border: 2px solid rgba(255,255,255,.75); }
+  .tr-btn-sec:hover { background: rgba(255,255,255,.12); }
+  .tr-btn:focus-visible { outline: 3px solid #fde68a; outline-offset: 2px; }
+  .tr-btn:disabled { opacity: .6; cursor: wait; }
+  .tr-mas { margin: 0.6rem 0 0; font-size: 0.8rem; }
+  @media (max-width: 640px) {
+    .tr-alertas { padding: 0.75rem 1rem; }
+    .tr-botones { width: 100%; }
+    .tr-btn { flex: 1 1 140px; padding: 0 0.5rem; font-size: 0.82rem; }
+  }
+</style>
+
+<script>
+  // Botones del aviso: llaman a /api/admin/transcriptor/alertas (cabecera X-Panel exigida por el servidor).
+  const caja = document.getElementById('tr-alertas');
+  caja?.querySelectorAll<HTMLLIElement>('.tr-item').forEach((li) => {
+    const estado = li.querySelector<HTMLElement>('.tr-estado')!;
+    const botones = li.querySelectorAll<HTMLButtonElement>('.tr-btn');
+    botones.forEach((btn) => btn.addEventListener('click', async () => {
+      const accion = btn.dataset.accion;
+      if (accion === 'resolver' && !confirm('¿Marcar como resuelto? El aviso desaparece del panel (si el error vuelve a pasar, aparece de nuevo).')) return;
+      botones.forEach((b) => (b.disabled = true));
+      estado.textContent = accion === 'resolver' ? 'Guardando…' : 'Reintentando…';
+      let res: { ok?: boolean; mensaje?: string; error?: string } = {};
+      try {
+        const r = await fetch('/api/admin/transcriptor/alertas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+          body: JSON.stringify({ id: li.dataset.id, accion }),
+        });
+        res = await r.json().catch(() => ({ ok: false, error: `Error ${r.status}` }));
+      } catch { res = { ok: false, error: 'Sin conexión. Intenta de nuevo.' }; }
+      if (res.ok) {
+        estado.textContent = `✓ ${res.mensaje ?? 'Listo.'}`;
+        setTimeout(() => {
+          li.remove();
+          const quedan = caja.querySelectorAll('.tr-item').length;
+          const total = Math.max(0, Number(document.getElementById('tr-alertas-n')?.textContent ?? '1') - 1);
+          if (quedan === 0 && total === 0) { caja.remove(); return; }
+          if (quedan === 0) { location.reload(); return; }
+          document.getElementById('tr-alertas-n')!.textContent = String(total);
+          document.getElementById('tr-alertas-pal')!.textContent = total === 1 ? 'problema' : 'problemas';
+        }, 1600);
+      } else {
+        estado.textContent = `⚠ ${res.error ?? 'No se pudo completar.'}`;
+        botones.forEach((b) => (b.disabled = false));
+      }
+    }));
+  });
+</script>
