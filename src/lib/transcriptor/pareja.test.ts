@@ -166,7 +166,7 @@ function fichaV2() {
 }
 const correoDe = (html: string): CorreoEnviado => ({ html, asunto: 'Sesión confirmada — Ps. Valentina Orellana', destinatario: 'diego@ejemplo.cl', enviadoAt: '2026-10-16T15:00:00.000Z', resendId: 're_123' });
 
-test('E: el anexo guardado es IGUAL al HTML enviado (con su SHA-256), ligado al aviso y a la firma', async () => {
+test('E: el anexo guardado es IGUAL al HTML enviado (con su SHA-256), ligado a la firma', async () => {
   const { db, c } = fichaV2();
   const a = await avisoV2ParaCorreo('diego@ejemplo.cl', db.cliente);
   assert.ok(a);
@@ -178,7 +178,8 @@ test('E: el anexo guardado es IGUAL al HTML enviado (con su SHA-256), ligado al 
   assert.equal(anexo.html_sha256, sha256Html(html));
   assert.deepEqual([anexo.consent_id, anexo.tipo, anexo.asunto, anexo.destinatario, anexo.enviado_at, anexo.resend_id],
     [c.id, 'aviso_v2', 'Sesión confirmada — Ps. Valentina Orellana', 'diego@ejemplo.cl', '2026-10-16T15:00:00.000Z', 're_123']);
-  assert.equal(anexo.aviso_id, db.tabla('consent_avisos')[0].id);
+  assert.equal(anexo.aviso_id, null, 'M1: el anexo se guarda antes que el aviso');
+  assert.equal(db.tabla('consent_avisos')[0].consent_id, c.id);
   const lista = await anexosDeConsentimientos([c.id], db.cliente);
   assert.equal(lista.length, 1);
   // Segunda confirmación: ya avisado, no hay aviso ni anexo nuevo.
@@ -197,15 +198,41 @@ test('E: las firmas v2 NO cambian (ni al avisar ni al guardar el anexo) y siguen
   assert.deepEqual([r.puede, r.consentIds], [true, [c.id]]);
 });
 
-test('E: si falla guardar el anexo (sin 0021), la constancia del aviso queda y el correo no se rompe', async () => {
-  const { db } = fichaV2();
+test('M1: si falla guardar el anexo (sin 0021 o fallo transitorio), NO se registra el aviso y vuelve a ir en el próximo correo', async () => {
+  const { db, c } = fichaV2();
   const desde = db.from.bind(db);
-  (db as unknown as { from: (t: string) => unknown }).from = (t: string) => (t === 'consent_anexos'
+  let falla = true;
+  (db as unknown as { from: (t: string) => unknown }).from = (t: string) => (t === 'consent_anexos' && falla
     ? { insert: async () => ({ data: null, error: { code: '42P01', message: 'relation does not exist' } }) }
     : desde(t));
   const a = await avisoV2ParaCorreo('diego@ejemplo.cl', db.cliente);
-  assert.equal(await registrarAvisoMostrado(a!, null, db.cliente, correoDe('<p>x</p>')), 1);
+  assert.equal(await registrarAvisoMostrado(a!, null, db.cliente, correoDe('<p>x</p>')), 0);
+  assert.equal(db.tabla('consent_avisos').length, 0, 'sin anexo no hay aviso registrado');
+  // Próximo correo: el aviso corresponde de nuevo; ahora el anexo se guarda y luego el aviso.
+  falla = false;
+  const b = await avisoV2ParaCorreo('diego@ejemplo.cl', db.cliente);
+  assert.deepEqual(b?.consentIds, [c.id]);
+  assert.equal(await registrarAvisoMostrado(b!, null, db.cliente, correoDe('<p>y</p>')), 1);
+  assert.equal(db.tabla('consent_anexos').length, 1);
+  assert.equal(db.tabla('consent_anexos')[0].html, '<p>y</p>');
   assert.equal(db.tabla('consent_avisos').length, 1);
+});
+
+test('M1: el anexo se guarda ANTES que el aviso (orden de inserción)', async () => {
+  const { db } = fichaV2();
+  const orden: string[] = [];
+  const desde = db.from.bind(db);
+  (db as unknown as { from: (t: string) => unknown }).from = (t: string) => {
+    const q = desde(t) as { insert?: (...x: unknown[]) => unknown };
+    if (q && typeof q.insert === 'function' && (t === 'consent_anexos' || t === 'consent_avisos')) {
+      const ins = q.insert.bind(q);
+      q.insert = (...x: unknown[]) => { orden.push(t); return ins(...x); };
+    }
+    return q;
+  };
+  const a = await avisoV2ParaCorreo('diego@ejemplo.cl', db.cliente);
+  assert.equal(await registrarAvisoMostrado(a!, null, db.cliente, correoDe('<p>x</p>')), 1);
+  assert.deepEqual(orden, ['consent_anexos', 'consent_avisos']);
 });
 
 test('E: sin datos del correo (llamada antigua) solo queda la constancia, sin anexo', async () => {

@@ -204,10 +204,14 @@ export function fichaEsPareja(x: SenalesPareja): boolean {
   return /\S\s+(y|&|e)\s+\S/i.test(String(x.nombre ?? '').trim());
 }
 
-/** Igual que puedeGrabar pero devuelve también firmantes/requeridas. Lanza si la base falla (falla cerrado). */
-export async function evaluarEnBase(patientId: string | null, tipo: TipoSesion, cliente?: SupabaseClient): Promise<EvaluacionConsentimiento> {
-  if (!patientId) return evaluarConsentimientos({ patientId: null, tipo, fechaNacimiento: null, filas: [], hoy: hoyChile() });
-  const c = await db(cliente);
+interface DatosFicha {
+  ficha: { name?: string | null; email?: string | null; birthdate?: string | null } | null;
+  filas: FilaConsentimiento[];
+  fichaPareja: boolean;
+}
+
+/** Lee la ficha, sus firmas y las señales de pareja. Lanza si la base falla (falla cerrado). */
+async function datosFicha(c: SupabaseClient, patientId: string): Promise<DatosFicha> {
   const [pac, cons, grabs] = await Promise.all([
     c.from('patients').select('id, name, email, birthdate').eq('id', patientId).maybeSingle(),
     c.from('consents')
@@ -218,21 +222,33 @@ export async function evaluarEnBase(patientId: string | null, tipo: TipoSesion, 
   if (pac.error) throw new Error(`consentimiento: no se pudo leer la ficha (${pac.error.message})`);
   if (cons.error) throw new Error(`consentimiento: no se pudieron leer los consentimientos (${cons.error.message})`);
   if (grabs.error) throw new Error(`consentimiento: no se pudieron leer las grabaciones (${grabs.error.message})`);
-  if (!pac.data) return evaluarConsentimientos({ patientId: null, tipo, fechaNacimiento: null, filas: [], hoy: hoyChile() });
+  if (!pac.data) return { ficha: null, filas: [], fichaPareja: false };
   const ficha = pac.data as { name?: string | null; email?: string | null; birthdate?: string | null };
   // D: la reserva manda (session_type o servicio de pareja). Si no se pueden leer, falla cerrado.
   const { reservas, tipoServicio } = await reservasDeFicha(c, ficha.email);
   const sessionTypes = reservas.map((b) => String(b.session_type ?? ''));
   const servicioPareja = fichaConReservaPareja(reservas, tipoServicio);
   const filas = (cons.data ?? []) as FilaConsentimiento[];
-  return evaluarConsentimientos({
-    patientId,
-    tipo,
-    fichaPareja: fichaEsPareja({ sessionTypes, servicioPareja, tiposGrabaciones: ((grabs.data ?? []) as { tipo?: string }[]).map((g) => g.tipo), filas, nombre: ficha.name }),
-    fechaNacimiento: ficha.birthdate ?? null,
-    filas,
-    hoy: hoyChile(),
-  });
+  const fichaPareja = fichaEsPareja({ sessionTypes, servicioPareja, tiposGrabaciones: ((grabs.data ?? []) as { tipo?: string }[]).map((g) => g.tipo), filas, nombre: ficha.name });
+  return { ficha, filas, fichaPareja };
+}
+
+/**
+ * ¿Esta ficha se trata como de pareja (pide 2 firmas)? ÚNICA fuente de verdad (86-revisión B1): la usan
+ * evaluarEnBase (para grabar), el link de la segunda persona (api/admin/consent.ts) y el bloque de la
+ * ficha (ConsentimientoParejaAnexos.astro). Así, si para grabar se exigen 2 firmas, el link para la
+ * segunda persona siempre existe. Lanza si la base falla.
+ */
+export async function fichaEsParejaEnBase(patientId: string, cliente?: SupabaseClient): Promise<boolean> {
+  return (await datosFicha(await db(cliente), patientId)).fichaPareja;
+}
+
+/** Igual que puedeGrabar pero devuelve también firmantes/requeridas. Lanza si la base falla (falla cerrado). */
+export async function evaluarEnBase(patientId: string | null, tipo: TipoSesion, cliente?: SupabaseClient): Promise<EvaluacionConsentimiento> {
+  if (!patientId) return evaluarConsentimientos({ patientId: null, tipo, fechaNacimiento: null, filas: [], hoy: hoyChile() });
+  const { ficha, filas, fichaPareja } = await datosFicha(await db(cliente), patientId);
+  if (!ficha) return evaluarConsentimientos({ patientId: null, tipo, fechaNacimiento: null, filas: [], hoy: hoyChile() });
+  return evaluarConsentimientos({ patientId, tipo, fichaPareja, fechaNacimiento: ficha.birthdate ?? null, filas, hoy: hoyChile() });
 }
 
 /** ¿transcriptor_activo = 'true'? Falla cerrado (error de lectura = apagado). */

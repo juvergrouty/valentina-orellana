@@ -12,7 +12,7 @@ import {
 import { URL_CONFIRMAR_PASSKEY, accesoClinicoCookies, type ResultadoAcceso } from '../../../lib/transcriptor/acceso';
 import { avisoAnexoResumen } from '../../../lib/transcriptor/resumen';
 import { conContenidoClaro } from '../../../lib/transcriptor/resumenCifrado';
-import { COLUMNAS_ARCHIVO } from '../../../lib/transcriptor/archivo';
+import { AVISO_FALTA_0020, consultarResumenes } from '../../../lib/transcriptor/archivo';
 import { auditarObligatorio } from '../../../lib/transcriptor/auditoria';
 import { identidadFirmante } from '../../../lib/transcriptor/consentimiento';
 import ConsentimientoParejaAnexos from '../../../components/admin/ConsentimientoParejaAnexos.astro';
@@ -66,6 +66,8 @@ let iaResumenes: ResFicha[] = [];
 let iaTranscritas = new Set<string>();
 let iaAcceso: ResultadoAcceso = { ok: true };
 let iaBloqueadas = false; // hay grabaciones, pero esta sesión no está confirmada con passkey
+/** 86-revisión M2: aviso arriba de las sesiones si falta 0020 o no se pudieron leer los resúmenes (nunca vaciar en silencio). */
+let iaAvisoBase: string | null = null;
 /** Solo demo (astro dev): HTML de los resúmenes "archivados" para que "Ver más" funcione sin R2. */
 let demoArchivados: Record<string, string> = {};
 const OCULTAS_EN_FICHA = new Set(['creada', 'cancelada', 'sin_consentimiento', 'bot_no_admitido']);
@@ -122,12 +124,14 @@ if (import.meta.env.DEV && demoIA) {
       iaGrabaciones = (gs as GrabFicha[]).filter((g) => !OCULTAS_EN_FICHA.has(g.estado));
       const ids = iaGrabaciones.map((g) => g.id);
       if (ids.length) {
-        const [{ data: rs }, { data: ts }] = await Promise.all([
-          supabase.from('resumenes_ia').select(`id, grabacion_id, version, autor, estado, rotulo, contenido, contenido_cifrado, modelo, listo_at, created_at, ${COLUMNAS_ARCHIVO}`)
-            .in('grabacion_id', ids).is('oculto_at', null).order('version', { ascending: false }),
+        const [{ data: rs, error: er, falta0020 }, { data: ts }] = await Promise.all([
+          consultarResumenes((cols) => supabase.from('resumenes_ia').select(`id, grabacion_id, version, autor, estado, rotulo, contenido, contenido_cifrado, modelo, listo_at, created_at${cols}`)
+            .in('grabacion_id', ids).is('oculto_at', null).order('version', { ascending: false })),
           supabase.from('transcripciones').select('grabacion_id').in('grabacion_id', ids).is('deleted_at', null),
         ]);
         iaResumenes = (rs ?? []) as ResFicha[];
+        if (er) iaAvisoBase = 'No se pudieron leer los resúmenes automáticos de esta ficha en este momento. Están guardados; recarga la página en unos minutos.';
+        else if (falta0020) iaAvisoBase = AVISO_FALTA_0020;
         iaTranscritas = new Set((ts ?? []).map((t: { grabacion_id: string }) => t.grabacion_id));
       }
     }
@@ -846,6 +850,12 @@ const faltanDatos = patient ? [
           </a>
         </div>
         <p id="hist-n" class="ia-sub hist-n" role="status" aria-live="polite"></p>
+
+        {iaAvisoBase && (
+          <div class="card ia-card ia-card-gris" role="alert">
+            <p class="ia-texto">{iaAvisoBase}</p>
+          </div>
+        )}
 
         {iaBloqueadas && !iaAcceso.ok && (
           <div class="card ia-card ia-card-gris" role="note">

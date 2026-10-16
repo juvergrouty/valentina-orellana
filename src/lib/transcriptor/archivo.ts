@@ -28,6 +28,29 @@ export const MAX_POR_CORRIDA = 5;
 /** Columnas de resumenes_ia que hay que pedir para poder leer un resumen archivado. */
 export const COLUMNAS_ARCHIVO = 'archivo_r2_key, archivo_b2_key, archivado_at';
 
+/** Aviso visible cuando falta la migración 0020 (86-revisión M2). */
+export const AVISO_FALTA_0020 = 'Falta aplicar la migración 0020 en Supabase. Los resúmenes se muestran igual (todos siguen en la base), pero los antiguos no se archivarán hasta aplicarla.';
+
+type ErrorPg = { code?: string; message?: string } | null;
+
+/**
+ * Lee resumenes_ia pidiendo las columnas del archivo (0020) y, si la base aún no las tiene (42703),
+ * repite la misma consulta SIN ellas (86-revisión M2): sin 0020 nada está archivado, así que todo el texto
+ * sigue en la base y la lectura es correcta. `armar` recibe el sufijo de columnas (", archivo_…" o "")
+ * para poner al final del select. Devuelve `falta0020` para que la pantalla muestre AVISO_FALTA_0020.
+ */
+export async function consultarResumenes<T = unknown>(
+  armar: (sufijoColumnas: string) => PromiseLike<{ data: unknown; error: ErrorPg }>,
+): Promise<{ data: T | null; error: ErrorPg; falta0020: boolean }> {
+  // (El select se arma con un sufijo variable: el tipo de supabase-js no lo puede leer; T lo pone quien llama.)
+  const r = await armar(`, ${COLUMNAS_ARCHIVO}`);
+  if (r.error?.code === '42703') {
+    const r2 = await armar('');
+    return { data: (r2.data ?? null) as T | null, error: r2.error, falta0020: true };
+  }
+  return { data: (r.data ?? null) as T | null, error: r.error, falta0020: false };
+}
+
 export const ACC_ARCHIVAR = 'archivar_resumen' as AccionAuditoria;
 
 export type AlmArchivo = Pick<AlmacenamientoTranscriptor, 'guardarCifrado' | 'leerCifrado' | 'copiarAB2' | 'borrar'>;

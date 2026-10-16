@@ -26,7 +26,7 @@ export const POST: APIRoute = async (ctx) => {
 
   const { data: rs, error } = await supabase.from('resumenes_ia')
     .select(`id, grabacion_id, estado, contenido, contenido_cifrado, ${COLUMNAS_ARCHIVO}`).in('id', ids as string[]);
-  if (error) return json({ ok: false, error: 'No se pudieron leer los resúmenes.' }, 500);
+  if (error) return json({ ok: false, error: error.code === '42703' ? 'Falta aplicar la migración 0020 en Supabase.' : 'No se pudieron leer los resúmenes.' }, 500);
   const gids = [...new Set((rs ?? []).map((r) => r.grabacion_id as string))];
   const { data: gs } = gids.length ? await supabase.from('grabaciones').select('id, patient_id').in('id', gids) : { data: [] };
   const deEsta = new Set((gs ?? []).filter((g) => g.patient_id === patientId).map((g) => g.id as string));

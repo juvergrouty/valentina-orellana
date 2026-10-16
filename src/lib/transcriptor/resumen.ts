@@ -17,7 +17,7 @@ import {
   MAX_TOKENS_PREGUNTA,
   type Grabacion, type Origen, type PausaGrabacion, type PeticionResumen, type TipoSesion, type TramoTranscrito,
 } from './tipos';
-import { COLUMNAS_ARCHIVO, textoResumen, type AlmArchivo, type FilaArchivo } from './archivo';
+import { consultarResumenes, textoResumen, type AlmArchivo, type FilaArchivo } from './archivo';
 import type { CifradoVOT1 } from './cifrado';
 import {
   CONFIG_PREGUNTAS, CONFIG_RESUMEN, llamarClaude,
@@ -808,10 +808,11 @@ export async function contextoSesionAnterior(
     .limit(5);
   if (error || !previas?.length) return null;
   for (const g of previas) {
-    const { data: r } = await c.from('resumenes_ia')
-      .select(`id, contenido, contenido_cifrado, ${COLUMNAS_ARCHIVO}`)
+    // 86-revisión M2: sin 0020 se lee igual (sin columnas de archivo) y el contexto previo no se pierde.
+    const { data: r } = await consultarResumenes((cols) => c.from('resumenes_ia')
+      .select(`id, contenido, contenido_cifrado${cols}`)
       .eq('grabacion_id', g.id).eq('estado', 'listo').is('oculto_at', null)
-      .order('version', { ascending: false }).limit(1).maybeSingle();
+      .order('version', { ascending: false }).limit(1).maybeSingle());
     let texto: string | null = null;
     try { texto = r ? await textoResumen(r as FilaArchivo, { cif, alm }) : null; } catch { texto = null; }
     const ctx = extraerContextoPrevio(texto);

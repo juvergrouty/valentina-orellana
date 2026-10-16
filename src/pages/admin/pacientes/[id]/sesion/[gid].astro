@@ -17,7 +17,7 @@ import {
 import type { Grabacion, PausaGrabacion, ResumenIA, TramoTranscrito } from '../../../../../lib/transcriptor/tipos';
 import { URL_CONFIRMAR_PASSKEY, accesoClinicoCookies } from '../../../../../lib/transcriptor/acceso';
 import { avisoAnexoResumen } from '../../../../../lib/transcriptor/resumen';
-import { COLUMNAS_ARCHIVO, tieneTexto, type FilaArchivo } from '../../../../../lib/transcriptor/archivo';
+import { consultarResumenes, tieneTexto, type FilaArchivo } from '../../../../../lib/transcriptor/archivo';
 
 const { id, gid } = Astro.params;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -42,6 +42,7 @@ let tramos: TramoTranscrito[] | null = null;
 let hayTranscripcion = false;
 let aviso: string | null = null;    // por qué no se muestra la transcripción (sin términos técnicos)
 let noEncontrada = false;
+let avisoLecturaResumen: string | null = null;
 
 if (bloqueoAcceso) {
   // Sin acceso clínico: no se consulta ni se descifra nada.
@@ -77,12 +78,14 @@ if (bloqueoAcceso) {
     } else {
       g = grab as GrabVista;
       nombrePaciente = p.name as string;
-      const [{ data: tr }, { data: rs }] = await Promise.all([
+      const [{ data: tr }, { data: rs, error: er }] = await Promise.all([
         supabase.from('transcripciones').select('id, r2_key').eq('grabacion_id', gid).is('deleted_at', null).maybeSingle(),
-        supabase.from('resumenes_ia').select(`id, version, autor, estado, rotulo, contenido, contenido_cifrado, modelo, listo_at, created_at, basado_en, ${COLUMNAS_ARCHIVO}`)
-          .eq('grabacion_id', gid).is('oculto_at', null).order('version', { ascending: false }),
+        consultarResumenes((cols) => supabase.from('resumenes_ia').select(`id, version, autor, estado, rotulo, contenido, contenido_cifrado, modelo, listo_at, created_at, basado_en${cols}`)
+          .eq('grabacion_id', gid).is('oculto_at', null).order('version', { ascending: false })),
       ]);
       versiones = (rs ?? []) as ResVista[];
+      // 86-revisión M2: sin 0020 se lee igual (consultarResumenes); si aun así falla, se dice (no "sin resumen").
+      if (er) avisoLecturaResumen = 'No se pudieron leer los resúmenes de esta sesión en este momento. Están guardados; recarga la página en unos minutos.';
       hayTranscripcion = !!tr;
       if (tr) {
         let clientAddress: string | null = null;
@@ -115,7 +118,7 @@ if (bloqueoAcceso) {
 // H6 + H7: los resúmenes se guardan cifrados; antes de abrirlos se registra `ver_resumen`.
 // 02-decisiones-16oct-noche B: los de sesiones fuera de las 4 últimas están archivados en R2 (+B2) y se
 // traen de ahí (archivo.ts), en memoria, solo para esta vista.
-let avisoResumen: string | null = null;
+let avisoResumen: string | null = avisoLecturaResumen;
 if (!(import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') && g && versiones.some((r) => r.estado === 'listo' && tieneTexto(r as FilaArchivo))) {
   const { auditarObligatorio: registrar } = await import('../../../../../lib/transcriptor/auditoria');
   let ip: string | null = null;

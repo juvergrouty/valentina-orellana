@@ -152,11 +152,17 @@ export function urlAccion(urlPanel: string, alertaId: string, accion: string): s
 export function armarCorreo(
   f: Pick<AlertaFila, 'tipo' | 'titulo' | 'detalle' | 'veces'> & Partial<Pick<AlertaFila, 'id' | 'clave' | 'accion' | 'grabacion_id'>>,
   urlPanel: string,
+  /**
+   * Estado de la sesión (86-revisión B4): con él, el correo trae el botón que repara (reintentar,
+   * rescatar…) aunque el aviso haya nacido con accion = 'revisar'. Nunca se escribe nada de la sesión
+   * en el correo: solo decide qué botones van. undefined = no se pudo leer (acciones sin sesión).
+   */
+  sesion?: SesionDeAlerta | null,
 ): { asunto: string; html: string; texto: string } {
   const asunto = sanearTexto(`⚠ Transcriptor: ${f.titulo}`, 150);
   const acciones = f.id && f.clave
-    ? accionesDisponibles({ tipo: f.tipo, clave: f.clave, accion: f.accion ?? 'revisar', grabacion_id: f.grabacion_id ?? null }, undefined)
-      .map((a) => ({ etiqueta: etiquetaAccion(a), url: urlAccion(urlPanel, f.id!, a) }))
+    ? accionesDisponibles({ tipo: f.tipo, clave: f.clave, accion: f.accion ?? 'revisar', grabacion_id: f.grabacion_id ?? null }, sesion)
+      .map((a) => ({ etiqueta: etiquetaAccion(a, sesion), url: urlAccion(urlPanel, f.id!, a) }))
     : [];
   const lineas = [
     `${etiquetaTipo(f.tipo)}: ${f.titulo}`,
@@ -210,6 +216,11 @@ export interface RepoAlertas {
   /** Cierra las abiertas que calzan (siempre resuelta_por = 'sistema'). */
   resolver(filtro: FiltroResolver, ahoraIso: string): Promise<number>;
   correoDestino(): Promise<string | null>;
+  /**
+   * Estado de la sesión del aviso, para que el correo traiga el botón que repara (86-revisión B4).
+   * Opcional: sin él el correo calcula las acciones sin sesión. Lanza si la base falla.
+   */
+  leerSesion?(grabacionId: string): Promise<SesionDeAlerta | null>;
 }
 
 const COLS = 'id, creada_at, tipo, titulo, detalle, grabacion_id, accion, clave, veces, ultima_vez, resuelta_at, resuelta_por, correo_enviado_at';
@@ -365,6 +376,7 @@ export function repoAlertasSupabase(db: SupabaseClient): RepoAlertas {
       const v = String((data as { value?: string } | null)?.value ?? '').trim();
       return v || null;
     },
+    leerSesion: (gid) => leerSesionDeAlerta(db, gid),
   };
 }
 
@@ -492,7 +504,12 @@ export function crearAlertas(deps: DepsAlertas = {}): ServicioAlertas {
       const limite = new Date(t.getTime() - FRENO_CORREO_MS).toISOString();
       if (!(await r.reclamarCorreo(fila.id, t.toISOString(), limite))) return;
       const para = (await r.correoDestino().catch(() => null)) ?? CORREO_VALE_RESPALDO;
-      const ok = await enviar(para, armarCorreo(fila, urlPanel));
+      // B4: con la sesión, el correo trae el botón que repara (no solo "Volver a revisar").
+      let sesion: SesionDeAlerta | null | undefined;
+      if (fila.grabacion_id && r.leerSesion) {
+        try { sesion = await r.leerSesion(fila.grabacion_id); } catch { sesion = undefined; }
+      }
+      const ok = await enviar(para, armarCorreo(fila, urlPanel, sesion));
       if (!ok) await r.liberarCorreo(fila.id, fila.correo_enviado_at);
     } catch (e) {
       console.error('[transcriptor/alertas] correo de respaldo:', e instanceof Error ? e.message : e);

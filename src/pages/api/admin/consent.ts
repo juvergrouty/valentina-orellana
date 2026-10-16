@@ -2,7 +2,9 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { sendConsentLinkEmail } from '../../../lib/email';
 import { consentUrl, FaltaMigracion0021, getOrCreatePendingConsent, whatsappConsentMessage } from '../../../lib/consent';
-import { correoParejaValido, estadoPareja, fichaEsParejaPorReserva, resumenEstadoPareja, urlWhatsAppPareja } from '../../../lib/transcriptor/pareja';
+import { correoParejaValido, enmascararCorreo, estadoPareja, resumenEstadoPareja, urlWhatsAppPareja } from '../../../lib/transcriptor/pareja';
+import { fichaEsParejaEnBase } from '../../../lib/transcriptor/consentimiento';
+import { guardiaPanel } from '../../../lib/transcriptor/peticion';
 import { auditar } from '../../../lib/transcriptor/auditoria';
 import type { AccionAuditoria } from '../../../lib/transcriptor/tipos';
 
@@ -26,7 +28,8 @@ function json(data: unknown, status = 200) {
 //           de pareja — decisión D del 16 oct noche),
 //           'pareja_email' (manda ese link al correo que escribe Vale; el correo NO se guarda),
 //           'pareja_estado' (¿ya firmó la segunda persona? — lo consulta la ficha mientras muestra el QR).
-export const POST: APIRoute = async ({ request, url }) => {
+export const POST: APIRoute = async (ctx) => {
+  const { request, url } = ctx;
   let body: Record<string, string>;
   try { body = await request.json(); }
   catch { return json({ ok: false, error: 'Body inválido.' }, 400); }
@@ -87,16 +90,21 @@ export const POST: APIRoute = async ({ request, url }) => {
   }
 
   if (action === 'pareja_link' || action === 'pareja_whatsapp' || action === 'pareja_email') {
+    // 86-revisión B2: crean el consentimiento de la persona 2 y pueden mandar un correo a una dirección
+    // libre → mismo estándar que los endpoints del transcriptor (Origin + X-Panel + sesión estricta) y bitácora.
+    const rechazo = await guardiaPanel(ctx, action as AccionAuditoria);
+    if (rechazo) return rechazo;
     // pareja_email: el correo SOLO se usa para este envío; no se guarda en la ficha ni en el consentimiento.
     const correoPareja = action === 'pareja_email' ? correoParejaValido(body.email) : null;
     if (action === 'pareja_email' && !correoPareja) return json({ ok: false, error: 'Revisa el correo: no parece válido.' }, 400);
     if (correoPareja && correoPareja === String(patient.email ?? '').trim().toLowerCase()) {
       return json({ ok: false, error: 'Ese es el correo de la persona agendada. Escribe el de la segunda persona.' }, 400);
     }
+    // B1: la MISMA regla que exige 2 firmas para grabar (consentimiento.ts): si pide 2 firmas, hay link.
     let esPareja: boolean;
-    try { esPareja = await fichaEsParejaPorReserva(supabase, patient.email); }
+    try { esPareja = await fichaEsParejaEnBase(patientId, supabase); }
     catch { return json({ ok: false, error: 'No se pudieron revisar las reservas. Intenta de nuevo.' }, 500); }
-    if (!esPareja) return json({ ok: false, error: 'Esta ficha no tiene reservas de pareja.' }, 409);
+    if (!esPareja) return json({ ok: false, error: 'Esta ficha no es de pareja (no tiene reservas de pareja ni dos personas).' }, 409);
     let p2: { id: string; token: string };
     try { p2 = await getOrCreatePendingConsent(patientId, 2); }
     catch (e) {
@@ -104,13 +112,19 @@ export const POST: APIRoute = async ({ request, url }) => {
       return json({ ok: false, error: e instanceof FaltaMigracion0021 ? e.message : 'No se pudo crear el link de la pareja. Intenta de nuevo.' }, 500);
     }
     const linkP2 = consentUrl(url.origin, p2.token);
-    if (action === 'pareja_link') return json({ ok: true, url: linkP2 });
+    // Bitácora (sin el token ni el correo completo).
+    const bitacora = (detalle: Record<string, unknown>, resultado: 'ok' | 'error' = 'ok') =>
+      auditar('vale', action as AccionAuditoria, { patientId, request, clientAddress: (() => { try { return ctx.clientAddress ?? null; } catch { return null; } })(), resultado, detalle: { consent_id: p2.id, ...detalle } });
+    if (action === 'pareja_link') { await bitacora({ canal: 'link' }); return json({ ok: true, url: linkP2 }); }
     if (correoPareja) {
-      const res = await sendConsentLinkEmail({ patientName: '', patientEmail: correoPareja, url: linkP2 });
+      // B3: el correo de la pareja no se guarda: en admin_logs y en la bitácora queda enmascarado.
+      const res = await sendConsentLinkEmail({ patientName: '', patientEmail: correoPareja, url: linkP2, destinatarioEnLog: enmascararCorreo(correoPareja) });
+      await bitacora({ canal: 'correo', destinatario: enmascararCorreo(correoPareja) }, res.sent ? 'ok' : 'error');
       if (!res.sent) return json({ ok: false, error: 'No se pudo enviar el correo. Intenta de nuevo o usa WhatsApp.' }, 500);
       await supabase.from('consents').update({ sent_at: new Date().toISOString(), sent_via: 'email' }).eq('id', p2.id).is('signed_at', null);
       return json({ ok: true, url: linkP2 });
     }
+    await bitacora({ canal: 'whatsapp' });
     await supabase.from('consents').update({ sent_at: new Date().toISOString(), sent_via: 'whatsapp' }).eq('id', p2.id).is('signed_at', null);
     return json({ ok: true, url: linkP2, waUrl: urlWhatsAppPareja(String(patient.name ?? '').split(' ')[0], linkP2) });
   }

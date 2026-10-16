@@ -120,7 +120,12 @@ export function filaAnexo(a: AvisoPendiente, consentId: string, avisoId: string 
 
 /**
  * Constancia de que se mostró (después de que el correo salió). Idempotente por consent_id.
- * Con `correo`, guarda además la copia fiel del correo como anexo de cada firma avisada (0021).
+ * Con `correo`, PRIMERO guarda la copia fiel del correo como anexo de cada firma (0021) y SOLO SI quedó
+ * guardada registra el aviso (0019) — 86-revisión M1: si el anexo no se pudo guardar (falta 0021, fallo
+ * transitorio), el aviso NO se registra y vuelve a ir en el próximo correo, así nunca queda un aviso
+ * "mostrado" sin su copia fiel. El anexo queda con aviso_id null (consent_avisos aún no existe al
+ * guardarlo y la tabla no admite update); se liga por consent_id + tipo (único) y booking_id.
+ * Si el anexo ya existía (23505: un intento anterior lo guardó y falló el aviso), se registra el aviso.
  * Nunca toca la fila del consentimiento (consents): la firma v2 queda exactamente igual.
  */
 export async function registrarAvisoMostrado(a: AvisoPendiente, bookingId: string | null | undefined, cliente?: SupabaseClient, correo?: CorreoEnviado): Promise<number> {
@@ -128,18 +133,21 @@ export async function registrarAvisoMostrado(a: AvisoPendiente, bookingId: strin
     const c = await db(cliente);
     let n = 0;
     for (const consentId of a.consentIds) {
-      const { data, error } = await c.from('consent_avisos').insert({
+      if (correo) {
+        const { error: ex } = await c.from('consent_anexos').insert(filaAnexo(a, consentId, null, bookingId, correo));
+        if (ex && ex.code !== '23505') {
+          console.warn('[transcriptor/avisoV2] no se pudo guardar el anexo del aviso (¿falta 0021?); el aviso irá en el próximo correo:', ex.code);
+          continue;
+        }
+      }
+      const { error } = await c.from('consent_avisos').insert({
         consent_id: consentId, patient_id: a.patientId, booking_id: bookingId ?? null, canal: 'correo', texto_version: TEXTO_AVISO_V2_VERSION,
-      }).select('id').maybeSingle();
+      });
       if (error) {
         if (error.code !== '23505') console.warn('[transcriptor/avisoV2] no se pudo registrar el aviso:', error.code);
-        continue; // ya registrado antes: su anexo es el de ese envío
+        continue; // ya registrado antes
       }
       n++;
-      if (!correo) continue;
-      const avisoId = (data as { id?: string } | null)?.id ?? null;
-      const { error: ex } = await c.from('consent_anexos').insert(filaAnexo(a, consentId, avisoId, bookingId, correo));
-      if (ex && ex.code !== '23505') console.warn('[transcriptor/avisoV2] no se pudo guardar el anexo del aviso (¿falta 0021?):', ex.code);
     }
     return n;
   } catch {

@@ -12,7 +12,7 @@
 // servidor). Quien llama (endpoint) exige passkey y registra la bitácora ANTES de leer contenido.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TranscripcionClara } from './tipos';
-import { COLUMNAS_ARCHIVO, conTextoResumen, type AlmArchivo, type FilaArchivo, type OpcionesLectura } from './archivo';
+import { consultarResumenes, conTextoResumen, type AlmArchivo, type FilaArchivo, type OpcionesLectura } from './archivo';
 import { lineasTranscripcion, resumenATexto } from './panel';
 import { avisoAnexoResumen } from './resumen';
 import { generarPdf, type BloquePdf } from './pdf';
@@ -150,7 +150,7 @@ export async function recopilarFicha(patientId: string, deps: DepsExportacion, o
 
   let agendadas: FichaExportada['sesiones_agendadas'] = [];
   if (p.email) {
-    const { data: bs } = await db.from('bookings').select('session_date, session_time, session_type, status, custom_title').eq('patient_email', p.email).order('session_date', { ascending: true });
+    const { data: bs } = await db.from('bookings').select('session_date, session_time, session_type, status, custom_title').ilike('patient_email', String(p.email).trim().replace(/[\\%_]/g, (m) => `\\${m}`)).order('session_date', { ascending: true }); // B5: sin distinguir mayúsculas (como pareja.ts)
     agendadas = ((bs ?? []) as Record<string, unknown>[])
       .filter((b) => b.session_date !== '2099-12-31' && enAnio(b.session_date as string, anio))
       .map((b) => ({ fecha: String(b.session_date), hora: b.session_time ? String(b.session_time).slice(0, 5) : null, tipo: (b.session_type as string) ?? null, estado: (b.status as string) ?? null, titulo: (b.custom_title as string) ?? null }));
@@ -161,7 +161,8 @@ export async function recopilarFicha(patientId: string, deps: DepsExportacion, o
   const ids = grabaciones.map((g) => g.id);
   const [{ data: rs, error: er }, { data: ts, error: et }] = ids.length
     ? await Promise.all([
-      db.from('resumenes_ia').select(`id, grabacion_id, version, autor, estado, rotulo, modelo, prompt_version, listo_at, oculto_at, contenido, contenido_cifrado, ${COLUMNAS_ARCHIVO}`).in('grabacion_id', ids).order('version', { ascending: true }),
+      // 86-revisión M2: sin 0020 se exporta igual (todo sigue en la base) en vez de fallar con 502.
+      consultarResumenes((cols) => db.from('resumenes_ia').select(`id, grabacion_id, version, autor, estado, rotulo, modelo, prompt_version, listo_at, oculto_at, contenido, contenido_cifrado${cols}`).in('grabacion_id', ids).order('version', { ascending: true })),
       db.from('transcripciones').select('id, grabacion_id, r2_key, b2_key, modelo, idioma, duracion_s, palabras, sha256_cifrado, deleted_at').in('grabacion_id', ids),
     ])
     : [{ data: [], error: null }, { data: [], error: null }];

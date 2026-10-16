@@ -1,7 +1,7 @@
 ---
 // Bloque de consentimientos de la ficha (decisiones D y E de docs/transcriptor/02-decisiones-16oct-noche.md):
-//   D. "Consentimiento de la pareja": en toda ficha con una reserva de pareja (session_type 'pareja-*'
-//      o servicio de pareja), un link propio para la SEGUNDA persona (consents.persona = 2, 0021) y su
+//   D. "Consentimiento de la pareja": en toda ficha que pide 2 firmas para grabar (misma regla que
+//      consentimiento.ts: reserva de pareja — session_type 'pareja-*' o servicio de pareja —, etc.), un link propio para la SEGUNDA persona (consents.persona = 2, 0021) y su
 //      estado (Falta / Firmado por X el …). Uso real: la persona no agendada firma en la consulta en
 //      SU celular (botón "Mostrar código QR": QR grande generado en el servidor, sin servicios
 //      externos; mientras está abierto se revisa sola la firma) o en su casa antes de la primera
@@ -10,9 +10,9 @@
 //   E. Anexos: la copia fiel del correo con el aviso de cambio de herramienta (consent_anexos, 0021).
 // Componente aparte para tocar lo mínimo de pacientes/[id].astro. Sin la migración 0021 el bloque
 // avisa que falta y el resto de la ficha queda igual.
-import { supabase } from '../../lib/supabase';
 import { consentUrl, FaltaMigracion0021, getOrCreatePendingConsent } from '../../lib/consent';
 import { estadoPareja, fichaConReservaPareja, urlWhatsAppPareja, type ReservaMinima } from '../../lib/transcriptor/pareja';
+import { fichaEsPareja, fichaEsParejaEnBase } from '../../lib/transcriptor/consentimiento';
 import { anexosDeConsentimientos, TITULO_ANEXO, type AnexoConsentimiento } from '../../lib/transcriptor/avisoV2';
 import { qrSvg } from '../../lib/transcriptor/qr';
 
@@ -29,25 +29,22 @@ const demoFalta = esDemo && Astro.url.searchParams.get('pareja') === 'falta';
 
 const fmtCL = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
-// ── D: ¿la reserva es de pareja? (session_type o tipo del servicio reservado) ──
+// ── D: ¿la ficha es de pareja? MISMA regla que exige 2 firmas para grabar (86-revisión B1:
+//    consentimiento.ts fichaEsParejaEnBase — reserva de pareja, grabación de pareja, 2 personas que
+//    firmaron o nombre "X y Y"). Si para grabar se piden 2 firmas, aquí siempre está el link. ──
 let esPareja = false;
 let errorReservas = false;
 if (esDemo) {
   esPareja = true;
 } else {
   try {
-    const ids = [...new Set(bookings.map((b) => String(b.service_id ?? '')).filter(Boolean))];
-    const tipoServicio = new Map<string, string | null>();
-    if (ids.length) {
-      const { data, error } = await supabase.from('services_catalog').select('id, type').in('id', ids);
-      if (error) throw new Error(error.message);
-      for (const s of (data ?? []) as { id: string; type: string | null }[]) tipoServicio.set(String(s.id), s.type);
-    }
-    esPareja = fichaConReservaPareja(bookings, tipoServicio);
+    esPareja = await fichaEsParejaEnBase(patient.id);
   } catch {
-    // Solo por session_type si no se pudo leer el catálogo (no se esconde el bloque de una pareja).
+    // Sin la base completa: con lo que trae la ficha (no se esconde el bloque de una pareja).
     errorReservas = true;
-    esPareja = fichaConReservaPareja(bookings, new Map());
+    esPareja = fichaConReservaPareja(bookings, new Map()) || fichaEsPareja({
+      sessionTypes: bookings.map((b) => b.session_type), tiposGrabaciones: [], filas: consentRows, nombre: patient.name,
+    });
   }
 }
 
@@ -167,7 +164,7 @@ if (esDemo) {
         )}
       </>
     )}
-    {errorReservas && <p class="cp-sub">No se pudo leer el catálogo de servicios: se revisó solo el tipo de sesión de las reservas.</p>}
+    {errorReservas && <p class="cp-sub">No se pudieron revisar todas las reservas: se usó lo que muestra la ficha. Recarga en un momento.</p>}
   </section>
 )}
 
@@ -254,7 +251,7 @@ if (esDemo) {
 <script>
   // Consentimiento de la pareja: QR (con revisión automática de la firma), WhatsApp, copiar link y correo.
   const post = async (cuerpo: Record<string, unknown>) => {
-    const r = await fetch('/api/admin/consent', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
+    const r = await fetch('/api/admin/consent', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Panel': '1' }, body: JSON.stringify(cuerpo) });
     let d: { ok?: boolean; error?: string; [k: string]: unknown } = {};
     try { d = await r.json(); } catch { /* respuesta sin JSON */ }
     if (!r.ok || !d.ok) throw new Error(d.error || 'No se pudo completar. Intenta de nuevo.');

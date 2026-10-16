@@ -1,8 +1,12 @@
 // Código QR en SVG, generado EN EL SERVIDOR (consentimiento de la pareja: la segunda persona lo
 // escanea en la consulta con su celular). Librería `qrcode-generator` 2.0.4 (Kazuhiko Arase, MIT,
 // sin dependencias, no hace llamadas de red): el link nunca sale a un servicio externo.
-// Pruebas en qr.test.ts.
+// Pruebas en qr.test.ts (decodifica el SVG y compara con el link).
 import qrcode from 'qrcode-generator';
+
+// La librería toma cada carácter como 1 byte (charCode & 0xff: rompería tildes/ñ). Los links son ASCII,
+// pero igual se le pasan los bytes UTF-8 como "cadena binaria" (lo verifica qr.test.ts).
+const bytesUtf8 = (s: string) => String.fromCharCode(...new TextEncoder().encode(s));
 
 /**
  * SVG cuadrado y escalable (viewBox en módulos, 4 módulos de margen como pide la norma).
@@ -11,7 +15,7 @@ import qrcode from 'qrcode-generator';
  */
 export function qrSvg(texto: string, opciones: { titulo?: string } = {}): string {
   const q = qrcode(0, 'M');
-  q.addData(texto, 'Byte');
+  q.addData(bytesUtf8(texto), 'Byte');
   q.make();
   const n = q.getModuleCount();
   const m = 4;
@@ -34,7 +38,7 @@ export function qrSvg(texto: string, opciones: { titulo?: string } = {}): string
 /** Cantidad de módulos por lado del QR de ese texto (para pruebas y para elegir el tamaño). */
 export function modulosQr(texto: string): number {
   const q = qrcode(0, 'M');
-  q.addData(texto, 'Byte');
+  q.addData(bytesUtf8(texto), 'Byte');
   q.make();
   return q.getModuleCount();
 }

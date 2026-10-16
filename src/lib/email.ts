@@ -1057,6 +1057,8 @@ export async function sendConsentLinkEmail(opts: {
   patientEmail: string;
   url:          string;
   idempotencyKey?: string;
+  /** Cómo aparece el destinatario en admin_logs (86-revisión B3: el de la pareja va enmascarado). */
+  destinatarioEnLog?: string;
 }): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
@@ -1091,7 +1093,7 @@ export async function sendConsentLinkEmail(opts: {
   // Misma llave con otro contenido = ese correo YA se envió en un intento anterior
   // (Resend lo rechaza para no duplicar): cuenta como enviado, no como falla.
   if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
-  await logEmail('email/consentimiento', opts.patientEmail, subject, !res.error, res.error?.message);
+  await logEmail('email/consentimiento', opts.destinatarioEnLog ?? opts.patientEmail, subject, !res.error, res.error?.message);
   if (res.error) return { sent: false, reason: res.error.message };
   return { sent: true };
 }

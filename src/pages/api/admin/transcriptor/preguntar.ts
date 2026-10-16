@@ -17,7 +17,7 @@ import { guardiaPanel } from '../../../../lib/transcriptor/peticion';
 import { auditar, auditarObligatorio } from '../../../../lib/transcriptor/auditoria';
 import { almacenamiento } from '../../../../lib/transcriptor/almacenamiento';
 import { cifrado } from '../../../../lib/transcriptor/cifrado';
-import { COLUMNAS_ARCHIVO, conTextoResumen, tieneTexto, type FilaArchivo } from '../../../../lib/transcriptor/archivo';
+import { consultarResumenes, conTextoResumen, tieneTexto, type FilaArchivo } from '../../../../lib/transcriptor/archivo';
 import { ErrorClaude, clasificarError } from '../../../../lib/transcriptor/claude';
 import {
   SIN_RESPUESTA, cargarInstrucciones, fechaLegible, plantillaDesdeTipo, responderPregunta,
@@ -101,8 +101,9 @@ export const POST: APIRoute = async (ctx) => {
 
   const [{ data: transcripciones, error: et }, { data: resumenes }] = await Promise.all([
     supabase.from('transcripciones').select('id, grabacion_id, r2_key').in('grabacion_id', ids).is('deleted_at', null),
-    supabase.from('resumenes_ia').select(`id, grabacion_id, version, contenido, contenido_cifrado, ${COLUMNAS_ARCHIVO}`).in('grabacion_id', ids)
-      .eq('estado', 'listo').is('oculto_at', null).order('version', { ascending: false }),
+    // 86-revisión M2: sin 0020 se lee igual (sin columnas de archivo).
+    consultarResumenes<FilaArchivo[]>((cols) => supabase.from('resumenes_ia').select(`id, grabacion_id, version, contenido, contenido_cifrado${cols}`).in('grabacion_id', ids)
+      .eq('estado', 'listo').is('oculto_at', null).order('version', { ascending: false })),
   ]);
   if (et) return json({ ok: false, error: 'No se pudieron leer las transcripciones.' }, 500);
   const trPorGrab = new Map((transcripciones ?? []).map((t) => [t.grabacion_id as string, t.r2_key as string]));

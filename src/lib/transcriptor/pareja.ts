@@ -158,3 +158,17 @@ export function resumenEstadoPareja(e: EstadoPareja): { firmado: boolean; nombre
   if (!e.firma) return { firmado: false, nombre: null, firmado_at: null };
   return { firmado: true, nombre: String(e.firma.signer_name ?? '').trim() || null, firmado_at: e.firma.signed_at ? String(e.firma.signed_at) : null };
 }
+
+/**
+ * Correo enmascarado para los registros (86-revisión B3): el correo de la segunda persona solo se usa
+ * para enviar el link; en admin_logs y en la bitácora queda así ("l•••@g•••.com"), nunca completo.
+ */
+export function enmascararCorreo(correo: string): string {
+  const c = String(correo ?? '').trim();
+  const at = c.lastIndexOf('@');
+  if (at < 1) return '•••';
+  const local = c.slice(0, at), dominio = c.slice(at + 1);
+  const punto = dominio.lastIndexOf('.');
+  const tld = punto > 0 ? dominio.slice(punto) : '';
+  return `${local[0]}•••@${dominio[0] ?? ''}•••${tld}`;
+}
