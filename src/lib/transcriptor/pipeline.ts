@@ -904,6 +904,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     await paso('envios', reintentarEnvios);
     await paso('transcripciones', procesarTranscripciones);
     await paso('respaldos', respaldos);
+    await paso('archivo', async (a) => (await import('./pasoArchivo')).pasoArchivo(deps, a)); // 02-decisiones-16oct-noche B: resúmenes fuera de las 4 últimas sesiones → R2+B2
     await paso('limpieza', limpiar);
     return { ok: errores.length === 0, apagado: false, pasos, errores, ms: reloj() - t0 };
   }

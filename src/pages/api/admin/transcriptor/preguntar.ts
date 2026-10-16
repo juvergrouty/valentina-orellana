@@ -17,7 +17,7 @@ import { guardiaPanel } from '../../../../lib/transcriptor/peticion';
 import { auditar, auditarObligatorio } from '../../../../lib/transcriptor/auditoria';
 import { almacenamiento } from '../../../../lib/transcriptor/almacenamiento';
 import { cifrado } from '../../../../lib/transcriptor/cifrado';
-import { conContenidoClaro, type FilaConContenido } from '../../../../lib/transcriptor/resumenCifrado';
+import { COLUMNAS_ARCHIVO, conTextoResumen, tieneTexto, type FilaArchivo } from '../../../../lib/transcriptor/archivo';
 import { ErrorClaude, clasificarError } from '../../../../lib/transcriptor/claude';
 import {
   SIN_RESPUESTA, cargarInstrucciones, fechaLegible, plantillaDesdeTipo, responderPregunta,
@@ -101,15 +101,17 @@ export const POST: APIRoute = async (ctx) => {
 
   const [{ data: transcripciones, error: et }, { data: resumenes }] = await Promise.all([
     supabase.from('transcripciones').select('id, grabacion_id, r2_key').in('grabacion_id', ids).is('deleted_at', null),
-    supabase.from('resumenes_ia').select('id, grabacion_id, version, contenido, contenido_cifrado').in('grabacion_id', ids)
+    supabase.from('resumenes_ia').select(`id, grabacion_id, version, contenido, contenido_cifrado, ${COLUMNAS_ARCHIVO}`).in('grabacion_id', ids)
       .eq('estado', 'listo').is('oculto_at', null).order('version', { ascending: false }),
   ]);
   if (et) return json({ ok: false, error: 'No se pudieron leer las transcripciones.' }, 500);
   const trPorGrab = new Map((transcripciones ?? []).map((t) => [t.grabacion_id as string, t.r2_key as string]));
   // H7: el resumen puede estar cifrado; aquí solo se ve si existe (se descifra DESPUÉS de la bitácora).
-  const resFilaPorGrab = new Map<string, FilaConContenido>();
+  // 02-decisiones-16oct-noche B: los de sesiones antiguas están archivados en R2 (+B2): solo lectura,
+  // se traen de ahí en memoria (archivo.ts) y nunca se vuelven a escribir en la base.
+  const resFilaPorGrab = new Map<string, FilaArchivo>();
   for (const r of resumenes ?? []) {
-    if (!resFilaPorGrab.has(r.grabacion_id as string) && (r.contenido || r.contenido_cifrado)) resFilaPorGrab.set(r.grabacion_id as string, r as FilaConContenido);
+    if (!resFilaPorGrab.has(r.grabacion_id as string) && tieneTexto(r as FilaArchivo)) resFilaPorGrab.set(r.grabacion_id as string, r as FilaArchivo);
   }
   const resPorGrab = new Map<string, string>();
   const usables = permitidas.filter((g) => trPorGrab.has(g.id as string) || resFilaPorGrab.has(g.id as string));
@@ -131,7 +133,7 @@ export const POST: APIRoute = async (ctx) => {
   // Descifrar resúmenes (H7) y transcripciones (las que fallen quedan con su resumen, si existe).
   {
     const claves = [...resFilaPorGrab.keys()];
-    const { filas } = await conContenidoClaro(claves.map((k) => resFilaPorGrab.get(k)!), cifrado);
+    const { filas } = await conTextoResumen(claves.map((k) => resFilaPorGrab.get(k)!), { cif: cifrado, alm: almacenamiento });
     filas.forEach((f, i) => { if (f.contenido) resPorGrab.set(claves[i], f.contenido); });
   }
   const sesiones: SesionParaPregunta[] = [];

@@ -9,6 +9,7 @@
 import { MODELO_U2, MODELO_U35_PRO, ROTULO_RESUMEN, type EstadoGrabacion, type Grabacion, type TramoTranscrito } from './tipos';
 import { HABLANTE_NO_IDENTIFICADO, HABLANTE_SIN_SEPARAR, formatearTiempo } from './hablantes';
 import { AJUSTE_NOMBRES_VALE } from './bot';
+import { paraRevisarHoy } from './resumen';
 
 // ─── Rótulos y textos fijos ──────────────────────────────────────────────────
 
@@ -16,7 +17,9 @@ export { ROTULO_RESUMEN };
 /** Rótulo de una versión que Vale editó (sigue siendo de origen IA: nunca se rotula como nota suya). */
 export const ROTULO_EDITADO = 'Resumen automático (IA) — editado por la terapeuta';
 export const AVISO_RESUMEN = 'Generado automáticamente por IA a partir de la grabación. Puede tener errores: no reemplaza tu nota clínica.';
-export const AVISO_RESPUESTA = 'Respuesta de IA basada solo en las transcripciones. Revisa las citas.';
+/** Nota fija del panel "Preguntar a la IA" (02-decisiones-16oct-noche, B). */
+export const AVISO_IA_PUEDE_ERRAR = 'La IA puede cometer errores. Revisa las respuestas.';
+export const AVISO_RESPUESTA ='Respuesta de IA basada solo en las transcripciones. Revisa las citas.';
 
 /** Ajuste nuevo de P5 (bot.ts): nombres visibles de Vale en Meet separados por "|". */
 export { AJUSTE_NOMBRES_VALE, NOMBRES_VALE_DEFECTO } from './bot';
@@ -378,4 +381,94 @@ export function lineasTranscripcion(
 /** Etiquetas únicas (en orden de aparición) para el formulario de renombrar. */
 export function etiquetasUnicas(tramos: TramoTranscrito[]): string[] {
   return [...new Set(tramos.map((t) => t.hablante).filter(Boolean))];
+}
+
+// ─── Ficha estilo historial (02-decisiones-16oct-noche, B) ───────────────────
+// Una entrada por sesión: la reserva (si la hay), la nota de evolución de Vale y la(s) grabación(es)
+// con su resumen IA. Se une por booking_id; lo que no tiene reserva se une por fecha.
+
+export interface ReservaHistorial { id: string; session_date: string; session_time?: string | null; session_type?: string | null; status?: string | null; custom_title?: string | null }
+export interface NotaHistorial { id: string; booking_id?: string | null; session_date: string; session_type?: string | null }
+export interface TarjetaHistorial { g: { id: string; booking_id: string | null; session_date: string; inicio_at?: string | null; tipo?: string | null; origen?: string | null } }
+
+export interface EntradaHistorial<N extends NotaHistorial, T extends TarjetaHistorial> {
+  clave: string;
+  fecha: string;
+  /** 'HH:MM' (de la reserva o del inicio de la grabación) o ''. */
+  hora: string;
+  reserva: ReservaHistorial | null;
+  /** online | presencial | pareja-online | pareja-presencial (o null). */
+  sessionType: string | null;
+  notas: N[];
+  ia: T[];
+}
+
+const horaChile = (iso: string | null | undefined) => iso
+  ? new Date(iso).toLocaleTimeString('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+  : '';
+
+/** session_type de una grabación (tipo + origen) para la etiqueta y el formulario de nota. */
+export function sessionTypeDeGrabacion(g: { tipo?: string | null; origen?: string | null }): string | null {
+  if (!g.origen) return null;
+  return g.tipo === 'pareja' ? `pareja-${g.origen}` : g.origen;
+}
+
+export function armarHistorial<N extends NotaHistorial, T extends TarjetaHistorial>(p: {
+  notas: N[]; tarjetas: T[]; reservas: ReservaHistorial[]; hoy: string;
+}): EntradaHistorial<N, T>[] {
+  const porClave = new Map<string, EntradaHistorial<N, T>>();
+  const reservas = new Map(p.reservas.map((r) => [r.id, r]));
+  const entrada = (clave: string, fecha: string) => {
+    let e = porClave.get(clave);
+    if (!e) { e = { clave, fecha, hora: '', reserva: null, sessionType: null, notas: [], ia: [] }; porClave.set(clave, e); }
+    return e;
+  };
+  const conReserva = (e: EntradaHistorial<N, T>, r: ReservaHistorial) => {
+    if (e.reserva) return;
+    e.reserva = r; e.hora = (r.session_time ?? '').slice(0, 5); e.sessionType = r.session_type ?? null;
+  };
+  // Reservas que ya ocurrieron (o de hoy), no canceladas: se puede escribir su evolución.
+  for (const r of p.reservas) {
+    if (r.status === 'cancelled' || r.session_date === '2099-12-31' || r.session_date > p.hoy) continue;
+    conReserva(entrada(`b:${r.id}`, r.session_date), r);
+  }
+  for (const t of p.tarjetas) {
+    const r = t.g.booking_id ? reservas.get(t.g.booking_id) : undefined;
+    const e = r ? entrada(`b:${r.id}`, r.session_date) : entrada(`d:${t.g.session_date}`, t.g.session_date);
+    if (r) conReserva(e, r);
+    if (!e.hora) e.hora = horaChile(t.g.inicio_at);
+    e.sessionType ??= sessionTypeDeGrabacion(t.g);
+    e.ia.push(t);
+  }
+  for (const n of p.notas) {
+    const r = n.booking_id ? reservas.get(n.booking_id) : undefined;
+    // Sin reserva: se junta con la grabación sin reserva de ese día (si la hay).
+    const e = r ? entrada(`b:${r.id}`, r.session_date) : entrada(`d:${n.session_date}`, n.session_date);
+    if (r) conReserva(e, r);
+    e.sessionType ??= n.session_type ?? null;
+    e.notas.push(n);
+  }
+  return [...porClave.values()].sort((a, b) => b.fecha.localeCompare(a.fecha) || b.hora.localeCompare(a.hora));
+}
+
+export const ETIQUETA_SESION: Record<string, string> = {
+  online: 'Individual online', presencial: 'Individual presencial', 'pareja-online': 'Pareja online', 'pareja-presencial': 'Pareja presencial',
+};
+
+/**
+ * "Para revisar hoy": "Para trabajar en la próxima sesión" + "Tareas" del ÚLTIMO resumen listo
+ * (la sesión más reciente que tenga alguna de las dos secciones). null si no hay.
+ */
+export function bloqueParaRevisarHoy<T extends { g: { id: string; session_date: string; created_at?: string | null }; contenido: string | null }>(tarjetas: T[]): {
+  grabacionId: string; fecha: string; proxima: string | null; tareas: string | null; md: string;
+} | null {
+  const orden = [...tarjetas].filter((t) => t.contenido)
+    .sort((a, b) => b.g.session_date.localeCompare(a.g.session_date) || String(b.g.created_at ?? '').localeCompare(String(a.g.created_at ?? '')));
+  for (const t of orden) {
+    const { proxima, tareas } = paraRevisarHoy(t.contenido);
+    if (!proxima && !tareas) continue;
+    const md = [proxima ? `### Para trabajar en esta sesión\n${proxima}` : null, tareas ? `### Tareas que quedaron\n${tareas}` : null].filter(Boolean).join('\n\n');
+    return { grabacionId: t.g.id, fecha: t.g.session_date, proxima, tareas, md };
+  }
+  return null;
 }

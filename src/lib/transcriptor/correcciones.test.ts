@@ -8,7 +8,8 @@ import {
   evaluarConsentimientos, evaluarEnBase, fichaEsPareja, motivoVisible, textoMotivo, type FilaConsentimiento,
 } from './consentimiento';
 import { avisoV2ParaCorreo, firmasParaAviso, htmlAvisoV2, registrarAvisoMostrado, TEXTO_AVISO_V2_VERSION } from './avisoV2';
-import { excluirDeIA, FRASE_CONFIRMAR_SUPRESION, suprimirTranscripcion, validarPedido } from './supresion';
+import { excluirDeIA, validarPedido } from './excluirIA';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   armarPromptResumen, avisoAnexoResumen, contextoSesionAnterior, formatearTranscripcion, lineaEncabezado, PARTE_FIJA_RESUMEN,
   PROMPT_VERSION_RESUMEN, INSTRUCCIONES_RESUMEN_POR_DEFECTO,
@@ -106,54 +107,45 @@ test('H4: avisoV2ParaCorreo solo con el transcriptor activo; se registra una vez
   assert.equal(await avisoV2ParaCorreo('otra@ejemplo.cl', db.cliente), null, 'sin ficha: sin aviso');
 });
 
-// ─── H5 + seg. M3: exclusión de la IA y supresión de la transcripción ───────
+// ─── H5: exclusión de la IA (la supresión de transcripciones se eliminó: 02-decisiones-16oct-noche, C) ──
 
-function escenarioSupresion() {
+function escenarioExclusion() {
   const db = new SupabaseMemoria();
   const p = randomUUID(), g = randomUUID(), t = randomUUID();
   db.tabla('grabaciones').push({ id: g, patient_id: p, estado: 'lista', session_date: '2026-10-10', excluir_ia_at: null });
   db.tabla('transcripciones').push({ id: t, grabacion_id: g, r2_key: 't/x.bin', b2_key: 't/x.bin', dek_envuelta: '\\x00', deleted_at: null });
-  db.tabla('preguntas_ia').push({ id: 'q1', patient_id: p, grabacion_ids: [g] }, { id: 'q2', patient_id: p, grabacion_ids: [randomUUID()] });
-  const borradas: string[] = [];
-  const deps = { db: db.cliente, almacenamiento: { borrarTranscripcion: async (k: string) => { borradas.push(k); } }, ahora: () => new Date('2026-10-16T12:00:00Z') };
-  return { db, p, g, t, borradas, deps };
+  const deps = { db: db.cliente, ahora: () => new Date('2026-10-16T12:00:00Z') };
+  return { db, p, g, t, deps };
 }
 
-test('seg. M3: validarPedido exige motivo, canal y la frase escrita', () => {
-  assert.equal(validarPedido({ motivo: 'corto', canal: 'correo' }, false).ok, false);
-  assert.equal(validarPedido({ motivo: 'La paciente lo pidió por correo el 15 oct', canal: 'fax' }, false).ok, false);
-  assert.equal(validarPedido({ motivo: 'La paciente lo pidió por correo el 15 oct', canal: 'correo' }, true).ok, false);
-  assert.equal(validarPedido({ motivo: 'La paciente lo pidió por correo el 15 oct', canal: 'correo', confirmacion: FRASE_CONFIRMAR_SUPRESION.toLowerCase() }, true).ok, true);
+test('C: ya no existe la supresión de transcripciones (módulo, endpoint, botón ni textos)', () => {
+  const raiz = new URL('../../../', import.meta.url);
+  assert.equal(existsSync(new URL('src/lib/transcriptor/supresion.ts', raiz)), false);
+  assert.equal(existsSync(new URL('src/pages/api/admin/transcriptor/suprimir.ts', raiz)), false);
+  const pagina = readFileSync(new URL('src/pages/admin/pacientes/[id]/sesion/[gid].astro', raiz), 'utf8');
+  assert.doesNotMatch(pagina, /suprimir|supresi[oó]n|Borrar la transcripci[oó]n|BORRAR/i);
+  assert.match(pagina, /Excluir de las preguntas a la IA/);
 });
 
-test('seg. M3: suprimir borra R2+B2, deja la DEK en null, marca motivo, excluye de la IA, borra sus preguntas y registra', async () => {
-  const e = escenarioSupresion();
-  const pedido = { motivo: 'La paciente pidió por correo borrar la transcripción', canal: 'correo', confirmacion: 'BORRAR' };
-  assert.equal((await suprimirTranscripcion(e.g, randomUUID(), pedido, e.deps)).ok, false, 'solo dentro de su ficha');
-  const r = await suprimirTranscripcion(e.g, e.p, pedido, e.deps);
-  assert.equal(r.ok, true);
-  assert.deepEqual(e.borradas, ['t/x.bin']);
+test('H5: validarPedido exige motivo y canal', () => {
+  assert.equal(validarPedido({ motivo: 'corto', canal: 'correo' }).ok, false);
+  assert.equal(validarPedido({ motivo: 'La paciente lo pidió por correo el 15 oct', canal: 'fax' }).ok, false);
+  assert.equal(validarPedido({ motivo: 'La paciente lo pidió por correo el 15 oct', canal: 'correo' }).ok, true);
+});
+
+test('H5: excluir de la IA no borra nada (transcripción intacta) y solo dentro de su ficha', async () => {
+  const e = escenarioExclusion();
+  const pedido = { motivo: 'Lo pidió en sesión al retirar la grabación', canal: 'presencial' };
+  assert.equal((await excluirDeIA(e.g, randomUUID(), pedido, e.deps)).ok, false, 'solo dentro de su ficha');
+  assert.equal((await excluirDeIA(e.g, e.p, pedido, e.deps)).ok, true);
   const t = e.db.tabla('transcripciones')[0];
-  assert.deepEqual([t.dek_envuelta, t.deleted_at, t.borrado_canal], [null, '2026-10-16T12:00:00.000Z', 'correo']);
-  assert.match(t.motivo_borrado, /pidió por correo/);
-  assert.ok(e.db.tabla('grabaciones')[0].excluir_ia_at);
-  assert.deepEqual(e.db.tabla('preguntas_ia').map((q) => q.id), ['q2']);
-  const bit = e.db.tabla('transcriptor_auditoria').filter((a) => a.accion === 'borrar_transcripcion');
-  assert.deepEqual(bit.map((a) => a.detalle.fase), ['inicio', 'listo']);
-  assert.ok(!JSON.stringify(bit).includes('pidió por correo'), 'el motivo no va a la bitácora');
-  assert.equal((await suprimirTranscripcion(e.g, e.p, pedido, e.deps)).ok, false, 'ya no hay transcripción');
-});
-
-test('seg. M3: si el almacenamiento falla, la fila NO se marca borrada', async () => {
-  const e = escenarioSupresion();
-  e.deps.almacenamiento.borrarTranscripcion = async () => { throw new Error('B2 caído'); };
-  const r = await suprimirTranscripcion(e.g, e.p, { motivo: 'Pedido de la paciente por WhatsApp', canal: 'whatsapp', confirmacion: 'BORRAR' }, e.deps);
-  assert.equal(r.ok, false);
-  assert.equal(e.db.tabla('transcripciones')[0].deleted_at, null);
+  assert.deepEqual([t.deleted_at, t.dek_envuelta], [null, '\\x00']);
+  assert.equal(e.db.tabla('transcriptor_auditoria').filter((a) => a.accion === 'excluir_ia').length, 1);
+  assert.equal((await excluirDeIA(e.g, e.p, pedido, e.deps)).ok, true, 'repetir no falla');
 });
 
 test('H5: excluir de la IA marca la grabación y contextoSesionAnterior la salta', async () => {
-  const e = escenarioSupresion();
+  const e = escenarioExclusion();
   const r = await excluirDeIA(e.g, e.p, { motivo: 'Lo pidió en sesión al retirar la grabación', canal: 'presencial' }, e.deps);
   assert.equal(r.ok, true);
   assert.match(e.db.tabla('grabaciones')[0].excluir_ia_motivo, /presencial/);
@@ -182,7 +174,7 @@ test('H7: el contenido del resumen se cifra con su id y tipo; las filas antiguas
 // ─── H8, H9, H14, H16, H10: prompt y rótulo ──────────────────────────────────
 
 test('prompt del resumen: textos de 81-revision y versión nueva', () => {
-  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-16.2');
+  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-16.3'); // estructura fija de Vale (02-decisiones-16oct-noche, B)
   assert.match(PARTE_FIJA_RESUMEN, /no incluyas en ninguna sección del resumen lo dicho en ese tramo/); // H8
   assert.doesNotMatch(PARTE_FIJA_RESUMEN, /NO lo omitas por tu cuenta/);
   assert.match(PARTE_FIJA_RESUMEN, /sin términos clínicos ni calificativos de gravedad como "pasiva", "activa", "leve", "grave", "problemático", "niega"/); // H9
