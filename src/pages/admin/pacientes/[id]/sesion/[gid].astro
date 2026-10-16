@@ -1,0 +1,411 @@
+---
+// Transcripción completa de una sesión grabada (paquete P7; 50-arquitectura §3.8, 30-seguridad §7).
+//  - Protegida por la sesión del panel (middleware) y sin caché (private, no-store).
+//  - El acceso se registra con auditarObligatorio ANTES de descifrar: si la bitácora falla, no se
+//    muestra nada. La transcripción se descifra en el servidor (almacenamiento.ts + cifrado.ts) y
+//    nunca se guarda en claro ni se escribe en logs.
+//  - Hablantes renombrables (grabaciones.mapa_hablantes) y resumen editable: editar crea una
+//    versión nueva autor='vale'; la de la IA queda intacta (trigger de 0014).
+export const prerender = false;
+import AdminLayout from '../../../../../components/admin/AdminLayout.astro';
+import { supabase } from '../../../../../lib/supabase';
+import { auditarObligatorio } from '../../../../../lib/transcriptor/auditoria';
+import {
+  AVISO_RESUMEN, ROTULO_RESUMEN, claveDeEtiqueta, duracionTexto, esRenombrable, estadoVisible, etiquetasUnicas, fechaLarga,
+  lineasTranscripcion, nombreHablante, resumenAHtml, textoProblema, tipoTexto, type LineaVista,
+} from '../../../../../lib/transcriptor/panel';
+import type { Grabacion, PausaGrabacion, ResumenIA, TramoTranscrito } from '../../../../../lib/transcriptor/tipos';
+
+const { id, gid } = Astro.params;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const fichaUrl = `/admin/pacientes/${id}`;
+if (!id || !gid || !UUID.test(gid)) return Astro.redirect(`${fichaUrl}?tab=notas`);
+
+type GrabVista = Pick<Grabacion, 'id' | 'patient_id' | 'origen' | 'tipo' | 'estado' | 'estado_antes_error' | 'session_date' | 'inicio_at' | 'duracion_seg' | 'pausas' | 'mapa_hablantes' | 'nota_sistema'>;
+type ResVista = Pick<ResumenIA, 'id' | 'version' | 'autor' | 'estado' | 'rotulo' | 'contenido' | 'listo_at' | 'created_at' | 'basado_en'>;
+
+let nombrePaciente = '';
+let g: GrabVista | null = null;
+let versiones: ResVista[] = [];
+let tramos: TramoTranscrito[] | null = null;
+let hayTranscripcion = false;
+let aviso: string | null = null;    // por qué no se muestra la transcripción (sin términos técnicos)
+let noEncontrada = false;
+
+if (import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') {
+  // Datos de prueba SOLO en `astro dev` (contenido inventado).
+  nombrePaciente = 'Camila Rojas';
+  g = { id: gid, patient_id: id, origen: 'presencial', tipo: 'individual', estado: 'lista', estado_antes_error: null, session_date: '2026-10-15', inicio_at: '2026-10-15T19:00:00Z', duracion_seg: 3012, pausas: [{ desde_ms: 1_500_000, hasta_ms: 1_620_000 }], mapa_hablantes: { A: 'Ps. Valentina' }, nota_sistema: null };
+  hayTranscripcion = true;
+  tramos = [
+    { inicio_ms: 4_000, fin_ms: 12_000, hablante: 'Hablante A', texto: 'Hola, Camila. ¿Cómo has estado esta semana?' },
+    { inicio_ms: 13_000, fin_ms: 40_000, hablante: 'Hablante B', texto: 'Mejor, la verdad. Estoy durmiendo mejor desde que dejo el celular fuera de la pieza.' },
+    { inicio_ms: 312_000, fin_ms: 330_000, hablante: 'Hablante A', texto: '¿Y qué notaste distinto en la mañana?' },
+    { inicio_ms: 331_000, fin_ms: 360_000, hablante: 'Hablante B', texto: 'Que me levanto con menos ansiedad. Aunque lo del trabajo sigue igual.' },
+    { inicio_ms: 1_420_000, fin_ms: 1_440_000, hablante: 'Hablante B', texto: 'A veces siento que no doy más con la pega, que es demasiado.' },
+    { inicio_ms: 1_441_000, fin_ms: 1_470_000, hablante: 'Hablante A', texto: 'Cuéntame más de eso, ¿cuándo lo sientes con más fuerza?' },
+    { inicio_ms: 2_460_000, fin_ms: 2_500_000, hablante: 'Hablante A', texto: 'Para la próxima semana te propongo hacer el registro de pensamientos tres veces.' },
+  ];
+  versiones = [{
+    id: '00000000-0000-4000-8000-0000000000r1', version: 1, autor: 'ia', estado: 'listo', rotulo: ROTULO_RESUMEN, listo_at: '2026-10-15T20:10:00Z', created_at: '2026-10-15T20:00:00Z', basado_en: null,
+    contenido: '## Resumen automático (IA)\n*Sesión individual · 15 oct 2026 · presencial · 50 min · Generado automáticamente a partir de la transcripción. No reemplaza el juicio clínico.*\n\n### Atención\n- Camila dijo «A veces siento que no doy más con la pega» [23:40], en el contexto de la carga laboral.\n\n### Puntos clave\n- Duerme mejor desde que deja el celular fuera de la pieza [00:13].\n\n### Tareas y acuerdos\n- Camila: registro de pensamientos 3 veces — antes de la próxima sesión [41:00].',
+  }];
+} else {
+  try {
+    const [{ data: grab, error: eg }, { data: p }] = await Promise.all([
+      supabase.from('grabaciones')
+        .select('id, patient_id, origen, tipo, estado, estado_antes_error, session_date, inicio_at, duracion_seg, pausas, mapa_hablantes, nota_sistema')
+        .eq('id', gid).maybeSingle(),
+      supabase.from('patients').select('id, name').eq('id', id).maybeSingle(),
+    ]);
+    // Solo se muestra dentro de la ficha a la que pertenece (nunca mezclar pacientes).
+    if (eg || !grab || !p || grab.patient_id !== id) {
+      noEncontrada = true;
+    } else {
+      g = grab as GrabVista;
+      nombrePaciente = p.name as string;
+      const [{ data: tr }, { data: rs }] = await Promise.all([
+        supabase.from('transcripciones').select('id, r2_key').eq('grabacion_id', gid).is('deleted_at', null).maybeSingle(),
+        supabase.from('resumenes_ia').select('id, version, autor, estado, rotulo, contenido, listo_at, created_at, basado_en')
+          .eq('grabacion_id', gid).is('oculto_at', null).order('version', { ascending: false }),
+      ]);
+      versiones = (rs ?? []) as ResVista[];
+      hayTranscripcion = !!tr;
+      if (tr) {
+        let clientAddress: string | null = null;
+        try { clientAddress = Astro.clientAddress ?? null; } catch { /* sin IP */ }
+        try {
+          await auditarObligatorio('vale', 'ver_transcripcion', {
+            grabacionId: gid, patientId: id, request: Astro.request, clientAddress, detalle: { transcripcion_id: tr.id },
+          });
+        } catch {
+          aviso = 'No se pudo registrar el acceso en la bitácora. Por seguridad, la transcripción no se muestra. Intenta de nuevo en un momento.';
+        }
+        if (!aviso) {
+          try {
+            const { almacenamiento } = await import('../../../../../lib/transcriptor/almacenamiento');
+            tramos = (await almacenamiento.leerTranscripcion(tr.r2_key as string)).segmentos;
+          } catch (e) {
+            // Solo el tipo de error: nunca contenido.
+            console.warn('[sesion/transcripcion] no se pudo leer la transcripción:', e instanceof Error ? e.name : 'error');
+            aviso = 'No se pudo abrir la transcripción cifrada en este momento. Está guardada a salvo; intenta de nuevo en unos minutos.';
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[sesion/transcripcion]', e instanceof Error ? e.name : 'error');
+    noEncontrada = true;
+  }
+}
+
+const mapa = (g?.mapa_hablantes ?? null) as Record<string, string> | null;
+const lineas: LineaVista[] = tramos ? lineasTranscripcion(tramos, (g?.pausas ?? []) as PausaGrabacion[], mapa) : [];
+const etiquetas = tramos ? etiquetasUnicas(tramos) : [];
+const hablantesRenombrables = etiquetas.filter(esRenombrable).map((e) => ({ etiqueta: e, clave: claveDeEtiqueta(e), nombre: nombreHablante(e, mapa) }));
+const indiceHablante = new Map(etiquetas.map((e, i) => [nombreHablante(e, mapa), i % 4]));
+
+// ?t=<segundos>: la línea donde cae ese minuto (la última que empieza antes o en ese momento).
+const tCrudo = Astro.url.searchParams.get('t');
+const tParam = tCrudo === null || tCrudo === '' ? NaN : Number(tCrudo);
+const objetivoMs = Number.isFinite(tParam) && tParam >= 0 ? tParam * 1000 : null;
+let objetivo = -1;
+if (objetivoMs != null) lineas.forEach((l, i) => { if (l.tipo === 'tramo' && l.ms <= objetivoMs + 999) objetivo = i; });
+if (objetivoMs != null && objetivo < 0) objetivo = lineas.findIndex((l) => l.tipo === 'tramo');
+
+const vigente = versiones.find((r) => r.estado === 'listo' && r.contenido) ?? null;
+const enCamino = versiones.some((r) => (r.estado === 'pendiente' || r.estado === 'en_batch') && (!vigente || r.version > vigente.version));
+const anteriores = versiones.filter((r) => r !== vigente && r.estado === 'listo' && r.contenido);
+const enlaceMinuto = (s: number) => `?t=${s}`;
+const estado = g ? estadoVisible(g.estado) : null;
+const problema = g ? textoProblema(g) : null;
+const hora = g?.inicio_at ? new Date(g.inicio_at).toLocaleTimeString('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '';
+const fmtFechaHora = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '';
+---
+
+<AdminLayout title={nombrePaciente ? `Transcripción · ${nombrePaciente}` : 'Transcripción'} current="/admin/pacientes">
+  <a href={`${fichaUrl}?tab=notas${g ? `#ia-${g.id}` : ''}`} style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Ficha{nombrePaciente ? ` de ${nombrePaciente}` : ''}</a>
+
+  {noEncontrada || !g ? (
+    <div class="card" style="text-align:center;padding:3rem;margin-top:1rem;">
+      <p style="color:var(--stone);font-size:0.9rem;">No se encontró esta sesión grabada en la ficha.</p>
+    </div>
+  ) : (
+    <div class="ses" data-gid={g.id}>
+      <header class="ses-cab">
+        <h2 class="ses-titulo">Sesión grabada</h2>
+        <p class="ses-fecha">{fechaLarga(g.session_date)}{hora ? ` · ${hora}` : ''}</p>
+        <p class="ia-sub">{tipoTexto(g)}{g.duracion_seg ? ` · ${duracionTexto(g.duracion_seg)} grabados` : ''}{estado && estado.tono !== 'listo' ? ` · ${estado.texto}` : ''}</p>
+      </header>
+
+      <div class="ses-grid">
+        <!-- Columna lateral (arriba en celular): resumen y nombres de hablantes -->
+        <aside class="ses-lateral">
+          <details class="card ia-card" id="ses-resumen" open={false}>
+            <summary class="ses-summary">
+              <span class="ia-badge"><span aria-hidden="true">✦</span> {vigente?.rotulo || ROTULO_RESUMEN}</span>
+              {vigente && vigente.version > 1 && <span class="ia-sub">versión {vigente.version}</span>}
+            </summary>
+            {vigente ? (
+              <>
+                <div class="ia-cuerpo" id="res-vista" set:html={resumenAHtml(vigente.contenido, enlaceMinuto)} />
+                {enCamino && <p class="ia-nota">Se está escribiendo una versión nueva; esta sigue visible mientras tanto.</p>}
+                <p class="ia-aviso">{AVISO_RESUMEN}</p>
+                <form id="res-editar" hidden>
+                  <label class="label" for="res-texto" style="display:block;margin:0.75rem 0 0.3rem;">Editar resumen</label>
+                  <textarea id="res-texto" rows="14" maxlength="20000" style="resize:vertical;font-size:0.85rem;">{vigente.contenido}</textarea>
+                  <p class="ia-nota">Los títulos de sección empiezan con ###; las viñetas, con "-". Se guarda como una versión nueva: la original de la IA no se modifica.</p>
+                  <div class="ia-acciones">
+                    <button type="submit" class="btn btn-dark btn-sm">Guardar versión nueva</button>
+                    <button type="button" class="btn btn-outline btn-sm" id="res-cancelar">Cancelar</button>
+                  </div>
+                </form>
+                <div class="ia-acciones" id="res-botones">
+                  <button type="button" class="btn btn-outline btn-sm" id="res-btn-editar" data-resumen-id={vigente.id}>Editar resumen</button>
+                  {g.estado === 'lista' && hayTranscripcion && !enCamino && (
+                    <button type="button" class="btn btn-outline btn-sm" id="res-btn-regenerar">Regenerar con la IA</button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p class="ia-texto">{problema ?? (enCamino || estado?.tono === 'proceso' ? 'Resumen automático (IA): en proceso. Aparecerá aquí solo.' : 'Esta sesión no tiene resumen.')}</p>
+            )}
+            <p class="ia-msg" id="res-msg" role="status" aria-live="polite"></p>
+            {anteriores.length > 0 && (
+              <details class="ses-versiones">
+                <summary>Versiones anteriores ({anteriores.length})</summary>
+                {anteriores.map((r) => (
+                  <div class="ses-version">
+                    <p class="ia-sub"><strong>Versión {r.version}</strong> · {r.autor === 'vale' ? 'editada por ti' : 'IA'} · {fmtFechaHora(r.listo_at ?? r.created_at)}</p>
+                    <div class="ia-cuerpo" set:html={resumenAHtml(r.contenido, enlaceMinuto)} />
+                  </div>
+                ))}
+              </details>
+            )}
+          </details>
+
+          {hablantesRenombrables.length > 0 && (
+            <details class="card" id="ses-hablantes">
+              <summary class="ses-summary"><span class="label">Nombres de quienes hablan</span></summary>
+              <form id="hab-form" style="display:flex;flex-direction:column;gap:0.6rem;margin-top:0.75rem;">
+                {hablantesRenombrables.map((h) => (
+                  <div>
+                    <label class="label" style="display:block;margin-bottom:0.25rem;" for={`hab-${h.clave}`}>{h.etiqueta}</label>
+                    <input type="text" id={`hab-${h.clave}`} data-clave={h.clave} maxlength="60"
+                      value={h.nombre === h.etiqueta ? '' : h.nombre} placeholder={`Ej.: Ps. Valentina, ${nombrePaciente.split(' ')[0] || 'Paciente'}`} />
+                  </div>
+                ))}
+                <p class="ia-nota" style="margin-top:0;">Deja un campo vacío para volver al nombre original.</p>
+                <button type="submit" class="btn btn-dark btn-sm" style="width:fit-content;">Guardar nombres</button>
+                <p class="ia-msg" id="hab-msg" role="status" aria-live="polite"></p>
+              </form>
+            </details>
+          )}
+        </aside>
+
+        <!-- Transcripción -->
+        <section class="card ses-tr" aria-label="Transcripción completa">
+          <div class="ses-tr-cab">
+            <p class="label">Transcripción completa</p>
+            {lineas.length > 0 && (
+              <div class="ses-buscar">
+                <input type="search" id="tr-buscar" placeholder="Buscar en la transcripción" aria-label="Buscar en la transcripción" />
+                <span id="tr-buscar-n" class="ia-sub" aria-live="polite"></span>
+              </div>
+            )}
+          </div>
+          {!hayTranscripcion ? (
+            <p class="ia-texto">{problema ?? (estado?.tono === 'proceso' ? 'La transcripción todavía se está procesando. Aparecerá aquí sola.' : 'Esta sesión no tiene transcripción guardada.')}</p>
+          ) : aviso ? (
+            <p class="ses-aviso" role="alert">{aviso}</p>
+          ) : !lineas.length ? (
+            <p class="ia-texto">La transcripción quedó vacía (no se detectó voz).</p>
+          ) : (
+            <>
+              <p class="ia-nota" style="margin:0 0 0.75rem;">Transcripción automática: puede tener errores. Se abrió solo para esta vista y el acceso quedó registrado.</p>
+              <ol class="tr-lista">
+                {lineas.map((l, i) => l.tipo === 'pausa' ? (
+                  <li class="tr-pausa" id={i === objetivo ? 't-objetivo' : undefined}>— {l.texto} · {l.marca} —</li>
+                ) : (
+                  <li class={`tr-linea${i === objetivo ? ' tr-objetivo' : ''}`} id={i === objetivo ? 't-objetivo' : undefined}>
+                    <a class="tr-marca" href={`?t=${Math.floor(l.ms / 1000)}`}>[{l.marca}]</a>
+                    <span class={`tr-hablante hab-${indiceHablante.get(l.hablante ?? '') ?? 0}`}>{l.hablante}</span>
+                    <p class="tr-texto">{l.texto}</p>
+                  </li>
+                ))}
+              </ol>
+            </>
+          )}
+        </section>
+      </div>
+    </div>
+  )}
+</AdminLayout>
+
+<style>
+  .ses-cab { margin: 0.75rem 0 1.25rem; }
+  .ses-titulo { font-family: 'Cormorant Garamond', serif; font-size: 1.6rem; font-weight: 400; }
+  .ses-fecha { font-weight: 600; font-size: 0.92rem; margin-top: 0.15rem; }
+  .ses-fecha::first-letter { text-transform: uppercase; }
+  .ses-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 1.5rem; align-items: start; }
+  .ses-lateral { order: 2; position: sticky; top: 90px; display: flex; flex-direction: column; gap: 1rem; max-height: calc(100vh - 110px); overflow-y: auto; }
+  .ses-tr { order: 1; min-width: 0; }
+  @media (max-width: 900px) {
+    .ses-grid { grid-template-columns: minmax(0, 1fr); }
+    .ses-lateral { order: 0; position: static; max-height: none; overflow: visible; }
+  }
+  .ses-summary { cursor: pointer; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; list-style: none; min-height: 32px; }
+  .ses-summary::-webkit-details-marker { display: none; }
+  .ses-summary::after { content: ''; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--stone); border-bottom: 2px solid var(--stone); transform: rotate(45deg); margin-right: 4px; }
+  details[open] > .ses-summary::after { transform: rotate(-135deg); }
+  .ses-versiones { margin-top: 0.85rem; font-size: 0.8rem; }
+  .ses-versiones > summary { cursor: pointer; color: var(--stone); }
+  .ses-version { border-top: 1px solid var(--warm); margin-top: 0.6rem; padding-top: 0.6rem; }
+  .ses-tr-cab { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+  .ses-buscar { display: flex; align-items: center; gap: 0.5rem; flex: 1 1 220px; max-width: 360px; }
+  .ses-buscar input { flex: 1; min-width: 0; }
+  .ses-aviso { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; border-radius: 6px; padding: 0.7rem 0.9rem; font-size: 0.85rem; }
+
+  .tr-lista { list-style: none; display: flex; flex-direction: column; gap: 0.15rem; }
+  .tr-linea { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.6rem; padding: 0.45rem 0.5rem; border-radius: 6px; scroll-margin-top: 90px; }
+  .tr-linea.tr-objetivo { background: #f7f1e6; outline: 2px solid #e6d9c2; }
+  .tr-linea.tr-coincide { background: #f0f4ff; }
+  .tr-marca { grid-row: 1 / span 2; font-variant-numeric: tabular-nums; font-size: 0.75rem; color: var(--stone); text-decoration: none; padding-top: 0.12rem; }
+  .tr-marca:hover { text-decoration: underline; }
+  .tr-hablante { font-size: 0.78rem; font-weight: 700; color: #374151; }
+  .tr-hablante.hab-1 { color: #576352; }
+  .tr-hablante.hab-2 { color: #7A6544; }
+  .tr-hablante.hab-3 { color: #1d4ed8; }
+  .tr-texto { font-size: 0.9rem; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+  .tr-pausa { text-align: center; font-size: 0.76rem; color: var(--stone); padding: 0.5rem 0; font-style: italic; }
+
+  .ia-card { border-left: 4px solid #A8906C; background: #fffdf9; }
+  .ia-badge { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.74rem; font-weight: 700; color: #7A6544; background: #f7f1e6; border: 1px solid #e6d9c2; border-radius: 99px; padding: 0.18rem 0.65rem; line-height: 1.35; }
+  .ia-sub { font-size: 0.78rem; color: var(--stone); }
+  .ia-texto { font-size: 0.86rem; color: var(--ink); margin-top: 0.6rem; line-height: 1.55; }
+  .ia-nota { font-size: 0.78rem; color: var(--stone); margin-top: 0.6rem; }
+  .ia-msg { font-size: 0.78rem; margin-top: 0.4rem; }
+  .ia-msg:empty { display: none; }
+  .ia-cuerpo { font-size: 0.86rem; line-height: 1.6; color: var(--ink); margin-top: 0.5rem; overflow-wrap: anywhere; }
+  .ia-cuerpo :global(h4) { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--stone); font-weight: 600; margin: 0.9rem 0 0.25rem; }
+  .ia-cuerpo :global(ul) { padding-left: 1.15rem; list-style: disc; }
+  .ia-cuerpo :global(li) { margin: 0.15rem 0; }
+  .ia-cuerpo :global(p) { margin: 0.3rem 0; }
+  .ia-cuerpo :global(p.ia-meta) { font-size: 0.76rem; color: var(--stone); font-style: italic; }
+  .ia-cuerpo :global(a.ia-min) { color: #576352; font-weight: 600; text-decoration: underline; white-space: nowrap; }
+  .ia-aviso { font-size: 0.75rem; color: var(--stone); border-top: 1px solid var(--warm); margin-top: 0.85rem; padding-top: 0.6rem; }
+  .ia-acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; align-items: center; }
+  @media (max-width: 600px) {
+    .ia-acciones .btn, #hab-form .btn { min-height: 40px; }
+    .tr-linea { grid-template-columns: minmax(0, 1fr); }
+    .tr-marca { grid-row: auto; }
+  }
+</style>
+
+<script>
+  async function postPanel(url: string, body: unknown): Promise<{ ok: boolean; error?: string }> {
+    const res = await fetch(url, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+      body: JSON.stringify(body),
+    });
+    try { return await res.json(); } catch { return { ok: false, error: 'Respuesta inesperada del servidor.' }; }
+  }
+  const raiz = document.querySelector<HTMLElement>('.ses');
+  const gid = raiz?.dataset.gid ?? '';
+  const pinta = (el: HTMLElement | null, texto: string, color: string) => { if (el) { el.textContent = texto; el.style.color = color; } };
+
+  // En pantallas anchas el resumen parte abierto (en celular, cerrado para ir directo a la transcripción).
+  const det = document.getElementById('ses-resumen') as HTMLDetailsElement | null;
+  if (det && window.matchMedia('(min-width: 901px)').matches) det.open = true;
+
+  // ?t= → ir a la línea de ese minuto.
+  document.getElementById('t-objetivo')?.scrollIntoView({ block: 'center' });
+
+  // ── Editar resumen (versión nueva autor='vale') y regenerar ──────────────────
+  const btnEditar = document.getElementById('res-btn-editar') as HTMLButtonElement | null;
+  const formEditar = document.getElementById('res-editar') as HTMLFormElement | null;
+  const vista = document.getElementById('res-vista');
+  const botones = document.getElementById('res-botones');
+  const resMsg = document.getElementById('res-msg');
+  btnEditar?.addEventListener('click', () => {
+    if (!formEditar) return;
+    formEditar.hidden = false; if (vista) vista.hidden = true; if (botones) botones.hidden = true;
+    (document.getElementById('res-texto') as HTMLTextAreaElement | null)?.focus();
+  });
+  document.getElementById('res-cancelar')?.addEventListener('click', () => {
+    if (formEditar) formEditar.hidden = true; if (vista) vista.hidden = false; if (botones) botones.hidden = false;
+  });
+  formEditar?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const contenido = (document.getElementById('res-texto') as HTMLTextAreaElement).value;
+    const boton = formEditar.querySelector<HTMLButtonElement>('button[type=submit]');
+    if (boton) boton.disabled = true;
+    pinta(resMsg, 'Guardando…', '#6b7280');
+    try {
+      const d = await postPanel('/api/admin/transcriptor/regenerar-resumen', { accion: 'editar', grabacion_id: gid, resumen_id: btnEditar?.dataset.resumenId, contenido });
+      if (!d.ok) throw new Error(d.error ?? 'No se pudo guardar.');
+      pinta(resMsg, '✓ Guardado como versión nueva.', '#15803d');
+      setTimeout(() => location.reload(), 900);
+    } catch (err) {
+      pinta(resMsg, '✕ ' + (err instanceof Error ? err.message : 'Error de conexión'), '#dc2626');
+      if (boton) boton.disabled = false;
+    }
+  });
+  document.getElementById('res-btn-regenerar')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget as HTMLButtonElement;
+    if (!confirm('¿Pedir a la IA un resumen nuevo con tus instrucciones actuales? El resumen actual se conserva como versión anterior.')) return;
+    b.disabled = true;
+    pinta(resMsg, 'Pidiendo un resumen nuevo…', '#6b7280');
+    try {
+      const d = await postPanel('/api/admin/transcriptor/regenerar-resumen', { accion: 'regenerar', grabacion_id: gid });
+      if (!d.ok) throw new Error(d.error ?? 'No se pudo pedir el resumen nuevo.');
+      pinta(resMsg, '✓ Listo. El resumen nuevo aparecerá aquí y en la ficha cuando termine.', '#15803d');
+      setTimeout(() => location.reload(), 1500);
+    } catch (err) {
+      pinta(resMsg, '✕ ' + (err instanceof Error ? err.message : 'Error de conexión'), '#dc2626');
+      b.disabled = false;
+    }
+  });
+
+  // ── Renombrar hablantes ──────────────────────────────────────────────────────
+  const habForm = document.getElementById('hab-form') as HTMLFormElement | null;
+  habForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const cambios: Record<string, string> = {};
+    habForm.querySelectorAll<HTMLInputElement>('input[data-clave]').forEach((i) => { cambios[i.dataset.clave!] = i.value.trim(); });
+    const boton = habForm.querySelector<HTMLButtonElement>('button[type=submit]');
+    const msg = document.getElementById('hab-msg');
+    if (boton) boton.disabled = true;
+    pinta(msg, 'Guardando…', '#6b7280');
+    try {
+      const d = await postPanel('/api/admin/transcriptor/hablantes', { grabacion_id: gid, cambios });
+      if (!d.ok) throw new Error(d.error ?? 'No se pudieron guardar los nombres.');
+      pinta(msg, '✓ Nombres guardados.', '#15803d');
+      setTimeout(() => location.reload(), 700);
+    } catch (err) {
+      pinta(msg, '✕ ' + (err instanceof Error ? err.message : 'Error de conexión'), '#dc2626');
+      if (boton) boton.disabled = false;
+    }
+  });
+
+  // ── Buscar en la transcripción (en el navegador; nada sale de la página) ────
+  const buscar = document.getElementById('tr-buscar') as HTMLInputElement | null;
+  const nBuscar = document.getElementById('tr-buscar-n');
+  const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  let temporizador: number | undefined;
+  buscar?.addEventListener('input', () => {
+    clearTimeout(temporizador);
+    temporizador = window.setTimeout(() => {
+      const q = sinTildes(buscar.value.trim());
+      let n = 0; let primera = null as HTMLElement | null;
+      document.querySelectorAll<HTMLElement>('.tr-linea').forEach((li) => {
+        const si = q.length >= 2 && sinTildes(li.textContent ?? '').includes(q);
+        li.classList.toggle('tr-coincide', si);
+        if (si) { n++; primera ??= li; }
+      });
+      if (nBuscar) nBuscar.textContent = q.length >= 2 ? (n ? `${n} ${n === 1 ? 'línea' : 'líneas'}` : 'Sin resultados') : '';
+      primera?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 250);
+  });
+</script>

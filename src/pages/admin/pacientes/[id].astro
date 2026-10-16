@@ -5,10 +5,17 @@ import { supabase } from '../../../lib/supabase';
 import { nowCL, todayCL } from '../../../lib/dateUtils';
 import { vigente, type ConsentRow } from '../../../lib/consent';
 import { origenTexto } from '../../../lib/origen';
+import {
+  AVISO_RESPUESTA, AVISO_RESUMEN, ROTULO_RESUMEN, duracionTexto, estadoVisible, fechaCorta, fechaLarga, resumenAHtml, resumenATexto,
+  sePuedeReintentar, textoProblema, tipoTexto,
+} from '../../../lib/transcriptor/panel';
 
 const { id } = Astro.params;
+// Datos de prueba del transcriptor SOLO en `astro dev` (import.meta.env.DEV es false en el build):
+// /admin/pacientes/<cualquier-id>?tab=notas&demo=ia para la revisión visual sin base de datos.
+const demoIA = import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia';
 
-const [{ data: patient }, { data: notasTodas }, { data: bookings }, { data: allSvc }] = await Promise.all([
+let [{ data: patient }, { data: notasTodas }, { data: bookings }, { data: allSvc }] = await Promise.all([
   supabase.from('patients').select('*').eq('id', id!).single(),
   supabase.from('session_notes').select('*').eq('patient_id', id!).order('session_date', { ascending: false }),
   supabase.from('bookings').select('*').eq('patient_email', '').order('session_date', { ascending: false }).limit(0),
@@ -18,7 +25,7 @@ const [{ data: patient }, { data: notasTodas }, { data: bookings }, { data: allS
 ]);
 const allServices = allSvc ?? [];
 // Las notas archivadas no se muestran, pero se conservan (ficha clínica, 15 años).
-const notes = (notasTodas ?? []).filter((n: { deleted_at?: string | null }) => !n.deleted_at);
+let notes = (notasTodas ?? []).filter((n: { deleted_at?: string | null }) => !n.deleted_at);
 
 // Buscar reservas por email del paciente si tiene email
 let patientBookings: any[] = [];
@@ -30,6 +37,91 @@ if (patient?.email) {
     .order('session_date', { ascending: false });
   patientBookings = data ?? [];
 }
+
+// ── Transcriptor IA (P7): grabaciones de esta ficha y sus resúmenes ──────────
+// El resumen es un ANEXO rotulado, separado de la nota de evolución (session_notes): nunca se
+// mezcla ni la reemplaza. Si la migración 0014 aún no está aplicada, la consulta falla y la
+// ficha se ve igual que siempre (sin la sección).
+type GrabFicha = {
+  id: string; booking_id: string | null; origen: 'presencial' | 'online'; tipo: 'individual' | 'pareja' | 'sin_tipo';
+  estado: string; estado_antes_error: string | null; session_date: string; inicio_at: string | null;
+  duracion_seg: number | null; nota_sistema: string | null; created_at: string;
+};
+type ResFicha = { id: string; grabacion_id: string; version: number; autor: 'ia' | 'vale'; estado: string; rotulo: string | null; contenido: string | null; listo_at: string | null; created_at: string };
+let iaGrabaciones: GrabFicha[] = [];
+let iaResumenes: ResFicha[] = [];
+let iaTranscritas = new Set<string>();
+const OCULTAS_EN_FICHA = new Set(['creada', 'cancelada', 'sin_consentimiento', 'bot_no_admitido']);
+if (import.meta.env.DEV && demoIA) {
+  // Ficha de prueba (nombres y contenido inventados).
+  patient = { id: id!, name: 'Camila Rojas', email: 'camila@example.com', phone: null, active: true, birthdate: '1993-04-02', rut: null, notes: '' };
+  notasTodas = [
+    { id: 'n1', patient_id: id, booking_id: 'b1', session_date: '2026-10-15', session_type: 'presencial', content: 'Buena adherencia. Trabajar asertividad con la jefa. Retomar registro de pensamientos.', deleted_at: null },
+    { id: 'n2', patient_id: id, booking_id: 'b0', session_date: '2026-10-01', session_type: 'presencial', content: 'Primera sesión. Motivo de consulta: ansiedad laboral.', deleted_at: null },
+  ];
+  patientBookings = [
+    { id: 'b1', session_date: '2026-10-15', session_time: '16:00:00', session_type: 'presencial', status: 'confirmed', amount: 45000, paid_at: '2026-10-15T19:00:00Z', notes: '', patient_email: 'camila@example.com' },
+    { id: 'b2', session_date: '2026-10-08', session_time: '16:00:00', session_type: 'presencial', status: 'confirmed', amount: 45000, paid_at: '2026-10-08T19:00:00Z', notes: '', patient_email: 'camila@example.com' },
+  ];
+  iaGrabaciones = [
+    { id: '00000000-0000-4000-8000-0000000000a1', booking_id: 'b1', origen: 'presencial', tipo: 'individual', estado: 'lista', estado_antes_error: null, session_date: '2026-10-15', inicio_at: '2026-10-15T19:00:00Z', duracion_seg: 3012, nota_sistema: null, created_at: '2026-10-15T19:00:00Z' },
+    { id: '00000000-0000-4000-8000-0000000000a2', booking_id: 'b2', origen: 'presencial', tipo: 'individual', estado: 'resumiendo', estado_antes_error: null, session_date: '2026-10-08', inicio_at: '2026-10-08T19:00:00Z', duracion_seg: 2950, nota_sistema: null, created_at: '2026-10-08T19:00:00Z' },
+    { id: '00000000-0000-4000-8000-0000000000a3', booking_id: null, origen: 'online', tipo: 'individual', estado: 'error', estado_antes_error: 'resumiendo', session_date: '2026-10-03', inicio_at: '2026-10-03T22:00:00Z', duracion_seg: 2700, nota_sistema: null, created_at: '2026-10-03T22:00:00Z' },
+  ];
+  iaResumenes = [{
+    id: 'r1', grabacion_id: '00000000-0000-4000-8000-0000000000a1', version: 1, autor: 'ia', estado: 'listo', rotulo: null, listo_at: '2026-10-15T20:10:00Z', created_at: '2026-10-15T20:00:00Z',
+    contenido: '## Resumen automático (IA)\n*Sesión individual · 15 oct 2026 · presencial · 50 min · Generado automáticamente a partir de la transcripción. No reemplaza el juicio clínico.*\n\n### Atención\n- Camila dijo «a veces siento que no doy más» [23:40], en el contexto de la carga laboral. No consta que se haya profundizado en ese momento.\n\n### Temas tratados\n- Conflicto con su jefa.\n- Sueño.\n\n### Puntos clave\n- Refiere dormir mejor desde que deja el celular fuera de la pieza [05:12].\n- La conversación pendiente con su jefa sigue siendo lo que más le preocupa.\n\n### Tareas y acuerdos\n- Camila: registro de pensamientos 3 veces — antes de la próxima sesión.\n\n### Para revisar la próxima sesión\n- Cómo le fue con la conversación con su jefa.',
+  }];
+  iaTranscritas = new Set(['00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2']);
+  notes = notasTodas as typeof notes;
+} else if (patient) {
+  try {
+    const { data: gs, error: eg } = await supabase.from('grabaciones')
+      .select('id, booking_id, origen, tipo, estado, estado_antes_error, session_date, inicio_at, duracion_seg, nota_sistema, created_at')
+      .eq('patient_id', id!).order('session_date', { ascending: false }).order('created_at', { ascending: false }).limit(200);
+    if (!eg && gs?.length) {
+      iaGrabaciones = (gs as GrabFicha[]).filter((g) => !OCULTAS_EN_FICHA.has(g.estado));
+      const ids = iaGrabaciones.map((g) => g.id);
+      if (ids.length) {
+        const [{ data: rs }, { data: ts }] = await Promise.all([
+          supabase.from('resumenes_ia').select('id, grabacion_id, version, autor, estado, rotulo, contenido, listo_at, created_at')
+            .in('grabacion_id', ids).is('oculto_at', null).order('version', { ascending: false }),
+          supabase.from('transcripciones').select('grabacion_id').in('grabacion_id', ids).is('deleted_at', null),
+        ]);
+        iaResumenes = (rs ?? []) as ResFicha[];
+        iaTranscritas = new Set((ts ?? []).map((t: { grabacion_id: string }) => t.grabacion_id));
+      }
+    }
+  } catch (e) {
+    console.warn('[ficha/transcriptor]', e instanceof Error ? e.message : e);
+  }
+}
+const fmtHoraCL = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '';
+// Por grabación: versión vigente (la de número más alto que esté lista), si hay otra en camino
+// y si el último intento de la IA falló.
+const iaTarjetas = iaGrabaciones.map((g) => {
+  const versiones = iaResumenes.filter((r) => r.grabacion_id === g.id).sort((a, b) => b.version - a.version);
+  const vigente = versiones.find((r) => r.estado === 'listo' && r.contenido) ?? null;
+  const generando = versiones.some((r) => (r.estado === 'pendiente' || r.estado === 'en_batch') && (!vigente || r.version > vigente.version));
+  const estado = estadoVisible(g.estado);
+  return {
+    g, vigente, generando, estado,
+    problema: textoProblema(g as never),
+    reintentable: sePuedeReintentar(g as never),
+    transcrita: iaTranscritas.has(g.id),
+    hora: fmtHoraCL(g.inicio_at),
+    html: vigente ? resumenAHtml(vigente.contenido, (s) => `/admin/pacientes/${id}/sesion/${g.id}?t=${s}`) : '',
+    texto: vigente ? resumenATexto(vigente.contenido) : '',
+  };
+});
+const iaPorBooking = new Map(iaTarjetas.filter((t) => t.g.booking_id).map((t) => [t.g.booking_id as string, t]));
+// Sesiones que la IA puede leer para responder (con transcripción o con resumen listo).
+const iaConsultables = iaTarjetas.filter((t) => t.transcrita || t.vigente);
+// Pestaña Notas clínicas: resúmenes y notas intercalados por fecha (el resumen, sobre la nota del mismo día).
+const itemsNotas = [
+  ...iaTarjetas.map((t) => ({ tipo: 'ia' as const, fecha: t.g.session_date, orden: 0, t })),
+  ...(notes ?? []).map((n: any) => ({ tipo: 'nota' as const, fecha: String(n.session_date ?? ''), orden: 1, n })),
+].sort((a, b) => b.fecha.localeCompare(a.fecha) || a.orden - b.orden);
 
 if (!patient) return Astro.redirect('/admin/pacientes');
 
@@ -387,6 +479,12 @@ const faltanDatos = patient ? [
                     </button>
                     <span class={`badge ${badgeClass}`}>{badgeLabel}</span>
                     {!isCancelled && <span class={`badge ${payBadgeClass}`}>{payBadgeLabel}</span>}
+                    {iaPorBooking.has(b.id) && (
+                      <a href={`${redirectBase}?tab=notas#ia-${iaPorBooking.get(b.id)!.g.id}`} class="badge ia-badge-sesion"
+                        title="Esta sesión se grabó. Ver el resumen automático en Notas clínicas.">
+                        {iaPorBooking.get(b.id)!.vigente ? 'Grabada · resumen IA' : 'Grabada · ' + iaPorBooking.get(b.id)!.estado.texto.toLowerCase()}
+                      </a>
+                    )}
                     {(b.notes ?? '').includes('ComprobanteTransferencia') && (
                       <a href={`/api/admin/comprobante?b=${b.id}`} target="_blank" rel="noopener" class="btn btn-outline btn-sm">
                         {isPaid ? 'Ver comprobante' : 'Comprobante por confirmar'}
@@ -551,40 +649,75 @@ const faltanDatos = patient ? [
 
   <!-- ── TAB: NOTAS CLÍNICAS ────────────────────────────────────────────────── -->
   {tab === 'notas' && (
-    <div style="display:grid;grid-template-columns:1fr 340px;gap:1.5rem;align-items:start;">
+    <div class="notas-grid">
 
-      <!-- Lista de notas -->
-      <div style="display:flex;flex-direction:column;gap:1rem;">
-        {!notes?.length ? (
+      <!-- Lista: notas de Vale + resúmenes automáticos (IA) intercalados por fecha.
+           El resumen va SOBRE la nota de esa fecha y en tarjeta propia: nunca se mezclan. -->
+      <div style="display:flex;flex-direction:column;gap:1rem;min-width:0;">
+        {!itemsNotas.length ? (
           <div class="card" style="text-align:center;padding:3rem;">
             <p style="color:var(--stone);font-size:0.9rem;">Sin notas clínicas aún.</p>
           </div>
-        ) : notes.map(note => (
+        ) : itemsNotas.map(it => it.tipo === 'ia' ? (
+          <article id={`ia-${it.t.g.id}`} class={`card ia-card anclado${it.t.vigente ? '' : ' ia-card-gris'}`} aria-label={`Resumen automático (IA) del ${fechaLarga(it.t.g.session_date)}`}>
+            <div class="ia-cab">
+              <span class="ia-badge"><span aria-hidden="true">✦</span> {it.t.vigente?.rotulo || ROTULO_RESUMEN}</span>
+              {it.t.estado.tono !== 'listo' && <span class={`ia-estado ia-estado-${it.t.estado.tono}`}>{it.t.estado.texto}</span>}
+            </div>
+            <p class="ia-fecha">{fechaLarga(it.t.g.session_date)}{it.t.hora ? ` · ${it.t.hora}` : ''}</p>
+            <p class="ia-sub">{tipoTexto(it.t.g)}{it.t.g.duracion_seg ? ` · ${duracionTexto(it.t.g.duracion_seg)} grabados` : ''}{it.t.vigente && it.t.vigente.version > 1 ? ` · versión ${it.t.vigente.version}` : ''}</p>
+            {it.t.vigente ? (
+              <div class="ia-cuerpo" set:html={it.t.html} />
+            ) : it.t.problema ? (
+              <p class="ia-texto">{it.t.problema}</p>
+            ) : (
+              <p class="ia-texto">Resumen automático (IA): en proceso. Aparecerá aquí solo.</p>
+            )}
+            {it.t.vigente && it.t.problema && <p class="ia-nota">{it.t.problema}</p>}
+            {it.t.generando && it.t.vigente && <p class="ia-nota">Se está escribiendo una versión nueva; esta sigue visible mientras tanto.</p>}
+            {it.t.g.nota_sistema && <p class="ia-nota">{it.t.g.nota_sistema}</p>}
+            {it.t.vigente && <p class="ia-aviso">{AVISO_RESUMEN}</p>}
+            <div class="ia-acciones">
+              {it.t.transcrita && (
+                <a class="btn btn-outline btn-sm" href={`/admin/pacientes/${patient.id}/sesion/${it.t.g.id}`}>Ver transcripción</a>
+              )}
+              {it.t.vigente && (
+                <button type="button" class="btn btn-outline btn-sm ia-copiar" data-texto={it.t.texto} data-fecha={it.t.g.session_date}
+                  data-tipo={it.t.g.tipo === 'pareja' ? `pareja-${it.t.g.origen}` : it.t.g.origen}>Copiar a mi nota</button>
+              )}
+              {it.t.reintentable && (
+                <button type="button" class="btn btn-outline btn-sm ia-reintentar" data-gid={it.t.g.id}>Reintentar</button>
+              )}
+              <span class="ia-msg" data-gid={it.t.g.id} role="status" aria-live="polite"></span>
+            </div>
+          </article>
+        ) : (
           <div class="card">
             <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.75rem;">
               <div>
-                <p style="font-weight:600;font-size:0.9rem;">{formatDate(note.session_date)}</p>
-                {note.session_type && (
+                <p style="font-weight:600;font-size:0.9rem;">{formatDate(it.n.session_date)}</p>
+                {it.n.session_type && (
                   <span style="font-size:0.72rem;background:var(--warm);color:var(--stone);padding:0.15rem 0.5rem;border-radius:99px;">
-                    {SESSION_LABELS[note.session_type] ?? note.session_type}
+                    {SESSION_LABELS[it.n.session_type] ?? it.n.session_type}
                   </span>
                 )}
               </div>
               <form method="POST" action="/api/admin/patients" style="margin:0;">
                 <input type="hidden" name="action" value="delete_note" />
-                <input type="hidden" name="id" value={note.id} />
+                <input type="hidden" name="id" value={it.n.id} />
                 <input type="hidden" name="redirect" value={`${redirectBase}?tab=notas`} />
                 <button type="submit" class="btn btn-danger btn-sm"
                   onclick="return confirm('¿Archivar esta nota? Deja de verse en la ficha, pero se conserva (la ficha clínica se guarda 15 años).')" title="Archivar">✕</button>
               </form>
             </div>
-            <p style="font-size:0.88rem;line-height:1.7;color:var(--ink);white-space:pre-wrap;">{note.content}</p>
+            <p style="font-size:0.88rem;line-height:1.7;color:var(--ink);white-space:pre-wrap;">{it.n.content}</p>
           </div>
         ))}
       </div>
 
+      <div class="notas-lateral">
       <!-- Agregar nota -->
-      <div class="card" id="nueva-nota" style="position:sticky;top:90px;">
+      <div class="card" id="nueva-nota">
         <p class="label" style="margin-bottom:1.25rem;">+ Nueva nota</p>
         <form method="POST" action="/api/admin/patients" style="display:flex;flex-direction:column;gap:1rem;">
           <input type="hidden" name="action" value="add_note" />
@@ -593,12 +726,12 @@ const faltanDatos = patient ? [
 
           <div>
             <label class="label" style="display:block;margin-bottom:0.3rem;">Fecha de sesión</label>
-            <input type="date" name="session_date"
+            <input type="date" name="session_date" id="nueva-nota-fecha"
               value={nowCL().toISOString().slice(0,10)} required />
           </div>
           <div>
             <label class="label" style="display:block;margin-bottom:0.3rem;">Tipo de sesión</label>
-            <select name="session_type">
+            <select name="session_type" id="nueva-nota-tipo">
               <option value="">— Sin especificar</option>
               <option value="presencial">Ind. Presencial</option>
               <option value="online">Ind. Online</option>
@@ -618,12 +751,58 @@ const faltanDatos = patient ? [
         </form>
       </div>
 
+      {iaTarjetas.length > 0 && (
+        <section class="card ia-preguntar" id="preguntar-ia" data-patient-id={patient.id}
+          data-sesiones={JSON.stringify(iaConsultables.map((t) => ({ id: t.g.id, fecha: fechaCorta(t.g.session_date) })))}>
+          <p class="ia-preg-titulo">Preguntar a la IA</p>
+          <p class="ia-sub" style="margin-bottom:0.85rem;">Sobre las sesiones grabadas de {patient.name}</p>
+          {iaConsultables.length ? (
+            <div style="display:flex;flex-direction:column;gap:0.6rem;">
+              <div>
+                <label class="label" for="ia-alcance" style="display:block;margin-bottom:0.3rem;">Sesiones</label>
+                <select id="ia-alcance">
+                  <option value="todas">Todas las sesiones ({iaConsultables.length})</option>
+                  {iaConsultables.length > 1 && <option value="ultima">Solo la última</option>}
+                  {iaConsultables.map((t) => <option value={t.g.id}>Sesión del {fechaCorta(t.g.session_date)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label class="label" for="ia-pregunta" style="display:block;margin-bottom:0.3rem;">Tu pregunta</label>
+                <textarea id="ia-pregunta" rows="3" maxlength="4000" style="resize:vertical;"
+                  placeholder="Ej.: ¿Qué dijo sobre su mamá en las últimas sesiones?"></textarea>
+              </div>
+              <div class="ia-chips" aria-label="Ideas de preguntas">
+                {['¿Qué tareas quedaron pendientes?', '¿Cómo ha cambiado el sueño?', 'Temas que se repiten'].map((c) => (
+                  <button type="button" class="ia-chip" data-pregunta={c}>{c}</button>
+                ))}
+              </div>
+              <button type="button" id="ia-preguntar-btn" class="btn btn-dark" style="width:100%;justify-content:center;">Preguntar</button>
+              <p id="ia-preg-estado" class="ia-sub" role="status" aria-live="polite"></p>
+              <div id="ia-respuesta" class="ia-respuesta" hidden>
+                <p class="label" style="margin-bottom:0.35rem;"><span aria-hidden="true">✦</span> Respuesta generada por IA</p>
+                <div id="ia-respuesta-texto" class="ia-respuesta-texto"></div>
+                <p id="ia-respuesta-extra" class="ia-sub" style="margin-top:0.5rem;"></p>
+                <p class="ia-aviso">{AVISO_RESPUESTA}</p>
+              </div>
+            </div>
+          ) : (
+            <p class="ia-texto">Aún no hay sesiones grabadas listas de este paciente.</p>
+          )}
+        </section>
+      )}
+      </div>
+
     </div>
   )}
 
   {tab === 'notas' && (
     <script>
-      document.getElementById('nueva-nota-content')?.focus();
+      // En celular el formulario queda abajo (después de las notas y resúmenes): enfocarlo
+      // saltaría la página hasta el final y abriría el teclado. Solo en pantallas anchas o
+      // si se llegó con #nueva-nota (botón "Escribir evolución" de la agenda).
+      if (location.hash === '#nueva-nota' || window.matchMedia('(min-width: 901px)').matches) {
+        document.getElementById('nueva-nota-content')?.focus();
+      }
     </script>
   )}
 
@@ -763,6 +942,54 @@ const faltanDatos = patient ? [
   .anclado { scroll-margin-top: 72px; }
   .anclado:target { outline: 3px solid #4f5ce8; outline-offset: 2px; animation: anclaPulso 2.4s ease-out 1; }
   @keyframes anclaPulso { 0% { box-shadow: 0 0 0 8px rgba(79,92,232,.25); } 100% { box-shadow: 0 0 0 0 rgba(79,92,232,0); } }
+
+  /* ── Notas clínicas: lista + columna lateral (una sola columna en celular) ── */
+  .notas-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1.5rem; align-items: start; }
+  .notas-lateral { position: sticky; top: 90px; display: flex; flex-direction: column; gap: 1rem; max-height: calc(100vh - 110px); overflow-y: auto; }
+  @media (max-width: 900px) {
+    .notas-grid { grid-template-columns: minmax(0, 1fr); }
+    .notas-lateral { position: static; max-height: none; overflow: visible; }
+  }
+
+  /* ── Resumen automático (IA): anexo con rótulo dorado oscuro #7A6544 (5,57:1 sobre blanco);
+     el dorado de marca #A8906C solo como borde. "Atención" se ve igual que las demás secciones. */
+  .ia-card { border-left: 4px solid #A8906C; background: #fffdf9; }
+  .ia-card-gris { background: var(--warm); border-left-color: #d9cdb8; }
+  .ia-cab { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: space-between; }
+  .ia-badge { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.74rem; font-weight: 700; color: #7A6544; background: #f7f1e6; border: 1px solid #e6d9c2; border-radius: 99px; padding: 0.18rem 0.65rem; line-height: 1.35; }
+  .ia-estado { font-size: 0.72rem; font-weight: 600; border-radius: 99px; padding: 0.15rem 0.6rem; border: 1px solid; }
+  .ia-estado-proceso, .ia-estado-neutro { color: #374151; background: #f3f4f6; border-color: #e5e7eb; }
+  .ia-estado-problema { color: #92400e; background: #fffbeb; border-color: #fcd34d; }
+  .ia-fecha { font-weight: 600; font-size: 0.9rem; margin-top: 0.65rem; }
+  .ia-fecha::first-letter { text-transform: uppercase; }
+  .ia-sub { font-size: 0.78rem; color: var(--stone); }
+  .ia-texto { font-size: 0.86rem; color: var(--ink); margin-top: 0.6rem; line-height: 1.55; }
+  .ia-nota { font-size: 0.78rem; color: var(--stone); margin-top: 0.6rem; }
+  .ia-cuerpo { font-size: 0.88rem; line-height: 1.65; color: var(--ink); margin-top: 0.4rem; overflow-wrap: anywhere; }
+  .ia-cuerpo :global(h4) { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--stone); font-weight: 600; margin: 0.95rem 0 0.25rem; }
+  .ia-cuerpo :global(ul) { padding-left: 1.15rem; list-style: disc; }
+  .ia-cuerpo :global(li) { margin: 0.15rem 0; }
+  .ia-cuerpo :global(p) { margin: 0.3rem 0; }
+  .ia-cuerpo :global(p.ia-meta) { font-size: 0.76rem; color: var(--stone); font-style: italic; }
+  .ia-cuerpo :global(a.ia-min) { color: #576352; font-weight: 600; text-decoration: underline; white-space: nowrap; }
+  .ia-aviso { font-size: 0.75rem; color: var(--stone); border-top: 1px solid var(--warm); margin-top: 0.85rem; padding-top: 0.6rem; }
+  .ia-acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; align-items: center; }
+  .ia-msg { font-size: 0.78rem; }
+  .ia-badge-sesion { color: #7A6544 !important; border-color: #e6d9c2 !important; background: #f7f1e6 !important; text-decoration: none; }
+  .ia-preg-titulo { font-weight: 700; font-size: 1rem; }
+  .ia-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .ia-chip { border: 1px solid var(--dust); background: var(--sand); border-radius: 99px; padding: 0.35rem 0.75rem; font-size: 0.76rem; color: var(--ink); cursor: pointer; font-family: inherit; text-align: left; }
+  .ia-chip:hover { border-color: #A8906C; }
+  .ia-respuesta { background: var(--sand); border: 1px solid var(--dust); border-radius: 8px; padding: 0.8rem; }
+  .ia-respuesta-texto { font-size: 0.86rem; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+  .ia-respuesta-texto :global(ul) { padding-left: 1.1rem; list-style: disc; }
+  .ia-respuesta-texto :global(p) { margin: 0.3rem 0; }
+  .ia-respuesta-texto :global(a) { color: #576352; font-weight: 600; text-decoration: underline; }
+  @media (max-width: 600px) {
+    .ia-acciones .btn, .ia-chip { min-height: 40px; }
+    .patient-tabs { overflow-x: auto; }
+    .patient-tabs a { white-space: nowrap; padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+  }
 </style>
 
 <script>
@@ -1104,4 +1331,132 @@ const faltanDatos = patient ? [
     rut.disabled = sin;
     (document.getElementById('pf-doc') as HTMLElement).style.display = sin ? 'grid' : 'none';
   });
+</script>
+
+<script>
+  // ── Transcriptor IA (P7): copiar resumen a la nota, reintentar y preguntar a la IA ──
+  // Todo pedido va con X-Panel: 1 (los endpoints del transcriptor lo exigen además de la sesión).
+  async function postPanel(url: string, body: unknown): Promise<{ ok: boolean; error?: string; [k: string]: unknown }> {
+    const res = await fetch(url, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+      body: JSON.stringify(body),
+    });
+    try { return await res.json(); } catch { return { ok: false, error: 'Respuesta inesperada del servidor.' }; }
+  }
+  const msgDe = (gid: string) => document.querySelector<HTMLElement>(`.ia-msg[data-gid="${gid}"]`);
+
+  document.addEventListener('click', async (e) => {
+    const t = e.target as HTMLElement;
+
+    // "Copiar a mi nota": pega el resumen (texto plano) en "+ Nueva nota" para que Vale lo edite.
+    const copiar = t.closest<HTMLButtonElement>('.ia-copiar');
+    if (copiar) {
+      const area = document.getElementById('nueva-nota-content') as HTMLTextAreaElement | null;
+      if (!area) return;
+      const texto = `Basado en el resumen automático (IA) — revisar y editar:\n${copiar.dataset.texto ?? ''}`;
+      area.value = area.value.trim() ? `${area.value.trimEnd()}\n\n${texto}` : texto;
+      const fecha = document.getElementById('nueva-nota-fecha') as HTMLInputElement | null;
+      const tipo = document.getElementById('nueva-nota-tipo') as HTMLSelectElement | null;
+      if (fecha && copiar.dataset.fecha) fecha.value = copiar.dataset.fecha;
+      if (tipo && copiar.dataset.tipo && [...tipo.options].some((o) => o.value === copiar.dataset.tipo)) tipo.value = copiar.dataset.tipo;
+      area.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      area.focus({ preventScroll: true });
+      return;
+    }
+
+    // "Reintentar" una grabación con problema.
+    const re = t.closest<HTMLButtonElement>('.ia-reintentar');
+    if (re) {
+      const gid = re.dataset.gid ?? '';
+      const msg = msgDe(gid);
+      re.disabled = true;
+      if (msg) { msg.textContent = 'Reintentando…'; msg.style.color = '#6b7280'; }
+      try {
+        const d = await postPanel('/api/admin/transcriptor/reintentar', { grabacion_id: gid });
+        if (!d.ok) throw new Error(d.error ?? 'No se pudo reintentar.');
+        if (msg) { msg.textContent = '✓ Se volverá a procesar. Aparecerá aquí solo.'; msg.style.color = '#15803d'; }
+        setTimeout(() => location.reload(), 1500);
+      } catch (err) {
+        if (msg) { msg.textContent = '✕ ' + (err instanceof Error ? err.message : 'Error de conexión'); msg.style.color = '#dc2626'; }
+        re.disabled = false;
+      }
+      return;
+    }
+
+    // Ideas rápidas de preguntas.
+    const chip = t.closest<HTMLButtonElement>('.ia-chip');
+    if (chip) {
+      const p = document.getElementById('ia-pregunta') as HTMLTextAreaElement | null;
+      if (p) { p.value = chip.dataset.pregunta ?? ''; p.focus(); }
+    }
+  });
+
+  // ── Preguntar a la IA ────────────────────────────────────────────────────────
+  const caja = document.getElementById('preguntar-ia');
+  const btn = document.getElementById('ia-preguntar-btn') as HTMLButtonElement | null;
+  if (caja && btn) {
+    const sesiones: { id: string; fecha: string }[] = JSON.parse(caja.dataset.sesiones || '[]');
+    const pid = caja.dataset.patientId ?? '';
+    const estado = document.getElementById('ia-preg-estado')!;
+    const box = document.getElementById('ia-respuesta')!;
+    const salida = document.getElementById('ia-respuesta-texto')!;
+    const extra = document.getElementById('ia-respuesta-extra')!;
+    const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+    const segs = (m: string) => { const p = m.split(':').map(Number); return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1]; };
+
+    // Texto de la IA → HTML seguro: se escapa todo y recién después se enlazan las citas
+    // "(12 oct 2026, [23:40])" a la transcripción de esa sesión en ese minuto.
+    function formatear(texto: string, citadas: { grabacion_id: string; fecha: string }[]): string {
+      const porFecha = new Map<string, string>();
+      for (const s of [...sesiones.map((x) => ({ grabacion_id: x.id, fecha: x.fecha })), ...citadas]) porFecha.set(s.fecha, s.grabacion_id);
+      const enlazar = (l: string) => l
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\((\d{1,2} [a-z]{3} \d{4}),\s*\[(\d{1,2}:\d{2}(?::\d{2})?)\]\)/g, (todo, fecha: string, marca: string) => {
+          const gid = porFecha.get(fecha);
+          return gid ? `(<a href="/admin/pacientes/${encodeURIComponent(pid)}/sesion/${encodeURIComponent(gid)}?t=${segs(marca)}">${fecha}, [${marca}]</a>)` : todo;
+        });
+      const out: string[] = [];
+      let lista = false;
+      for (const cruda of esc(texto).split('\n')) {
+        const l = cruda.trim();
+        const v = /^(?:[-*•]|\d{1,2}[.)])\s+(.+)$/.exec(l);
+        if (v) { if (!lista) { out.push('<ul>'); lista = true; } out.push(`<li>${enlazar(v[1])}</li>`); continue; }
+        if (lista) { out.push('</ul>'); lista = false; }
+        if (l) out.push(`<p>${enlazar(l)}</p>`);
+      }
+      if (lista) out.push('</ul>');
+      return out.join('');
+    }
+
+    btn.addEventListener('click', async () => {
+      const pregunta = (document.getElementById('ia-pregunta') as HTMLTextAreaElement).value.trim();
+      const alcance = (document.getElementById('ia-alcance') as HTMLSelectElement).value;
+      if (!pregunta) { estado.textContent = 'Escribe una pregunta.'; estado.style.color = '#dc2626'; return; }
+      const ids = alcance === 'todas' ? null : alcance === 'ultima' ? [sesiones[0]?.id].filter(Boolean) : [alcance];
+      btn.disabled = true;
+      box.hidden = true;
+      estado.style.color = '';
+      estado.textContent = `Buscando en ${ids ? ids.length : sesiones.length} ${(ids ? ids.length : sesiones.length) === 1 ? 'sesión' : 'sesiones'}…`;
+      try {
+        const d = await postPanel('/api/admin/transcriptor/preguntar', { patient_id: pid, pregunta, ...(ids ? { grabacion_ids: ids } : {}) });
+        if (!d.ok) throw new Error(d.error ?? 'No se pudo responder ahora. Intenta de nuevo en un minuto.');
+        const citadas = (d.sesiones as { grabacion_id: string; fecha: string }[] | undefined) ?? [];
+        salida.innerHTML = formatear(String(d.respuesta ?? ''), citadas);
+        const omitidas = (d.omitidas as { fecha: string }[] | undefined) ?? [];
+        const notas: string[] = [];
+        if (citadas.length) notas.push(`Leyó ${citadas.length} ${citadas.length === 1 ? 'sesión' : 'sesiones'}.`);
+        if (omitidas.length) notas.push(`No alcanzaron a entrar: ${omitidas.map((o) => o.fecha).join(', ')}.`);
+        if (Number(d.lectura_fallida) > 0) notas.push('Alguna transcripción no se pudo leer; se usó su resumen si lo había.');
+        extra.textContent = notas.join(' ');
+        box.hidden = false;
+        estado.textContent = '';
+      } catch (err) {
+        estado.textContent = '✕ ' + (err instanceof Error ? err.message : 'No se pudo responder ahora. Intenta de nuevo en un minuto.');
+        estado.style.color = '#dc2626';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
 </script>
