@@ -1,0 +1,106 @@
+// Configuración del bot: TODO llega por variables de entorno de la máquina efímera
+// (las arma src/lib/transcriptor/bot.ts del sitio al crear la máquina en Fly).
+// La app de Fly no tiene secretos permanentes: el único dato sensible es BOT_TOKEN,
+// que solo sirve para hablar con /api/transcriptor/bot-evento de UNA grabación y vence.
+
+export interface ConfigBot {
+  grabacionId: string;
+  meetUrl: string;
+  botNombre: string;
+  eventoUrl: string;
+  token: string;
+  /** Hora de término prevista de la sesión. */
+  horaFin: Date;
+  /** Máximo de espera en la sala de espera (20 min). */
+  esperaAdmisionMs: number;
+  /** Tiempo solo (sin humanos) antes de salir (60 s). */
+  soloMs: number;
+  /** Margen después de horaFin antes de salir sí o sí (30 min). */
+  maxExtraMs: number;
+  /** Humanos máximos permitidos en la llamada (individual 2, pareja 3). */
+  maxHumanos: number;
+  /** Nombres con que puede aparecer Vale en Meet (comparación normalizada). */
+  valeNombres: string[];
+  /** Largo de cada segmento de audio (15 min) y solapamiento (3 s). */
+  segmentoMs: number;
+  solapamientoMs: number;
+  /** Bitrate de MediaRecorder. */
+  bitsPorSegundo: number;
+}
+
+export const MEET_URL_RE = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/; // 32 bytes en base64url sin relleno
+
+function entero(env: Record<string, string | undefined>, nombre: string, defecto: number, min: number, max: number): number {
+  const crudo = env[nombre];
+  if (crudo === undefined || crudo === '') return defecto;
+  const n = Number(crudo);
+  if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${nombre} inválido: debe ser un entero entre ${min} y ${max}`);
+  return n;
+}
+
+/** Lee y valida la configuración. Lanza con un mensaje en español si falta algo. */
+export function leerConfig(env: Record<string, string | undefined> = process.env): ConfigBot {
+  const faltan = ['GRABACION_ID', 'MEET_URL', 'EVENTO_URL', 'BOT_TOKEN', 'HORA_FIN'].filter((k) => !env[k]);
+  if (faltan.length) throw new Error(`Faltan variables de entorno: ${faltan.join(', ')}`);
+
+  const grabacionId = env.GRABACION_ID!;
+  if (!UUID_RE.test(grabacionId)) throw new Error('GRABACION_ID no es un uuid');
+
+  const meetUrl = env.MEET_URL!;
+  if (!MEET_URL_RE.test(meetUrl)) throw new Error('MEET_URL no es un enlace de Google Meet válido');
+
+  const eventoUrl = env.EVENTO_URL!;
+  let u: URL;
+  try { u = new URL(eventoUrl); } catch { throw new Error('EVENTO_URL no es una URL'); }
+  const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+  if (u.protocol !== 'https:' && !(local && u.protocol === 'http:')) throw new Error('EVENTO_URL debe ser https');
+
+  const token = env.BOT_TOKEN!;
+  if (!TOKEN_RE.test(token)) throw new Error('BOT_TOKEN con formato inválido');
+
+  const horaFin = new Date(env.HORA_FIN!);
+  if (Number.isNaN(horaFin.getTime())) throw new Error('HORA_FIN no es una fecha ISO');
+
+  const botNombre = (env.BOT_NOMBRE || 'Notas de Ps. Valentina Orellana').slice(0, 60);
+  const valeNombres = (env.VALE_NOMBRES || 'Valentina Orellana')
+    .split('|').map((s) => s.trim()).filter(Boolean);
+
+  return {
+    grabacionId,
+    meetUrl,
+    botNombre,
+    eventoUrl,
+    token,
+    horaFin,
+    esperaAdmisionMs: entero(env, 'ESPERA_ADMISION_MS', 20 * 60_000, 10_000, 60 * 60_000),
+    soloMs: entero(env, 'SOLO_MS', 60_000, 5_000, 30 * 60_000),
+    maxExtraMs: entero(env, 'MAX_EXTRA_MS', 30 * 60_000, 0, 3 * 60 * 60_000),
+    maxHumanos: entero(env, 'MAX_HUMANOS', 2, 1, 10),
+    valeNombres,
+    segmentoMs: entero(env, 'SEGMENTO_MS', 15 * 60_000, 30_000, 60 * 60_000),
+    solapamientoMs: entero(env, 'SOLAPAMIENTO_MS', 3_000, 0, 30_000),
+    bitsPorSegundo: entero(env, 'BITS_POR_SEGUNDO', 32_000, 16_000, 128_000),
+  };
+}
+
+/** Normaliza un nombre visible para comparar (minúsculas, sin tildes ni espacios dobles). */
+export function normalizarNombre(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** Nombres típicos de otros bots/asistentes de notas (no cuentan como humanos). */
+const BOT_RE = /\b(notetaker|note taker|notas de|notes|bot|assistant|asistente|otter|fireflies|read\.ai|tl;dv|tldv|fathom|gemini|recorder|grabadora)\b/i;
+
+export function esNombreDeBot(nombre: string, botNombre: string): boolean {
+  const n = normalizarNombre(nombre);
+  if (!n) return true;
+  if (n === normalizarNombre(botNombre)) return true;
+  return BOT_RE.test(n);
+}
+
+export function esVale(nombre: string, valeNombres: string[]): boolean {
+  const n = normalizarNombre(nombre);
+  return valeNombres.some((v) => normalizarNombre(v) === n);
+}

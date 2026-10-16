@@ -1,0 +1,15 @@
+# App de Fly.io del bot de Meet. SOLO se usa para construir y publicar la imagen:
+#   fly deploy --build-only --push --image-label v1
+# NUNCA `fly deploy` a secas (crearía una máquina permanente). Las máquinas las crea el sitio,
+# una por sesión, con la Machines API (src/lib/transcriptor/bot.ts): región iad,
+# auto_destroy = true, restart.policy = "no". Esta app NO tiene secrets (30-seguridad §5.1):
+# el BOT_TOKEN de cada sesión llega en la config de su máquina y muere con ella.
+#
+# Cambia `app` si el nombre ya está tomado en Fly (y FLY_APP_BOT / FLY_IMAGEN en Vercel).
+app = "vo-bot-meet"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Sin [http_service] ni [[services]]: el bot no recibe conexiones, solo sale a Meet y al sitio.

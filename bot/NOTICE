@@ -1,0 +1,64 @@
+Bot de notas de la Ps. Valentina Orellana ("Notas de Ps. Valentina Orellana")
+Copyright 2026 Valentina Orellana
+
+Este producto incluye software derivado de Vexa (https://github.com/Vexa-ai/vexa),
+distribuido bajo la Licencia Apache, versión 2.0 (ver LICENSE en esta carpeta).
+Código de origen tomado del commit f1a62fbbdfd2c98cb162582d82c31fe8102acc89
+(rama main, 9 oct 2026). El repositorio de Vexa no incluye archivo NOTICE propio.
+
+Archivos derivados y cambios realizados (Apache-2.0, sección 4(b)):
+
+- src/meet/selectores.ts  <- core/meetings/modules/join/src/googlemeet/selectors.ts
+  Se conservan los selectores de invitado (nombre, "Ask to join", cámara,
+  micrófono, sala de espera, rechazo, expulsión, salida). Se quitaron los del
+  modo autenticado, Gemini, panel de personas y los genéricos [role="alert"]
+  de expulsión (daban falsos positivos). Comentarios traducidos al español.
+
+- src/meet/entrar.ts      <- core/meetings/modules/join/src/googlemeet/join.ts
+  Solo el flujo de invitado anónimo. Sin capturas de pantalla (privacidad:
+  nunca se guarda imagen de una sesión clínica), sin callbacks a meeting-api,
+  sin escaneo estructural de diagnóstico. Se conserva el idioma fijo en-US
+  (?hl=en) para que los selectores en inglés funcionen.
+
+- src/meet/admision.ts    <- core/meetings/modules/join/src/googlemeet/admission.ts
+  Se conservan la guarda de sala de espera, el conteo de tiles reales
+  (excluye el panel de efectos), la clasificación "rechazo explícito" vs
+  "página de error". Sin reCAPTCHA (no se resuelven desafíos: si aparece uno,
+  el bot sale con error), sin Gemini, sin volcados de depuración.
+
+- src/meet/expulsion.ts   <- core/meetings/modules/join/src/googlemeet/removal.ts
+  Misma lógica de detección, sin monitor por intervalo propio.
+
+- src/meet/salir.ts       <- core/meetings/modules/join/src/googlemeet/leave.ts
+                             core/meetings/modules/join/src/shared/leave-click.ts
+  Clic de salida en el navegador (misma rutina), sin callbacks.
+
+- src/meet/humano.ts      <- core/meetings/modules/join/src/googlemeet/humanized/x11Input.ts
+                             core/meetings/modules/join/src/googlemeet/humanized/humanizedInteraction.ts
+  X11Input (xdotool/XTEST) casi sin cambios. La trayectoria del mouse se
+  sintetiza (curva con ruido) en vez de usar la biblioteca de capturas de
+  movimiento de Vexa (mocap-data.ts no se copia). Se conserva la calibración
+  pantalla<->página y la verificación del punto final con elementFromPoint.
+
+- src/meet/argumentos.ts  <- core/meetings/modules/join/src/browser-args.ts
+  Mismos argumentos de Chromium; idioma fijo en-US.
+
+- src/captura/hablantes-pagina.ts <- core/meetings/modules/gmeet-capture/src/gmeet-speakers.ts
+  Misma lectura del tile iluminado (clases conocidas, nombre en
+  span.notranslate, exclusión del propio tile por data-self-name). Se agrega
+  un listado de participantes visibles para la regla de salida.
+
+- src/captura/audio-pagina.ts <- core/meetings/modules/gmeet-capture/src/gmeet-capture.ts
+                                 core/meetings/modules/recording/src/audio-pipeline.ts (MediaRecorderCapture)
+  En vez de PCM por participante a 16 kHz, se mezclan todas las pistas
+  remotas en un MediaStreamAudioDestinationNode y se graba con MediaRecorder
+  (audio/webm;codecs=opus, 32 kbps) en segmentos de 15 min con 3 s de
+  solapamiento. Mismo puente página->Node con exposeFunction.
+
+- src/vigia.ts            <- idea de core/meetings/services/bot/src/aloneness.ts
+  Reescrito: la regla de salida se basa en los participantes visibles (no en
+  silencio de audio) y agrega "Vale salió", "más participantes de los
+  esperados" y hora máxima.
+
+Todo lo demás (src/index.ts, src/config.ts, src/sitio.ts, src/linea.ts,
+src/segmentos.ts, Dockerfile, fly.toml) es código propio.
