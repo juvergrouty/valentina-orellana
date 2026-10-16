@@ -1,6 +1,7 @@
-// Bot "Notas de Ps. Valentina Orellana": entra al Meet como invitado, espera que Vale lo
-// admita (hasta 20 min), graba el audio mezclado de la reunión en segmentos de 15 min que
-// sube directo a R2 (URL prefirmada que pide al sitio), registra quién habla por el tile
+// Bot "Notas Ps. Valentina Orellana": entra al Meet como invitado (o, en modo 'cuenta', con la
+// cuenta de Google del robot: invitado del calendario, entra sin pedir permiso; ver
+// docs/transcriptor/85-robot-meet.md), espera que Vale lo admita (hasta 20 min), graba el
+// audio mezclado de la reunión en segmentos de 15 min que sube directo a R2 (URL prefirmada que pide al sitio), registra quién habla por el tile
 // iluminado y sale cuando Vale sale, cuando quedan solo bots, si entra alguien de más, si lo
 // expulsan o al llegar a HORA_FIN + 30 min. Al terminar, el proceso sale y la máquina de Fly
 // se autodestruye (config.auto_destroy = true, restart.policy = "no").
@@ -12,7 +13,7 @@ import { LineaHablantes } from './linea.js';
 import { cargarPlaywright, type Navegador, type Pagina } from './navegador.js';
 import { esperarAdmision } from './meet/admision.js';
 import { argumentosChromium, IDIOMA_UI } from './meet/argumentos.js';
-import { entrarComoInvitado } from './meet/entrar.js';
+import { entrarComoInvitado, entrarConCuenta } from './meet/entrar.js';
 import { revisarExpulsion } from './meet/expulsion.js';
 import { EntradaX11, InteraccionHumana } from './meet/humano.js';
 import { salirDeMeet } from './meet/salir.js';
@@ -22,6 +23,7 @@ import { instalarHablantesEnPagina, participantesEnPagina } from './captura/habl
 import { Segmentos } from './segmentos.js';
 import { Sitio, TokenRechazadoError } from './sitio.js';
 import { sanearError } from './saneo.js';
+import { estadoSesionValido, soloGoogle, type EstadoSesion } from './sesion.js';
 import { Vigia, type MotivoFin } from './vigia.js';
 
 const log = (m: string) => console.log(`[bot ${new Date().toISOString()}] ${m}`);
@@ -122,9 +124,12 @@ async function main(): Promise<number> {
 
   let navegador: Navegador | null = null;
   let finEnviado = false;
+  let devolverSesion: (() => Promise<void>) | null = null;
   const enviarFin = async (motivo: MotivoFin, linea: ReturnType<LineaHablantes['cerrar']> = []) => {
     if (finEnviado) return;
     finEnviado = true;
+    // Antes de `fin` (fin revoca el token): la sesión renovada del robot vuelve al sitio.
+    if (devolverSesion) { const d = devolverSesion; devolverSesion = null; await d().catch(() => {}); }
     await sitio.enviar({ tipo: 'fin', motivo, linea_hablantes: linea });
   };
 
@@ -145,17 +150,43 @@ async function main(): Promise<number> {
         navegador = await lanzar(false);
       }
     }
-    const contexto = await navegador.newContext({
-      locale: IDIOMA_UI,
-      viewport: { width: 1280, height: 720 },
-      permissions: [],
-    });
-    const p = await contexto.newPage();
+    const nav = navegador;
+    const opcionesContexto = { locale: IDIOMA_UI, viewport: { width: 1280, height: 720 }, permissions: [] };
     const x11 = new EntradaX11();
     const humano = (await x11.disponible()) ? new InteraccionHumana(x11, log) : null;
     if (!humano) log('xdotool/Xvfb no disponible: se usarán clics sintéticos (Meet podría rechazarlos)');
 
-    await entrarComoInvitado(p, cfg.meetUrl, cfg.botNombre, { humano, log });
+    // Modo 'cuenta': la sesión del robot llega del sitio (solo en memoria). Sin ella → invitado.
+    let sesion: EstadoSesion | null = null;
+    if (cfg.modo === 'cuenta' && cfg.cuentaEmail) {
+      sesion = await sitio.pedirSesion(cfg.cuentaEmail).catch((e) => {
+        if (e instanceof TokenRechazadoError) throw e;
+        log(`no se pudo pedir la sesión del robot (${sanearError(e instanceof Error ? e.message : e, 120)})`);
+        return null;
+      });
+      log(sesion ? 'modo cuenta: sesión del robot recibida' : 'modo cuenta sin sesión disponible: entra como invitado');
+    }
+    let contexto = await nav.newContext(sesion ? { ...opcionesContexto, storageState: sesion } : opcionesContexto);
+    let p = await contexto.newPage();
+    if (sesion && cfg.cuentaEmail) {
+      const r = await entrarConCuenta(p, cfg.meetUrl, cfg.cuentaEmail, { humano, log });
+      if (r === 'sin_sesion') {
+        log('Meet no reconoció la sesión del robot: entra como invitado');
+        await sitio.enviar({ tipo: 'sesion_invalida', motivo: 'Meet pidió iniciar sesión de nuevo' }).catch(() => {});
+        sesion = null;
+        await contexto.close().catch(() => {});
+        contexto = await nav.newContext(opcionesContexto);
+        p = await contexto.newPage();
+        await entrarComoInvitado(p, cfg.meetUrl, cfg.botNombre, { humano, log });
+      }
+    } else {
+      await entrarComoInvitado(p, cfg.meetUrl, cfg.botNombre, { humano, log });
+    }
+    // Al salir devuelve la sesión renovada (Google rota cookies); nunca toca disco.
+    devolverSesion = sesion ? async () => {
+      const e = await contexto.storageState().catch(() => null);
+      if (estadoSesionValido(e)) await sitio.enviar({ tipo: 'sesion_actualizada', sesion: soloGoogle(e) }).catch(() => log('no se pudo devolver la sesión renovada'));
+    } : null;
     await sitio.enviar({ tipo: 'lobby' });
 
     const adm = await esperarAdmision(p, cfg.esperaAdmisionMs, log);

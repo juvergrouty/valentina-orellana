@@ -1,4 +1,4 @@
-# Bot de Meet "Notas de Ps. Valentina Orellana" (paquete P5)
+# Bot de Meet "Notas Ps. Valentina Orellana" (paquete P5)
 
 Bot que entra **como invitado** al Google Meet de una sesión online, espera que Vale lo
 admita, graba el audio de la reunión, registra quién habla y se va solo. Corre en una
@@ -41,6 +41,18 @@ Diseño: `docs/transcriptor/50-arquitectura.md` §1.3 y §5, `30-seguridad.md` �
 8. `fin` en el sitio: revoca el token (vence ya), guarda la línea de hablantes, descarta
    segmentos pedidos y nunca confirmados, y deja la grabación en `subida` (o `sin_audio`). Desde
    ahí sigue el mismo camino que una presencial (AssemblyAI, cifrado, resumen).
+
+### Modo 'cuenta' (robot con cuenta de Google propia — decisión G, 16 oct noche)
+
+Detrás del ajuste `transcriptor_bot_modo` (`'invitado'` por defecto; migración 0022). Con
+`'cuenta'` y una sesión vigente guardada: el sitio agrega el correo del robot como invitado del
+evento de Calendar (sin avisar a nadie), la máquina recibe `BOT_MODO=cuenta` y
+`BOT_CUENTA_EMAIL`, el bot pide la sesión (`pide_sesion`, solo en memoria), entra con la cuenta
+("Join now": invitado del calendario, sin pedir permiso, con nombre y foto de la cuenta) y al
+salir devuelve la sesión renovada (`sesion_actualizada`) antes de `fin`. Si Meet no reconoce la
+sesión, avisa `sesion_invalida` y entra como invitado anónimo (Vale lo admite). Investigación,
+riesgos y pasos para Vale: `docs/transcriptor/85-robot-meet.md`. Foto de perfil de la cuenta:
+`perfil/foto-robot.png`.
 
 El bot **no tiene ninguna llave de proveedor** (ni R2, ni Supabase, ni AssemblyAI). Solo
 conoce `/api/transcriptor/bot-evento` y su token, que únicamente permite avanzar SU grabación
@@ -156,8 +168,8 @@ sesión acepta `pg_dump` por IPv4. `pg_dump` 17 sirve para servidores 15 y 17.
 1. **Google puede bloquear invitados anónimos automatizados** ("You can't join this video
    call", reCAPTCHA) sobre todo desde IPs de centros de datos como las de Fly. El bot no
    resuelve desafíos: avisa `error` y la grabación queda en error (con "Reintentar"). Si pasa
-   seguido, las salidas son: entrar con una cuenta de Google dedicada al bot (Vexa lo soporta;
-   requiere guardar una sesión de Google = un secreto más) o usar la grabación presencial.
+   seguido, las salidas son: entrar con una cuenta de Google dedicada al bot (modo 'cuenta', ver
+   arriba y 85-robot-meet.md) o usar la grabación presencial.
 2. **Google cambia el DOM de Meet** sin aviso: selectores, clases "hablando" (ofuscadas) y
    tiles. Todo está aislado en `src/meet/selectores.ts`. Síntomas: no aparece el campo de
    nombre / "Ask to join" (error al entrar), línea de hablantes vacía, o el bot sale enseguida

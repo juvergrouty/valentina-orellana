@@ -6,7 +6,7 @@ Usuaria: Ps. Valentina Orellana (Vale), psicóloga clínica en Chile, atiende in
 ## Qué quiere
 - Todo ocurre dentro de su web (panel /admin). Nada de app nativa. Chrome en Mac o Safari en iPhone.
 - Presencial: un botón "Grabar" en el panel (desde el iPhone). Al lado, ANTES de empezar, un botón "Lugar con ruido" que fuerza el modelo robusto.
-- Online: un bot llamado "Notas de Ps. Valentina Orellana" entra SOLO a su Meet (ella lo admite), graba y se va al terminar.
+- Online: un bot llamado "Notas Ps. Valentina Orellana" entra SOLO a su Meet (ella lo admite), graba y se va al terminar.
 - Transcripción automática. Resumen automático en la ficha del paciente, etiquetado "Resumen automático (IA)", siguiendo SUS instrucciones (puntos clave, tareas dadas, qué revisar la próxima sesión). Ella NO quiere aprobar nada: todo automático.
 - Preguntas a la IA sobre sesiones completas (Q&A).
 - La sesión completa se guarda FUERA de su sitio (almacenamiento externo cifrado), pero solo se procesa/ve a través de su sitio.

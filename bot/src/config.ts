@@ -3,10 +3,19 @@
 // La app de Fly no tiene secretos permanentes: el único dato sensible es BOT_TOKEN,
 // que solo sirve para hablar con /api/transcriptor/bot-evento de UNA grabación y vence.
 
+/** Nombre visible del robot (decisión G, 16 oct noche). Igual a BOT_NOMBRE de src/lib/transcriptor/tipos.ts. */
+export const NOMBRE_ROBOT = 'Notas Ps. Valentina Orellana';
+
+/** 'cuenta': entra con la cuenta de Google del robot (sesión que entrega el sitio). 'invitado': anónimo. */
+export type ModoBot = 'cuenta' | 'invitado';
+
 export interface ConfigBot {
   grabacionId: string;
   meetUrl: string;
   botNombre: string;
+  modo: ModoBot;
+  /** Correo de la cuenta del robot (solo en modo 'cuenta'). */
+  cuentaEmail: string | null;
   eventoUrl: string;
   token: string;
   /** Hora de término prevista de la sesión. */
@@ -63,7 +72,10 @@ export function leerConfig(env: Record<string, string | undefined> = process.env
   const horaFin = new Date(env.HORA_FIN!);
   if (Number.isNaN(horaFin.getTime())) throw new Error('HORA_FIN no es una fecha ISO');
 
-  const botNombre = (env.BOT_NOMBRE || 'Notas de Ps. Valentina Orellana').slice(0, 60);
+  const botNombre = (env.BOT_NOMBRE || NOMBRE_ROBOT).slice(0, 60);
+  const cuentaEmail = correoValido(env.BOT_CUENTA_EMAIL);
+  if (env.BOT_MODO === 'cuenta' && !cuentaEmail) throw new Error('BOT_MODO=cuenta requiere BOT_CUENTA_EMAIL válido');
+  const modo: ModoBot = env.BOT_MODO === 'cuenta' ? 'cuenta' : 'invitado';
   const valeNombres = (env.VALE_NOMBRES || 'Valentina Orellana')
     .split('|').map((s) => s.trim()).filter(Boolean);
 
@@ -71,6 +83,8 @@ export function leerConfig(env: Record<string, string | undefined> = process.env
     grabacionId,
     meetUrl,
     botNombre,
+    modo,
+    cuentaEmail: modo === 'cuenta' ? cuentaEmail : null,
     eventoUrl,
     token,
     horaFin,
@@ -85,13 +99,19 @@ export function leerConfig(env: Record<string, string | undefined> = process.env
   };
 }
 
+const CORREO_RE = /^[a-z0-9](?:[a-z0-9._+-]{0,62})@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
+export function correoValido(s: string | undefined): string | null {
+  const c = (s ?? '').trim().toLowerCase();
+  return c.length <= 120 && CORREO_RE.test(c) ? c : null;
+}
+
 /** Normaliza un nombre visible para comparar (minúsculas, sin tildes ni espacios dobles). */
 export function normalizarNombre(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 /** Nombres típicos de otros bots/asistentes de notas (no cuentan como humanos). */
-const BOT_RE = /\b(notetaker|note taker|notas de|notes|bot|assistant|asistente|otter|fireflies|read\.ai|tl;dv|tldv|fathom|gemini|recorder|grabadora)\b/i;
+const BOT_RE = /\b(notetaker|note taker|notas de|notas ps|notes|bot|assistant|asistente|otter|fireflies|read\.ai|tl;dv|tldv|fathom|gemini|recorder|grabadora)\b/i;
 
 export function esNombreDeBot(nombre: string, botNombre: string): boolean {
   const n = normalizarNombre(nombre);

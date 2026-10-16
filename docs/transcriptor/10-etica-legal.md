@@ -106,7 +106,7 @@ En mi consulta grabo el audio de las sesiones para que nada importante de lo que
 
 **Qué se graba**
 - Solo el **audio** de la sesión: nunca video ni imagen.
-- En sesiones presenciales grabo desde mi teléfono, que dejo en modo avión. En sesiones online entra a la videollamada un asistente llamado **“Notas de Ps. Valentina Orellana”**. Lo verás en la lista de participantes, yo lo admito y se retira al terminar.
+- En sesiones presenciales grabo desde mi teléfono, que dejo en modo avión. En sesiones online entra a la videollamada un asistente llamado **“Notas Ps. Valentina Orellana”**. Lo verás en la lista de participantes, yo lo admito y se retira al terminar.
 - Al comenzar te recordaré que estamos grabando. Nunca grabo a escondidas ni fuera del horario de la sesión.
 
 **Para qué se usa (y para qué no)**
@@ -247,7 +247,7 @@ Cada salvaguarda indica qué la exige. “Debe” significa que es requisito par
 
 ### 4.3 Transparencia en cada sesión
 - Indicador visible y permanente “● Grabando” en la pantalla del grabador.
-- El bot de Meet se llama “Notas de Ps. Valentina Orellana”, solo entra si Vale lo admite y se va al terminar.
+- El bot de Meet se llama “Notas Ps. Valentina Orellana”, solo entra si Vale lo admite y se va al terminar.
 - Protocolo de Vale: decir al comienzo “estamos grabando, como acordamos; si quieres pausar, me dices”. Exigencias: Ley 21.331 art. 4 (información continua) y APA secc. 1.
 
 ### 4.4 Pausar la grabación

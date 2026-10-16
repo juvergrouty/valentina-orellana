@@ -200,7 +200,7 @@ Tabla nueva `transcripciones` (RLS activado, sin políticas anon, `grant select,
 ### 5.1 Lanzamiento
 - Lo lanza **Vercel** (cron cada 5 min que mira sesiones online que empiezan en ≤ 3 min, o botón en el panel), nunca el propio bot. Vercel llama la Machines API con `FLY_API_TOKEN` (deploy token **solo de la app del bot**, con `--expiry`).
 - Antes de lanzar, el servidor valida: reserva online confirmada, consentimiento v3 vigente (ambos si pareja), no hay ya un bot activo para esa reserva.
-- Config de la máquina (env): `SITE_URL`, `BOOKING_REF` (id opaco), `MEET_URL` (desde la reserva en Supabase), `BOT_TOKEN` (ver 5.2), `BOT_NOMBRE="Notas de Ps. Valentina Orellana"`. Máquina con `auto_destroy` y tope de duración (p. ej. 2 h) [por verificar nombre exacto del campo en la referencia de Machines].
+- Config de la máquina (env): `SITE_URL`, `BOOKING_REF` (id opaco), `MEET_URL` (desde la reserva en Supabase), `BOT_TOKEN` (ver 5.2), `BOT_NOMBRE="Notas Ps. Valentina Orellana"`. Máquina con `auto_destroy` y tope de duración (p. ej. 2 h) [por verificar nombre exacto del campo en la referencia de Machines].
 - La app del bot en Fly **no tiene secretos permanentes con valor**: ni llaves de R2, ni AssemblyAI, ni Anthropic, ni Supabase. El bot solo sabe hablar con el sitio.
 
 ### 5.2 Autenticación del bot contra el sitio
