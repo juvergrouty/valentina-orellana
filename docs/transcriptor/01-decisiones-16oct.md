@@ -7,3 +7,9 @@
 5. **Grabación OPCIONAL** hasta que el abogado valide por escrito (`transcriptor_grabacion_requisito = 'opcional'`).
 6. Resumen IA = anexo separado, rotulado "Resumen automático (IA) — no revisado"; nunca reemplaza la nota de evolución de Vale.
 7. No se graba a menores de 18.
+
+## Agregado 16 oct (tarde)
+8. **Errores técnicos → PANEL primero**: cada error (subida, transcripción, resumen, bot, respaldo, chequeo diario) aparece como aviso destacado en el panel apenas Vale entra (todas las páginas de /admin), con qué falló, de qué sesión y un botón para resolver/reintentar ahí mismo; queda hasta resolverse. Correo solo como respaldo. Esto NO es alerta de riesgo clínico (eso sigue prohibido).
+9. **Consentimiento**: la firma v2 con la autorización `accept_recording = true` SÍ habilita grabar (Vale quiere que sirva para quienes ya firmaron; la abogada lo confirmará). La v3 (nueva, amplia, para pacientes nuevos) también. En pareja, cada persona presente debe tener su firma vigente con grabación autorizada. Revocación o `accept_recording=false` bloquea.
+10. Ficha sin fecha de nacimiento: se permite grabar (Vale atiende solo adultos).
+11. Vale decide en cada sesión si graba (no hay grabación obligatoria).
