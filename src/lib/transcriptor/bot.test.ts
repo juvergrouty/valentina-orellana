@@ -11,6 +11,7 @@ import {
 } from './bot';
 import { BOT_NOMBRE, type Grabacion } from './tipos';
 import { cifrarSesion, filtrarEstadoSesion, TABLA_SESION_BOT } from './botCuenta';
+import type { NuevaAlerta } from './alertas';
 
 const SECRETO = 's'.repeat(32);
 const GID = '3f2b8a1e-0c4d-4e5f-9a6b-7c8d9e0f1a2b';
@@ -242,12 +243,13 @@ function escenario(estado = 'bot_lanzando') {
     head: async (_b: string, key: string) => (objetos.has(key) ? { bytes: objetos.get(key)! } : null),
   };
   const ahora = new Date('2026-10-16T22:00:00.000Z');
+  const avisos: NuevaAlerta[] = [];
   const enviar = (cuerpo: unknown, tok: string | null = token) => procesarEventoBot(
     { authorization: tok === null ? null : `Bearer ${tok}`, cuerpoTexto: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo), clientAddress: '1.2.3.4' },
-    { db: db as never, secreto: SECRETO, almacenamiento: async () => alm as never, ahora: () => ahora },
+    { db: db as never, secreto: SECRETO, almacenamiento: async () => alm as never, ahora: () => ahora, alertar: async (a) => { avisos.push(a); } },
   );
   const g = () => db.tablas.grabaciones[0];
-  return { db, token, objetos, enviar, g };
+  return { db, token, objetos, enviar, g, avisos };
 }
 
 test('endpoint: token ausente, falso o vencido → 404 genérico y queda en la bitácora', async () => {
@@ -510,6 +512,7 @@ test('lanzarBot: modo cuenta invita al robot al evento y lanza con BOT_MODO=cuen
     db.tablas.settings.push({ key: 'transcriptor_bot_modo', value: 'cuenta' });
     if (conSesion) sesionGuardada(db); else db.tablas[TABLA_SESION_BOT] = [];
     const invitaciones: string[] = [];
+    const avisos: NuevaAlerta[] = [];
     let cuerpo: { config: { env: Record<string, string> } } | null = null;
     const f = (async (_u: string, init: RequestInit) => { cuerpo = JSON.parse(String(init.body)); return new Response(JSON.stringify({ id: 'e2865013a1b2c3' }), { status: 200 }); }) as unknown as typeof fetch;
     const bot = crearBot({
@@ -517,9 +520,10 @@ test('lanzarBot: modo cuenta invita al robot al evento y lanza con BOT_MODO=cuen
       env: { FLY_API_TOKEN: 't', FLY_APP_BOT: 'vo-bot-meet', FLY_IMAGEN: 'registry.fly.io/vo-bot-meet:v1', BOT_TOKEN_SECRET: SECRETO, PUBLIC_SITE_URL: 'https://www.valentinaorellana.cl' },
       calendario: async () => ({ token: 'g', calendarId: 'primary' }),
       invitar: async (_t, _c, ev, correo) => { invitaciones.push(`${ev}:${correo}`); return 'agregado'; },
+      alertar: async (x) => { avisos.push(x); },
     });
     const g = { ...GRAB, origen: 'online', patient_id: 'p1', estado: 'bot_lanzando', google_event_id: 'ev123' } as unknown as Grabacion;
-    return { db, bot, g, invitaciones, cuerpo: () => cuerpo! };
+    return { db, bot, g, invitaciones, avisos, cuerpo: () => cuerpo! };
   };
   const a = preparar(true);
   await a.bot.lanzarBot(a.g);
@@ -533,4 +537,61 @@ test('lanzarBot: modo cuenta invita al robot al evento y lanza con BOT_MODO=cuen
   assert.deepEqual(b.invitaciones, []);
   assert.equal(b.cuerpo().config.env.BOT_MODO, 'invitado');
   assert.ok(b.db.tablas.transcriptor_auditoria.some((f) => (f.detalle as Record<string, unknown> | null)?.aviso === 'robot_sin_sesion'));
+  // Aviso al instante (t-n-pulido): no espera al chequeo diario.
+  assert.deepEqual(b.avisos.map((x) => x.clave), ['robot:sesion']);
+  assert.deepEqual(a.avisos, [], 'con sesión e invitación correcta no hay aviso');
+});
+
+// ─── Avisos inmediatos de los problemas del robot (t-n-pulido, avisosRobot.ts) ─
+
+test('avisos inmediatos: error del robot, sesión vencida y sin sesión crean el aviso en el mismo evento', async () => {
+  const a = escenario('bot_en_lobby');
+  await a.enviar({ tipo: 'error', detalle: 'No encontré el botón "Pedir unirse"' });
+  assert.equal(a.avisos.length, 1);
+  assert.equal(a.avisos[0].clave, `bot-error:${GID}:bot_en_lobby`);
+  assert.equal(a.avisos[0].grabacionId, GID);
+  assert.equal(a.avisos[0].tipo, 'bot');
+  assert.match(a.avisos[0].detalle ?? '', /Pedir unirse/);
+
+  const b = escenario('grabando');
+  await b.enviar({ tipo: 'error', detalle: 'No se pudieron subir los segmentos 3, 4' });
+  assert.equal(b.avisos[0].clave, `bot-error:${GID}:grabando`);
+
+  const c = escenario();
+  sesionGuardada(c.db);
+  await c.enviar({ tipo: 'pide_sesion' });
+  await c.enviar({ tipo: 'sesion_invalida', motivo: 'Meet pidió iniciar sesión de nuevo' });
+  assert.deepEqual(c.avisos.map((x) => x.clave), ['robot:sesion']);
+  assert.match(c.avisos[0].titulo, /Venció la sesión/);
+
+  const d = escenario();
+  sesionGuardada(d.db, { estado: 'vencida' });
+  await d.enviar({ tipo: 'pide_sesion' });
+  assert.deepEqual(d.avisos.map((x) => x.clave), ['robot:sesion']);
+
+  // Sesión ocupada por otro bot en ese momento: no es un problema de la sesión → sin aviso.
+  const e = escenario();
+  sesionGuardada(e.db, { en_uso_por: '00000000-0000-4000-8000-000000000999', en_uso_hasta: '2026-10-17T03:00:00.000Z' });
+  const r = await e.enviar({ tipo: 'pide_sesion' });
+  assert.equal(r.cuerpo.motivo, 'ocupada');
+  assert.deepEqual(e.avisos, []);
+});
+
+test('avisos inmediatos: el robot no quedó invitado del evento → aviso de esa sesión', async () => {
+  const db = new BaseFalsa();
+  db.tablas.grabaciones.push({ id: GID, estado: 'bot_lanzando', patient_id: 'p1' });
+  db.tablas.settings.push({ key: 'transcriptor_bot_modo', value: 'cuenta' });
+  sesionGuardada(db);
+  const avisos: NuevaAlerta[] = [];
+  const f = (async () => new Response(JSON.stringify({ id: 'e2865013a1b2c3' }), { status: 200 })) as unknown as typeof fetch;
+  const bot = crearBot({
+    db: db as never, fetch: f,
+    env: { FLY_API_TOKEN: 't', FLY_APP_BOT: 'vo-bot-meet', FLY_IMAGEN: 'registry.fly.io/vo-bot-meet:v1', BOT_TOKEN_SECRET: SECRETO, PUBLIC_SITE_URL: 'https://www.valentinaorellana.cl' },
+    calendario: async () => ({ token: 'g', calendarId: 'primary' }),
+    invitar: async () => 'no_organizador',
+    alertar: async (x) => { avisos.push(x); },
+  });
+  await bot.lanzarBot({ ...GRAB, origen: 'online', patient_id: 'p1', estado: 'bot_lanzando', google_event_id: 'ev123' } as unknown as Grabacion);
+  assert.deepEqual(avisos.map((x) => x.clave), [`robot-invitado:${GID}`]);
+  assert.equal(avisos[0].grabacionId, GID);
 });

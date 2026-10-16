@@ -379,3 +379,43 @@ export function lineasTranscripcion(
 export function etiquetasUnicas(tramos: TramoTranscrito[]): string[] {
   return [...new Set(tramos.map((t) => t.hablante).filter(Boolean))];
 }
+
+// ─── Robot de Meet: modo y sesión de su cuenta (añadido en t-n-pulido) ───────
+// Solo al final del archivo (otro paquete edita panel.ts en paralelo). Pruebas en panelRobot.test.ts.
+import { AJUSTE_BOT_MODO, normalizarModoBot, type ModoBot } from './botCuenta';
+
+export { AJUSTE_BOT_MODO };
+export type EstadoSesionRobot = 'sin_sesion' | 'activa' | 'vencida';
+
+/** Columnas NO secretas de transcriptor_bot_sesion (el panel nunca lee sesion_cifrada). */
+export interface FilaSesionRobot { cuenta_email?: string | null; estado?: string | null; actualizada_at?: string | null; vencida_motivo?: string | null }
+
+/** Estado de la sesión de Google del robot: sin fila o sin cuenta = 'sin_sesion'. */
+export function estadoSesionRobot(f: FilaSesionRobot | null | undefined): EstadoSesionRobot {
+  if (!f || !String(f.cuenta_email ?? '').trim()) return 'sin_sesion';
+  return f.estado === 'vigente' ? 'activa' : 'vencida';
+}
+
+export const TEXTO_SESION_ROBOT: Record<EstadoSesionRobot, string> = {
+  sin_sesion: 'Todavía no se ha iniciado sesión en la cuenta del robot (85-robot-meet §7.2, con Claude).',
+  activa: 'El robot entra con su cuenta, con su nombre y foto, sin pedir permiso.',
+  vencida: 'Google pidió iniciar sesión de nuevo. Mientras tanto entra como invitado y tú lo admites (85-robot-meet §7.3).',
+};
+export const ETIQUETA_SESION_ROBOT: Record<EstadoSesionRobot, string> = { sin_sesion: 'Sin sesión', activa: 'Activa', vencida: 'Vencida' };
+
+/** Texto del interruptor del asistente según el modo y la sesión ("Tú lo admites en Meet" solo cuando es cierto). */
+export function textoAsistenteMeet(modo: ModoBot, sesion: EstadoSesionRobot): string {
+  const base = 'El asistente "Notas Ps. Valentina Orellana" entra solo a tus sesiones online con consentimiento de grabación.';
+  if (modo === 'cuenta' && sesion === 'activa') return `${base} Entra con su propia cuenta de Google, sin pedir permiso. Solo en eventos que no organizas tú (como los de Encuadrado) pide unirse y lo admites.`;
+  if (modo === 'cuenta') return `${base} Hoy entra como invitado porque su cuenta no tiene una sesión activa: tú lo admites en Meet.`;
+  return `${base} Tú lo admites en Meet.`;
+}
+
+/** Valida transcriptor_bot_modo. 'cuenta' exige que la cuenta del robot ya exista (sesión activa o vencida). */
+export function validarModoBot(valor: unknown, sesion: EstadoSesionRobot | 'error'): Resultado<ModoBot> {
+  if (valor !== 'cuenta' && valor !== 'invitado') return { ok: false, error: 'Valor no válido.' };
+  const modo = normalizarModoBot(valor);
+  if (modo === 'cuenta' && sesion === 'error') return { ok: false, error: 'No pude revisar la cuenta del robot. Intenta de nuevo en unos minutos.' };
+  if (modo === 'cuenta' && sesion === 'sin_sesion') return { ok: false, error: 'Primero hay que iniciar sesión una vez en la cuenta del robot (85-robot-meet §7.2, con Claude). Mientras tanto queda como invitado.' };
+  return { ok: true, valor: modo };
+}

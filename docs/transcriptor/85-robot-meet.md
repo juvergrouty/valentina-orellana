@@ -136,7 +136,7 @@ El robot entra como invitado (tú lo admites) y queda en la bitácora `robot_ses
 6. **Cambios del DOM de Meet**: "Join now" y "Switch account" están aislados en `bot/src/meet/selectores.ts`.
 
 ## 9. Lo que otros paquetes deben saber
-- **Panel (`src/pages/admin/transcriptor.astro`)**: solo cambié el nombre. El texto "Tú lo admites en Meet" deja de ser cierto en modo 'cuenta'. Falta un interruptor para `transcriptor_bot_modo` y mostrar el estado de la sesión del robot (vigente/vencida).
-- **Alertas / chequeo diario (P8)**: convertir las entradas de bitácora `robot_sin_sesion`, `robot_sesion_vencida` y `robot_no_invitado` en un aviso con el botón "Volver a revisar" y el texto "Vuelve a iniciar sesión en la cuenta del robot (85-robot-meet §7.3)".
-- **`scripts/verificar-secretos-build.mjs`**: agregar `BOT_APROVISIONAR_SECRET` a OBLIGATORIAS. Se lee con `process.env` en runtime, nunca con `import.meta.env`.
+- **Panel (`src/pages/admin/transcriptor.astro`)** — hecho en t-n-pulido: ajuste "Cómo entra el asistente a Meet" (invitado / con su cuenta; 'cuenta' solo si la cuenta ya tiene sesión guardada) y estado de la sesión (sin sesión / activa / vencida). El texto "Tú lo admites en Meet" solo aparece cuando es cierto.
+- **Avisos** — hecho en t-n-pulido (`avisosRobot.ts`): `robot_sin_sesion` / `robot_sesion_vencida` → aviso `robot:sesion` al instante (Volver a revisar + §7.3; se cierra solo al subir una sesión nueva o pasar a modo invitado); `robot_no_invitado` → `robot-invitado:<id>`; evento `error` → `bot-error:<id>:<paso>`.
+- **`BOT_APROVISIONAR_SECRET`** — hecho en t-n-pulido: en `secretos.ts` (se lee con `secreto()` en runtime) y en OBLIGATORIAS de `scripts/verificar-secretos-build.mjs`.
 - **tipos.ts**: solo cambió el valor de `BOT_NOMBRE`. Los eventos nuevos están en `EventoBotCuenta` (bot.ts), no en el contrato.

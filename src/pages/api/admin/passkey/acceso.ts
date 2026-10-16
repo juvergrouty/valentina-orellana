@@ -5,6 +5,7 @@ import { pasoDosBloqueado, puedeOmitirPasskey } from '../../../../lib/passkey/nu
 import {
   borrarPaso, estadoPasskeys, leerPaso, opcionesAcceso, ponerSesion, rpDe, usarCodigoRespaldo, verificarAcceso,
 } from '../../../../lib/passkey/servidor';
+import { conVolver, destinoSeguro } from '../../../../lib/passkey/regreso';
 
 export const prerender = false;
 
@@ -63,7 +64,7 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url, clientAd
   };
 
   if (esJson) {
-    let cuerpo: { accion?: string; respuesta?: unknown };
+    let cuerpo: { accion?: string; respuesta?: unknown; volver?: unknown };
     try { cuerpo = await request.json(); } catch { return json({ error: 'Solicitud inválida.' }, 400); }
     const rp = rpDe(url);
     if (!rp) return json({ error: 'La passkey solo funciona en valentinaorellana.cl. Usa un código de respaldo.' }, 400);
@@ -92,7 +93,8 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url, clientAd
       borrarPaso(cookies);
       ponerSesion(cookies, 'passkey');
       await logInfo('auth/passkey-ok', `Acceso al panel con passkey (${r.nombre})`, { ip });
-      return json({ ok: true, ir: '/admin' });
+      // Login con regreso: la página del panel que pidió entrar (validada: solo /admin…).
+      return json({ ok: true, ir: destinoSeguro(cuerpo.volver) ?? '/admin' });
     }
     return json({ error: 'Acción desconocida.' }, 400);
   }
@@ -100,11 +102,12 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url, clientAd
   // Formularios (código de respaldo / omitir)
   const form = await request.formData();
   const accion = String(form.get('accion') ?? '');
+  const volver = destinoSeguro(form.get('volver')?.toString());
 
   if (accion === 'codigo') {
     const intento = await registrarFallo('código de respaldo');
-    if (intento.bloqueado) { borrarPaso(cookies); return redirect('/admin/login?error=bloqueado'); }
-    if (!(await usarCodigoRespaldo(String(form.get('codigo') ?? '')))) return redirect('/admin/login?paso=passkey&error=codigo');
+    if (intento.bloqueado) { borrarPaso(cookies); return redirect(conVolver('/admin/login?error=bloqueado', volver)); }
+    if (!(await usarCodigoRespaldo(String(form.get('codigo') ?? '')))) return redirect(conVolver('/admin/login?paso=passkey&error=codigo', volver));
     await anularFallo(intento.id);
     borrarPaso(cookies);
     ponerSesion(cookies, 'passkey');
@@ -114,13 +117,13 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url, clientAd
 
   if (accion === 'omitir') {
     let estado;
-    try { estado = await estadoPasskeys(); } catch { return redirect('/admin/login?paso=passkey&error=estado'); }
-    if (!puedeOmitirPasskey(estado)) return redirect('/admin/login?paso=passkey&error=obligatoria');
+    try { estado = await estadoPasskeys(); } catch { return redirect(conVolver('/admin/login?paso=passkey&error=estado', volver)); }
+    if (!puedeOmitirPasskey(estado)) return redirect(conVolver('/admin/login?paso=passkey&error=obligatoria', volver));
     borrarPaso(cookies);
     ponerSesion(cookies, 'contrasena');
     await logWarn('auth/passkey-omitida', 'Acceso al panel sin passkey ("Entrar sin passkey esta vez")', { ip });
-    return redirect('/admin');
+    return redirect(volver ?? '/admin');
   }
 
-  return redirect('/admin/login?paso=passkey');
+  return redirect(conVolver('/admin/login?paso=passkey', volver));
 };

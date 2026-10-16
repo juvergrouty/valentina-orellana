@@ -3,12 +3,16 @@ export const prerender = false;
 
 import { leerPaso, estadoPasskeys, rpDe, sesionAceptada } from '../../lib/passkey/servidor';
 import { puedeOmitirPasskey } from '../../lib/passkey/nucleo';
+import { conVolver, destinoSeguro } from '../../lib/passkey/regreso';
+
+// Login con regreso: página del panel que pidió entrar (?volver=, validada: solo rutas /admin…).
+const volver = destinoSeguro(Astro.url.searchParams.get('volver'));
 
 // Si ya tiene una sesión que sirve, redirigir al panel. Una sesión solo con
 // contraseña NO sirve si la passkey se volvió obligatoria (16 oct 2026): en ese
 // caso se muestra el formulario (si no, /admin y el login se redirigían en círculo).
 if (await sesionAceptada(Astro.cookies.get('vo_admin_token')?.value)) {
-  return Astro.redirect('/admin');
+  return Astro.redirect(volver ?? '/admin');
 }
 
 const error = Astro.url.searchParams.get('error');
@@ -129,7 +133,7 @@ const passkeyDisponible = !!rpDe(Astro.url);
     <p class="sub">Ps. Valentina Orellana</p>
 
     {paso ? (
-      <div>
+      <div id="paso-passkey" data-volver={volver ?? ''} data-volver-paso={conVolver('/admin/login?error=paso', volver)}>
         <p class="paso-texto">Contraseña correcta. Ahora confirma que eres tú con Face ID, Touch ID o la huella de tu dispositivo.</p>
         {passkeyDisponible
           ? <button type="button" id="btn-passkey" autofocus>Usar Face ID o huella</button>
@@ -143,6 +147,7 @@ const passkeyDisponible = !!rpDe(Astro.url);
           <summary>¿No tienes tu teléfono o computador? Usa un código de respaldo</summary>
           <form method="POST" action="/api/admin/passkey/acceso">
             <input type="hidden" name="accion" value="codigo" />
+            {volver && <input type="hidden" name="volver" value={volver} />}
             <label for="codigo">Código de respaldo</label>
             <input id="codigo" name="codigo" type="text" required autocomplete="one-time-code" inputmode="text" placeholder="XXXXX-XXXXX" maxlength="13" />
             <button type="submit" class="secundario">Entrar con el código</button>
@@ -152,12 +157,14 @@ const passkeyDisponible = !!rpDe(Astro.url);
         {puedeOmitir && (
           <form method="POST" action="/api/admin/passkey/acceso" class="omitir">
             <input type="hidden" name="accion" value="omitir" />
+            {volver && <input type="hidden" name="volver" value={volver} />}
             <button type="submit">Entrar sin passkey esta vez</button>
           </form>
         )}
       </div>
     ) : (
     <form method="POST" action="/api/admin/login">
+      {volver && <input type="hidden" name="volver" value={volver} />}
       <label for="password">Contraseña</label>
       <input id="password" name="password" type="password" required autocomplete="current-password" autofocus />
       <button type="submit">Ingresar</button>
@@ -174,6 +181,10 @@ const passkeyDisponible = !!rpDe(Astro.url);
     import { startAuthentication, browserSupportsWebAuthn, WebAuthnError } from '@simplewebauthn/browser';
 
     const boton = document.getElementById('btn-passkey') as HTMLButtonElement | null;
+    // Login con regreso: el servidor valida el destino otra vez (solo /admin…).
+    const pasoEl = document.getElementById('paso-passkey');
+    const volver = pasoEl?.dataset.volver || '';
+    const irPaso = pasoEl?.dataset.volverPaso || '/admin/login?error=paso';
     const estado = document.getElementById('estado-passkey');
     const decir = (texto: string, mal = false) => { if (estado) { estado.textContent = texto; estado.classList.toggle('mal', mal); } };
     const post = (cuerpo: unknown) => fetch('/api/admin/passkey/acceso', {
@@ -191,12 +202,12 @@ const passkeyDisponible = !!rpDe(Astro.url);
         try {
           const r1 = await post({ accion: 'opciones' });
           const opciones = await r1.json();
-          if (!r1.ok) { if (opciones.volver) location.href = '/admin/login?error=paso'; throw new Error(opciones.error || 'No pude preparar la passkey.'); }
+          if (!r1.ok) { if (opciones.volver) location.href = irPaso; throw new Error(opciones.error || 'No pude preparar la passkey.'); }
           const respuesta = await startAuthentication({ optionsJSON: opciones });
           decir('Verificando…');
-          const r2 = await post({ accion: 'verificar', respuesta });
+          const r2 = await post({ accion: 'verificar', respuesta, volver });
           const fin = await r2.json();
-          if (!r2.ok) { if (fin.volver) location.href = '/admin/login?error=paso'; throw new Error(fin.error || 'No se pudo verificar la passkey.'); }
+          if (!r2.ok) { if (fin.volver) location.href = irPaso; throw new Error(fin.error || 'No se pudo verificar la passkey.'); }
           decir('Listo. Entrando…');
           location.href = fin.ir || '/admin';
         } catch (e) {

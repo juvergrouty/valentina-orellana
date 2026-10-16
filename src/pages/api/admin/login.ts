@@ -5,6 +5,7 @@ import { logWarn } from '../../../lib/logger';
 import { igualesSeguro } from '../../../lib/adminSession';
 import { estadoPasskeys, ponerPaso, ponerSesion } from '../../../lib/passkey/servidor';
 import { pasoDespuesDeContrasena } from '../../../lib/passkey/nucleo';
+import { conVolver, destinoSeguro } from '../../../lib/passkey/regreso';
 
 export const prerender = false;
 
@@ -42,6 +43,8 @@ const intentaEnUnosMinutos = () => new Response(
 export const POST: APIRoute = async ({ request, cookies, redirect, clientAddress }) => {
   const form     = await request.formData();
   const password = form.get('password')?.toString() ?? '';
+  // Login con regreso: página del panel a la que volver después de entrar (solo /admin…, validada).
+  const volver = destinoSeguro(form.get('volver')?.toString());
   const expected = secreto('ADMIN_PASSWORD');
   const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || clientAddress || 'desconocida';
 
@@ -86,12 +89,12 @@ export const POST: APIRoute = async ({ request, cookies, redirect, clientAddress
   // bloquea a las conexiones que ya fallaron alguna vez.
   if (fallosIp > MAX_POR_IP || (fallosPrevios >= MAX_TOTAL && fallosPreviosIp > 0)) {
     await reclasificar('auth/login-bloqueado', 'warn', 'Intento de acceso bloqueado por el límite de intentos');
-    return redirect('/admin/login?error=bloqueado');
+    return redirect(conVolver('/admin/login?error=bloqueado', volver));
   }
 
   if (!expected || !igualesSeguro(password, expected)) {
     // El intento ya quedó registrado como fallido en el paso 1.
-    return redirect('/admin/login?error=1');
+    return redirect(conVolver('/admin/login?error=1', volver));
   }
 
   // Segundo factor (16 oct 2026): si hay passkeys registradas, la contraseña
@@ -109,7 +112,7 @@ export const POST: APIRoute = async ({ request, cookies, redirect, clientAddress
   if (pasoDespuesDeContrasena(estado) === 'pedir_passkey') {
     await reclasificar('auth/login-ok', 'info', 'Contraseña correcta; falta confirmar con passkey');
     ponerPaso(cookies);
-    return redirect('/admin/login?paso=passkey');
+    return redirect(conVolver('/admin/login?paso=passkey', volver));
   }
 
   await reclasificar('auth/login-ok', 'info', 'Acceso al panel');
@@ -117,5 +120,5 @@ export const POST: APIRoute = async ({ request, cookies, redirect, clientAddress
   // Cookie de sesión: token firmado que vence en 8 horas (httpOnly).
   ponerSesion(cookies, 'contrasena');
 
-  return redirect('/admin');
+  return redirect(volver ?? '/admin');
 };

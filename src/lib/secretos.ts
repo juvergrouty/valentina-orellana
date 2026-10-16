@@ -20,6 +20,8 @@ export type NombreSecreto =
   | 'R2_ACCESS_KEY_ID' | 'R2_SECRET_ACCESS_KEY'
   | 'B2_KEY_ID' | 'B2_APPLICATION_KEY'
   | 'FLY_API_TOKEN' | 'BOT_TOKEN_SECRET'
+  // Robot de Meet con cuenta propia (aprovisionamiento) y respaldo semanal en Fly (t-n-pulido).
+  | 'BOT_APROVISIONAR_SECRET' | 'FLY_API_TOKEN_RESPALDO'
   | 'ADMIN_SECRET' | 'ADMIN_PASSWORD' | 'CRON_SECRET'
   // Resto del sitio (pagos, Google, Meta, SII, webhook de Resend).
   | 'FLOW_API_KEY' | 'FLOW_SECRET_KEY' | 'FLOW_SANDBOX_API_KEY' | 'FLOW_SANDBOX_SECRET_KEY'
@@ -44,6 +46,8 @@ function desdeDev(n: NombreSecreto): string | undefined {
         case 'B2_APPLICATION_KEY': return import.meta.env.B2_APPLICATION_KEY;
         case 'FLY_API_TOKEN': return import.meta.env.FLY_API_TOKEN;
         case 'BOT_TOKEN_SECRET': return import.meta.env.BOT_TOKEN_SECRET;
+        case 'BOT_APROVISIONAR_SECRET': return import.meta.env.BOT_APROVISIONAR_SECRET;
+        case 'FLY_API_TOKEN_RESPALDO': return import.meta.env.FLY_API_TOKEN_RESPALDO;
         case 'ADMIN_SECRET': return import.meta.env.ADMIN_SECRET;
         case 'ADMIN_PASSWORD': return import.meta.env.ADMIN_PASSWORD;
         case 'CRON_SECRET': return import.meta.env.CRON_SECRET;

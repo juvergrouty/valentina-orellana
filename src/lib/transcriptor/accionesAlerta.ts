@@ -16,6 +16,7 @@
 import type { AlertaFila, SesionDeAlerta } from './alertas';
 import type { EstadoGrabacion } from './tipos';
 import { planReintento, ejecutarReintento, opsReintentoSupabase, type OpsReintento } from './reintentoAlerta';
+import { CLAVE_ROBOT_SESION, PASOS_RELOGIN, PREFIJO_BOT_ERROR, PREFIJO_ROBOT_INVITADO } from './avisosRobot';
 
 // ─── Catálogo ─────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,7 @@ export const INFO_ACCION: Record<AccionAviso, InfoAccion> = {
     queHace: 'Vuelve a pedir el resumen de la sesión a la IA en el próximo minuto (la transcripción ya está guardada). El aviso se cierra solo cuando el resumen queda listo.',
   },
   rescatar: {
-    etiqueta: 'Cerrar la sesión con lo que haya',
+    etiqueta: 'Cerrar con lo grabado',
     queHace: 'El asistente de notas ya no puede volver a esa reunión. Si alcanzó a subir audio, se transcribe y se resume eso; si no subió nada, la sesión queda cerrada como "no grabada". El aviso se cierra cuando la sesión avanza.',
   },
   apagar_bot: {
@@ -93,6 +94,7 @@ export type ClaseAviso =
   | { k: 'reporte' }
   | { k: 'calendario' }
   | { k: 'resumen_modo' }
+  | { k: 'robot_sesion' }                                        // robot:sesion (avisosRobot.ts)
   | { k: 'apagado' }
   | { k: 'otro' };
 
@@ -107,6 +109,11 @@ export function claseDe(a: Pick<AlertaFila, 'tipo' | 'clave' | 'grabacion_id'>):
     const paso = (at[2] as EstadoGrabacion | undefined) ?? PASO_POR_TIPO[a.tipo] ?? 'transcribiendo';
     return { k: 'paso', paso };
   }
+  // Robot de Meet (avisosRobot.ts): sesión de su cuenta, no quedó invitado, error que informó.
+  if (c === CLAVE_ROBOT_SESION) return { k: 'robot_sesion' };
+  if (new RegExp(`^${PREFIJO_ROBOT_INVITADO}${UUID}$`, 'i').test(c)) return { k: 'info', paso: 'bot_en_lobby' };
+  const be = new RegExp(`^${PREFIJO_BOT_ERROR}${UUID}:(bot_lanzando|bot_en_lobby|grabando)$`, 'i').exec(c);
+  if (be) return { k: 'paso', paso: be[1].toLowerCase() as EstadoGrabacion };
   if (c.startsWith('bot-maquina:')) return { k: 'bot_maquina' };
   if (c.startsWith('bot-vigilante:')) return { k: 'info', paso: 'transcribiendo' };
   if (c.startsWith('sin-voz:')) return { k: 'info', paso: 'transcrita' };
@@ -230,7 +237,10 @@ export function instruccionDe(a: Pick<AlertaFila, 'tipo' | 'clave' | 'grabacion_
   const c = claseDe(a);
   const despues = 'Después toca «Volver a revisar».';
   switch (c.k) {
-    case 'info': return 'Es informativo: el aviso se cierra solo cuando la sesión termina de procesarse.';
+    case 'info':
+      if (a.clave.startsWith(PREFIJO_ROBOT_INVITADO)) return 'El robot pedirá unirse a la reunión: admítelo en Meet. El aviso se cierra solo cuando entra a grabar (o cuando la sesión termina).';
+      return 'Es informativo: el aviso se cierra solo cuando la sesión termina de procesarse.';
+    case 'robot_sesion': return `${PASOS_RELOGIN} Mientras tanto el robot entra como invitado y tú lo admites en Meet. ${despues}`;
     case 'paso': {
       if (!sesion) return null;
       const acc = accionesDisponibles(a, sesion, ahora);
@@ -286,6 +296,8 @@ export interface OpsAcciones {
   generarReporte(): Promise<void>;
   probarCalendario(): Promise<void>;
   apagadoConPendientes(): Promise<{ activo: boolean; pendientes: number }>;
+  /** true = el robot no necesita su sesión (modo 'invitado') o la tiene vigente. Opcional (avisosRobot.ts). */
+  robotSesionOk?(): Promise<boolean>;
 }
 
 export interface ResultadoAccion {
@@ -429,6 +441,10 @@ async function revisar(
         return listo();
       case 'resumen_modo':
         return (await ops.leerModoResumen()) === 'directo' ? listo() : sigue('el ajuste todavía no dice "directo". Toca «Usar modo "directo"».');
+      case 'robot_sesion': {
+        if (!ops.robotSesionOk) return sigue('no se puede revisar la sesión del robot desde aquí.');
+        return (await ops.robotSesionOk()) ? listo() : sigue(`la cuenta del robot todavía no tiene una sesión vigente. ${PASOS_RELOGIN}`);
+      }
       case 'apagado': {
         const r = await ops.apagadoConPendientes();
         if (r.activo || r.pendientes === 0) return listo();
@@ -485,6 +501,7 @@ export async function opsAccionesReales(): Promise<OpsAcciones> {
   const { limpiezaReintento } = await import('./estados');
   const { auditar } = await import('./auditoria');
   const repo = alertas.repoAlertasSupabase(db);
+  const { secreto: secretoRt } = await import('../secretos');
   const ahoraIso = () => new Date().toISOString();
 
   return {
@@ -604,8 +621,8 @@ export async function opsAccionesReales(): Promise<OpsAcciones> {
       return r;
     },
     lanzarRespaldo: () => lanzarMaquinaRespaldo({
-      // Llave SOLO en runtime (process.env literal): nunca import.meta.env (A2/M1).
-      token: typeof process !== 'undefined' ? process.env?.FLY_API_TOKEN_RESPALDO?.trim() || undefined : undefined,
+      // Llave SOLO en runtime (secretos.ts): nunca import.meta.env (A2/M1).
+      token: secretoRt('FLY_API_TOKEN_RESPALDO')?.trim() || undefined,
       app: typeof process !== 'undefined' ? process.env?.FLY_APP_RESPALDO : undefined,
     }),
     async usarDirecto() {
@@ -642,12 +659,16 @@ export async function opsAccionesReales(): Promise<OpsAcciones> {
         .in('estado', ['subida', 'transcribiendo', 'transcrita', 'resumiendo']);
       return { activo, pendientes: count ?? 0 };
     },
+    async robotSesionOk() {
+      const { leerModoBot, cuentaRobotVigente } = await import('./botCuenta');
+      return (await leerModoBot(db)) === 'invitado' || !!(await cuentaRobotVigente(db));
+    },
   };
 }
 
 /**
  * Para el chequeo diario: revisa los avisos sueltos que nadie más cierra (calendario, ajustes del
- * resumen, transcriptor apagado con pendientes). Nunca lanza.
+ * resumen, transcriptor apagado con pendientes, sesión del robot). Nunca lanza.
  */
 export async function revisarAvisosSueltos(ops?: OpsAcciones, listar?: () => Promise<AlertaFila[]>): Promise<number> {
   try {
@@ -656,7 +677,7 @@ export async function revisarAvisosSueltos(ops?: OpsAcciones, listar?: () => Pro
     let n = 0;
     for (const f of filas) {
       const k = claseDe(f).k;
-      if (k !== 'calendario' && k !== 'resumen_modo' && k !== 'apagado') continue;
+      if (k !== 'calendario' && k !== 'resumen_modo' && k !== 'apagado' && k !== 'robot_sesion') continue;
       if ((await ejecutarAccionAviso(f.id, 'revisar', o)).cerrada) n++;
     }
     return n;

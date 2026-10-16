@@ -1,13 +1,19 @@
 // POST /api/admin/transcriptor/ajustes — P7 (50-arquitectura §3.8).
-// Cambia SOLO estos ajustes de settings: transcriptor_activo, transcriptor_bot_activo y
-// transcriptor_bot_nombres_vale (clave de P5). Los demás (requisito de grabación, modo del
+// Cambia SOLO estos ajustes de settings: transcriptor_activo, transcriptor_bot_activo,
+// transcriptor_bot_nombres_vale (clave de P5) y transcriptor_bot_modo ('invitado' | 'cuenta';
+// 'cuenta' solo si la cuenta del robot ya tiene una sesión guardada — 85-robot-meet). Los demás (requisito de grabación, modo del
 // resumen, alerta de riesgo, presupuesto) los fijan las decisiones de Vale y no se editan aquí.
 // Cuerpo: { clave, valor }. Auth del panel + Origin/Referer propio + X-Panel + bitácora.
 // Encender transcriptor/bot exige passkey obligatoria (decisión 3; panel.ts motivoBloqueoActivacion).
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
-import { exigePasskeyObligatoria, motivoBloqueoActivacion, validarAjuste, type EstadoPasskeyActivacion } from '../../../../lib/transcriptor/panel';
+import {
+  AJUSTE_BOT_MODO, estadoSesionRobot, exigePasskeyObligatoria, motivoBloqueoActivacion, validarAjuste, validarModoBot,
+  type EstadoPasskeyActivacion, type EstadoSesionRobot,
+} from '../../../../lib/transcriptor/panel';
+import { CLAVE_ROBOT_SESION } from '../../../../lib/transcriptor/avisosRobot';
+import { resolverAlertasPorPrefijo } from '../../../../lib/transcriptor/alertas';
 import { COOKIE_ADMIN, nivelTokenAdmin } from '../../../../lib/adminSession';
 import { estadoPasskeys, invalidarEstadoPasskeys } from '../../../../lib/passkey/servidor';
 import { guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
@@ -21,9 +27,22 @@ export const POST: APIRoute = async (ctx) => {
   const clientAddress = safeAddr(ctx);
   const body = await leerJson(request);
   if (!body) return json({ ok: false, error: 'Solicitud inválida.' }, 400);
-  const v = validarAjuste(body.clave, body.valor);
-  if (!v.ok) return json({ ok: false, error: v.error }, 400);
-  const { clave, valor } = v.valor;
+  let clave: string;
+  let valor: string;
+  if (body.clave === AJUSTE_BOT_MODO) {
+    // Modo del robot: 'cuenta' exige que la cuenta ya exista (columnas no secretas; nunca sesion_cifrada).
+    const { data: fila, error: es } = await supabase.from('transcriptor_bot_sesion').select('cuenta_email, estado').eq('id', 1).maybeSingle();
+    const sinTabla = !!es && ['42P01', 'PGRST205', 'PGRST204'].includes(String(es.code ?? ''));
+    const sesion: EstadoSesionRobot | 'error' = es ? (sinTabla ? 'sin_sesion' : 'error') : estadoSesionRobot(fila);
+    const m = validarModoBot(body.valor, sesion);
+    if (!m.ok) return json({ ok: false, error: m.error }, m.error === 'Valor no válido.' ? 400 : 409);
+    clave = AJUSTE_BOT_MODO;
+    valor = m.valor;
+  } else {
+    const v = validarAjuste(body.clave, body.valor);
+    if (!v.ok) return json({ ok: false, error: v.error }, 400);
+    ({ clave, valor } = v.valor);
+  }
 
   // Decisión 3 (revisión de seguridad 16 oct, A1): encender el transcriptor o el bot exige
   // passkey registrada + "Passkey obligatoria" + esta sesión confirmada con passkey. Se lee el
@@ -54,5 +73,7 @@ export const POST: APIRoute = async (ctx) => {
     request, clientAddress,
     detalle: { clave, anterior: actual?.value ?? null, nuevo: valor },
   });
+  // En modo invitado la sesión del robot ya no hace falta: su aviso queda arreglado.
+  if (clave === AJUSTE_BOT_MODO && valor === 'invitado') await resolverAlertasPorPrefijo(CLAVE_ROBOT_SESION, []);
   return json({ ok: true, valor });
 };
