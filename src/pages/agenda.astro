@@ -89,7 +89,7 @@ const resumenPareja     = resumenGrupo('pareja');
             </div>
             <span
               id={`step-label-${i + 1}`}
-              class="hidden md:block font-body text-[10px] tracking-widest uppercase step-label text-stone"
+              class={`${i === 0 ? 'block' : 'hidden md:block'} whitespace-nowrap font-body text-[10px] tracking-widest uppercase step-label ${i === 0 ? 'text-ink' : 'text-stone'}`}
               data-step={i + 1}
             >
               {label}
@@ -122,7 +122,7 @@ const resumenPareja     = resumenGrupo('pareja');
       <div id="step-1" class="booking-step">
         <p class="label text-stone mb-4">Paso 1</p>
         <div class="divider mb-6"></div>
-        <h2 class="step-title font-heading font-light text-3xl text-ink mb-8 focus:outline-none" tabindex="-1">¿Para quién es la sesión?</h2>
+        <h2 id="titulo-para-quien" class="step-title font-heading font-light text-3xl text-ink mb-8 focus:outline-none" tabindex="-1">¿Para quién es la sesión?</h2>
 
         <!-- 1a: Elegir grupo (Individual / Pareja) -->
         <div id="group-selection" class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
@@ -234,7 +234,7 @@ const resumenPareja     = resumenGrupo('pareja');
             <div id="calendar-grid" class="grid grid-cols-7 gap-1"></div>
 
             <!-- Leyenda para orientar al cliente -->
-            <div class="flex items-center justify-center gap-4 mt-5 pt-4 border-t border-dust/60">
+            <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mt-5 pt-4 border-t border-dust/60">
               <span class="flex items-center gap-1.5 text-[11px] text-stone">
                 <span class="inline-block w-3.5 h-3.5 rounded-full" style="box-shadow:inset 0 0 0 2px #576352;"></span>
                 Hoy
@@ -246,6 +246,10 @@ const resumenPareja     = resumenGrupo('pareja');
               <span class="flex items-center gap-1.5 text-[11px] text-stone/50">
                 <span class="line-through">00</span>
                 No disponible
+              </span>
+              <span class="flex items-center gap-1.5 text-[11px] text-stone/50">
+                <span class="text-stone/40" style="text-decoration:underline dotted;text-underline-offset:3px;">00</span>
+                Sin horas (pide sobrecupo)
               </span>
             </div>
           </div>
@@ -267,7 +271,7 @@ const resumenPareja     = resumenGrupo('pareja');
               <div id="slots-grid" class="grid grid-cols-3 gap-2.5"></div>
               <div id="no-slots-msg" class="hidden font-body text-sm text-stone/60 text-center py-8 leading-relaxed">
                 <p>Sin horarios disponibles<br />para este día.</p>
-                <a
+                <a id="sobrecupo-wa"
                   href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20estoy%20buscando%20un%20sobrecupo%20o%20un%20horario%20disponible%20distinto%20a%20los%20que%20aparecen%20en%20la%20agenda.%20%C2%BFMe%20puedes%20ayudar%3F"
                   target="_blank" rel="noopener"
                   class="inline-block mt-3 text-forest underline underline-offset-2 hover:text-ink transition-colors"
@@ -524,6 +528,11 @@ const resumenPareja     = resumenGrupo('pareja');
     @apply text-dust/50 cursor-not-allowed;
     background: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.03) 4px, rgba(0,0,0,0.03) 8px);
   }
+  /* Ya respondido "¿Para quién es la sesión?" (16 oct 2026): el título se
+     oculta junto con las tarjetas Individual/Pareja, para no dejarlo sin nada abajo. */
+  #step-1:has(#group-selection.hidden) #titulo-para-quien { display: none; }
+  /* Día sin horas libres (16 oct 2026): atenuado, pero se puede tocar para pedir sobrecupo */
+  #calendar-grid .day-available.day-full { @apply text-stone/40; text-decoration: underline dotted; text-underline-offset: 4px; }
   #calendar-grid .day-selected {
     @apply bg-ink text-sand font-semibold;
   }
@@ -636,7 +645,9 @@ const resumenPareja     = resumenGrupo('pareja');
         ind.textContent = String(i);
       }
       if (label) {
-        label.className = 'hidden md:block font-body text-[10px] tracking-widest uppercase step-label';
+        // En celular se ve solo el nombre del paso actual (16 oct 2026: antes
+        // solo "1 2 3 4", sin saber en qué paso se estaba).
+        label.className = `${i === currentStep ? 'block' : 'hidden md:block'} whitespace-nowrap font-body text-[10px] tracking-widest uppercase step-label`;
         if (i === currentStep) label.classList.add('text-ink');
         else label.classList.add('text-stone');
       }
@@ -1021,6 +1032,33 @@ const resumenPareja     = resumenGrupo('pareja');
       grid.appendChild(btn);
       dayButtons.push({ btn, iso, isPast });
     }
+    marcarDiasSinHoras(dayButtons.filter((d) => !d.btn.disabled).map((d) => d.iso));
+  }
+
+  // Días sin ninguna hora libre para el servicio elegido (16 oct 2026): se ven
+  // "Sin horas" pero se pueden tocar, para que la paciente pida sobrecupo por
+  // WhatsApp en vez de irse. Las horas quedan en caché para cuando elija el día.
+  let marcaPedida = 0;
+  async function marcarDiasSinHoras(fechas) {
+    if (!state.serviceId || !fechas.length) return;
+    const pedido = ++marcaPedida;
+    const dur = state.sessionDuration ? `&duration=${state.sessionDuration}` : '';
+    const mod = state.modalityChoice ? `&modality=${encodeURIComponent(state.modalityChoice)}` : '';
+    try {
+      const res = await fetch(`/api/availability/mes?fechas=${fechas.join(',')}&service_id=${encodeURIComponent(state.serviceId)}${dur}${mod}`);
+      if (!res.ok || pedido !== marcaPedida) return;
+      const { dias } = await res.json();
+      if (pedido !== marcaPedida) return; // la paciente ya cambió de mes o de servicio
+      for (const [iso, slots] of Object.entries(dias ?? {})) {
+        state.loadedSlots[`${iso}|${state.serviceId ?? ''}|${state.modalityChoice ?? ''}`] = slots;
+        if (slots.length) continue;
+        const b = document.querySelector(`#calendar-grid .day-btn[data-iso="${iso}"]`);
+        if (!b || b.disabled) continue;
+        b.classList.add('day-full');
+        b.title = 'Sin horas libres · puedes pedir un sobrecupo';
+        b.setAttribute('aria-label', `${fechaLargaEs(iso)}, sin horas libres (puedes pedir sobrecupo)`);
+      }
+    } catch { /* sin marcas: cada día se revisa al elegirlo */ }
   }
 
   async function selectDate(iso) {
@@ -1073,6 +1111,13 @@ const resumenPareja     = resumenGrupo('pareja');
 
     const dia = state.selectedDate ? fechaLargaEs(state.selectedDate) : '';
     if (!slots.length) {
+      // WhatsApp de sobrecupo con el día y el servicio ya escritos (16 oct 2026).
+      const wa = $('sobrecupo-wa');
+      if (wa) {
+        const servicio = state.sessionTitle ? ` (${state.sessionTitle})` : '';
+        const texto = `Hola Valentina, quiero una hora el ${dia}${servicio} y no aparecen horarios disponibles. Necesito un sobrecupo, ¿me podrías ayudar?`;
+        wa.href = `https://wa.me/56972735696?text=${encodeURIComponent(texto)}`;
+      }
       show('no-slots-msg');
       hide('slots-help-msg');
       anunciar(`Sin horarios disponibles para el ${dia}.`);
@@ -1091,6 +1136,21 @@ const resumenPareja     = resumenGrupo('pareja');
       btn.setAttribute('aria-pressed', state.selectedTime === time ? 'true' : 'false');
       btn.addEventListener('click', () => selectTime(time));
       grid.appendChild(btn);
+    });
+  }
+
+  // Correo revisado al salir del campo (16 oct 2026): antes el error salía
+  // recién al apretar "Continuar". Mismo formato que la validación final.
+  {
+    const emailEl = $('patient_email');
+    const emailErr = emailEl?.nextElementSibling;
+    const emailOk = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+    emailEl?.addEventListener('blur', () => {
+      const v = emailEl.value.trim();
+      if (v && !emailOk(v)) emailErr?.classList.remove('hidden');
+    });
+    emailEl?.addEventListener('input', () => {
+      if (emailOk(emailEl.value.trim())) emailErr?.classList.add('hidden');
     });
   }
 
