@@ -35,3 +35,6 @@
 ## G. Robot de Meet
 - Nombre: "Notas Ps. Valentina Orellana".
 - Debe integrarse como participante "amigable" (no como bot externo tipo Fireflies). Investigar y proponer cómo (p. ej. cuenta de Google propia del robot invitada al evento para que entre sin pedir permiso, con foto/logo).
+
+## H. Robot: modo invitado (decisión 16 oct noche)
+- Vale eligió que el robot funcione como INVITADO (ella lo admite en Meet con un clic). No se crea cuenta de Google del robot por ahora (Google bloqueó su número por exceso de verificaciones). El modo 'cuenta' queda construido pero apagado; el módulo de captura de sesión no se escribe.
