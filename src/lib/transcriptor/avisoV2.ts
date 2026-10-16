@@ -71,7 +71,13 @@ export async function avisoV2ParaCorreo(email: string, cliente?: SupabaseClient)
     const { data: avisos, error: ea } = await c.from('consent_avisos').select('consent_id').in('consent_id', ids);
     if (ea) return null; // sin tabla (0019) o error: sin aviso
     const ya = new Set(((avisos ?? []) as { consent_id: string }[]).map((a) => a.consent_id));
-    const pendientes = firmasParaAviso(filas as Fila[], ya);
+    // Solo las firmas de quien recibe ESTE correo (en pareja, la otra persona no lo vio — revisión final N2).
+    const destino = correo.toLowerCase();
+    const propias = (filas as Fila[]).filter((f) => {
+      const e = String(f.signer_email ?? '').trim().toLowerCase();
+      return e ? e === destino : (filas as Fila[]).length === 1;
+    });
+    const pendientes = firmasParaAviso(propias, ya);
     if (!pendientes.length) return null;
     return { patientId, consentIds: pendientes.map((f) => f.id), html: htmlAvisoV2() };
   } catch {

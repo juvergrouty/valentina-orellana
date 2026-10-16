@@ -40,7 +40,7 @@ export const POST: APIRoute = async ({ request, url }) => {
     if (!UUID.test(consentId)) return json({ ok: false, error: 'Elige de quién es el retiro.' }, 400);
     const note = (body.note ?? '').trim().slice(0, 500) || null;
     const { data: firmado, error: ef } = await supabase.from('consents')
-      .select('id, patient_id, signed_at, revoked_at, accept_recording, recording_revoked_at, signer_name')
+      .select('*') // '*' y no la lista: sin la migración 0019 (recording_revoked_at) el retiro completo sigue funcionando (revisión final N1)
       .eq('id', consentId).maybeSingle();
     if (ef) return json({ ok: false, error: 'No se pudo leer el consentimiento. Intenta de nuevo.' }, 500);
     if (!firmado || firmado.patient_id !== patientId || !firmado.signed_at) {

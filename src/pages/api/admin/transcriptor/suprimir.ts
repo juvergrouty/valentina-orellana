@@ -5,17 +5,20 @@
 //   { accion: 'excluir_ia', grabacion_id, patient_id, motivo, canal }
 //       → la sesión deja de usarse en las preguntas a la IA y como contexto de resúmenes (81 H5).
 // Lógica en src/lib/transcriptor/supresion.ts (con pruebas). Auth del panel + Origin/Referer propio
-// + X-Panel (guardiaPanel). La confirmación es escrita en la página (sin confirm()).
+// + X-Panel (guardiaPanel) + passkey (exigirAccesoClinico). La confirmación es escrita en la página (sin confirm()).
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { esUuid, guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
+import { exigirAccesoClinico } from '../../../../lib/transcriptor/acceso';
 import { excluirDeIA, suprimirTranscripcion } from '../../../../lib/transcriptor/supresion';
 import type { AccionAuditoria } from '../../../../lib/transcriptor/tipos';
 
 export const prerender = false;
 
 export const POST: APIRoute = async (ctx) => {
-  const rechazo = await guardiaPanel(ctx, 'borrar_transcripcion' as AccionAuditoria);
+  // Borrado irreversible: exige además sesión confirmada con passkey (revisión final N3).
+  const rechazo = (await guardiaPanel(ctx, 'borrar_transcripcion' as AccionAuditoria))
+    ?? (await exigirAccesoClinico(ctx, 'borrar_transcripcion' as AccionAuditoria));
   if (rechazo) return rechazo;
   const body = await leerJson(ctx.request);
   if (!body || !esUuid(body.grabacion_id) || !esUuid(body.patient_id)) return json({ ok: false, error: 'Solicitud inválida.' }, 400);

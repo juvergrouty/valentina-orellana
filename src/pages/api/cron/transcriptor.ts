@@ -6,7 +6,7 @@ export const prerender = false;
 // Orquestador del transcriptor IA (paquete P6). Lo llama Supabase cada minuto (pg_cron + pg_net,
 // job 'transcriptor-cada-1-min', con la clave interna settings.cron_interno_secret, igual que el job
 // 'tareas-cada-5-min'; SQL en docs/transcriptor/70-cron.md). También acepta CRON_SECRET (respaldo manual).
-// Trabaja como máximo ~50 s (maxDuration de Vercel = 60 s) y deja lo pendiente para el minuto
+// Trabaja como máximo ~50 s (maxDuration de Vercel = 300 s con Fluid compute; el resumen tiene su propio tope de ~240 s) y deja lo pendiente para el minuto
 // siguiente; dos llamadas solapadas no repiten trabajo (toma atómica por grabación).
 // La respuesta solo trae conteos (sin datos de pacientes).
 
