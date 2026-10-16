@@ -87,7 +87,7 @@ export const AJUSTES = {
   activo: 'transcriptor_activo',                    // 'true' | 'false' (default 'false')
   botActivo: 'transcriptor_bot_activo',             // 'true' | 'false' (default 'false')
   grabacionRequisito: 'transcriptor_grabacion_requisito', // GrabacionRequisito (default 'opcional')
-  resumenModo: 'transcriptor_resumen_modo',         // ResumenModo (default 'batch')
+  resumenModo: 'transcriptor_resumen_modo',         // ResumenModo (default 'directo' — decisión 16 oct)
   alertaRiesgo: 'transcriptor_alerta_riesgo',       // 'true' | 'false' (default 'false')
   presupuestoClp: 'transcriptor_presupuesto_clp',   // '35000'
   usdClp: 'transcriptor_usd_clp',                   // '950'
@@ -104,7 +104,7 @@ export interface AjustesTranscriptor {
   usdClp: number;
 }
 
-// ─── Filas de las tablas (0013_transcriptor.sql) ─────────────────────────────
+// ─── Filas de las tablas (0014_transcriptor.sql) ─────────────────────────────
 // Fechas como string ISO (lo que devuelve supabase-js). bytea llega como string '\\x…'.
 
 export interface Grabacion {

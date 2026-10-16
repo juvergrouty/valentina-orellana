@@ -151,12 +151,12 @@ Diferencias online vs presencial:
 
 ---
 
-## 2. Modelo de datos — `supabase/migrations/0013_transcriptor.sql`
+## 2. Modelo de datos — `supabase/migrations/0014_transcriptor.sql`
 
 Principios: nada clínico se borra (15 años); el **texto completo** de la transcripción NO vive en Supabase (vive cifrado en R2 + B2); el **resumen** sí vive en Supabase porque es parte de la ficha (igual que `session_notes`). Estados con `check`, transiciones atómicas por `update … where estado = <esperado>`.
 
 ```sql
--- 0013_transcriptor.sql — Transcriptor IA (15 oct 2026)
+-- 0014_transcriptor.sql — Transcriptor IA (15 oct 2026)
 -- Ejecutar UNA VEZ en el SQL Editor de Supabase. Aditivo: no toca tablas existentes
 -- salvo insertar ajustes nuevos en settings y (opcional, al final) un job de pg_cron.
 
@@ -432,7 +432,7 @@ Convención: todo el código nuevo de servidor en `src/lib/transcriptor/` (carpe
 ### 3.1 Base (paquete P0)
 | Archivo | Responsabilidad |
 |---|---|
-| `supabase/migrations/0013_transcriptor.sql` | §2. |
+| `supabase/migrations/0014_transcriptor.sql` | §2. |
 | `src/lib/transcriptor/tipos.ts` | Tipos compartidos (`Grabacion`, `Segmento`, `Estado`, `ResultadoTranscripcion`, `LineaHablante`), **firmas** de las funciones que cada paquete implementa (contrato), constantes (`BOT_NOMBRE = 'Notas de Ps. Valentina Orellana'`, prefijos de llaves R2). |
 | `src/lib/transcriptor/reglas.ts` | Regla FIJA de modelo: `elegirModelo({tipo, origen, lugarConRuido})` → pareja ⇒ `universal-3-5-pro` + `speaker_labels` (solo presencial; online sin diarización); individual/sin tipo ⇒ `universal-2`; ruido ⇒ `universal-3-5-pro`. `tipoDesdeSessionType('pareja-online') → 'pareja'`. Sin IA. Con pruebas de tabla. |
 | `src/lib/transcriptor/estados.ts` | `transicionar(id, de[], a, cambios)` = `update … where id=? and estado in (de) returning *` (0 filas ⇒ otro proceso ya lo hizo); `tomar(id)` con lease 10 min (`tomada_en`). |
@@ -635,7 +635,7 @@ Cada paquete toca **solo** sus archivos. P0 publica los contratos (`tipos.ts`) p
 
 | Paquete | Archivos (exclusivos) | Depende de |
 |---|---|---|
-| **P0 Base** | `supabase/migrations/0013_transcriptor.sql`, `src/lib/transcriptor/{tipos,reglas,estados,auditoria}.ts`, `src/env.d.ts`, `package.json` (+lock), `vercel.json` (headers + cron) | — |
+| **P0 Base** | `supabase/migrations/0014_transcriptor.sql`, `src/lib/transcriptor/{tipos,reglas,estados,auditoria}.ts`, `src/env.d.ts`, `package.json` (+lock), `vercel.json` (headers + cron) | — |
 | **P1 Almacenamiento/cifrado** | `src/lib/transcriptor/{almacenamiento,cifrado}.ts`, `docs/transcriptor/60-config-buckets.md` (pasos R2/B2 para Vale) | P0 |
 | **P2 AssemblyAI** | `src/lib/transcriptor/{assemblyai,hablantes}.ts`, `src/pages/api/transcriptor/webhook-assemblyai.ts` | P0 |
 | **P3 Claude** | `src/lib/transcriptor/{claude,resumen}.ts`, `src/pages/api/admin/transcriptor/preguntar.ts` | P0 (P1 para descifrar en `preguntar`) |

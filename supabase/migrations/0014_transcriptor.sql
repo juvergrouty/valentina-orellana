@@ -1,4 +1,4 @@
--- 0013_transcriptor.sql — Transcriptor IA (15 oct 2026). Diseño: docs/transcriptor/50-arquitectura.md §2,
+-- 0014_transcriptor.sql — Transcriptor IA (15 oct 2026). Diseño: docs/transcriptor/50-arquitectura.md §2,
 -- con los ajustes de 30-seguridad.md (cifrado por sobre, bitácora solo-agregar), 10-etica-legal.md §4
 -- (rótulo IA, nada se borra, preguntas cifradas) y 20-clinico.md §0 (resumen = anexo aparte de la nota).
 --
@@ -328,8 +328,8 @@ insert into public.settings (key, value) values
   ('transcriptor_activo',                'false'),    -- botón Grabar + pipeline
   ('transcriptor_bot_activo',            'false'),    -- bot de Meet automático
   ('transcriptor_grabacion_requisito',   'opcional'), -- 'obligatoria' | 'opcional' (hasta que el abogado valide)
-  ('transcriptor_resumen_modo',          'batch'),    -- 'batch' | 'directo' (Vale aún decide)
-  ('transcriptor_alerta_riesgo',         'false'),    -- tamizaje/alerta de riesgo (Vale aún decide)
+  ('transcriptor_resumen_modo',          'directo'),  -- 'batch' | 'directo' (Vale eligió protección máxima 16 oct: Messages API con HIPAA)
+  ('transcriptor_alerta_riesgo',         'false'),    -- Vale decidió 16 oct: sin alertas; solo sección Atención neutra
   ('transcriptor_presupuesto_clp',       '35000'),
   ('transcriptor_usd_clp',               '950')
 on conflict (key) do nothing;
