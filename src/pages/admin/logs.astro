@@ -17,7 +17,9 @@ if (Astro.request.method === 'POST') {
     await supabase.from('admin_logs').delete().lt('created_at', new Date().toISOString())
       .not('context', 'like', 'boleta/%').not('context', 'like', 'auth/%').not('context', 'like', 'flow/boleta%')
       // Ni los códigos de WhatsApp (clics y pacientes): son la medición por canal.
-      .not('context', 'like', 'wa/%');
+      .not('context', 'like', 'wa/%')
+      // Ni el historial de correos automáticos (Comunicaciones → Automáticos, 16 oct 2026).
+      .not('context', 'like', 'email/%');
   }
   return Astro.redirect('/admin/logs?cleared=1');
 }

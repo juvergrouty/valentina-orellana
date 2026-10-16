@@ -2,10 +2,23 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { leerCorreosAutomaticos, marcarCorreosVistos, type CorreoAutomatico } from '../../lib/correosAutomaticos';
 
 const sentParam   = Astro.url.searchParams.get('sent');
 const failedParam = Astro.url.searchParams.get('failed');
 const errorParam  = Astro.url.searchParams.get('error');
+// Pestaña "Automáticos" (16 oct 2026): confirmaciones, recordatorios, pasos,
+// boletas, reseñas, evaluaciones… todo lo que la página manda sola.
+const tab         = Astro.url.searchParams.get('tab') === 'automaticos' ? 'automaticos' : 'masivos';
+const soloErrores = Astro.url.searchParams.get('solo') === 'errores';
+let automaticos: CorreoAutomatico[] = [];
+let errorAutomaticos = false;
+if (tab === 'automaticos') {
+  try { automaticos = await leerCorreosAutomaticos(60, soloErrores); } catch { errorAutomaticos = true; }
+  // Al mirarlos, el aviso de "correos que no se pudieron enviar" se apaga hasta el próximo fallo.
+  await marcarCorreosVistos().catch(() => undefined);
+}
+const fallidos = automaticos.filter((c) => c.estado === 'fallo').length;
 
 // Historial de envíos (tabla opcional — si no existe, queda vacío)
 const { data: emails } = await supabase
@@ -68,14 +81,52 @@ function fmt(iso: string) {
     </div>
 
     <div class="com-tabs">
-      <button class="com-tab active" id="tab-correos">Correos <span class="com-tab-count">({history.length})</span></button>
+      <a href="/admin/comunicaciones" class={`com-tab ${tab === 'masivos' ? 'active' : ''}`} id="tab-correos">Correos masivos <span class="com-tab-count">({history.length})</span></a>
+      <a href="/admin/comunicaciones?tab=automaticos" class={`com-tab ${tab === 'automaticos' ? 'active' : ''}`}>Automáticos</a>
       <button class="com-tab disabled" disabled>
         WhatsApp
         <span class="com-soon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Próximamente</span>
       </button>
     </div>
 
-    <div class="com-body">
+    {tab === 'automaticos' && (
+      <div class="com-body">
+        <div class="com-list">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:0.75rem;">
+            <p style="font-size:0.85rem;color:#374151;margin:0;">Correos que tu página mandó sola en los últimos 60 días{soloErrores ? ' · solo los que fallaron' : ''}.</p>
+            {soloErrores
+              ? <a href="/admin/comunicaciones?tab=automaticos" class="btn btn-outline btn-sm">Ver todos</a>
+              : <a href="/admin/comunicaciones?tab=automaticos&solo=errores" class="btn btn-outline btn-sm">Ver solo los que fallaron</a>}
+          </div>
+          {errorAutomaticos && <p class="alert-error">⚠ No se pudo leer el historial. Recarga en un rato.</p>}
+          {!errorAutomaticos && automaticos.length === 0 && (
+            <p style="color:#6b7280;padding:1.5rem;text-align:center;">{soloErrores ? 'Ningún correo automático falló en los últimos 60 días. 🎉' : 'Sin correos automáticos en los últimos 60 días.'}</p>
+          )}
+          {automaticos.length > 0 && (
+            <table class="com-table">
+              <thead><tr><th>Fecha</th><th>Correo</th><th>Para</th><th>Estado</th></tr></thead>
+              <tbody>
+                {automaticos.map((c) => (
+                  <tr>
+                    <td style="color:#6b7280;white-space:nowrap;">{fmtHora(c.fecha)}</td>
+                    <td style="font-weight:600;color:#111827;">{c.tipo}{c.asunto && c.asunto !== c.tipo && <span style="display:block;font-weight:400;color:#6b7280;font-size:0.78rem;">{c.asunto}</span>}</td>
+                    <td style="color:#374151;word-break:break-all;">{c.para}</td>
+                    <td>
+                      {c.estado === 'enviado' && <span style="color:#15803d;font-weight:600;">✓ Enviado</span>}
+                      {c.estado === 'desactivado' && <span style="color:#6b7280;">No enviado (desactivado en Configuración)</span>}
+                      {c.estado === 'fallo' && <span style="color:#dc2626;font-weight:600;">✕ Falló<span style="display:block;font-weight:400;font-size:0.78rem;">{c.error}</span></span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {fallidos > 0 && <p style="font-size:0.78rem;color:#6b7280;margin:0.75rem 0 0;">Si un correo falló, puedes reenviarlo desde la sesión de la paciente (botones ✉ en su ficha) o escribirle por WhatsApp.</p>}
+        </div>
+      </div>
+    )}
+
+    <div class="com-body" style={tab === 'automaticos' ? 'display:none;' : undefined}>
       {history.length === 0 ? (
         <div class="com-empty">
           <div class="com-empty-icon">
@@ -189,7 +240,7 @@ function fmt(iso: string) {
 .com-head h1 { font-size: 1.6rem; font-weight: 700; color: #111827; }
 
 .com-tabs { display: flex; gap: 0.4rem; padding: 0.5rem 1.5rem 0; }
-.com-tab {
+.com-tab { text-decoration: none; display: inline-flex; align-items: center; gap: 0.3rem;
   display: inline-flex; align-items: center; gap: 0.35rem;
   padding: 0.45rem 0.9rem; font-size: 0.85rem; font-weight: 500; color: #374151;
   background: #f3f4f6; border: none; border-radius: 8px; cursor: pointer;

@@ -1,6 +1,6 @@
 import { Resend } from 'resend';
 import { supabase } from './supabase';
-import { logEmail, logError } from './logger';
+import { logEmail, logError, logInfo } from './logger';
 import { stepsItems, STEPS_INTRO } from './stepsContent';
 import { todayCL, hoursUntilSessionCL } from './dateUtils';
 import { frasePlazoPago, AVISO_REAGENDAR } from './cobrosProximos';
@@ -102,7 +102,10 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
 
   // Envío automático: respeta el interruptor de Configuración. El reenvío manual lo omite.
   if (!opts.skipToggle && !(await emailTypeEnabled('confirmation'))) {
-    await logEmail('email/confirmacion', data.patient_email, 'Confirmación (desactivada en Configuración)', false, 'Envío automático desactivado');
+    // No es un fallo (16 oct 2026): queda como información, no como error, para no
+    // disparar el aviso de "correos que no se pudieron enviar".
+    await logInfo('email/confirmacion', `✉ Confirmación no enviada a ${data.patient_email}: el envío automático está desactivado en Configuración`,
+      { to: data.patient_email, subject: 'Confirmación (desactivada en Configuración)', ok: false, desactivado: true });
     return { sent: true, reason: 'desactivado' }; // nada que enviar: no es un error que reintentar
   }
 
