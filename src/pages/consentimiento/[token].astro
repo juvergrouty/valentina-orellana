@@ -44,7 +44,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: '
           <li>{consent.accept_case_review ? '✓' : '✕'} Revisión anónima de casos con otros psicólogos</li>
         </ul>
         {consent.revoked_at && <p class="text-sm text-red-600 mt-6">Este consentimiento fue retirado el {fmt(consent.revoked_at)}.</p>}
-        <p class="text-xs text-stone mt-8">Para cambiar o retirar tu consentimiento, escribe a {contactEmail}.</p>
+        <p class="text-xs text-stone mt-8">Para cambiar o retirar tu consentimiento (también solo la autorización de grabación), escribe a {contactEmail} o por WhatsApp al <a href="https://wa.me/56972735696" target="_blank" rel="noopener noreferrer" class="underline">+56 9 7273 5696</a>.</p>
       </div>
     ) : (
       <>
