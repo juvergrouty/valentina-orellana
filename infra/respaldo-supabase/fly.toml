@@ -1,0 +1,10 @@
+# App de Fly.io del respaldo semanal de Supabase (separada de la del bot: esta SÍ tiene
+# secrets — DATABASE_URL y la llave B2 de solo escritura —; la del bot no tiene ninguno).
+# Solo para construir la imagen:  fly deploy --build-only --push --image-label v1
+# La máquina programada se crea UNA vez con `fly machine run … --schedule weekly`
+# (pasos completos en bot/README.md §Respaldo semanal de Supabase).
+app = "vo-respaldo-supabase"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
