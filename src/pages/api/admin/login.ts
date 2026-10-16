@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
+import { secreto } from '../../../lib/secretos';
 import { logWarn } from '../../../lib/logger';
 import { igualesSeguro } from '../../../lib/adminSession';
 import { estadoPasskeys, ponerPaso, ponerSesion } from '../../../lib/passkey/servidor';
@@ -41,7 +42,7 @@ const intentaEnUnosMinutos = () => new Response(
 export const POST: APIRoute = async ({ request, cookies, redirect, clientAddress }) => {
   const form     = await request.formData();
   const password = form.get('password')?.toString() ?? '';
-  const expected = import.meta.env.ADMIN_PASSWORD;
+  const expected = secreto('ADMIN_PASSWORD');
   const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || clientAddress || 'desconocida';
 
   // 1) Registrar el intento ANTES de revisar la contraseña (cuenta como fallido

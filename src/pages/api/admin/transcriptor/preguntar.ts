@@ -7,11 +7,13 @@
 //   • Pregunta y respuesta se guardan CIFRADAS (formato VOT1) en preguntas_ia; nunca en claro,
 //     ni en logs, ni en la bitácora (solo largo y cantidad de sesiones).
 //   • Messages API directa con Haiku 5.5, sin Batch y sin metadatos del paciente.
-//   • Protegido por la sesión del panel (middleware + revisión aquí) y exige Origin/Referer propio.
+//   • Protegido por la sesión del panel (middleware) + guardiaPanel (Origin/Referer propio, X-Panel)
+//     + sesión confirmada con passkey (acceso.ts).
 import type { APIRoute } from 'astro';
 import { gunzipSync } from 'node:zlib';
 import { supabase } from '../../../../lib/supabase';
-import { COOKIE_ADMIN, tokenAdminValido, tokenRevocado } from '../../../../lib/adminSession';
+import { exigirAccesoClinico } from '../../../../lib/transcriptor/acceso';
+import { guardiaPanel } from '../../../../lib/transcriptor/peticion';
 import { auditar, auditarObligatorio } from '../../../../lib/transcriptor/auditoria';
 import { almacenamiento } from '../../../../lib/transcriptor/almacenamiento';
 import { cifrado } from '../../../../lib/transcriptor/cifrado';
@@ -42,15 +44,6 @@ async function cargarP1(): Promise<{ alm: Almacenamiento; cif: Cifrado } | null>
 
 const aHex = (b: Uint8Array) => `\\x${Buffer.from(b).toString('hex')}`;
 
-function origenValido(request: Request, url: URL): boolean {
-  const origen = request.headers.get('origin') || request.headers.get('referer');
-  if (!origen) return false;
-  let host = '';
-  try { host = new URL(origen).host; } catch { return false; }
-  const propios = [url.host, request.headers.get('host'), request.headers.get('x-forwarded-host')].filter(Boolean);
-  return propios.includes(host);
-}
-
 async function leerTranscripcion(p1: { alm: Almacenamiento; cif: Cifrado }, r2Key: string): Promise<TranscripcionClara> {
   const cifrado = await p1.alm.get('transcripciones', r2Key);
   let claro = await p1.cif.descifrar(cifrado, { claveObjeto: r2Key, tipo: 'transcripcion' });
@@ -61,11 +54,12 @@ async function leerTranscripcion(p1: { alm: Almacenamiento; cif: Cifrado }, r2Ke
   return t;
 }
 
-export const POST: APIRoute = async ({ request, url, cookies, clientAddress }) => {
-  // Defensa en profundidad (el middleware ya lo revisa, pero deja pasar POST sin Origin/Referer).
-  if (!origenValido(request, url)) return json({ ok: false, error: 'Origen no permitido.' }, 403);
-  const token = cookies.get(COOKIE_ADMIN)?.value ?? '';
-  if (!tokenAdminValido(token) || await tokenRevocado(token)) return json({ ok: false, error: 'No autorizado.' }, 401);
+export const POST: APIRoute = async (ctx) => {
+  // Acceso (revisión de seguridad 16 oct): guardiaPanel (POST, Origin/Referer propio, X-Panel: 1,
+  // sesión no cerrada, falla cerrado) + sesión de nivel passkey (acceso.ts). Antes de leer nada.
+  const rechazo = (await guardiaPanel(ctx, 'preguntar')) ?? (await exigirAccesoClinico(ctx, 'preguntar'));
+  if (rechazo) return rechazo;
+  const { request, clientAddress } = ctx;
 
   let body: { patient_id?: unknown; pregunta?: unknown; grabacion_ids?: unknown };
   try { body = await request.json(); }

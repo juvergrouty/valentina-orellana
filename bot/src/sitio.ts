@@ -3,6 +3,7 @@
 // Formato de eventos = EventoBot de src/lib/transcriptor/tipos.ts.
 import type { LineaHablante } from './linea.js';
 import type { MotivoFin } from './vigia.js';
+import { sanearError } from './saneo.js';
 
 export type EventoBot =
   | { tipo: 'lobby' }
@@ -43,6 +44,8 @@ export class Sitio {
 
   /** Envía un evento con reintentos (red/5xx/429). Devuelve el JSON de respuesta. */
   async enviar(evento: EventoBot): Promise<Record<string, unknown>> {
+    // Nunca sale el enlace de Meet en un error (B8).
+    if (evento.tipo === 'error') evento = { tipo: 'error', detalle: sanearError(evento.detalle) };
     let ultimo = '';
     for (let i = 0; i < this.intentos; i++) {
       try {

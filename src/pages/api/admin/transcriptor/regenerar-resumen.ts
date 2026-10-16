@@ -12,6 +12,7 @@ import { supabase } from '../../../../lib/supabase';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
 import { transicionar } from '../../../../lib/transcriptor/estados';
 import { MAX_RESUMEN_EDITADO, ROTULO_EDITADO } from '../../../../lib/transcriptor/panel';
+import { exigirAccesoClinico } from '../../../../lib/transcriptor/acceso';
 import { esUuid, guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
 import { cargarInstrucciones, plantillaDesdeTipo } from '../../../../lib/transcriptor/resumen';
 import { AJUSTES, type TipoSesion } from '../../../../lib/transcriptor/tipos';
@@ -19,7 +20,8 @@ import { AJUSTES, type TipoSesion } from '../../../../lib/transcriptor/tipos';
 export const prerender = false;
 
 export const POST: APIRoute = async (ctx) => {
-  const rechazo = await guardiaPanel(ctx, 'regenerar_resumen');
+  // Además de la guardia: sesión confirmada con passkey (acceso.ts; revisión de seguridad 16 oct, A1).
+  const rechazo = (await guardiaPanel(ctx, 'regenerar_resumen')) ?? (await exigirAccesoClinico(ctx, 'regenerar_resumen'));
   if (rechazo) return rechazo;
   const { request } = ctx;
   const clientAddress = safeAddr(ctx);

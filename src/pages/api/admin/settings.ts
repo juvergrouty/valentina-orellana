@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { rutaInterna } from '../../../lib/rutaInterna';
+import { esAjusteReservado } from '../../../lib/transcriptor/acceso';
 
 export const prerender = false;
 
@@ -27,9 +28,11 @@ export const POST: APIRoute = async ({ request }) => {
 
   for (const [key, value] of form.entries()) {
     if (key === 'redirect' || key === '_bool_form') continue;
-    // passkey_obligatoria solo se cambia en /api/admin/passkey/gestion (exige
-    // sesión confirmada con passkey); este formulario general no puede apagarla.
-    if (key.startsWith('passkey_')) continue;
+    // Claves reservadas (revisión de seguridad 16 oct, B2): passkey_* solo en
+    // /api/admin/passkey/gestion (exige sesión con passkey); transcriptor_* solo
+    // en /api/admin/transcriptor/ajustes (lista blanca + bitácora + passkey
+    // obligatoria); cron_interno_secret y admin_tokens_revocados, nunca.
+    if (esAjusteReservado(key)) continue;
     updates[key] = String(value);
   }
 

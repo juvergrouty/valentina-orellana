@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { secreto as leerSecreto } from '../../../lib/secretos';
 import { WEBHOOK_HEADER_ASSEMBLYAI } from '../../../lib/transcriptor/tipos';
 import { assemblyAIDesdeEnv, procesarWebhookAssemblyAI, repoWebhookSupabase } from '../../../lib/transcriptor/assemblyai';
 
@@ -14,7 +15,7 @@ export const prerender = false;
 // No confía en el cuerpo: vuelve a pedir el estado a AssemblyAI con nuestra llave.
 
 export const POST: APIRoute = async ({ request }) => {
-  const secreto = import.meta.env.ASSEMBLYAI_WEBHOOK_SECRET;
+  const secreto = leerSecreto('ASSEMBLYAI_WEBHOOK_SECRET'); // runtime: nunca en el bundle (A2/M1)
   const cabecera = request.headers.get(WEBHOOK_HEADER_ASSEMBLYAI);
   let cuerpo = '';
   try { cuerpo = await request.text(); } catch { /* cuerpo vacío → 400 más abajo */ }

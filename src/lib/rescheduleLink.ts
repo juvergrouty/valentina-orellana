@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { secreto } from './secretos';
 import { hoursUntilSessionCL } from './dateUtils';
 
 // Link personal para que la paciente reagende sola desde su correo — a pedido
@@ -11,11 +12,11 @@ export const REAGENDAR_TEXTO = 'Solo puedes reagendar tu sesión hasta con 24 ho
 const SITE = 'https://www.valentinaorellana.cl';
 
 function firma(bookingId: string): string {
-  return createHmac('sha256', `reagendar:${import.meta.env.ADMIN_SECRET ?? ''}`).update(bookingId).digest('hex').slice(0, 32);
+  return createHmac('sha256', `reagendar:${secreto('ADMIN_SECRET') ?? ''}`).update(bookingId).digest('hex').slice(0, 32);
 }
 
 export function claveReagendarValida(bookingId: string, k: string | null | undefined): boolean {
-  if (typeof bookingId !== 'string' || typeof k !== 'string' || !bookingId || !k || !import.meta.env.ADMIN_SECRET) return false;
+  if (typeof bookingId !== 'string' || typeof k !== 'string' || !bookingId || !k || !secreto('ADMIN_SECRET')) return false;
   const a = Buffer.from(firma(bookingId));
   const b = Buffer.from(k);
   return a.length === b.length && timingSafeEqual(a, b);

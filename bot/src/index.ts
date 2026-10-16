@@ -21,6 +21,7 @@ import { instalarGrabadorEnPagina } from './captura/audio-pagina.js';
 import { instalarHablantesEnPagina, participantesEnPagina } from './captura/hablantes-pagina.js';
 import { Segmentos } from './segmentos.js';
 import { Sitio, TokenRechazadoError } from './sitio.js';
+import { sanearError } from './saneo.js';
 import { Vigia, type MotivoFin } from './vigia.js';
 
 const log = (m: string) => console.log(`[bot ${new Date().toISOString()}] ${m}`);
@@ -129,7 +130,21 @@ async function main(): Promise<number> {
 
   try {
     const { chromium } = await cargarPlaywright();
-    navegador = await chromium.launch({ headless: false, args: argumentosChromium() });
+    // Primero con sandbox (B6). Si no arranca (kernel sin espacios de nombres para pwuser), se
+    // relanza sin sandbox para no perder la sesión, y queda en el log. CHROMIUM_SANDBOX=0 lo salta.
+    const lanzar = (sandbox: boolean) => chromium.launch({ headless: false, chromiumSandbox: sandbox, args: argumentosChromium(1280, 720, { sandbox }) });
+    if (process.env.CHROMIUM_SANDBOX === '0') {
+      navegador = await lanzar(false);
+      log('Chromium sin sandbox (CHROMIUM_SANDBOX=0)');
+    } else {
+      try {
+        navegador = await lanzar(true);
+        log('Chromium con sandbox');
+      } catch (e) {
+        log(`Chromium sin sandbox: el sandbox no arrancó (${sanearError(e instanceof Error ? e.message : e, 160)})`);
+        navegador = await lanzar(false);
+      }
+    }
     const contexto = await navegador.newContext({
       locale: IDIOMA_UI,
       viewport: { width: 1280, height: 720 },
@@ -164,7 +179,7 @@ async function main(): Promise<number> {
     await enviarFin(r.motivo, r.linea);
     return 0;
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = sanearError(e instanceof Error ? e.message : String(e)); // sin enlace de Meet (B8)
     log(`error: ${msg}`);
     if (e instanceof TokenRechazadoError) return 4; // el sitio ya no acepta a este bot: salir sin más
     await sitio.enviar({ tipo: 'error', detalle: msg.slice(0, 300) }).catch(() => {});

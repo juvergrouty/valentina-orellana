@@ -9,12 +9,14 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
 import { fusionarMapaHablantes } from '../../../../lib/transcriptor/panel';
+import { exigirAccesoClinico } from '../../../../lib/transcriptor/acceso';
 import { esUuid, guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
 
 export const prerender = false;
 
 export const POST: APIRoute = async (ctx) => {
-  const rechazo = await guardiaPanel(ctx, 'renombrar_hablantes');
+  // Además de la guardia: sesión confirmada con passkey (acceso.ts; revisión de seguridad 16 oct, A1).
+  const rechazo = (await guardiaPanel(ctx, 'renombrar_hablantes')) ?? (await exigirAccesoClinico(ctx, 'renombrar_hablantes'));
   if (rechazo) return rechazo;
   const { request } = ctx;
   const clientAddress = safeAddr(ctx);

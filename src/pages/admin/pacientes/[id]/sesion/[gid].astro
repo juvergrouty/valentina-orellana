@@ -15,11 +15,20 @@ import {
   lineasTranscripcion, nombreHablante, resumenAHtml, textoProblema, tipoTexto, type LineaVista,
 } from '../../../../../lib/transcriptor/panel';
 import type { Grabacion, PausaGrabacion, ResumenIA, TramoTranscrito } from '../../../../../lib/transcriptor/tipos';
+import { URL_CONFIRMAR_PASSKEY, accesoClinicoCookies } from '../../../../../lib/transcriptor/acceso';
 
 const { id, gid } = Astro.params;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fichaUrl = `/admin/pacientes/${id}`;
 if (!id || !gid || !UUID.test(gid)) return Astro.redirect(`${fichaUrl}?tab=notas`);
+
+// Acceso clínico (revisión de seguridad 16 oct, A1/M2; acceso.ts): solo con sesión confirmada con
+// passkey y no cerrada; si no se puede verificar, falla cerrado. Antes de leer NADA de la base.
+const esDemo = import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia';
+const acceso = esDemo ? { ok: true as const } : await accesoClinicoCookies(Astro.cookies);
+if (!acceso.ok && acceso.motivo === 'sesion') return Astro.redirect('/admin/login');
+const bloqueoAcceso = acceso.ok ? null : acceso;
+if (bloqueoAcceso) Astro.response.status = bloqueoAcceso.status;
 
 type GrabVista = Pick<Grabacion, 'id' | 'patient_id' | 'origen' | 'tipo' | 'estado' | 'estado_antes_error' | 'session_date' | 'inicio_at' | 'duracion_seg' | 'pausas' | 'mapa_hablantes' | 'nota_sistema'>;
 type ResVista = Pick<ResumenIA, 'id' | 'version' | 'autor' | 'estado' | 'rotulo' | 'contenido' | 'listo_at' | 'created_at' | 'basado_en'>;
@@ -32,7 +41,9 @@ let hayTranscripcion = false;
 let aviso: string | null = null;    // por qué no se muestra la transcripción (sin términos técnicos)
 let noEncontrada = false;
 
-if (import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') {
+if (bloqueoAcceso) {
+  // Sin acceso clínico: no se consulta ni se descifra nada.
+} else if (esDemo) {
   // Datos de prueba SOLO en `astro dev` (contenido inventado).
   nombrePaciente = 'Camila Rojas';
   g = { id: gid, patient_id: id, origen: 'presencial', tipo: 'individual', estado: 'lista', estado_antes_error: null, session_date: '2026-10-15', inicio_at: '2026-10-15T19:00:00Z', duracion_seg: 3012, pausas: [{ desde_ms: 1_500_000, hasta_ms: 1_620_000 }], mapa_hablantes: { A: 'Ps. Valentina' }, nota_sistema: null };
@@ -126,7 +137,12 @@ const fmtFechaHora = (iso: string | null) => iso ? new Date(iso).toLocaleString(
 <AdminLayout title={nombrePaciente ? `Transcripción · ${nombrePaciente}` : 'Transcripción'} current="/admin/pacientes">
   <a href={`${fichaUrl}?tab=notas${g ? `#ia-${g.id}` : ''}`} style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Ficha{nombrePaciente ? ` de ${nombrePaciente}` : ''}</a>
 
-  {noEncontrada || !g ? (
+  {bloqueoAcceso ? (
+    <div class="card" style="text-align:center;padding:3rem;margin-top:1rem;" role="alert">
+      <p style="color:var(--stone);font-size:0.9rem;margin-bottom:1rem;">{bloqueoAcceso.error}</p>
+      {bloqueoAcceso.motivo === 'passkey' && <a class="btn btn-dark btn-sm" href={URL_CONFIRMAR_PASSKEY}>Ir a Seguridad para confirmar con passkey</a>}
+    </div>
+  ) : noEncontrada || !g ? (
     <div class="card" style="text-align:center;padding:3rem;margin-top:1rem;">
       <p style="color:var(--stone);font-size:0.9rem;">No se encontró esta sesión grabada en la ficha.</p>
     </div>

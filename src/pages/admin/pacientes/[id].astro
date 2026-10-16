@@ -9,6 +9,7 @@ import {
   AVISO_RESPUESTA, AVISO_RESUMEN, ROTULO_RESUMEN, duracionTexto, estadoVisible, fechaCorta, fechaLarga, resumenAHtml, resumenATexto,
   sePuedeReintentar, textoProblema, tipoTexto,
 } from '../../../lib/transcriptor/panel';
+import { URL_CONFIRMAR_PASSKEY, accesoClinicoCookies, type ResultadoAcceso } from '../../../lib/transcriptor/acceso';
 
 const { id } = Astro.params;
 // Datos de prueba del transcriptor SOLO en `astro dev` (import.meta.env.DEV es false en el build):
@@ -51,6 +52,8 @@ type ResFicha = { id: string; grabacion_id: string; version: number; autor: 'ia'
 let iaGrabaciones: GrabFicha[] = [];
 let iaResumenes: ResFicha[] = [];
 let iaTranscritas = new Set<string>();
+let iaAcceso: ResultadoAcceso = { ok: true };
+let iaBloqueadas = false; // hay grabaciones, pero esta sesión no está confirmada con passkey
 const OCULTAS_EN_FICHA = new Set(['creada', 'cancelada', 'sin_consentimiento', 'bot_no_admitido']);
 if (import.meta.env.DEV && demoIA) {
   // Ficha de prueba (nombres y contenido inventados).
@@ -74,6 +77,13 @@ if (import.meta.env.DEV && demoIA) {
   }];
   iaTranscritas = new Set(['00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2']);
   notes = notasTodas as typeof notes;
+} else if (patient && !(iaAcceso = await accesoClinicoCookies(Astro.cookies)).ok) {
+  // Resúmenes IA solo con sesión confirmada con passkey (revisión de seguridad 16 oct, A1;
+  // acceso.ts). Sin ella no se lee ningún contenido; solo se cuenta si hay grabaciones para avisar.
+  try {
+    const { count } = await supabase.from('grabaciones').select('id', { count: 'exact', head: true }).eq('patient_id', id!);
+    iaBloqueadas = (count ?? 0) > 0;
+  } catch { /* sin la migración: no hay nada que avisar */ }
 } else if (patient) {
   try {
     const { data: gs, error: eg } = await supabase.from('grabaciones')
@@ -654,6 +664,12 @@ const faltanDatos = patient ? [
       <!-- Lista: notas de Vale + resúmenes automáticos (IA) intercalados por fecha.
            El resumen va SOBRE la nota de esa fecha y en tarjeta propia: nunca se mezclan. -->
       <div style="display:flex;flex-direction:column;gap:1rem;min-width:0;">
+        {iaBloqueadas && !iaAcceso.ok && (
+          <div class="card ia-card ia-card-gris" role="note">
+            <p class="ia-texto">{iaAcceso.error}</p>
+            {iaAcceso.motivo === 'passkey' && <div class="ia-acciones"><a class="btn btn-outline btn-sm" href={URL_CONFIRMAR_PASSKEY}>Confirmar con passkey</a></div>}
+          </div>
+        )}
         {!itemsNotas.length ? (
           <div class="card" style="text-align:center;padding:3rem;">
             <p style="color:var(--stone);font-size:0.9rem;">Sin notas clínicas aún.</p>

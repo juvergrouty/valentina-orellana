@@ -54,6 +54,18 @@ export function puedeGestionar(nivel: NivelSesion, e: Pick<EstadoPasskeys, 'cant
   return nivel === 'passkey' || e.cantidad === 0;
 }
 
+// ── Límite de intentos del paso 2 (passkey / código de respaldo) ────────────
+// Revisión de seguridad 16 oct (B8): además del tope global (10 en 15 min, protege los códigos de
+// respaldo de un ataque repartido entre muchas IP) hay un tope por IP más bajo (5 en 15 min), así
+// una sola IP no consume el cupo global entero de una vez. Fallar la lectura del conteo = bloqueado.
+export const MAX_FALLOS_PASO2 = 10;
+export const MAX_FALLOS_PASO2_IP = 5;
+
+export function pasoDosBloqueado(fallosGlobal: number | null, fallosIp: number | null, errorLectura = false): boolean {
+  if (errorLectura || fallosGlobal == null || fallosIp == null) return true;
+  return fallosGlobal > MAX_FALLOS_PASO2 || fallosIp > MAX_FALLOS_PASO2_IP;
+}
+
 /** ¿Se puede eliminar una passkey? (no la última mientras sea obligatoria) */
 export function puedeEliminar(e: Pick<EstadoPasskeys, 'cantidad' | 'obligatoria'>): boolean {
   return !(e.obligatoria && e.cantidad <= 1);

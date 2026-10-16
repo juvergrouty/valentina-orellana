@@ -96,6 +96,16 @@ export const POST: APIRoute = async ({ request, cookies, url }) => {
     const valor = cuerpo.valor === true;
     if (valor && estado.cantidad === 0) return json({ error: 'Registra al menos una passkey antes de hacerla obligatoria.' }, 409);
     if (valor && estado.codigosRestantes === 0) return json({ error: 'Genera tus códigos de respaldo antes de hacerla obligatoria.' }, 409);
+    // Decisión 3 (revisión de seguridad 16 oct, A1): con el transcriptor o el bot encendidos no se
+    // puede quitar la obligatoriedad. Si no se puede leer el ajuste, se rechaza (falla cerrado).
+    if (!valor) {
+      const { data: tx, error: eTx } = await supabase.from('settings').select('key, value')
+        .in('key', ['transcriptor_activo', 'transcriptor_bot_activo']);
+      if (eTx) return json({ error: 'No pude revisar si el transcriptor está encendido. Intenta en unos minutos.' }, 503);
+      if ((tx ?? []).some((r: { value: string | null }) => r.value === 'true')) {
+        return json({ error: 'El transcriptor está encendido: la passkey debe seguir siendo obligatoria. Apágalo primero en Transcriptor si necesitas desactivarla.' }, 409);
+      }
+    }
     const { error } = await supabase.from('settings').upsert(
       { key: SETTING_OBLIGATORIA, value: valor ? 'true' : 'false', updated_at: new Date().toISOString() },
       { onConflict: 'key' },

@@ -11,11 +11,13 @@ import type { ChequeoSalud, EstadoGrabacion, Origen, SaludFila } from './tipos';
 import { MODELO_PREGUNTAS, MODELO_RESUMEN, MODELO_U2, MODELO_U35_PRO } from './tipos';
 import { sanearTexto, type AlertaTipo, type NuevaAlerta } from './alertas';
 import vercelJson from '../../../vercel.json';
+import { secreto, type NombreSecreto } from '../secretos';
+import { variable } from './entorno';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 /** Chequeos de P8. Los de tipos.ts + 3 nuevos (la columna `chequeo` es texto libre). */
-export type ChequeoP8 = ChequeoSalud | 'config' | 'aai_borrado' | 'permisos_microfono';
+export type ChequeoP8 = ChequeoSalud | 'config' | 'aai_borrado' | 'aai_huerfanos' | 'permisos_microfono';
 
 export interface ResultadoP8 {
   chequeo: ChequeoP8;
@@ -73,6 +75,27 @@ export interface FuentesSalud {
   probarAnthropic(): Promise<void>;
   /** Contenido de vercel.json desplegado. */
   vercel(): unknown;
+  /** GET /v2/transcript de AssemblyAI (solo id, fecha, estado), creados desde `desde`. Opcional. */
+  listarTranscriptsAai?(desde: Date): Promise<TranscriptAai[]>;
+  /** Qué ids reconoce la base: segmentos (con su aai_borrado_at) y webhooks recibidos con nuestro secreto. */
+  origenTranscriptsAai?(ids: string[]): Promise<OrigenTranscripts>;
+  /** DELETE /v2/transcript/{id} (idempotente). */
+  borrarTranscriptAai?(id: string): Promise<void>;
+}
+
+/** Elemento de GET /v2/transcript (https://www.assemblyai.com/docs/api-reference/transcripts/list). */
+export interface TranscriptAai {
+  id: string;
+  created: string;
+  status: 'queued' | 'processing' | 'completed' | 'error' | string;
+  /** audio_url = 'http://deleted_by_user' (ya borrado: se ignora). Nunca se guarda la URL. */
+  borrado: boolean;
+}
+
+export interface OrigenTranscripts {
+  segmentos: { aai_transcript_id: string; aai_borrado_at: string | null }[];
+  /** transcript_id de webhooks recibidos (cabecera con nuestro secreto verificada). */
+  webhooks: string[];
 }
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -287,6 +310,91 @@ async function chequeoAaiBorrado({ f, ahora }: Ctx): Promise<ResultadoP8> {
   };
 }
 
+// ─── Transcripts huérfanos en AssemblyAI (revisión de seguridad 16 oct, M4) ───
+// El chequeo 'aai_borrado' solo mira filas de grabacion_segmentos. Un POST reintentado tras un 5xx
+// o un reintento que perdió el id dejan transcripts (audio + texto clínico) que ninguna fila
+// conoce. Aquí se lista GET /v2/transcript (últimos días; solo id/fecha/estado) y se comparan los
+// ids con la base:
+//   - 'activo': su segmento existe y aún no se borró → lo cubre 'aai_borrado' (no se cuenta).
+//   - 'identificado': su segmento ya figura borrado, o llegó su webhook con NUESTRO secreto pero no
+//     hay segmento (duplicado nuestro) → se borra automáticamente (es nuestro y debía borrarse).
+//   - 'desconocido': nada en la base lo reconoce → NO se borra solo; se avisa en el panel. Se
+//     puede borrar con borrarTranscriptsHuerfanos(ids, …, { incluirDesconocidos: true }).
+// Solo cuentan los creados hace más de 2 h; los 'queued/processing' se avisan pero no se borran.
+
+export const VENTANA_HUERFANOS_MS = 7 * 24 * H;   // la cuenta tiene TTL corto; 7 días de margen
+
+export interface Huerfano { id: string; clase: 'identificado' | 'desconocido'; borrable: boolean }
+
+/** Clasificación pura (sin red). */
+export function clasificarHuerfanos(lista: TranscriptAai[], origen: OrigenTranscripts, ahora: Date): Huerfano[] {
+  const t = ahora.getTime();
+  const porSegmento = new Map(origen.segmentos.map((s) => [s.aai_transcript_id, s]));
+  const conWebhook = new Set(origen.webhooks);
+  const out: Huerfano[] = [];
+  const vistos = new Set<string>();
+  for (const x of lista) {
+    if (!x?.id || vistos.has(x.id)) continue;
+    vistos.add(x.id);
+    if (x.borrado) continue;
+    const creado = ms(x.created);
+    if (!Number.isFinite(creado) || t - creado < GRACIA_BORRADO_MS) continue;
+    const seg = porSegmento.get(x.id);
+    if (seg && !seg.aai_borrado_at) continue; // activo: lo revisa 'aai_borrado'
+    const clase: Huerfano['clase'] = seg || conWebhook.has(x.id) ? 'identificado' : 'desconocido';
+    out.push({ id: x.id, clase, borrable: x.status === 'completed' || x.status === 'error' });
+  }
+  return out;
+}
+
+/**
+ * Borra en AssemblyAI los huérfanos indicados. Por defecto SOLO los identificados y borrables;
+ * los desconocidos únicamente con { incluirDesconocidos: true } (decisión explícita de Vale).
+ * Nunca lanza: devuelve cuáles se borraron, cuáles fallaron y cuáles se omitieron.
+ */
+export async function borrarTranscriptsHuerfanos(
+  huerfanos: Huerfano[], borrar: (id: string) => Promise<void>, op: { incluirDesconocidos?: boolean } = {},
+): Promise<{ borrados: string[]; fallidos: string[]; omitidos: string[] }> {
+  const borrados: string[] = [], fallidos: string[] = [], omitidos: string[] = [];
+  for (const h of huerfanos) {
+    if (!h.borrable || (h.clase === 'desconocido' && !op.incluirDesconocidos)) { omitidos.push(h.id); continue; }
+    try { await borrar(h.id); borrados.push(h.id); } catch { fallidos.push(h.id); }
+  }
+  return { borrados, fallidos, omitidos };
+}
+
+async function chequeoAaiHuerfanos({ f, ahora }: Ctx): Promise<ResultadoP8> {
+  if (!f.listarTranscriptsAai || !f.origenTranscriptsAai || !f.env('ASSEMBLYAI_API_KEY')) {
+    return { chequeo: 'aai_huerfanos', ok: true, detalle: { revisado: false }, alertas: [] };
+  }
+  const lista = await f.listarTranscriptsAai(new Date(ahora.getTime() - VENTANA_HUERFANOS_MS));
+  const candidatos = lista.filter((x) => !x.borrado).map((x) => x.id);
+  const origen = candidatos.length ? await f.origenTranscriptsAai(candidatos) : { segmentos: [], webhooks: [] };
+  const huerfanos = clasificarHuerfanos(lista, origen, ahora);
+  if (!huerfanos.length) return { chequeo: 'aai_huerfanos', ok: true, detalle: { listados: lista.length }, alertas: [] };
+
+  const r = f.borrarTranscriptAai
+    ? await borrarTranscriptsHuerfanos(huerfanos, f.borrarTranscriptAai)
+    : { borrados: [] as string[], fallidos: [] as string[], omitidos: huerfanos.map((h) => h.id) };
+  const borrados = new Set(r.borrados);
+  const quedan = huerfanos.filter((h) => !borrados.has(h.id));
+  const desconocidos = quedan.filter((h) => h.clase === 'desconocido').length;
+  const detalle = { listados: lista.length, huerfanos: huerfanos.length, borrados: r.borrados.length, fallidos: r.fallidos.length, desconocidos };
+  if (!quedan.length) return { chequeo: 'aai_huerfanos', ok: true, detalle, alertas: [] };
+  const partes = [
+    desconocidos ? `${desconocidos} transcript(s) en AssemblyAI que ninguna sesión del panel reconoce (no se borraron solos: revisar y borrar si son de una sesión)` : '',
+    quedan.length - desconocidos ? `${quedan.length - desconocidos} transcript(s) que debían borrarse y siguen ahí (se reintenta en el próximo chequeo)` : '',
+  ].filter(Boolean);
+  return {
+    chequeo: 'aai_huerfanos', ok: false, detalle,
+    alertas: [{
+      tipo: 'transcripcion', clave: clave('aai_huerfanos'), accion: 'revisar',
+      titulo: 'AssemblyAI guarda transcripciones de más de 2 horas que no corresponden a una sesión en curso',
+      detalle: `${partes.join('. ')}.${r.borrados.length ? ` Hoy se borraron ${r.borrados.length}.` : ''}`,
+    }],
+  };
+}
+
 async function chequeoCopiasB2({ f, ahora }: Ctx): Promise<ResultadoP8> {
   const filas = await f.transcripcionesSinCopiaB2(new Date(ahora.getTime() - GRACIA_COPIA_B2_MS));
   if (!filas.length) return { chequeo: 'copias_b2', ok: true, alertas: [] };
@@ -374,6 +482,7 @@ function chequeoMicrofono({ f }: Ctx): ResultadoP8 {
 const NOMBRE_CHEQUEO: Record<ChequeoP8, string> = {
   config: 'la configuración', r2: 'Cloudflare R2', b2: 'Backblaze B2', assemblyai: 'AssemblyAI', anthropic: 'Anthropic (Claude)',
   atascadas: 'las sesiones en curso', audio_borrado: 'el borrado del audio', aai_borrado: 'el borrado en AssemblyAI',
+  aai_huerfanos: 'las transcripciones sueltas en AssemblyAI',
   copias_b2: 'las copias en B2', respaldo_supabase: 'el respaldo semanal', gasto: 'el gasto del mes',
   permisos_microfono: 'el permiso del micrófono', clave: 'la llave de cifrado', fly: 'Fly.io', calendar: 'Google Calendar',
   pg_cron: 'las tareas automáticas', cobertura_online: 'la cobertura online', resumenes: 'los resúmenes',
@@ -435,6 +544,7 @@ export async function ejecutarSalud(d: DepsEjecucion): Promise<ResumenSalud> {
     ['atascadas', () => chequeoAtascadas(ctx)],
     ['audio_borrado', () => chequeoAudioBorrado(ctx)],
     ['aai_borrado', () => chequeoAaiBorrado(ctx)],
+    ['aai_huerfanos', () => chequeoAaiHuerfanos(ctx)],
     ['copias_b2', () => chequeoCopiasB2(ctx)],
   ];
   if (ajustes.activo) {
@@ -494,10 +604,13 @@ export async function ejecutarSalud(d: DepsEjecucion): Promise<ResumenSalud> {
 
 // ─── Fuentes reales (Supabase, R2/B2, AssemblyAI, Anthropic) ─────────────────
 
+// Solo process.env en runtime. NUNCA `import.meta.env` como objeto: Vite lo reemplaza en el build
+// por un literal con TODAS las variables (llaves incluidas) y quedaban escritas en el bundle del
+// servidor (revisión 16 oct, A2/M1). En `astro dev` el respaldo es por nombre literal
+// (secretos.ts para llaves, entorno.ts para el resto), y en el build esa rama no existe.
 function envReal(n: string): string | undefined {
   const p = typeof process !== 'undefined' ? process.env?.[n] : undefined;
-  let v = p;
-  if (!v) { try { v = ((import.meta.env ?? {}) as unknown as Record<string, string | undefined>)[n]; } catch { v = undefined; } }
+  const v = (typeof p === 'string' && p.trim()) ? p : (secreto(n as NombreSecreto) ?? variable(n as Parameters<typeof variable>[0]));
   const t = typeof v === 'string' ? v.trim() : '';
   return t || undefined;
 }
@@ -628,6 +741,47 @@ export async function fuentesReales(): Promise<FuentesSalud> {
       await c.models.retrieve(MODELO_PREGUNTAS);
     },
     vercel: () => vercelJson,
+    async listarTranscriptsAai(desde) {
+      // GET /v2/transcript (doc oficial: limit máx. 200, orden de más nuevo a más viejo;
+      // page_details.prev_url apunta a la página más vieja). Se leen solo id, created, status y si
+      // audio_url es el marcador de borrado; la URL no se guarda.
+      const key = envReal('ASSEMBLYAI_API_KEY');
+      if (!key) return [];
+      const out: TranscriptAai[] = [];
+      let url: string | null = 'https://api.assemblyai.com/v2/transcript?limit=200';
+      for (let pagina = 0; url && pagina < 10; pagina++) {
+        if (!url.startsWith('https://api.assemblyai.com/')) break; // nunca mandar la llave a otro host
+        const r: Response = await fetch(url, { headers: { authorization: key }, signal: AbortSignal.timeout(AAI_TIMEOUT) });
+        if (!r.ok) { await r.body?.cancel().catch(() => {}); throw new Error(`GET /v2/transcript: HTTP ${r.status}`); }
+        const j = await r.json() as { transcripts?: { id?: unknown; created?: unknown; status?: unknown; audio_url?: unknown }[]; page_details?: { prev_url?: unknown } };
+        let masViejo = false;
+        for (const x of j.transcripts ?? []) {
+          if (typeof x?.id !== 'string' || typeof x.created !== 'string') continue;
+          if (Date.parse(x.created) < desde.getTime()) { masViejo = true; continue; }
+          out.push({ id: x.id, created: x.created, status: String(x.status ?? ''), borrado: typeof x.audio_url === 'string' && x.audio_url.startsWith('http://deleted_by_user') });
+        }
+        url = !masViejo && typeof j.page_details?.prev_url === 'string' ? j.page_details.prev_url : null;
+      }
+      return out;
+    },
+    async origenTranscriptsAai(ids) {
+      const segmentos: OrigenTranscripts['segmentos'] = [];
+      const webhooks: string[] = [];
+      for (let i = 0; i < ids.length; i += 100) {
+        const lote = ids.slice(i, i + 100);
+        segmentos.push(...await lista<{ aai_transcript_id: string; aai_borrado_at: string | null }>(
+          db.from('grabacion_segmentos').select('aai_transcript_id, aai_borrado_at').in('aai_transcript_id', lote).limit(1000), 'segmentos por transcript'));
+        const eventos = lote.flatMap((id) => [`${id}:completed`, `${id}:error`]);
+        const ws = await lista<{ evento_id: string }>(
+          db.from('transcriptor_webhooks').select('evento_id').eq('proveedor', 'assemblyai').in('evento_id', eventos).limit(1000), 'webhooks');
+        webhooks.push(...ws.map((w) => w.evento_id.split(':')[0]));
+      }
+      return { segmentos, webhooks };
+    },
+    async borrarTranscriptAai(id) {
+      const { assemblyAIDesdeEnv } = await import('./assemblyai');
+      await assemblyAIDesdeEnv({ intentos: 2, timeoutMs: AAI_TIMEOUT }).borrar(id);
+    },
   };
 }
 

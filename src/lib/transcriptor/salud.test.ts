@@ -3,8 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  calcularGastoUsd, ejecutarSalud, fechaRespaldo, filaSalud, mesChile, revisarReglaMicrofono,
-  VARIABLES_REQUERIDAS, type FuentesSalud, type ResultadoP8,
+  borrarTranscriptsHuerfanos, calcularGastoUsd, clasificarHuerfanos, ejecutarSalud, fechaRespaldo, filaSalud, mesChile,
+  revisarReglaMicrofono, VARIABLES_REQUERIDAS, type FuentesSalud, type ResultadoP8, type TranscriptAai,
 } from './salud';
 import { armarReporte, mesAnterior } from './reporte';
 import type { NuevaAlerta } from './alertas';
@@ -51,7 +51,7 @@ test('todo sano: ninguna alerta, se guarda cada chequeo y se cierran las alertas
   assert.equal(r.ok, true);
   assert.deepEqual(alertas, []);
   const nombres = guardadas.map((g) => g.chequeo).sort();
-  assert.deepEqual(nombres, ['aai_borrado', 'anthropic', 'assemblyai', 'atascadas', 'audio_borrado', 'b2', 'config', 'copias_b2', 'gasto', 'permisos_microfono', 'r2', 'respaldo_supabase']);
+  assert.deepEqual(nombres, ['aai_borrado', 'aai_huerfanos', 'anthropic', 'assemblyai', 'atascadas', 'audio_borrado', 'b2', 'config', 'copias_b2', 'gasto', 'permisos_microfono', 'r2', 'respaldo_supabase']);
   assert.ok(guardadas.every((g) => g.ok && g.fallo_desde === null && g.ultimo_ok_at === AHORA.toISOString()));
   assert.ok(resueltas.some((x) => x.prefijo === 'salud:respaldo_supabase' && x.salvo.length === 0));
 });
@@ -249,4 +249,73 @@ test('reporte mensual: conteos, costos por proveedor y tiempos, sin ids ni texto
   assert.equal(d.tiempos.resumen_en_menos_de_2h_pct, 50);
   const txt = JSON.stringify(d);
   assert.doesNotMatch(txt, /"g[123]"/, 'sin ids de grabación');
+});
+
+// ─── Transcripts huérfanos en AssemblyAI (revisión de seguridad 16 oct, M4) ───
+const T = (id: string, h: number, status = 'completed', borrado = false): TranscriptAai => ({ id, created: hace(h), status, borrado });
+
+test('clasificarHuerfanos: activos se ignoran; identificados y desconocidos > 2 h se cuentan', () => {
+  const lista = [
+    T('activo', 5),                       // su segmento sigue vivo → lo ve 'aai_borrado'
+    T('ya-borrado-en-base', 5),           // segmento con aai_borrado_at pero sigue en AAI → identificado
+    T('duplicado-webhook', 5),            // sin segmento, llegó su webhook con nuestro secreto → identificado
+    T('desconocido', 5),                  // nadie lo reconoce → no se borra solo
+    T('reciente', 1),                     // < 2 h: en gracia
+    T('procesando', 5, 'processing'),     // huérfano, pero no se puede borrar aún
+    T('borrado-aai', 5, 'completed', true),
+  ];
+  const h = clasificarHuerfanos(lista, {
+    segmentos: [{ aai_transcript_id: 'activo', aai_borrado_at: null }, { aai_transcript_id: 'ya-borrado-en-base', aai_borrado_at: hace(4) }],
+    webhooks: ['duplicado-webhook'],
+  }, AHORA);
+  assert.deepEqual(h, [
+    { id: 'ya-borrado-en-base', clase: 'identificado', borrable: true },
+    { id: 'duplicado-webhook', clase: 'identificado', borrable: true },
+    { id: 'desconocido', clase: 'desconocido', borrable: true },
+    { id: 'procesando', clase: 'desconocido', borrable: false },
+  ]);
+});
+
+test('borrarTranscriptsHuerfanos: por defecto solo identificados; desconocidos solo si se pide', async () => {
+  const h = [
+    { id: 'a', clase: 'identificado' as const, borrable: true },
+    { id: 'b', clase: 'desconocido' as const, borrable: true },
+    { id: 'c', clase: 'identificado' as const, borrable: false },
+    { id: 'd', clase: 'identificado' as const, borrable: true },
+  ];
+  const borrados: string[] = [];
+  const r = await borrarTranscriptsHuerfanos(h, async (id) => { if (id === 'd') throw new Error('red'); borrados.push(id); });
+  assert.deepEqual(r, { borrados: ['a'], fallidos: ['d'], omitidos: ['b', 'c'] });
+  const r2 = await borrarTranscriptsHuerfanos(h, async () => {}, { incluirDesconocidos: true });
+  assert.deepEqual(r2.borrados, ['a', 'b', 'd']);
+});
+
+test('chequeo diario: borra los huérfanos identificados y avisa en el panel por los desconocidos', async () => {
+  const borrados: string[] = [];
+  const { alertas, guardadas } = await correr(fuentesSanas({
+    async listarTranscriptsAai() { return [T('nuestro', 6), T('ajeno', 6), T('activo', 6)]; },
+    async origenTranscriptsAai(ids) {
+      assert.deepEqual(ids.sort(), ['activo', 'ajeno', 'nuestro']);
+      return { segmentos: [{ aai_transcript_id: 'activo', aai_borrado_at: null }], webhooks: ['nuestro'] };
+    },
+    async borrarTranscriptAai(id) { borrados.push(id); },
+  }));
+  assert.deepEqual(borrados, ['nuestro']);              // el desconocido NO se borra solo
+  const a = alertas.find((x) => x.clave === 'salud:aai_huerfanos')!;
+  assert.ok(a, 'alerta de huérfanos');
+  assert.match(a.detalle!, /1 transcript\(s\) en AssemblyAI que ninguna sesión/);
+  assert.ok(!a.detalle!.includes('ajeno'));            // sin ids en el texto
+  const fila = guardadas.find((g) => g.chequeo === 'aai_huerfanos')!;
+  assert.equal(fila.ok, false);
+  assert.deepEqual(fila.detalle, { listados: 3, huerfanos: 2, borrados: 1, fallidos: 0, desconocidos: 1 });
+});
+
+test('chequeo diario: si todos los huérfanos eran nuestros y se borraron, queda OK y sin aviso', async () => {
+  const { alertas, guardadas } = await correr(fuentesSanas({
+    async listarTranscriptsAai() { return [T('nuestro', 6)]; },
+    async origenTranscriptsAai() { return { segmentos: [{ aai_transcript_id: 'nuestro', aai_borrado_at: hace(5) }], webhooks: [] }; },
+    async borrarTranscriptAai() {},
+  }));
+  assert.equal(alertas.filter((x) => x.clave === 'salud:aai_huerfanos').length, 0);
+  assert.equal(guardadas.find((g) => g.chequeo === 'aai_huerfanos')!.ok, true);
 });

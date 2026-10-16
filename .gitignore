@@ -1,8 +1,10 @@
 # Dependencias
 node_modules/
 
-# npm — ya no se usa, ignorar si aparece
+# npm — ya no se usa, ignorar si aparece (salvo el lockfile del bot, que fija sus
+# dependencias en la imagen Docker: revisión de seguridad 16 oct, B6)
 package-lock.json
+!bot/package-lock.json
 
 # Build
 dist/

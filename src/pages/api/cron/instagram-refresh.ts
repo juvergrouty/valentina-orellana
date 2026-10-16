@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { APIRoute } from 'astro';
+import { secreto } from '../../../lib/secretos';
 import { supabase } from '../../../lib/supabase';
 import { logError, logWarn } from '../../../lib/logger';
 
@@ -16,7 +17,7 @@ function secretoValido(auth: string | null, secret: string | undefined): boolean
 // Renueva el token de larga duración de Instagram (válido 60 días).
 // Vercel Cron lo llama mensualmente con cabecera Authorization: Bearer <CRON_SECRET>.
 export const GET: APIRoute = async ({ request }) => {
-  const secret = import.meta.env.CRON_SECRET;
+  const secret = secreto('CRON_SECRET');
   // Falla cerrado: si CRON_SECRET no está configurado, nadie puede llamar al cron.
   {
     const auth = request.headers.get('authorization');

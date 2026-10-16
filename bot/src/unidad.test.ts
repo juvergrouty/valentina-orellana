@@ -7,7 +7,8 @@ import { Vigia } from './vigia.js';
 import { Segmentos } from './segmentos.js';
 import { Sitio, TokenRechazadoError, type EventoBot } from './sitio.js';
 import { trayectoria } from './meet/humano.js';
-import { conIdiomaFijo } from './meet/argumentos.js';
+import { argumentosChromium, conIdiomaFijo } from './meet/argumentos.js';
+import { sanearError } from './saneo.js';
 import { esRechazoExplicito } from './meet/admision.js';
 
 const ENV_OK = {
@@ -172,4 +173,19 @@ test('Meet: idioma fijo y clasificación de rechazo', () => {
   assert.equal(conIdiomaFijo('https://meet.google.com/abc-defg-hij'), 'https://meet.google.com/abc-defg-hij?hl=en');
   assert.ok(esRechazoExplicito('text=denied your request'));
   assert.ok(!esRechazoExplicito('button:has-text("Try again")'));
+});
+
+test('Chromium: sin --no-sandbox salvo que se pida explícitamente (B6)', () => {
+  assert.ok(!argumentosChromium().includes('--no-sandbox'));
+  assert.ok(!argumentosChromium(1280, 720, { sandbox: true }).includes('--no-sandbox'));
+  assert.ok(argumentosChromium(1280, 720, { sandbox: false }).includes('--no-sandbox'));
+});
+
+test('sanearError quita el enlace y el código de Meet (B8)', () => {
+  const m = sanearError('page.goto: net::ERR_ABORTED at https://meet.google.com/abc-defg-hij?hl=en\nllamada abc-defg-hij');
+  assert.ok(!m.includes('meet.google.com'));
+  assert.ok(!m.includes('abc-defg-hij'));
+  assert.ok(!/[\n\r]/.test(m));
+  assert.ok(m.includes('[url]'));
+  assert.equal(sanearError('x'.repeat(500)).length, 300);
 });

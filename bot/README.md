@@ -175,6 +175,20 @@ sesión acepta `pg_dump` por IPv4. `pg_dump` 17 sirve para servidores 15 y 17.
 7. **IP compartida**: el bloqueo de 15 min tras 10 tokens inválidos es por IP; las máquinas de
    Fly pueden compartir IP de salida con otros clientes de Fly (caso raro).
 
+8. **Sandbox de Chromium** (revisión de seguridad 16 oct, B6). El bot lanza Chromium CON su
+   sandbox de espacios de nombres (`chromiumSandbox: true`, sin `--no-sandbox`) como `pwuser`,
+   el usuario sin privilegios de la imagen de Playwright. No se pudo probar en Fly desde aquí
+   (no hay Docker local ni cuenta): depende de que el kernel de la máquina permita espacios de
+   nombres sin privilegios. Si no arranca, el bot relanza **sin sandbox** para no perder la sesión
+   y deja en el log de Fly `Chromium sin sandbox: el sandbox no arrancó (…)`. En la primera
+   prueba real revisar `fly logs`: si sale `Chromium con sandbox`, quedó bien. Si sale "sin
+   sandbox", las opciones son aceptar el riesgo (bajo: la página es de Google, el token sirve
+   solo para subir audio de esa sesión hasta su vencimiento) o investigar el kernel de Fly.
+   `CHROMIUM_SANDBOX=0` fuerza el modo sin sandbox. Las banderas de aislamiento de sitios de
+   Vexa (`IsolateOrigins`, `site-per-process`) se mantienen: no se probó Meet sin ellas.
+9. **Cadena de suministro**: imagen base fijada por digest y dependencias con `npm ci` desde
+   `package-lock.json` (ver comentario del Dockerfile para actualizar ambos juntos).
+
 ## Pendientes
 
 - **Vale**: crear la app de Fly y el token (pasos de arriba), confirmar su nombre visible en

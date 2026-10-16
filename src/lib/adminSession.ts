@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { secreto } from './secretos';
 
 // Sesión del panel (3 oct 2026). Antes la cookie era el propio ADMIN_SECRET:
 // igual para siempre, así que una cookie robada servía indefinidamente.
@@ -8,7 +9,7 @@ export const COOKIE_ADMIN = 'vo_admin_token';
 export const DURACION_SESION_MS = 8 * 60 * 60 * 1000;
 
 function firmar(payload: string): string {
-  return createHmac('sha256', `panel:${import.meta.env.ADMIN_SECRET ?? ''}`).update(payload).digest('hex');
+  return createHmac('sha256', `panel:${secreto('ADMIN_SECRET') ?? ''}`).update(payload).digest('hex');
 }
 
 // Passkey (16 oct 2026): "v1" = sesión con contraseña sola; "v2" = sesión
@@ -29,7 +30,7 @@ export function nivelTokenAdmin(token: string | undefined | null): NivelSesionAd
 }
 
 export function tokenAdminValido(token: string | undefined | null): boolean {
-  if (!token || !import.meta.env.ADMIN_SECRET) return false;
+  if (!token || !secreto('ADMIN_SECRET')) return false;
   const partes = token.split('.');
   if (partes.length !== 3 || (partes[0] !== 'v1' && partes[0] !== 'v2')) return false;
   const vence = Number(partes[1]);
@@ -63,13 +64,21 @@ async function leerRevocados(): Promise<{ firma: string; vence: number }[]> {
   try { const l = JSON.parse(data?.value || '[]'); return Array.isArray(l) ? l : []; } catch { return []; }
 }
 
-export async function tokenRevocado(token: string): Promise<boolean> {
+/**
+ * ¿La sesión fue cerrada? Si la lista no se puede leer: en el panel general no se bloquea
+ * (false); con { estricto: true } (rutas del transcriptor, revisión 16 oct M2) se LANZA y
+ * quien llama falla cerrado.
+ */
+export async function tokenRevocado(token: string, opciones: { estricto?: boolean } = {}): Promise<boolean> {
   const firma = token.split('.')[2] ?? '';
   if (!cacheRevocados || Date.now() - cacheRevocados.leido > 30_000) {
     try {
       const lista = await leerRevocados();
       cacheRevocados = { firmas: new Set(lista.map(r => r.firma)), leido: Date.now() };
-    } catch { return false; } // si no se puede leer, no se bloquea el panel
+    } catch (e) {
+      if (opciones.estricto) throw e;
+      return false; // si no se puede leer, no se bloquea el panel
+    }
   }
   return cacheRevocados.firmas.has(firma);
 }

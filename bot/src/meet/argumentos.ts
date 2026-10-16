@@ -4,9 +4,16 @@
 
 export const IDIOMA_UI = 'en-US';
 
-export function argumentosChromium(anchoPx = 1280, altoPx = 720): string[] {
+// Sandbox (revisión de seguridad 16 oct, B6): por defecto Chromium corre CON su sandbox de
+// espacios de nombres (sin --no-sandbox) como el usuario sin privilegios `pwuser` de la imagen de
+// Playwright, y Playwright lo lanza con `chromiumSandbox: true`. El sandbox setuid no se usa
+// (--disable-setuid-sandbox), basta el de espacios de nombres. Si el kernel de la máquina no lo
+// permite, index.ts relanza sin sandbox y lo deja en el log (ver bot/README.md, "Sandbox").
+// Las banderas de aislamiento de sitios (IsolateOrigins, site-per-process) vienen de Vexa y se
+// mantienen: no se probó Meet sin ellas.
+export function argumentosChromium(anchoPx = 1280, altoPx = 720, o: { sandbox?: boolean } = {}): string[] {
   return [
-    '--no-sandbox',
+    ...(o.sandbox === false ? ['--no-sandbox'] : []),
     '--disable-setuid-sandbox',
     '--disable-features=IsolateOrigins,site-per-process,VizDisplayCompositor',
     '--disable-infobars',

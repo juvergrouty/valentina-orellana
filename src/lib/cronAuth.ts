@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { supabase } from './supabase';
+import { secreto } from './secretos';
 
 // ¿Quién puede llamar a las tareas automáticas (cron)?
 // - Vercel / GitHub Actions: con CRON_SECRET (variable de entorno).
@@ -18,7 +19,7 @@ export async function cronAutorizado(request: Request): Promise<boolean> {
   if (!auth.startsWith('Bearer ')) return false;
   const dado = auth.slice(7);
 
-  const secret = import.meta.env.CRON_SECRET;
+  const secret = secreto('CRON_SECRET');
   if (secret && igual(dado, secret)) return true;
 
   const { data } = await supabase.from('settings').select('value').eq('key', 'cron_interno_secret').maybeSingle();

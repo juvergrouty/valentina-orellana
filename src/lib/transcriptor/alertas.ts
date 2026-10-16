@@ -14,6 +14,7 @@
 //     Índice único parcial en 0017_transcriptor_alertas.sql (clave) where resuelta_at is null.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { EstadoGrabacion, Origen } from './tipos';
+import { secreto } from '../secretos';
 
 // ─── Contrato (P6 y otros paquetes lo usan tal cual) ─────────────────────────
 
@@ -302,13 +303,15 @@ export const URL_PANEL = 'https://www.valentinaorellana.cl/admin';
 
 export type EnviarCorreoAlerta = (para: string, c: { asunto: string; html: string; texto: string }) => Promise<boolean>;
 
+// La llave de Resend SOLO en runtime (secretos.ts): nunca `import.meta.env` entero, que Vite
+// incrusta en el bundle con todas las variables (revisión 16 oct, A2/M1). EMAIL_FROM no es
+// secreto: acceso literal.
 function envDe(n: 'RESEND_API_KEY' | 'EMAIL_FROM'): string | undefined {
-  const p = typeof process !== 'undefined' ? process.env?.[n] : undefined;
+  if (n === 'RESEND_API_KEY') return secreto('RESEND_API_KEY');
+  const p = typeof process !== 'undefined' ? process.env?.EMAIL_FROM : undefined;
   if (p) return p;
-  try {
-    const e = (import.meta.env ?? {}) as unknown as Record<string, string | undefined>;
-    return n === 'RESEND_API_KEY' ? e.RESEND_API_KEY : e.EMAIL_FROM;
-  } catch { return undefined; } // fuera de Vite (pruebas) no hay import.meta.env
+  try { return import.meta.env.EMAIL_FROM; }
+  catch { return undefined; } // fuera de Vite (pruebas) no hay import.meta.env
 }
 
 export const enviarCorreoResend: EnviarCorreoAlerta = async (para, c) => {

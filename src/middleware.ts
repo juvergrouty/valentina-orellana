@@ -1,6 +1,7 @@
 import { defineMiddleware } from 'astro:middleware';
 import type { APIContext, MiddlewareNext } from 'astro';
 import { tokenAdminValido, tokenRevocado } from './lib/adminSession';
+import { esRutaTranscriptor } from './lib/transcriptor/acceso';
 
 const COOKIE = 'vo_admin_token';
 
@@ -68,7 +69,25 @@ async function protegerAdmin(context: APIContext, next: MiddlewareNext): Promise
     }
   }
 
-  if (!tokenAdminValido(token) || await tokenRevocado(token)) {
+  // Rutas del transcriptor (revisión de seguridad 16 oct, M2): si no se puede leer la lista de
+  // sesiones cerradas o el estado de las passkeys, se falla CERRADO (503) en vez de dejar pasar.
+  // El resto del panel sigue igual que antes (no se deja a Valentina fuera si Supabase falla).
+  const estricto = esRutaTranscriptor(pathname);
+  const noDisponible = () => isAdminApi
+    ? new Response(JSON.stringify({ error: 'No se pudo verificar tu sesión. Intenta de nuevo en unos minutos.', motivo: 'no_disponible' }), {
+        status: 503, headers: { 'Content-Type': 'application/json' },
+      })
+    : new Response('<!doctype html><meta charset="utf-8"><title>Intenta en unos minutos</title><p style="font-family:system-ui;padding:2rem">No se pudo verificar tu sesión del panel en este momento. Por seguridad esta página no se muestra. Intenta de nuevo en unos minutos.</p><p style="font-family:system-ui;padding:0 2rem"><a href="/admin">Volver al panel</a></p>', {
+        status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      });
+
+  let revocado = false;
+  if (tokenAdminValido(token)) {
+    try { revocado = await tokenRevocado(token, { estricto }); }
+    catch { return noDisponible(); }
+  }
+
+  if (!tokenAdminValido(token) || revocado) {
     // Un formulario del panel enviado con la sesión vencida (navegación del
     // navegador, no un fetch) vuelve al login en vez de mostrar un JSON crudo.
     const esNavegacion = context.request.headers.get('sec-fetch-mode') === 'navigate'
@@ -90,7 +109,10 @@ async function protegerAdmin(context: APIContext, next: MiddlewareNext): Promise
   // (nunca dejar a Valentina fuera del panel). Ver src/lib/passkey/nucleo.ts.
   // Import dinámico: solo las rutas del panel cargan Supabase y WebAuthn.
   const { sesionAceptada } = await import('./lib/passkey/servidor');
-  if (!(await sesionAceptada(token))) {
+  let aceptada: boolean;
+  try { aceptada = await sesionAceptada(token, { estricto }); }
+  catch { return noDisponible(); }
+  if (!aceptada) {
     if (isAdminApi) {
       return new Response(JSON.stringify({ error: 'Falta confirmar con tu passkey. Vuelve a entrar al panel.' }), {
         status: 401,

@@ -8,6 +8,7 @@
 //   • Se registran los tokens de cada llamada (y su costo en USD) para la vista de costos.
 // Nunca se escribe en logs ni en mensajes de error el texto enviado o recibido.
 import Anthropic from '@anthropic-ai/sdk';
+import { secreto } from '../secretos';
 import {
   MODELO_PREGUNTAS, MODELO_RESUMEN,
   type ClienteClaude, type PeticionResumen, type ResultadoBatch,
@@ -165,9 +166,9 @@ export interface RespuestaClaude {
 
 let clientePorDefecto: Anthropic | null = null;
 
+// Solo runtime (secretos.ts): `import.meta.env.ANTHROPIC_API_KEY` quedaba escrita en el bundle (A2/M1).
 function llaveAnthropic(): string | undefined {
-  if (typeof process !== 'undefined' && process.env?.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
-  try { return import.meta.env.ANTHROPIC_API_KEY; } catch { return undefined; } // fuera de Vite (pruebas) no hay import.meta.env
+  return secreto('ANTHROPIC_API_KEY');
 }
 
 export function clienteAnthropic(): Anthropic {

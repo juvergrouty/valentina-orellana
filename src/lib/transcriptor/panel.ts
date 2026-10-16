@@ -277,6 +277,30 @@ export function validarAjuste(clave: unknown, valor: unknown): Resultado<{ clave
   return n.ok ? { ok: true, valor: { clave: c, valor: n.valor } } : n;
 }
 
+// ─── Decisión 3: sin passkey obligatoria no se enciende el transcriptor ──────
+// (revisión de seguridad 16 oct, A1). Se aplica en ajustes.ts (rechazo en el servidor) y la
+// página /admin/transcriptor muestra el mismo motivo junto a los interruptores.
+
+export const AJUSTES_QUE_EXIGEN_PASSKEY = ['transcriptor_activo', 'transcriptor_bot_activo'] as const;
+
+/** ¿Este cambio es un ENCENDIDO que exige passkey obligatoria? (apagar siempre se permite). */
+export function exigePasskeyObligatoria(clave: string, valor: string): boolean {
+  return valor === 'true' && (AJUSTES_QUE_EXIGEN_PASSKEY as readonly string[]).includes(clave);
+}
+
+/** Estado de passkeys (de passkey/servidor.ts estadoPasskeys) o 'error' si no se pudo leer. */
+export type EstadoPasskeyActivacion = { cantidad: number; obligatoria: boolean; migracionPendiente: boolean } | 'error';
+
+/** null = se puede encender; si no, el motivo en palabras de Vale. Falla cerrado. */
+export function motivoBloqueoActivacion(estado: EstadoPasskeyActivacion | null | undefined, nivelSesion: 'contrasena' | 'passkey' | null): string | null {
+  if (!estado || estado === 'error') return 'No pude revisar la configuración de tu passkey. Intenta de nuevo en unos minutos.';
+  if (estado.migracionPendiente) return 'Falta aplicar en Supabase la migración de passkeys (0015). Sin passkey obligatoria no se puede encender el transcriptor.';
+  if (estado.cantidad === 0) return 'Para encender el transcriptor, primero registra tu passkey (Face ID o huella) en Seguridad y activa "Passkey obligatoria".';
+  if (!estado.obligatoria) return 'Para encender el transcriptor, primero activa "Passkey obligatoria" en Seguridad: así la contraseña sola no basta para ver transcripciones ni resúmenes.';
+  if (nivelSesion !== 'passkey') return 'Confirma esta sesión con tu passkey en Seguridad para encender el transcriptor.';
+  return null;
+}
+
 // ─── Costo estimado del mes ──────────────────────────────────────────────────
 // Precios oficiales verificados en 50-arquitectura §8 (15 oct 2026). Es una ESTIMACIÓN para el
 // panel: la cifra real es la factura de cada proveedor (P8 compara en su reporte mensual).

@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import {
   correosInvitados, crearBot, cuerpoMaquina, eventoUtil, extraerBearer, generarTokenBot, hmacTokenBot, idEventoBot,
   maxHumanosPorTipo, meetUrlDesdeEvento, meetUrlDesdeNotas, normalizarMeetUrl, notaFinBot, parsearEventoBot,
-  payloadSeguro, procesarEventoBot, tokenVigente, uuidDesdeEventId, venceTokenBot, VIGENCIA_TOKEN_TRAS_FIN_MS,
+  payloadSeguro, procesarEventoBot, sanearErrorBot, tokenVigente, uuidDesdeEventId, venceTokenBot, VIGENCIA_TOKEN_TRAS_FIN_MS,
+  MAX_BYTES_SEGMENTO_BOT,
   type EventoCalendario,
 } from './bot';
 import { BOT_NOMBRE, type Grabacion } from './tipos';
@@ -400,4 +401,32 @@ test('sesionesOnlineProximas: cruza reservas y fichas, descarta canceladas y pre
     [EV.id, GID, 'p1', 'pareja', 'https://meet.google.com/abc-defg-hij'],
     ['encuadrado1', null, 'p9', 'sin_tipo', 'https://meet.google.com/eee-eeee-eee'],
   ]);
+});
+
+// ─── Revisión de seguridad 16 oct: tope por segmento (B7) y saneo de errores (B8) ───
+test('endpoint: un segmento de más de 300 MB se rechaza (413) y no queda como subido', async () => {
+  const s = escenario();
+  await s.enviar({ tipo: 'lobby' });
+  await s.enviar({ tipo: 'activo' });
+  await s.enviar({ tipo: 'pide_url', seq: 0 });
+  const key = String(s.db.tablas.grabacion_segmentos[0].r2_key);
+  const grande = MAX_BYTES_SEGMENTO_BOT + 1;
+  s.objetos.set(key, grande);
+  const r = await s.enviar({ tipo: 'segmento_subido', seq: 0, bytes: grande, offset_ms: 0, duracion_ms: 900_000 });
+  assert.equal(r.status, 413);
+  assert.equal(s.db.tablas.grabacion_segmentos[0].subido_at ?? null, null);
+  // Justo en el tope sí se acepta.
+  s.objetos.set(key, MAX_BYTES_SEGMENTO_BOT);
+  assert.equal((await s.enviar({ tipo: 'segmento_subido', seq: 0, bytes: MAX_BYTES_SEGMENTO_BOT, offset_ms: 0, duracion_ms: 900_000 })).status, 200);
+});
+
+test('sanearErrorBot: el error guardado no lleva el enlace ni el código de Meet', async () => {
+  const m = sanearErrorBot('page.goto: Timeout at https://meet.google.com/abc-defg-hij?hl=en (meet.google.com/abc-defg-hij)\n');
+  assert.ok(!m.includes('meet.google.com') && !m.includes('abc-defg-hij') && !m.includes('\n'), m);
+  const s = escenario();
+  await s.enviar({ tipo: 'lobby' });
+  await s.enviar({ tipo: 'error', detalle: 'Falló: https://meet.google.com/xyz-abcd-efg' });
+  assert.ok(!String(s.g().ultimo_error).includes('meet.google.com'));
+  assert.ok(!String(s.g().ultimo_error).includes('xyz-abcd-efg'));
+  assert.ok(!JSON.stringify(s.db.tablas.transcriptor_auditoria).includes('xyz-abcd-efg'));
 });

@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { secreto } from './secretos';
 import { supabase } from './supabase';
 import { logEmail, logError, logInfo } from './logger';
 import { stepsItems, STEPS_INTRO } from './stepsContent';
@@ -10,7 +11,7 @@ import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLin
 // Inicialización perezosa — no falla si la key no está configurada
 let _resend: Resend | null = null;
 function getResend(): Resend | null {
-  const key = import.meta.env.RESEND_API_KEY;
+  const key = secreto('RESEND_API_KEY'); // runtime (src/lib/secretos.ts)
   if (!key) return null;
   if (!_resend) _resend = new Resend(key);
   return _resend;

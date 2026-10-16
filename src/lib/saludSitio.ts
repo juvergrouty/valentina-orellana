@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { secreto as leerSecreto } from './secretos';
 import { todayCL } from './dateUtils';
 
 // Salud de la página (8 oct 2026): avisos en el panel cuando algo hay que
@@ -134,7 +135,7 @@ export async function revisarSaludSiToca(): Promise<void> {
     let previo: SaludSitio = {};
     try { const p = JSON.parse(m[CLAVE_SALUD] || '{}'); if (p && typeof p === 'object') previo = p; } catch { /* ilegible: se parte de cero */ }
 
-    const claveResend = import.meta.env.RESEND_API_KEY as string | undefined;
+    const claveResend = leerSecreto('RESEND_API_KEY');
     const domResend = dominioRemitente();
     const waToken = m['whatsapp_access_token']?.trim();
     const waPhone = m['whatsapp_phone_number_id']?.trim();

@@ -4,7 +4,9 @@
 //   - método POST,
 //   - Origin (o, si falta, Referer) presente y del mismo sitio,
 //   - cabecera X-Panel: 1 (un formulario de otro sitio no puede ponerla sin CORS),
-//   - cookie del panel válida y no revocada (defensa en profundidad).
+//   - cookie del panel válida y no revocada (defensa en profundidad; falla cerrado si no se puede
+//     leer la lista de sesiones cerradas).
+// El contenido clínico exige además nivel passkey: ver acceso.ts (exigirAccesoClinico).
 // Cada rechazo queda en la bitácora del transcriptor.
 import type { APIContext } from 'astro';
 import { COOKIE_ADMIN, tokenAdminValido, tokenRevocado } from '../adminSession';
@@ -41,11 +43,18 @@ export async function guardiaPanel(ctx: APIContext, accion: AccionAuditoria): Pr
   else if (request.headers.get('x-panel') !== '1') motivo = 'cabecera';
   else {
     const token = cookies.get(COOKIE_ADMIN)?.value ?? '';
-    if (!tokenAdminValido(token) || (await tokenRevocado(token))) motivo = 'sesion';
+    if (!tokenAdminValido(token)) motivo = 'sesion';
+    else {
+      // Estricto (revisión 16 oct, M2): si la lista de sesiones cerradas no se puede leer,
+      // se rechaza (503) en vez de dejar pasar.
+      try { if (await tokenRevocado(token, { estricto: true })) motivo = 'sesion'; }
+      catch { motivo = 'no_disponible'; }
+    }
   }
   if (!motivo) return null;
   await auditar('vale', accion, { request, clientAddress: safeAddr(ctx), resultado: 'denegado', detalle: { motivo } });
   if (motivo === 'sesion') return json({ ok: false, error: 'Tu sesión del panel venció. Vuelve a entrar.', motivo }, 401);
+  if (motivo === 'no_disponible') return json({ ok: false, error: 'No se pudo verificar tu sesión. Intenta de nuevo en unos minutos.', motivo }, 503);
   return json({ ok: false, error: 'Origen no permitido.', motivo }, 403);
 }
 

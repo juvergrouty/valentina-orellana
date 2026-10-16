@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { APIRoute } from 'astro';
+import { secreto } from '../../../lib/secretos';
 import { agregarLineaNotas } from '../../../lib/apigateway';
 import { supabase } from '../../../lib/supabase';
 import { sendReviewRequestEmail, sendEvaluationEmail } from '../../../lib/email';
@@ -30,7 +31,7 @@ function json(data: unknown, status = 200) {
 // Envía la solicitud de reseña de Google a los pacientes cuya sesión ya terminó
 // (una vez por sesión: se marca la reserva para no repetir).
 export const GET: APIRoute = async ({ request }) => {
-  const secret = import.meta.env.CRON_SECRET;
+  const secret = secreto('CRON_SECRET');
   // Falla cerrado: si CRON_SECRET no está configurado, nadie puede llamar al cron.
   {
     const auth = request.headers.get('authorization');

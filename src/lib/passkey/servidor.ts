@@ -16,6 +16,7 @@ import {
 } from '@simplewebauthn/server';
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../supabase';
+import { secreto as leerSecreto } from '../secretos';
 import { COOKIE_ADMIN, DURACION_SESION_MS, crearTokenAdmin, nivelTokenAdmin, type NivelSesionAdmin } from '../adminSession';
 import {
   CANTIDAD_CODIGOS, DURACION_PASO_MS, RP_NOMBRE, codigoCoincide, configRp, crearTokenPaso, generarCodigosRespaldo,
@@ -28,7 +29,7 @@ const DURACION_DESAFIO_MS = 5 * 60 * 1000;
 // Identificador fijo de la usuaria del panel (hay una sola). No es un dato personal.
 const USER_ID = new TextEncoder().encode('vo-panel-admin');
 
-const secreto = () => import.meta.env.ADMIN_SECRET ?? '';
+const secreto = () => leerSecreto('ADMIN_SECRET') ?? '';
 export const rpDe = (url: URL): ConfigRp | null => configRp(url, !!import.meta.env.DEV);
 
 /** La tabla aún no existe (migración 0015 sin aplicar). */
@@ -63,13 +64,20 @@ export async function estadoPasskeys(): Promise<EstadoPasskeys> {
   return estado;
 }
 
-/** Para el middleware: ¿esta sesión basta? Si no se puede leer el estado, sí (no bloquear el panel). */
-export async function sesionAceptada(token: string | undefined | null): Promise<boolean> {
+/**
+ * Para el middleware: ¿esta sesión basta? Si no se puede leer el estado: en el panel general sí
+ * (no bloquear el panel); con { estricto: true } (rutas del transcriptor, revisión 16 oct M2)
+ * se LANZA y el middleware falla cerrado.
+ */
+export async function sesionAceptada(token: string | undefined | null, opciones: { estricto?: boolean } = {}): Promise<boolean> {
   const nivel = nivelTokenAdmin(token);
   if (!nivel) return false;
   if (nivel === 'passkey') return true;
   try { return sesionSuficiente(nivel, await estadoPasskeys()); }
-  catch { return true; }
+  catch (e) {
+    if (opciones.estricto) throw e;
+    return true;
+  }
 }
 
 export interface PasskeyGuardada {

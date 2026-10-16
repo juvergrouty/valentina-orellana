@@ -94,3 +94,16 @@ test('nombre de passkey', () => {
   assert.equal(nombrePasskey('<b>Mac</b>'), 'bMac/b');
   assert.equal(nombrePasskey('x'.repeat(100)).length, 60);
 });
+
+test('paso 2: tope global (10) y tope por IP (5) en 15 min; si no se puede contar, bloqueado', async () => {
+  const { pasoDosBloqueado, MAX_FALLOS_PASO2, MAX_FALLOS_PASO2_IP } = await import('./nucleo');
+  assert.equal(MAX_FALLOS_PASO2, 10);
+  assert.equal(MAX_FALLOS_PASO2_IP, 5);
+  assert.equal(pasoDosBloqueado(1, 1), false);
+  assert.equal(pasoDosBloqueado(5, 5), false);
+  assert.equal(pasoDosBloqueado(6, 6), true);    // misma IP pasada de 5
+  assert.equal(pasoDosBloqueado(11, 1), true);   // muchas IP: tope global
+  assert.equal(pasoDosBloqueado(10, 5), false);
+  assert.equal(pasoDosBloqueado(0, 0, true), true);
+  assert.equal(pasoDosBloqueado(null, 0), true);
+});

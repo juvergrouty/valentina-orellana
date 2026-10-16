@@ -13,6 +13,9 @@ import {
   textoProblema, tipoTexto, type CostoMes,
 } from '../../lib/transcriptor/panel';
 import { AJUSTES, RUTAS, type Grabacion } from '../../lib/transcriptor/tipos';
+import { motivoBloqueoActivacion, type EstadoPasskeyActivacion } from '../../lib/transcriptor/panel';
+import { COOKIE_ADMIN, nivelTokenAdmin } from '../../lib/adminSession';
+import { estadoPasskeys } from '../../lib/passkey/servidor';
 
 
 type GrabLista = Pick<Grabacion, 'id' | 'patient_id' | 'origen' | 'tipo' | 'estado' | 'estado_antes_error' | 'session_date' | 'inicio_at' | 'duracion_seg' | 'created_at'>;
@@ -95,6 +98,12 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') {
 }
 
 const activo = ajustes[AJUSTES.activo] === 'true';
+// Decisión 3 (revisión de seguridad 16 oct, A1): por qué no se puede encender (el servidor lo rechaza igual).
+let estadoPk: EstadoPasskeyActivacion = 'error';
+if (import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') estadoPk = { cantidad: 1, obligatoria: true, migracionPendiente: false };
+else { try { estadoPk = await estadoPasskeys(); } catch { estadoPk = 'error'; } }
+const nivelSesion = import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia' ? 'passkey' : nivelTokenAdmin(Astro.cookies.get(COOKIE_ADMIN)?.value);
+const bloqueoEncender = motivoBloqueoActivacion(estadoPk, nivelSesion);
 const botActivo = ajustes[AJUSTES.botActivo] === 'true';
 const nombresVale = (ajustes[AJUSTE_NOMBRES_VALE] || NOMBRES_VALE_DEFECTO).split('|').join('\n');
 const tope = Number(ajustes[AJUSTES.presupuestoClp]) || 35000;
@@ -122,6 +131,12 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
     <!-- ── Ajustes ─────────────────────────────────────────────────────── -->
     <section class="card tx-card" aria-labelledby="tx-aj">
       <h3 id="tx-aj" class="tx-h3">Ajustes</h3>
+      {bloqueoEncender && (
+        <div class="alert-error" role="note" style="margin-bottom:0.75rem;">
+          🔒 {bloqueoEncender} <a href="/admin/seguridad" style="text-decoration:underline;">Ir a Seguridad →</a>
+          {(activo || botActivo) && <span> (Hoy está encendido; puedes apagarlo, pero no volver a encenderlo hasta resolver esto.)</span>}
+        </div>
+      )}
       <div class="tx-switch-fila">
         <div>
           <p class="tx-switch-titulo">Transcriptor activo</p>

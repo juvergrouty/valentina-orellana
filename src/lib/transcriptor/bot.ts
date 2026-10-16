@@ -16,6 +16,7 @@
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { tipoDesdeSessionType } from './reglas';
+import { secreto } from '../secretos';
 import {
   BOT_NOMBRE, PREFIJO_AUDIO, RUTAS, TIEMPOS,
   type Almacenamiento, type Bot, type EventoBot, type Grabacion, type LineaHablante, type SesionOnline, type TipoSesion,
@@ -33,6 +34,28 @@ export const MAX_SEQ_BOT = 200;
 export const MAX_LINEA_HABLANTES = 20_000;
 /** Cuerpo máximo aceptado en bot-evento (la línea de hablantes de 1 h cabe holgada). */
 export const MAX_CUERPO_EVENTO = 1_000_000;
+/**
+ * Tope por segmento del bot (revisión de seguridad 16 oct, B7): 15 min de audio Opus a 32 kbps son
+ * ~4 MB; 300 MB deja margen de sobra y evita que un token robado suba GB que luego se mandan a
+ * AssemblyAI (costo). Un segmento más grande se rechaza y su objeto se borra de R2.
+ */
+export const MAX_BYTES_SEGMENTO_BOT = 300 * 1024 * 1024;
+
+/**
+ * Sanea el texto de error que manda el bot (revisión 16 oct, B8): el mensaje crudo de Playwright puede
+ * traer el enlace de Meet o su código (abc-defg-hij). Se quitan URLs, códigos de Meet y caracteres de
+ * control antes de guardarlo en grabaciones.ultimo_error o en la bitácora.
+ */
+export function sanearErrorBot(m: unknown, max = 300): string {
+  const t = String(m ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\b(?:https?|wss?):\/\/\S+/gi, '[url]')
+    .replace(/\bmeet\.google\.com\/\S*/gi, '[url]')
+    .replace(/\b[a-z]{3}-[a-z]{4}-[a-z]{3}\b/gi, '[código]')
+    .replace(/\s+/g, ' ').trim();
+  return t.slice(0, max);
+}
+
 /** Bloqueo por IP: 10 tokens inválidos en 15 min (como el login). */
 export const MAX_FALLOS_IP = 10;
 export const VENTANA_FALLOS_MS = 15 * 60_000;
@@ -128,7 +151,7 @@ export function parsearEventoBot(cuerpo: unknown): ResultadoParseo {
     }
     case 'error':
       if (typeof c.detalle !== 'string') return { ok: false, error: 'detalle inválido' };
-      return { ok: true, evento: { tipo: 'error', detalle: c.detalle.replace(/[\u0000-\u001f]/g, ' ').slice(0, 300) } };
+      return { ok: true, evento: { tipo: 'error', detalle: sanearErrorBot(c.detalle) } };
     default:
       return { ok: false, error: 'tipo desconocido' };
   }
@@ -292,14 +315,27 @@ export interface DepsBot {
   calendario?: () => Promise<{ token: string; calendarId: string } | null>;
 }
 
+// Llaves (FLY_API_TOKEN, BOT_TOKEN_SECRET) SOLO en runtime vía secretos.ts. Nunca leer
+// `import.meta.env` como objeto: Vite lo incrusta entero en el bundle (revisión 16 oct, A2/M1).
+function envNoSecreta(n: 'FLY_APP_BOT' | 'FLY_IMAGEN' | 'PUBLIC_SITE_URL'): string | undefined {
+  const p = typeof process !== 'undefined' ? process.env?.[n] : undefined;
+  if (p) return p;
+  try {
+    switch (n) {
+      case 'FLY_APP_BOT': return import.meta.env.FLY_APP_BOT;
+      case 'FLY_IMAGEN': return import.meta.env.FLY_IMAGEN;
+      case 'PUBLIC_SITE_URL': return import.meta.env.PUBLIC_SITE_URL;
+    }
+  } catch { return undefined; } // fuera de Vite (pruebas) no hay import.meta.env
+}
+
 function envBot(deps: DepsBot) {
-  const e = (import.meta.env ?? {}) as unknown as Record<string, string | undefined>;
   return {
-    FLY_API_TOKEN: deps.env?.FLY_API_TOKEN ?? e.FLY_API_TOKEN,
-    FLY_APP_BOT: deps.env?.FLY_APP_BOT ?? e.FLY_APP_BOT,
-    FLY_IMAGEN: deps.env?.FLY_IMAGEN ?? e.FLY_IMAGEN,
-    BOT_TOKEN_SECRET: deps.env?.BOT_TOKEN_SECRET ?? e.BOT_TOKEN_SECRET,
-    PUBLIC_SITE_URL: deps.env?.PUBLIC_SITE_URL ?? e.PUBLIC_SITE_URL ?? 'https://www.valentinaorellana.cl',
+    FLY_API_TOKEN: deps.env?.FLY_API_TOKEN ?? secreto('FLY_API_TOKEN'),
+    FLY_APP_BOT: deps.env?.FLY_APP_BOT ?? envNoSecreta('FLY_APP_BOT'),
+    FLY_IMAGEN: deps.env?.FLY_IMAGEN ?? envNoSecreta('FLY_IMAGEN'),
+    BOT_TOKEN_SECRET: deps.env?.BOT_TOKEN_SECRET ?? secreto('BOT_TOKEN_SECRET'),
+    PUBLIC_SITE_URL: deps.env?.PUBLIC_SITE_URL ?? envNoSecreta('PUBLIC_SITE_URL') ?? 'https://www.valentinaorellana.cl',
   };
 }
 
@@ -462,7 +498,7 @@ export function crearBot(deps: DepsBot = {}): Bot {
 
 // ─── Eventos del bot (con base) ──────────────────────────────────────────────
 
-export type AlmacenamientoBot = Pick<Almacenamiento, 'urlSubida' | 'head'>;
+export type AlmacenamientoBot = Pick<Almacenamiento, 'urlSubida' | 'head'> & Partial<Pick<Almacenamiento, 'borrar'>>;
 
 export interface EntradaEvento {
   authorization: string | null;
@@ -495,8 +531,8 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
   const ahora = deps.ahora?.() ?? new Date();
   const token = extraerBearer(entrada.authorization);
   if (!token) return NO_ENCONTRADO; // rechazo temprano, sin tocar la base
-  const secreto = deps.secreto ?? ((import.meta.env ?? {}) as unknown as Record<string, string | undefined>).BOT_TOKEN_SECRET;
-  if (!secreto) return { status: 503, cuerpo: { error: 'No configurado' } };
+  const secretoBot = deps.secreto ?? secreto('BOT_TOKEN_SECRET');
+  if (!secretoBot) return { status: 503, cuerpo: { error: 'No configurado' } };
   if (entrada.cuerpoTexto.length > MAX_CUERPO_EVENTO) return { status: 413, cuerpo: { error: 'Demasiado grande' } };
 
   const c = deps.db ?? (await clientePorDefecto());
@@ -511,7 +547,7 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
     if ((count ?? 0) >= MAX_FALLOS_IP) return NO_ENCONTRADO;
   }
 
-  const hmac = hmacTokenBot(token, secreto);
+  const hmac = hmacTokenBot(token, secretoBot);
   const { data: g, error: eG } = await c.from('grabaciones')
     .select('id, patient_id, estado, inicio_at, bot_token_vence_at, bot_machine_id')
     .eq('bot_token_sha256', hmac).maybeSingle();
@@ -593,6 +629,12 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
       if (!seg.subido_at) {
         const h = await alm.head('audio', seg.r2_key as string);
         if (!h || h.bytes !== ev.bytes) return { status: 409, cuerpo: { error: 'El objeto en R2 no calza con lo informado' } };
+        if (h.bytes > MAX_BYTES_SEGMENTO_BOT) {
+          // Tope por segmento (B7): se borra el objeto y no se marca como subido (no va a AssemblyAI).
+          try { await alm.borrar?.('audio', seg.r2_key as string); } catch { /* lo borra el ciclo de vida de 1 día */ }
+          await auditar('bot', 'alerta', { ...auditoria, resultado: 'denegado', detalle: { aviso: 'segmento_demasiado_grande', seq: ev.seq, bytes: h.bytes } });
+          return { status: 413, cuerpo: { error: 'Segmento demasiado grande' } };
+        }
         await c.from('grabacion_segmentos')
           .update({ subido_at: ahora.toISOString(), bytes: ev.bytes, offset_ms: ev.offset_ms, duracion_ms: ev.duracion_ms })
           .eq('id', seg.id).is('subido_at', null);

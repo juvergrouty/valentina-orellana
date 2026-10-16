@@ -26,6 +26,7 @@
 // Reglas de privacidad: nunca se envía `metadata` ni datos del paciente; nunca se registra la URL firmada
 // ni el texto; los mensajes de error se sanean (sin URLs) antes de guardarlos.
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { secreto } from '../secretos';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   MODELO_U35_PRO, RUTAS, WEBHOOK_HEADER_ASSEMBLYAI,
@@ -75,12 +76,11 @@ export interface ConfigAssemblyAI {
 }
 
 function envVar(nombre: 'ASSEMBLYAI_API_KEY' | 'ASSEMBLYAI_WEBHOOK_SECRET' | 'PUBLIC_SITE_URL'): string | undefined {
-  // import.meta.env con acceso literal (Vite lo reemplaza); process.env como respaldo (pruebas, scripts).
-  const ie = import.meta.env as Partial<ImportMetaEnv> | undefined;
-  const v = nombre === 'ASSEMBLYAI_API_KEY' ? ie?.ASSEMBLYAI_API_KEY
-    : nombre === 'ASSEMBLYAI_WEBHOOK_SECRET' ? ie?.ASSEMBLYAI_WEBHOOK_SECRET
-    : ie?.PUBLIC_SITE_URL;
-  return v || (typeof process !== 'undefined' ? process.env[nombre] : undefined) || undefined;
+  // Llaves SOLO en runtime (secretos.ts): con import.meta.env.X Vite las escribía en el bundle (A2/M1).
+  if (nombre !== 'PUBLIC_SITE_URL') return secreto(nombre);
+  let v: string | undefined;
+  try { v = import.meta.env.PUBLIC_SITE_URL; } catch { v = undefined; } // fuera de Vite no hay import.meta.env
+  return (typeof process !== 'undefined' ? process.env.PUBLIC_SITE_URL : undefined) || v || undefined;
 }
 
 export function urlWebhook(sitio: string): string {

@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { logInfo, logWarn } from '../../../../lib/logger';
-import { puedeOmitirPasskey } from '../../../../lib/passkey/nucleo';
+import { pasoDosBloqueado, puedeOmitirPasskey } from '../../../../lib/passkey/nucleo';
 import {
   borrarPaso, estadoPasskeys, leerPaso, opcionesAcceso, ponerSesion, rpDe, usarCodigoRespaldo, verificarAcceso,
 } from '../../../../lib/passkey/servidor';
@@ -17,9 +17,9 @@ export const prerender = false;
 //   form accion=omitir                   → "Entrar sin passkey esta vez" (solo si no es obligatoria)
 //
 // Límite de intentos: los fallos se registran en admin_logs ('auth/2fa-fallido')
-// ANTES de revisar; con más de 10 en 15 minutos se pide la contraseña de nuevo.
+// ANTES de revisar; con más de 10 en 15 minutos (o más de 5 desde la misma IP) se pide la
+// contraseña de nuevo.
 const VENTANA_MS = 15 * 60 * 1000;
-const MAX_FALLOS = 10;
 
 const json = (cuerpo: unknown, status = 200) =>
   new Response(JSON.stringify(cuerpo), { status, headers: { 'Content-Type': 'application/json' } });
@@ -48,9 +48,15 @@ export const POST: APIRoute = async ({ request, cookies, redirect, url, clientAd
     const { data: fila } = await supabase.from('admin_logs')
       .insert({ level: 'warn', context: 'auth/2fa-fallido', message: `Segundo paso del acceso rechazado: ${motivo}`, data: { ip } })
       .select('id').single();
-    const { count, error } = await supabase.from('admin_logs').select('id', { count: 'exact', head: true })
-      .eq('context', 'auth/2fa-fallido').gt('created_at', new Date(Date.now() - VENTANA_MS).toISOString());
-    return { id: fila?.id ?? null, bloqueado: !!error || (count ?? 0) > MAX_FALLOS };
+    const desde = new Date(Date.now() - VENTANA_MS).toISOString();
+    // Tope global y tope por IP (revisión 16 oct, B8; reglas en nucleo.ts pasoDosBloqueado).
+    const [global, porIp] = await Promise.all([
+      supabase.from('admin_logs').select('id', { count: 'exact', head: true })
+        .eq('context', 'auth/2fa-fallido').gt('created_at', desde),
+      supabase.from('admin_logs').select('id', { count: 'exact', head: true })
+        .eq('context', 'auth/2fa-fallido').gt('created_at', desde).eq('data->>ip', ip),
+    ]);
+    return { id: fila?.id ?? null, bloqueado: pasoDosBloqueado(global.count ?? 0, porIp.count ?? 0, !!(global.error || porIp.error)) };
   };
   const anularFallo = async (id: string | null) => {
     if (id) await supabase.from('admin_logs').update({ context: 'auth/2fa-ok', level: 'info', message: 'Segundo paso del acceso correcto' }).eq('id', id);
