@@ -271,7 +271,7 @@ const resumenPareja     = resumenGrupo('pareja');
               <!-- Header horarios -->
               <div class="mb-6 pb-5 border-b border-dust">
                 <p class="label text-stone mb-1">Horarios disponibles</p>
-                <p id="slots-date-label" class="font-heading font-semibold text-2xl text-ink"></p>
+                <p id="slots-date-label" tabindex="-1" class="font-heading font-semibold text-2xl text-ink focus:outline-none"></p>
               </div>
               <p id="hora-tomada-msg" role="status" class="hidden font-body text-sm text-red-700 bg-red-50 border border-red-200 px-3 py-2 mb-3"></p>
               <div id="slots-grid" class="grid grid-cols-3 gap-2.5"></div>
@@ -829,6 +829,8 @@ const resumenPareja     = resumenGrupo('pareja');
     state.loadedSlots     = {};
     state.horasMes        = {}; // horas por día del servicio anterior: no sirven para este
     // Otro servicio: el día elegido antes no vale (sus horas eran de otro servicio).
+    state.autoDiaServicio = null;
+    pedidoDia++;
     state.selectedDate    = null;
     state.selectedTime    = null;
     { const sc = $('slots-container'); if (sc) { sc.classList.add('hidden'); sc.style.display = ''; } }
@@ -1087,7 +1089,9 @@ const resumenPareja     = resumenGrupo('pareja');
     } catch { /* sin marcas: cada día se revisa al elegirlo */ }
   }
 
+  let pedidoDia = 0;
   async function selectDate(iso) {
+    const pedido = ++pedidoDia;
     state.selectedDate = iso;
     state.selectedTime = null;
 
@@ -1115,7 +1119,7 @@ const resumenPareja     = resumenGrupo('pareja');
     // Siempre en vivo (16 oct 2026): si otra persona toma una hora, desaparece
     // para las demás apenas vuelven a mirar el día (antes quedaba en caché).
     const slots = await cargarHoras(iso);
-    if (state.selectedDate !== iso) return; // eligió otro día mientras cargaba
+    if (pedido !== pedidoDia) return; // eligió otro día (u otro servicio) mientras cargaba
     renderSlots(slots ?? []);
   }
 
@@ -1125,6 +1129,7 @@ const resumenPareja     = resumenGrupo('pareja');
       const svc = state.serviceId ? `&service_id=${encodeURIComponent(state.serviceId)}` : '';
       const mod = state.modalityChoice ? `&modality=${encodeURIComponent(state.modalityChoice)}` : '';
       const res = await fetch(`/api/availability?date=${iso}${dur}${svc}${mod}`, { cache: 'no-store' });
+      if (!res.ok) return null; // error del servidor: no es "sin horas"
       const data = await res.json();
       return data.slots ?? [];
     } catch {
@@ -1136,12 +1141,15 @@ const resumenPareja     = resumenGrupo('pareja');
   // 45 s y al volver a la pestaña se vuelven a pedir las horas del día elegido
   // y se vuelven a marcar los días sin horas. Si la hora que había elegido la
   // tomó otra persona, se le avisa y se quita la selección.
-  async function refrescarDisponibilidad() {
+  let vueltasRefresco = 0;
+  async function refrescarDisponibilidad(todo = false) {
     if (state.step !== 2 || document.hidden || !state.serviceId) return;
     const iso = state.selectedDate;
     if (iso) {
       const slots = await cargarHoras(iso);
       if (slots === null || state.selectedDate !== iso || state.step !== 2) return;
+      // Sin cambios: no se toca nada (no se pierde el foco ni un toque a medias).
+      if (JSON.stringify(slots) === state.ultimoPintado) return refrescarMes(todo);
       const elegida = state.selectedTime;
       if (elegida && !slots.includes(elegida)) {
         state.selectedTime = null;
@@ -1149,20 +1157,28 @@ const resumenPareja     = resumenGrupo('pareja');
         const aviso = $('hora-tomada-msg');
         if (aviso) { aviso.textContent = `La hora de las ${elegida} acaba de ser tomada por otra persona. Elige otra, por favor.`; aviso.classList.remove('hidden'); }
       }
-      renderSlots(slots);
+      renderSlots(slots, true);
     }
+    refrescarMes(todo);
+  }
+  // Los días del mes se revisan cada 3 min (o al volver a la pestaña): cada
+  // revisión consulta Google Calendar por cada día.
+  function refrescarMes(todo) {
+    if (!todo && ++vueltasRefresco % 4 !== 0) return;
     const fechas = [...document.querySelectorAll('#calendar-grid .day-btn')].filter((b) => !b.disabled).map((b) => b.dataset.iso);
     marcarDiasSinHoras(fechas);
   }
-  setInterval(refrescarDisponibilidad, 45000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refrescarDisponibilidad(); });
+  setInterval(() => refrescarDisponibilidad(false), 45000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refrescarDisponibilidad(true); });
 
   // Días más cercanos con horas para el mismo servicio (experta en conversión,
   // 16 oct 2026): un día sin horas nunca es un callejón sin salida.
   function isoMas(iso, n) { const [y, m, d] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); }
+  let pedidoSugerencias = 0;
   async function sugerirDiasCercanos(desde) {
     const caja = $('sugerencias-dias');
     if (!caja || !desde) return;
+    const pedido = ++pedidoSugerencias;
     caja.innerHTML = '';
     const buscar = () => Object.entries(state.horasMes ?? {})
       .filter(([iso, sl]) => iso > desde && sl.length).sort(([a], [b]) => a.localeCompare(b)).slice(0, 3);
@@ -1176,10 +1192,10 @@ const resumenPareja     = resumenGrupo('pareja');
         const res = await fetch(`/api/availability/mes?fechas=${fechas.join(',')}&service_id=${encodeURIComponent(state.serviceId)}${dur}${mod}`, { cache: 'no-store' });
         if (res.ok) state.horasMes = { ...(state.horasMes ?? {}), ...((await res.json()).dias ?? {}) };
       } catch { /* sin sugerencias */ }
-      if (state.selectedDate !== desde) return;
+      if (pedido !== pedidoSugerencias || state.selectedDate !== desde) return;
       cercanos = buscar();
     }
-    if (!cercanos.length) return;
+    if (pedido !== pedidoSugerencias || !cercanos.length) return;
     const titulo = document.createElement('p');
     titulo.className = 'font-body text-sm text-ink mb-2';
     titulo.textContent = 'Este día no tengo horas libres. Lo más cercano:';
@@ -1191,7 +1207,6 @@ const resumenPareja     = resumenGrupo('pareja');
       btn.type = 'button';
       btn.className = 'border border-forest text-forest bg-white hover:bg-forest hover:text-white transition-colors px-3 py-2 text-sm font-body rounded-[4px] min-h-[44px]';
       btn.textContent = `${fechaLargaEs(iso).replace(/^(\S+)/, (d) => d.charAt(0).toUpperCase() + d.slice(1))} · ${sl[0]}`;
-      btn.setAttribute('aria-label', `Ver horas del ${fechaLargaEs(iso)}, la primera a las ${sl[0]}`);
       btn.dataset.cta = 'agenda_dia_sugerido';
       btn.addEventListener('click', () => irADia(iso));
       fila.appendChild(btn);
@@ -1206,9 +1221,11 @@ const resumenPareja     = resumenGrupo('pareja');
       renderCalendar();
     }
     selectDate(iso);
+    $('slots-date-label')?.focus({ preventScroll: true }); // el chip desaparece: el foco va al día
   }
 
-  function renderSlots(slots) {
+  function renderSlots(slots, silencioso = false) {
+    state.ultimoPintado = JSON.stringify(slots);
     const grid = $('slots-grid');
     grid.innerHTML = '';
 
@@ -1223,8 +1240,10 @@ const resumenPareja     = resumenGrupo('pareja');
       }
       show('no-slots-msg');
       hide('slots-help-msg');
-      anunciar(`Sin horarios disponibles para el ${dia}.`);
-      sugerirDiasCercanos(state.selectedDate);
+      if (!silencioso) {
+        anunciar(`Sin horarios disponibles para el ${dia}.`);
+        sugerirDiasCercanos(state.selectedDate);
+      }
       return;
     }
     hide('no-slots-msg');
@@ -1235,7 +1254,7 @@ const resumenPareja     = resumenGrupo('pareja');
       const servicio = state.sessionTitle ? ` ${state.sessionTitle}` : ' una sesión';
       waB.href = `https://wa.me/56972735696?text=${encodeURIComponent(`Hola Valentina, me interesa${servicio}. Los horarios de la agenda no me acomodan; me serviría (día y horario): ¿Vemos un sobrecupo?`)}`;
     }
-    anunciar(`${slots.length} ${slots.length === 1 ? 'horario disponible' : 'horarios disponibles'} para el ${dia}.`);
+    if (!silencioso) anunciar(`${slots.length} ${slots.length === 1 ? 'horario disponible' : 'horarios disponibles'} para el ${dia}.`);
 
     slots.forEach((time) => {
       const btn = document.createElement('button');
@@ -1266,6 +1285,7 @@ const resumenPareja     = resumenGrupo('pareja');
 
   function selectTime(time) {
     state.selectedTime = time;
+    hide('hora-tomada-msg');
 
     document.querySelectorAll('.slot-btn').forEach((b) => {
       if (b.dataset.time === time) b.className = b.className.replace('slot-btn', 'slot-btn slot-selected').replace('slot-selected slot-selected', 'slot-selected');
