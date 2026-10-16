@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../lib/supabase';
+import { secreto } from '../../lib/secretos';
 
 export const prerender = false;
 
@@ -7,7 +8,7 @@ export const prerender = false;
 export const GET: APIRoute = async () => {
   const { data } = await supabase
     .from('settings').select('value').eq('key', 'instagram_access_token').maybeSingle();
-  const token = data?.value?.trim() || import.meta.env.INSTAGRAM_ACCESS_TOKEN;
+  const token = data?.value?.trim() || secreto('INSTAGRAM_ACCESS_TOKEN');
 
   if (!token) {
     return json({ configured: false, items: [], username: null });

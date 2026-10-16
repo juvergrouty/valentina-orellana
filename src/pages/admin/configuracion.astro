@@ -2,6 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { secreto } from '../../lib/secretos';
 import { ADMIN_EMAIL_FALLBACK } from '../../lib/email';
 
 // Cargar settings actuales
@@ -27,13 +28,13 @@ const errorParam  = Astro.url.searchParams.get('error');
 const errorDetail = Astro.url.searchParams.get('detail') ?? '';
 
 // Instagram — token por variable de entorno o por panel
-const igTokenEnv = !!import.meta.env.INSTAGRAM_ACCESS_TOKEN;
+const igTokenEnv = !!secreto('INSTAGRAM_ACCESS_TOKEN');
 const igConnected = igTokenEnv || !!settings['instagram_access_token'];
 
 // API Gateway — detectar configuración por variables de entorno (Vercel)
-const agwTokenEnv = !!import.meta.env.APIGATEWAY_APIKEY;
+const agwTokenEnv = !!secreto('APIGATEWAY_APIKEY');
 const agwRutEnv   = !!import.meta.env.SII_RUT;
-const agwClaveEnv = !!import.meta.env.SII_CLAVE;
+const agwClaveEnv = !!secreto('SII_CLAVE');
 const agwConfigured = agwTokenEnv || !!settings['apigateway_apikey'];
 const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
   && (agwRutEnv || !!settings['sii_rut'])

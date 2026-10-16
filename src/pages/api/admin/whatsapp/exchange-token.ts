@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
+import { secreto } from '../../../../lib/secretos';
 
 export const prerender = false;
 
@@ -16,7 +17,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!code) return json({ error: 'Falta el código de autorización.' }, 400);
 
     const appId     = import.meta.env.PUBLIC_META_APP_ID;
-    const appSecret = import.meta.env.META_APP_SECRET;
+    const appSecret = secreto('META_APP_SECRET');
     if (!appId || !appSecret) return json({ error: 'META_APP_SECRET / PUBLIC_META_APP_ID no configurados en Vercel.' }, 500);
 
     // IMPORTANTE (corregido 11 sep 2026): comprobamos en vivo que, con el

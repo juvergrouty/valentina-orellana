@@ -20,7 +20,13 @@ export type NombreSecreto =
   | 'R2_ACCESS_KEY_ID' | 'R2_SECRET_ACCESS_KEY'
   | 'B2_KEY_ID' | 'B2_APPLICATION_KEY'
   | 'FLY_API_TOKEN' | 'BOT_TOKEN_SECRET'
-  | 'ADMIN_SECRET' | 'ADMIN_PASSWORD' | 'CRON_SECRET';
+  | 'ADMIN_SECRET' | 'ADMIN_PASSWORD' | 'CRON_SECRET'
+  // Resto del sitio (pagos, Google, Meta, SII, webhook de Resend).
+  | 'FLOW_API_KEY' | 'FLOW_SECRET_KEY' | 'FLOW_SANDBOX_API_KEY' | 'FLOW_SANDBOX_SECRET_KEY'
+  | 'GOOGLE_CLIENT_SECRET' | 'GOOGLE_PLACES_API_KEY'
+  | 'META_APP_SECRET' | 'INSTAGRAM_ACCESS_TOKEN'
+  | 'APIGATEWAY_APIKEY' | 'SII_CLAVE'
+  | 'RESEND_WEBHOOK_SECRET';
 
 function desdeDev(n: NombreSecreto): string | undefined {
   try {
@@ -41,6 +47,17 @@ function desdeDev(n: NombreSecreto): string | undefined {
         case 'ADMIN_SECRET': return import.meta.env.ADMIN_SECRET;
         case 'ADMIN_PASSWORD': return import.meta.env.ADMIN_PASSWORD;
         case 'CRON_SECRET': return import.meta.env.CRON_SECRET;
+        case 'FLOW_API_KEY': return import.meta.env.FLOW_API_KEY;
+        case 'FLOW_SECRET_KEY': return import.meta.env.FLOW_SECRET_KEY;
+        case 'FLOW_SANDBOX_API_KEY': return import.meta.env.FLOW_SANDBOX_API_KEY;
+        case 'FLOW_SANDBOX_SECRET_KEY': return import.meta.env.FLOW_SANDBOX_SECRET_KEY;
+        case 'GOOGLE_CLIENT_SECRET': return import.meta.env.GOOGLE_CLIENT_SECRET;
+        case 'GOOGLE_PLACES_API_KEY': return import.meta.env.GOOGLE_PLACES_API_KEY;
+        case 'META_APP_SECRET': return import.meta.env.META_APP_SECRET;
+        case 'INSTAGRAM_ACCESS_TOKEN': return import.meta.env.INSTAGRAM_ACCESS_TOKEN;
+        case 'APIGATEWAY_APIKEY': return import.meta.env.APIGATEWAY_APIKEY;
+        case 'SII_CLAVE': return import.meta.env.SII_CLAVE;
+        case 'RESEND_WEBHOOK_SECRET': return import.meta.env.RESEND_WEBHOOK_SECRET;
       }
     }
   } catch { /* fuera de Vite (tsx/node:test) import.meta.env no existe */ }

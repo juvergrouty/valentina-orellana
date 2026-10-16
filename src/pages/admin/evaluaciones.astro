@@ -2,6 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { secreto } from '../../lib/secretos';
 import { getCachedReviews } from '../../lib/googleReviews';
 
 // Config desde settings: Place ID + API key de Google
@@ -13,7 +14,7 @@ const cfg: Record<string, string> = {};
 
 // La API key también puede venir de variable de entorno
 const placeId = cfg.google_place_id ?? '';
-const apiKey  = cfg.google_places_api_key ?? import.meta.env.GOOGLE_PLACES_API_KEY ?? '';
+const apiKey  = cfg.google_places_api_key ?? secreto('GOOGLE_PLACES_API_KEY') ?? '';
 
 interface GReview {
   author_name: string;

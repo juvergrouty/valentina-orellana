@@ -227,7 +227,7 @@ export async function avisosSalud(): Promise<AvisoSalud[]> {
   }
 
   // Instagram: el token dura 60 días y lo renueva el cron mensual.
-  const igConfigurado = !!val('instagram_access_token') || !!import.meta.env.INSTAGRAM_ACCESS_TOKEN;
+  const igConfigurado = !!val('instagram_access_token') || !!leerSecreto('INSTAGRAM_ACCESS_TOKEN');
   if (igConfigurado) {
     const renovado = Date.parse(val('instagram_token_renovado'));
     const expira = Date.parse(val('instagram_token_expira'));

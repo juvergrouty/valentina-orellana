@@ -31,7 +31,7 @@ export const GET: APIRoute = async ({ request }) => {
   // deja de ser necesaria después de la primera renovación.
   const { data } = await supabase
     .from('settings').select('value').eq('key', 'instagram_access_token').maybeSingle();
-  const token = data?.value?.trim() || import.meta.env.INSTAGRAM_ACCESS_TOKEN;
+  const token = data?.value?.trim() || secreto('INSTAGRAM_ACCESS_TOKEN');
 
   if (!token) {
     await logWarn('instagram/refresh-token', 'No hay token de Instagram configurado (ni en el panel ni en Vercel)');
