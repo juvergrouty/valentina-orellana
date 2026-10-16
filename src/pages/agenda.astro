@@ -254,7 +254,7 @@ const resumenPareja     = resumenGrupo('pareja');
               </span>
               <span class="flex items-center gap-1.5 text-[11px] text-stone/50">
                 <span class="text-stone/40" style="text-decoration:underline dotted;text-underline-offset:3px;">00</span>
-                Sin horas (pide sobrecupo)
+                Sin horas libres
               </span>
             </div>
           </div>
@@ -273,17 +273,24 @@ const resumenPareja     = resumenGrupo('pareja');
                 <p class="label text-stone mb-1">Horarios disponibles</p>
                 <p id="slots-date-label" class="font-heading font-semibold text-2xl text-ink"></p>
               </div>
+              <p id="hora-tomada-msg" role="status" class="hidden font-body text-sm text-red-700 bg-red-50 border border-red-200 px-3 py-2 mb-3"></p>
               <div id="slots-grid" class="grid grid-cols-3 gap-2.5"></div>
               <div id="no-slots-msg" class="hidden font-body text-sm text-stone/60 text-center py-8 leading-relaxed">
-                <p>Sin horarios disponibles<br />para este día.</p>
-                <a id="sobrecupo-wa"
+                <div id="sugerencias-dias"></div>
+                <p>Si ninguno te sirve, escríbeme: vemos un sobrecupo para este día.</p>
+                <a id="sobrecupo-wa" data-cta="agenda_sobrecupo_dia_sin_horas"
                   href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20estoy%20buscando%20un%20sobrecupo%20o%20un%20horario%20disponible%20distinto%20a%20los%20que%20aparecen%20en%20la%20agenda.%20%C2%BFMe%20puedes%20ayudar%3F"
                   target="_blank" rel="noopener"
                   class="inline-block mt-3 text-forest underline underline-offset-2 hover:text-ink transition-colors"
                 >Escríbeme para un sobrecupo</a>
               </div>
-              <!-- "¿Ninguna hora te acomoda?" reemplazado por el botón de WhatsApp bajo el calendario (14 oct 2026). -->
-              <p id="slots-help-msg" class="hidden"></p>
+              <!-- Sobrecupo siempre a la vista, discreto (experta en conversión, 16 oct 2026). -->
+              <p id="slots-help-msg" class="hidden font-body text-sm text-stone text-center mt-5">
+                ¿Ningún horario te acomoda?
+                <a id="sobrecupo-siempre-wa" data-cta="agenda_sobrecupo_siempre" target="_blank" rel="noopener"
+                  href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20los%20horarios%20de%20la%20agenda%20no%20me%20acomodan.%20%C2%BFVemos%20un%20sobrecupo%3F"
+                  class="text-forest font-medium underline underline-offset-2 hover:text-ink">Escríbeme y vemos un sobrecupo que te sirva</a>.
+              </p>
             </div>
           </div>
         </div>
@@ -820,6 +827,12 @@ const resumenPareja     = resumenGrupo('pareja');
     const sufijo = modality === 'online' ? 'Online' : 'Presencial';
     state.sessionTitle    = new RegExp(`\\b${sufijo}\\b`, 'i').test(name) ? name : `${name} ${sufijo}`;
     state.loadedSlots     = {};
+    state.horasMes        = {}; // horas por día del servicio anterior: no sirven para este
+    // Otro servicio: el día elegido antes no vale (sus horas eran de otro servicio).
+    state.selectedDate    = null;
+    state.selectedTime    = null;
+    { const sc = $('slots-container'); if (sc) { sc.classList.add('hidden'); sc.style.display = ''; } }
+    $('slots-placeholder')?.classList.remove('hidden');
 
     // Poblar el resumen del servicio (nombre + modalidad + precio + duración)
     const sName = $('summary-name');
@@ -1054,15 +1067,22 @@ const resumenPareja     = resumenGrupo('pareja');
       if (!res.ok || pedido !== marcaPedida) return;
       const { dias } = await res.json();
       if (pedido !== marcaPedida) return; // la paciente ya cambió de mes o de servicio
-      // Solo marca: al elegir el día las horas se consultan en vivo (esta
-      // respuesta puede venir de la caché del CDN y tener un par de minutos).
+      // Solo marca y sugiere: al elegir el día las horas se consultan en vivo.
+      state.horasMes = { ...(state.horasMes ?? {}), ...(dias ?? {}) };
       for (const [iso, slots] of Object.entries(dias ?? {})) {
-        if (slots.length) continue;
+        if (slots.length) { document.querySelector(`#calendar-grid .day-btn[data-iso="${iso}"]`)?.classList.remove('day-full'); continue; }
         const b = document.querySelector(`#calendar-grid .day-btn[data-iso="${iso}"]`);
         if (!b || b.disabled) continue;
         b.classList.add('day-full');
         b.title = 'Sin horas libres · puedes pedir un sobrecupo';
         b.setAttribute('aria-label', `${fechaLargaEs(iso)}, sin horas libres (puedes pedir sobrecupo)`);
+      }
+      // Primer día con horas ya abierto (experta en conversión, 16 oct 2026): en
+      // vez de "Selecciona un día", la paciente ve de inmediato horas reales. La
+      // hora no se elige sola: esa decisión es de ella. Solo una vez por servicio.
+      if (state.step === 2 && !state.selectedDate && state.autoDiaServicio !== state.serviceId) {
+        const primero = Object.keys(dias ?? {}).sort().find((iso) => (dias[iso] ?? []).length);
+        if (primero) { state.autoDiaServicio = state.serviceId; selectDate(primero); }
       }
     } catch { /* sin marcas: cada día se revisa al elegirlo */ }
   }
@@ -1090,25 +1110,102 @@ const resumenPareja     = resumenGrupo('pareja');
     $('slots-grid').innerHTML = '<p class="col-span-3 text-xs text-stone py-2">Cargando horarios...</p>';
     hide('no-slots-msg');
     hide('slots-help-msg');
+    hide('hora-tomada-msg');
 
-    // Fetch slots — el horario es por servicio, así que la caché incluye el service_id
-    const cacheKey = `${iso}|${state.serviceId ?? ''}|${state.modalityChoice ?? ''}`;
-    let slots = state.loadedSlots[cacheKey];
-    if (!slots) {
+    // Siempre en vivo (16 oct 2026): si otra persona toma una hora, desaparece
+    // para las demás apenas vuelven a mirar el día (antes quedaba en caché).
+    const slots = await cargarHoras(iso);
+    if (state.selectedDate !== iso) return; // eligió otro día mientras cargaba
+    renderSlots(slots ?? []);
+  }
+
+  async function cargarHoras(iso) {
+    try {
+      const dur = state.sessionDuration ? `&duration=${state.sessionDuration}` : '';
+      const svc = state.serviceId ? `&service_id=${encodeURIComponent(state.serviceId)}` : '';
+      const mod = state.modalityChoice ? `&modality=${encodeURIComponent(state.modalityChoice)}` : '';
+      const res = await fetch(`/api/availability?date=${iso}${dur}${svc}${mod}`, { cache: 'no-store' });
+      const data = await res.json();
+      return data.slots ?? [];
+    } catch {
+      return null; // sin respuesta: no se cambia lo que se ve
+    }
+  }
+
+  // Refresco automático mientras la paciente está eligiendo (16 oct 2026): cada
+  // 45 s y al volver a la pestaña se vuelven a pedir las horas del día elegido
+  // y se vuelven a marcar los días sin horas. Si la hora que había elegido la
+  // tomó otra persona, se le avisa y se quita la selección.
+  async function refrescarDisponibilidad() {
+    if (state.step !== 2 || document.hidden || !state.serviceId) return;
+    const iso = state.selectedDate;
+    if (iso) {
+      const slots = await cargarHoras(iso);
+      if (slots === null || state.selectedDate !== iso || state.step !== 2) return;
+      const elegida = state.selectedTime;
+      if (elegida && !slots.includes(elegida)) {
+        state.selectedTime = null;
+        anunciar(`La hora de las ${elegida} acaba de ser tomada. Elige otra.`);
+        const aviso = $('hora-tomada-msg');
+        if (aviso) { aviso.textContent = `La hora de las ${elegida} acaba de ser tomada por otra persona. Elige otra, por favor.`; aviso.classList.remove('hidden'); }
+      }
+      renderSlots(slots);
+    }
+    const fechas = [...document.querySelectorAll('#calendar-grid .day-btn')].filter((b) => !b.disabled).map((b) => b.dataset.iso);
+    marcarDiasSinHoras(fechas);
+  }
+  setInterval(refrescarDisponibilidad, 45000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refrescarDisponibilidad(); });
+
+  // Días más cercanos con horas para el mismo servicio (experta en conversión,
+  // 16 oct 2026): un día sin horas nunca es un callejón sin salida.
+  function isoMas(iso, n) { const [y, m, d] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); }
+  async function sugerirDiasCercanos(desde) {
+    const caja = $('sugerencias-dias');
+    if (!caja || !desde) return;
+    caja.innerHTML = '';
+    const buscar = () => Object.entries(state.horasMes ?? {})
+      .filter(([iso, sl]) => iso > desde && sl.length).sort(([a], [b]) => a.localeCompare(b)).slice(0, 3);
+    let cercanos = buscar();
+    if (cercanos.length < 3) {
+      // Puede que lo cercano caiga en el mes siguiente: se piden los próximos 35 días.
+      const fechas = Array.from({ length: 35 }, (_, i) => isoMas(desde, i + 1));
       try {
         const dur = state.sessionDuration ? `&duration=${state.sessionDuration}` : '';
-        const svc = state.serviceId ? `&service_id=${encodeURIComponent(state.serviceId)}` : '';
         const mod = state.modalityChoice ? `&modality=${encodeURIComponent(state.modalityChoice)}` : '';
-        const res = await fetch(`/api/availability?date=${iso}${dur}${svc}${mod}`);
-        const data = await res.json();
-        slots = data.slots ?? [];
-        state.loadedSlots[cacheKey] = slots;
-      } catch {
-        slots = [];
-      }
+        const res = await fetch(`/api/availability/mes?fechas=${fechas.join(',')}&service_id=${encodeURIComponent(state.serviceId)}${dur}${mod}`, { cache: 'no-store' });
+        if (res.ok) state.horasMes = { ...(state.horasMes ?? {}), ...((await res.json()).dias ?? {}) };
+      } catch { /* sin sugerencias */ }
+      if (state.selectedDate !== desde) return;
+      cercanos = buscar();
     }
-
-    renderSlots(slots);
+    if (!cercanos.length) return;
+    const titulo = document.createElement('p');
+    titulo.className = 'font-body text-sm text-ink mb-2';
+    titulo.textContent = 'Este día no tengo horas libres. Lo más cercano:';
+    caja.appendChild(titulo);
+    const fila = document.createElement('div');
+    fila.className = 'flex flex-wrap justify-center gap-2 mb-4';
+    for (const [iso, sl] of cercanos) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'border border-forest text-forest bg-white hover:bg-forest hover:text-white transition-colors px-3 py-2 text-sm font-body rounded-[4px] min-h-[44px]';
+      btn.textContent = `${fechaLargaEs(iso).replace(/^(\S+)/, (d) => d.charAt(0).toUpperCase() + d.slice(1))} · ${sl[0]}`;
+      btn.setAttribute('aria-label', `Ver horas del ${fechaLargaEs(iso)}, la primera a las ${sl[0]}`);
+      btn.dataset.cta = 'agenda_dia_sugerido';
+      btn.addEventListener('click', () => irADia(iso));
+      fila.appendChild(btn);
+    }
+    caja.appendChild(fila);
+  }
+  // Abre un día (cambia de mes si hace falta).
+  function irADia(iso) {
+    const [y, m] = iso.split('-').map(Number);
+    if (state.calendarYear !== y || state.calendarMonth !== m - 1) {
+      state.calendarYear = y; state.calendarMonth = m - 1;
+      renderCalendar();
+    }
+    selectDate(iso);
   }
 
   function renderSlots(slots) {
@@ -1127,10 +1224,17 @@ const resumenPareja     = resumenGrupo('pareja');
       show('no-slots-msg');
       hide('slots-help-msg');
       anunciar(`Sin horarios disponibles para el ${dia}.`);
+      sugerirDiasCercanos(state.selectedDate);
       return;
     }
     hide('no-slots-msg');
     show('slots-help-msg');
+    // Sobrecupo siempre a la vista, discreto, bajo las horas (16 oct 2026).
+    const waB = $('sobrecupo-siempre-wa');
+    if (waB) {
+      const servicio = state.sessionTitle ? ` ${state.sessionTitle}` : ' una sesión';
+      waB.href = `https://wa.me/56972735696?text=${encodeURIComponent(`Hola Valentina, me interesa${servicio}. Los horarios de la agenda no me acomodan; me serviría (día y horario): ¿Vemos un sobrecupo?`)}`;
+    }
     anunciar(`${slots.length} ${slots.length === 1 ? 'horario disponible' : 'horarios disponibles'} para el ${dia}.`);
 
     slots.forEach((time) => {

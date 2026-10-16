@@ -9,7 +9,7 @@ export const prerender = false;
 // /agenda marca como "Sin horas" los días que no tienen ninguna, para que la
 // paciente no tenga que probar día por día (igual puede tocarlos y pedir
 // sobrecupo). Mismo cálculo que /api/availability (src/lib/disponibilidad.ts);
-// al elegir el día se vuelve a consultar, así que esto solo orienta.
+// al elegir el día se vuelve a consultar.
 const MAX_FECHAS = 45;
 const EN_PARALELO = 8;
 
@@ -38,8 +38,7 @@ export const GET: APIRoute = async ({ url }) => {
 
   return new Response(JSON.stringify({ dias }), {
     status: 200,
-    // Caché corta en el CDN: muchas pacientes mirando el mismo mes no
-    // multiplican las consultas a Google Calendar.
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
+    // Sin caché (Valentina, 16 oct 2026): una hora tomada debe dejar de verse al instante.
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
 };
