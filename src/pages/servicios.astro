@@ -4,6 +4,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
 import { supabase } from '../lib/supabase';
 import { imagenUrl, imagenSrcset } from '../lib/imagenOptimizada';
+import { DIRECCION } from '../data/consulta';
 
 // Leer servicios visibles desde la base de datos
 const { data: dbServices, error: errServicios } = await supabase
@@ -82,6 +83,13 @@ const modalityLabel = (m: string) =>
 
   <section class="py-section bg-sand">
     <div class="container-site">
+      <!-- Introducción (SEO, 16 oct 2026) -->
+      <p class="body-lead max-w-2xl mb-10 md:mb-14">
+        Acompaño a adultos y parejas desde un enfoque sistémico: miramos lo que te pasa en relación con tu historia,
+        tus vínculos y el momento que estás viviendo. Puedes elegir sesiones online, desde cualquier lugar de Chile,
+        o presenciales en mi consulta en Las Condes. Todas duran 50 minutos. Si no sabes cuál es la opción para ti,
+        más abajo te cuento cómo es cada una.
+      </p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
         {services.map((service, i) => { const foto = fotoConsulta(service); return (
           <div class="relative overflow-hidden rounded-[10px] group min-h-[420px] flex flex-col justify-end">
@@ -152,6 +160,54 @@ const modalityLabel = (m: string) =>
           </div>
         ); })}
       </div>
+    </div>
+  </section>
+
+  <!-- Cómo es cada terapia (SEO, 16 oct 2026): texto útil antes del cierre, mismas clases del sitio. -->
+  <section class="bg-warm border-t border-dust py-16 md:py-24">
+    <div class="container-site max-w-3xl space-y-12">
+
+      <div>
+        <p class="label mb-3">Terapia individual</p>
+        <div class="divider mb-6"></div>
+        <h2 class="card-title text-2xl md:text-3xl mb-5">¿Cómo es la terapia individual?</h2>
+        <div class="space-y-4 body-text">
+          <p>La terapia individual es un espacio para ti. En la primera sesión me cuentas qué te trae y qué te gustaría que cambiara, y definimos juntos cómo seguir, sin presión ni compromisos.</p>
+          <p>Trabajo con temas como ansiedad, estrés, duelo, autoestima, autoexigencia, límites y vínculos, entre otros. No se trata solo de hablar de lo que duele: buscamos entender los patrones que se repiten y construir herramientas concretas para tu día a día. Al comienzo lo habitual es una sesión a la semana; a medida que avanza el proceso, podemos espaciarlas.</p>
+          <p>También acompaño procesos de trauma, a Personas Altamente Sensibles (PAS) y a madres y padres que quieren fortalecer el vínculo con sus hijos.</p>
+        </div>
+      </div>
+
+      <div>
+        <p class="label mb-3">Terapia de pareja</p>
+        <div class="divider mb-6"></div>
+        <h2 class="card-title text-2xl md:text-3xl mb-5">¿Cómo es la terapia de pareja?</h2>
+        <div class="space-y-4 body-text">
+          <p>Las sesiones de pareja son con ambos. En la primera escucho a cada uno, sin buscar culpables, y desde ahí miramos qué dinámica se repite entre ustedes y de dónde viene.</p>
+          <p>El objetivo es que puedan comunicarse mejor, cuidarse y decidir con más claridad, ya sea para reencontrarse o para separarse de una manera más cuidada. Si tu pareja no quiere ir, puedes empezar tú en terapia individual: muchas veces el cambio de uno mueve la relación completa. Si en la relación hay violencia, la terapia de pareja no es el primer paso: escríbeme y te oriento. Te cuento más en <a href="/terapia-de-pareja-las-condes" class="text-forest underline underline-offset-4">terapia de pareja en Las Condes y online</a>.</p>
+        </div>
+      </div>
+
+      <div>
+        <p class="label mb-3">Modalidad</p>
+        <div class="divider mb-6"></div>
+        <h2 class="card-title text-2xl md:text-3xl mb-5">Online o presencial: ¿cuál elegir?</h2>
+        <div class="space-y-4 body-text">
+          <p>Las dos modalidades duran lo mismo y tienen el mismo cuidado. La sesión online es por Google Meet: solo necesitas un lugar privado y tranquilo, audífonos y una buena conexión, y puedes conectarte desde cualquier parte de Chile. La presencial es en {DIRECCION.calle}, {DIRECCION.detalle}, {DIRECCION.comuna}.</p>
+          <p>Si te cuesta encontrar tiempo para trasladarte, lo online suele ser más fácil de sostener. Si prefieres salir de tu casa y tener un lugar distinto para la terapia, lo presencial puede acomodarte mejor. Si tienes dudas, lo conversamos.</p>
+        </div>
+      </div>
+
+      <div>
+        <p class="label mb-3">Valores</p>
+        <div class="divider mb-6"></div>
+        <h2 class="card-title text-2xl md:text-3xl mb-5">Valores y reembolso</h2>
+        <div class="space-y-4 body-text">
+          <p>Cada servicio muestra arriba su duración y su valor. La atención es particular: no tengo convenio con Fonasa ni Isapre, pero por cada sesión te entrego boleta de honorarios para que pidas reembolso en tu Isapre o seguro complementario, según tu plan. El pago se hace en línea al reservar, y puedes reagendar sin costo avisando con al menos 24 horas de anticipación. Todo el detalle está en <a href="/precios" class="text-forest underline underline-offset-4">precios y preguntas frecuentes</a>.</p>
+          <p>Si quieres conocer mi formación y mi forma de trabajar, puedes leer <a href="/sobre-mi" class="text-forest underline underline-offset-4">sobre mí</a>. Y cuando quieras dar el paso, <a href="/agenda" class="text-forest underline underline-offset-4">elige día y hora en la agenda</a>.</p>
+        </div>
+      </div>
+
     </div>
   </section>
 
