@@ -108,6 +108,8 @@ if (import.meta.env.DEV && demoIA) {
   demoArchivados = { [dr(5, null, true).id]: r5, [dr(6, null, true).id]: r6 };
   iaTranscritas = new Set(iaGrabaciones.map((g) => g.id));
   notes = notasTodas as typeof notes;
+  // Solo demo: ?falta=0020 muestra el aviso de la migración pendiente (86-revisión M2).
+  if (Astro.url.searchParams.get('falta') === '0020') iaAvisoBase = AVISO_FALTA_0020;
 } else if (patient && !(iaAcceso = await accesoClinicoCookies(Astro.cookies)).ok) {
   // Sin sesión con passkey no se lee ningún contenido (revisión de seguridad 16 oct, A1); solo se
   // cuenta si hay grabaciones para avisar. Con passkey obligatoria al entrar esto no debería pasar.
@@ -1261,7 +1263,8 @@ const faltanDatos = patient ? [
   @media (max-width: 600px) {
     .ia-acciones .btn, .ia-chip { min-height: 40px; }
     .patient-tabs { overflow-x: auto; }
-    .patient-tabs a { white-space: nowrap; padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+    /* A 375 px las 3 pestañas caben enteras (antes "Notas clínicas (" quedaba cortada). */
+    .patient-tabs a { white-space: nowrap; padding-left: 0.5rem !important; padding-right: 0.5rem !important; font-size: 0.7rem !important; letter-spacing: 0.02em !important; }
   }
 
   /* ── "Para revisar hoy" (arriba de todo) ── */
