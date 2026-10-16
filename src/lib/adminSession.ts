@@ -11,18 +11,30 @@ function firmar(payload: string): string {
   return createHmac('sha256', `panel:${import.meta.env.ADMIN_SECRET ?? ''}`).update(payload).digest('hex');
 }
 
-export function crearTokenAdmin(): string {
-  const payload = `v1.${Date.now() + DURACION_SESION_MS}`;
+// Passkey (16 oct 2026): "v1" = sesión con contraseña sola; "v2" = sesión
+// confirmada además con passkey o código de respaldo (ver src/lib/passkey/).
+// Ambas se firman igual; el prefijo va dentro de lo firmado, así que un v1 no
+// se puede convertir en v2. La firma sigue siendo la 3.ª parte (revocación igual).
+export type NivelSesionAdmin = 'contrasena' | 'passkey';
+
+export function crearTokenAdmin(nivel: NivelSesionAdmin = 'contrasena'): string {
+  const payload = `${nivel === 'passkey' ? 'v2' : 'v1'}.${Date.now() + DURACION_SESION_MS}`;
   return `${payload}.${firmar(payload)}`;
+}
+
+/** Nivel de un token válido ('contrasena' | 'passkey'), o null si no es válido. */
+export function nivelTokenAdmin(token: string | undefined | null): NivelSesionAdmin | null {
+  if (!tokenAdminValido(token)) return null;
+  return token!.startsWith('v2.') ? 'passkey' : 'contrasena';
 }
 
 export function tokenAdminValido(token: string | undefined | null): boolean {
   if (!token || !import.meta.env.ADMIN_SECRET) return false;
   const partes = token.split('.');
-  if (partes.length !== 3 || partes[0] !== 'v1') return false;
+  if (partes.length !== 3 || (partes[0] !== 'v1' && partes[0] !== 'v2')) return false;
   const vence = Number(partes[1]);
   if (!Number.isFinite(vence) || vence < Date.now()) return false;
-  const esperada = Buffer.from(firmar(`v1.${partes[1]}`));
+  const esperada = Buffer.from(firmar(`${partes[0]}.${partes[1]}`));
   const recibida = Buffer.from(partes[2]);
   return esperada.length === recibida.length && timingSafeEqual(esperada, recibida);
 }

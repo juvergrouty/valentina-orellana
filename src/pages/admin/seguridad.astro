@@ -1,0 +1,236 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { COOKIE_ADMIN, nivelTokenAdmin } from '../../lib/adminSession';
+import { estadoPasskeys, listarPasskeys, rpDe, type PasskeyGuardada } from '../../lib/passkey/servidor';
+import { puedeGestionar, type EstadoPasskeys } from '../../lib/passkey/nucleo';
+
+// Seguridad del panel (16 oct 2026): passkeys (Face ID / huella) y códigos de
+// respaldo. Decisión 3 de docs/transcriptor/01-decisiones-16oct.md.
+// Las acciones van por fetch a /api/admin/passkey/gestion.
+
+const nivel = nivelTokenAdmin(Astro.cookies.get(COOKIE_ADMIN)?.value) ?? 'contrasena';
+let estado: EstadoPasskeys | null = null;
+let passkeys: PasskeyGuardada[] = [];
+let errorCarga = '';
+try {
+  estado = await estadoPasskeys();
+  passkeys = await listarPasskeys();
+} catch (e) { errorCarga = (e as Error).message; }
+const gestionar = !!estado && puedeGestionar(nivel, estado);
+const rpOk = !!rpDe(Astro.url);
+const codigoUsado = Astro.url.searchParams.get('codigo_usado') === '1';
+
+const fecha = (iso: string | null) => iso
+  ? new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  : 'Nunca';
+---
+
+<AdminLayout title="Seguridad" current="/admin/seguridad">
+  <div class="p-6 max-w-3xl" id="seguridad" data-gestionar={gestionar ? '1' : '0'}>
+    <h1 class="text-xl font-semibold mb-1">Seguridad del panel</h1>
+    <p class="text-sm text-gray-600 mb-6">Con una passkey, para entrar al panel no basta la contraseña: también se pide Face ID, Touch ID o la huella de tu iPhone o Mac. La passkey queda guardada en tu dispositivo (y en tu Llavero de iCloud); este sitio solo guarda una llave pública que no sirve para entrar.</p>
+
+    {errorCarga && <p class="mb-4 p-3 rounded bg-red-50 text-red-800 text-sm">No pude leer la configuración de passkeys: {errorCarga}</p>}
+    {estado?.migracionPendiente && <p class="mb-4 p-3 rounded bg-yellow-50 text-yellow-900 text-sm">Falta aplicar la migración <b>0015_passkeys.sql</b> en Supabase. Mientras tanto se entra solo con la contraseña.</p>}
+    {codigoUsado && (
+      <p class="mb-4 p-3 rounded bg-yellow-50 text-yellow-900 text-sm" role="status">
+        Entraste con un código de respaldo: ese código ya no sirve. {estado && <>Te quedan <b>{estado.codigosRestantes}</b>.</>} Si perdiste tu dispositivo, elimina su passkey abajo y registra la del dispositivo nuevo.
+      </p>
+    )}
+    {!rpOk && <p class="mb-4 p-3 rounded bg-yellow-50 text-yellow-900 text-sm">Estás en una dirección que no es valentinaorellana.cl: aquí no se pueden registrar ni usar passkeys.</p>}
+
+    <p id="msg" class="hidden mb-4 p-3 rounded text-sm" role="status" aria-live="polite"></p>
+
+    <!-- Códigos recién generados: se muestran UNA vez -->
+    <div id="codigos" class="hidden mb-6 p-4 border-2 border-indigo-600 rounded bg-white text-sm">
+      <h2 class="font-semibold mb-1">Tus códigos de respaldo</h2>
+      <p class="text-gray-600 mb-3">Sirven para entrar si no tienes a mano tu iPhone ni tu Mac. Cada uno funciona <b>una sola vez</b>. Guárdalos ahora en un lugar seguro fuera del computador (por ejemplo, impresos o en tu gestor de contraseñas): <b>no se vuelven a mostrar</b>.</p>
+      <ol id="codigos-lista" class="grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-base mb-3 list-decimal list-inside"></ol>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" id="btn-copiar" class="px-3 py-1.5 rounded border text-sm">Copiar</button>
+        <button type="button" id="btn-imprimir" class="px-3 py-1.5 rounded border text-sm">Imprimir</button>
+        <button type="button" id="btn-guardados" class="px-3 py-1.5 rounded bg-indigo-600 text-white text-sm">Ya los guardé</button>
+      </div>
+    </div>
+
+    {estado && !estado.migracionPendiente && (
+      <>
+        {nivel === 'contrasena' && estado.cantidad > 0 && (
+          <div class="mb-6 p-4 border rounded bg-yellow-50 text-sm flex flex-wrap items-center justify-between gap-3">
+            <p class="text-yellow-900">Entraste solo con la contraseña. Para agregar o quitar passkeys, confirma primero con tu passkey.</p>
+            <button type="button" id="btn-confirmar" class="px-4 py-2 rounded bg-indigo-600 text-white text-sm" disabled={!rpOk}>Confirmar con passkey</button>
+          </div>
+        )}
+
+        <section class="mb-8 p-4 border rounded bg-white text-sm">
+          <h2 class="font-semibold mb-3">Passkeys registradas</h2>
+          {passkeys.length === 0 ? (
+            <p class="text-gray-600 mb-4">Aún no tienes passkeys. Registra una en tu iPhone y otra en tu Mac: así, si pierdes uno, entras con el otro.</p>
+          ) : (
+            <ul class="divide-y border rounded mb-4">
+              {passkeys.map(p => (
+                <li class="p-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p class="font-medium">{p.nombre}</p>
+                    <p class="text-xs text-gray-500">Registrada: {fecha(p.created_at)} · Último uso: {fecha(p.last_used_at)}{p.backed_up ? ' · Sincronizada con iCloud' : ''}</p>
+                  </div>
+                  <button type="button" class="btn-eliminar text-xs text-red-700 underline disabled:opacity-40 disabled:no-underline" data-id={p.id} data-nombre={p.nombre} disabled={!gestionar}>Eliminar</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div class="flex flex-wrap items-end gap-3">
+            <label class="text-sm">Nombre de este dispositivo<br />
+              <input id="nombre-passkey" maxlength="60" placeholder="iPhone de Vale" class="border rounded px-3 py-2 w-56" autocomplete="off" />
+            </label>
+            <button type="button" id="btn-registrar" class="px-4 py-2 rounded bg-indigo-600 text-white text-sm disabled:opacity-50" disabled={!gestionar || !rpOk}>Agregar passkey de este dispositivo</button>
+          </div>
+          <p class="text-xs text-gray-500 mt-2">Hazlo desde el dispositivo que quieres registrar: abre el panel en tu iPhone (Safari) para registrar el iPhone, y en tu Mac (Safari o Chrome) para registrar el Mac.</p>
+        </section>
+
+        <section class="mb-8 p-4 border rounded bg-white text-sm">
+          <h2 class="font-semibold mb-1">Passkey obligatoria</h2>
+          <p class="text-gray-600 mb-3">
+            {estado.obligatoria
+              ? 'Activada: para entrar se necesita la contraseña y además tu passkey (o un código de respaldo).'
+              : 'Desactivada: si tienes passkey se te pide, pero puedes "Entrar sin passkey esta vez". Actívala cuando tengas registrados tu iPhone y tu Mac y hayas guardado tus códigos de respaldo.'}
+          </p>
+          <label class="inline-flex items-center gap-2">
+            <input type="checkbox" id="chk-obligatoria" checked={estado.obligatoria} disabled={!gestionar || estado.cantidad === 0} />
+            <span>Exigir passkey para entrar al panel</span>
+          </label>
+          {estado.cantidad === 0 && <p class="text-xs text-gray-500 mt-2">Primero registra al menos una passkey.</p>}
+        </section>
+
+        <section class="mb-8 p-4 border rounded bg-white text-sm">
+          <h2 class="font-semibold mb-1">Códigos de respaldo</h2>
+          <p class="text-gray-600 mb-3">
+            {estado.cantidad === 0
+              ? 'Se generan al registrar tu primera passkey.'
+              : <>Te quedan <b>{estado.codigosRestantes}</b> de 10. Si generas códigos nuevos, los anteriores dejan de servir.</>}
+          </p>
+          {estado.cantidad > 0 && <button type="button" id="btn-regenerar" class="px-4 py-2 rounded border text-sm disabled:opacity-50" disabled={!gestionar}>Generar códigos nuevos</button>}
+        </section>
+
+        <section class="p-4 border rounded bg-gray-50 text-xs text-gray-600">
+          <h2 class="font-semibold text-sm text-gray-800 mb-1">Si pierdes tus dispositivos y tus códigos</h2>
+          <p>En Supabase → SQL Editor ejecuta <code class="font-mono">update settings set value = 'false' where key = 'passkey_obligatoria';</code> Así vuelve a bastar la contraseña ("Entrar sin passkey esta vez"); después registra tus dispositivos nuevos y elimina los perdidos.</p>
+        </section>
+      </>
+    )}
+  </div>
+</AdminLayout>
+
+<style is:global>
+  /* "Imprimir" saca solo los códigos de respaldo, no todo el panel. */
+  @media print {
+    body * { visibility: hidden !important; }
+    #codigos, #codigos * { visibility: visible !important; }
+    #codigos { position: absolute; left: 0; top: 0; width: 100%; border: none; }
+    #codigos .flex { display: none; }
+  }
+</style>
+
+<script>
+  import { startRegistration, startAuthentication, browserSupportsWebAuthn, WebAuthnError } from '@simplewebauthn/browser';
+
+  const $ = (id: string) => document.getElementById(id);
+  const msg = $('msg')!;
+  const decir = (texto: string, tipo: 'ok' | 'mal' | 'info' = 'info') => {
+    msg.textContent = texto;
+    msg.className = 'mb-4 p-3 rounded text-sm ' + (tipo === 'ok' ? 'bg-green-50 text-green-800' : tipo === 'mal' ? 'bg-red-50 text-red-800' : 'bg-gray-50 text-gray-700');
+    msg.scrollIntoView({ block: 'nearest' });
+  };
+  const api = async (cuerpo: Record<string, unknown>) => {
+    const r = await fetch('/api/admin/passkey/gestion', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo), credentials: 'same-origin',
+    });
+    const datos = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(datos.error || 'No se pudo completar.');
+    return datos;
+  };
+  const textoError = (e: unknown) => {
+    if (e instanceof WebAuthnError && e.code === 'ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED') return 'Este dispositivo ya tiene una passkey registrada en el panel.';
+    if ((e as Error)?.name === 'NotAllowedError' || (e instanceof WebAuthnError && e.code === 'ERROR_CEREMONY_ABORTED')) return 'Se canceló o no se reconoció. Intenta de nuevo.';
+    return (e as Error)?.message || 'No se pudo completar.';
+  };
+
+  // Códigos de respaldo: se muestran una vez; al recargar desaparecen.
+  let codigosVisibles = false;
+  const mostrarCodigos = (codigos: string[]) => {
+    const lista = $('codigos-lista')!;
+    lista.replaceChildren(...codigos.map(c => { const li = document.createElement('li'); li.textContent = c; return li; }));
+    $('codigos')!.classList.remove('hidden');
+    codigosVisibles = true;
+    $('codigos')!.scrollIntoView({ block: 'start' });
+  };
+  window.addEventListener('beforeunload', (ev) => { if (codigosVisibles) { ev.preventDefault(); ev.returnValue = ''; } });
+  $('btn-copiar')?.addEventListener('click', async () => {
+    const txt = [...$('codigos-lista')!.querySelectorAll('li')].map(li => li.textContent).join('\n');
+    try { await navigator.clipboard.writeText(txt); decir('Códigos copiados. Pégalos en tu gestor de contraseñas.', 'ok'); }
+    catch { decir('No se pudo copiar; selecciónalos y cópialos a mano.', 'mal'); }
+  });
+  $('btn-imprimir')?.addEventListener('click', () => window.print());
+  $('btn-guardados')?.addEventListener('click', () => { codigosVisibles = false; location.reload(); });
+
+  const sinWebAuthn = !browserSupportsWebAuthn();
+
+  $('btn-registrar')?.addEventListener('click', async (ev) => {
+    const boton = ev.currentTarget as HTMLButtonElement;
+    if (sinWebAuthn) return decir('Este navegador no permite passkeys. Usa Safari o Chrome actualizado.', 'mal');
+    boton.disabled = true;
+    decir('Sigue las instrucciones de tu dispositivo (Face ID, Touch ID o huella)…');
+    try {
+      const opciones = await api({ accion: 'registro-opciones' });
+      const respuesta = await startRegistration({ optionsJSON: opciones });
+      const nombre = ($('nombre-passkey') as HTMLInputElement).value;
+      const r = await api({ accion: 'registro-verificar', respuesta, nombre });
+      if (r.codigos?.length) {
+        decir('Passkey registrada. Guarda ahora tus códigos de respaldo.', 'ok');
+        mostrarCodigos(r.codigos);
+      } else {
+        decir('Passkey registrada.', 'ok');
+        setTimeout(() => location.reload(), 900);
+      }
+    } catch (e) { decir(textoError(e), 'mal'); }
+    finally { boton.disabled = false; }
+  });
+
+  $('btn-confirmar')?.addEventListener('click', async (ev) => {
+    const boton = ev.currentTarget as HTMLButtonElement;
+    if (sinWebAuthn) return decir('Este navegador no permite passkeys. Usa Safari o Chrome actualizado.', 'mal');
+    boton.disabled = true;
+    try {
+      const opciones = await api({ accion: 'confirmar-opciones' });
+      const respuesta = await startAuthentication({ optionsJSON: opciones });
+      await api({ accion: 'confirmar', respuesta });
+      location.reload();
+    } catch (e) { decir(textoError(e), 'mal'); boton.disabled = false; }
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.btn-eliminar').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm(`¿Eliminar la passkey "${b.dataset.nombre}"? Ese dispositivo ya no servirá para entrar al panel.`)) return;
+    b.disabled = true;
+    try { await api({ accion: 'eliminar', id: b.dataset.id }); location.reload(); }
+    catch (e) { decir(textoError(e), 'mal'); b.disabled = false; }
+  }));
+
+  $('chk-obligatoria')?.addEventListener('change', async (ev) => {
+    const chk = ev.currentTarget as HTMLInputElement;
+    const valor = chk.checked;
+    if (valor && !confirm('Desde ahora, para entrar al panel se pedirá tu passkey (o un código de respaldo). ¿Tienes tus códigos de respaldo guardados?')) { chk.checked = false; return; }
+    chk.disabled = true;
+    try { await api({ accion: 'obligatoria', valor }); location.reload(); }
+    catch (e) { decir(textoError(e), 'mal'); chk.checked = !valor; chk.disabled = false; }
+  });
+
+  $('btn-regenerar')?.addEventListener('click', async (ev) => {
+    if (!confirm('¿Generar 10 códigos nuevos? Los anteriores dejarán de servir.')) return;
+    const boton = ev.currentTarget as HTMLButtonElement;
+    boton.disabled = true;
+    try { const r = await api({ accion: 'regenerar-codigos' }); decir('Códigos nuevos generados. Los anteriores ya no sirven.', 'ok'); mostrarCodigos(r.codigos); }
+    catch (e) { decir(textoError(e), 'mal'); }
+    finally { boton.disabled = false; }
+  });
+</script>

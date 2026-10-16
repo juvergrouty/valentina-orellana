@@ -37,7 +37,10 @@ async function protegerAdmin(context: APIContext, next: MiddlewareNext): Promise
   // cuenta de Google y recibir las sesiones de las pacientes en su calendario.
   // La cookie de sesión (SameSite=lax) sí viaja en el redirect de vuelta de
   // Google, así que exigirla no rompe la conexión de Valentina.
-  const PUBLIC_ADMIN_API = ['/api/admin/login'];
+  // Paso de passkey (16 oct 2026): /api/admin/passkey/acceso es público porque
+  // se usa ANTES de tener sesión; exige su propia cookie de paso intermedio
+  // (contraseña correcta hace menos de 10 minutos, SameSite=strict).
+  const PUBLIC_ADMIN_API = ['/api/admin/login', '/api/admin/passkey/acceso'];
 
   // Proteger rutas /admin/* y /api/admin/* (excepto las públicas)
   const isAdminPage = pathname.startsWith('/admin') && pathname !== '/admin/login';
@@ -79,6 +82,22 @@ async function protegerAdmin(context: APIContext, next: MiddlewareNext): Promise
       });
     }
     return context.redirect('/admin/login');
+  }
+
+  // Passkey obligatoria (16 oct 2026): una sesión abierta solo con contraseña
+  // deja de servir cuando passkey_obligatoria = 'true' y hay passkeys
+  // registradas. Sin passkeys, o si no se puede leer el estado, se deja pasar
+  // (nunca dejar a Valentina fuera del panel). Ver src/lib/passkey/nucleo.ts.
+  // Import dinámico: solo las rutas del panel cargan Supabase y WebAuthn.
+  const { sesionAceptada } = await import('./lib/passkey/servidor');
+  if (!(await sesionAceptada(token))) {
+    if (isAdminApi) {
+      return new Response(JSON.stringify({ error: 'Falta confirmar con tu passkey. Vuelve a entrar al panel.' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return context.redirect('/admin/login?passkey=1');
   }
 
   return next();
