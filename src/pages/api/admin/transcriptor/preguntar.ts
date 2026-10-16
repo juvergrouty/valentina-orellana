@@ -13,6 +13,8 @@ import { gunzipSync } from 'node:zlib';
 import { supabase } from '../../../../lib/supabase';
 import { COOKIE_ADMIN, tokenAdminValido, tokenRevocado } from '../../../../lib/adminSession';
 import { auditar, auditarObligatorio } from '../../../../lib/transcriptor/auditoria';
+import { almacenamiento } from '../../../../lib/transcriptor/almacenamiento';
+import { cifrado } from '../../../../lib/transcriptor/cifrado';
 import { ErrorClaude, clasificarError } from '../../../../lib/transcriptor/claude';
 import {
   SIN_RESPUESTA, cargarInstrucciones, fechaLegible, plantillaDesdeTipo, responderPregunta,
@@ -33,29 +35,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PREGUNTA = 4000;
 const MAX_SESIONES = 40;
 
-// ─── Módulos de P1 (almacenamiento.ts y cifrado.ts) ──────────────────────────
-// Se cargan con import.meta.glob para que este endpoint compile aunque P1 aún no esté
-// integrado; si faltan, la ruta responde 503 en vez de romper el build.
-// Vite exige la forma literal `import.meta.glob(...)`; los tipos de Vite solo existen tras `astro sync`.
-// @ts-ignore -- import.meta.glob lo resuelve Vite al compilar
-const MODULOS_P1: Record<string, () => Promise<unknown>> = import.meta.glob(['../../../../lib/transcriptor/almacenamiento.ts', '../../../../lib/transcriptor/cifrado.ts']);
-
-function implementacion<T>(mod: Record<string, unknown>, nombre: string, metodo: string): T | null {
-  const candidatos = [mod[nombre], mod.default, mod];
-  for (const c of candidatos) {
-    if (c && typeof (c as Record<string, unknown>)[metodo] === 'function') return c as T;
-  }
-  return null;
-}
-
+// ─── Módulos de P1 (almacenamiento.ts y cifrado.ts): import directo (integrado por P6) ───
 async function cargarP1(): Promise<{ alm: Almacenamiento; cif: Cifrado } | null> {
-  const cargarAlm = Object.entries(MODULOS_P1).find(([k]) => k.endsWith('/almacenamiento.ts'))?.[1];
-  const cargarCif = Object.entries(MODULOS_P1).find(([k]) => k.endsWith('/cifrado.ts'))?.[1];
-  if (!cargarAlm || !cargarCif) return null;
-  const [ma, mc] = await Promise.all([cargarAlm(), cargarCif()]) as Record<string, unknown>[];
-  const alm = implementacion<Almacenamiento>(ma, 'almacenamiento', 'get');
-  const cif = implementacion<Cifrado>(mc, 'cifrado', 'descifrar');
-  return alm && cif ? { alm, cif } : null;
+  return { alm: almacenamiento, cif: cifrado };
 }
 
 const aHex = (b: Uint8Array) => `\\x${Buffer.from(b).toString('hex')}`;

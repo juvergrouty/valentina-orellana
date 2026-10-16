@@ -13,7 +13,8 @@
     "preview": "astro preview",
     "astro": "astro",
     "test:transcriptor": "npx -y tsx@4.23.15 --test src/lib/transcriptor/*.test.ts",
-    "test:passkey": "npx -y tsx@4.23.15 --test src/lib/passkey/*.test.ts"
+    "test:passkey": "npx -y tsx@4.23.15 --test src/lib/passkey/*.test.ts",
+    "test": "npx -y tsx@4.23.15 --test src/lib/transcriptor/*.test.ts src/lib/passkey/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
