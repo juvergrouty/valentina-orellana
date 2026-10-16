@@ -1,7 +1,9 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { logWarn } from '../../../lib/logger';
-import { COOKIE_ADMIN, DURACION_SESION_MS, crearTokenAdmin, igualesSeguro } from '../../../lib/adminSession';
+import { igualesSeguro } from '../../../lib/adminSession';
+import { estadoPasskeys, ponerPaso, ponerSesion } from '../../../lib/passkey/servidor';
+import { pasoDespuesDeContrasena } from '../../../lib/passkey/nucleo';
 
 export const prerender = false;
 
@@ -91,16 +93,28 @@ export const POST: APIRoute = async ({ request, cookies, redirect, clientAddress
     return redirect('/admin/login?error=1');
   }
 
+  // Segundo factor (16 oct 2026): si hay passkeys registradas, la contraseña
+  // correcta NO abre el panel: deja un paso intermedio de 10 minutos
+  // (cookie vo_admin_paso2) y se pide Face ID / huella o un código de respaldo.
+  // Sin passkeys (o con la migración 0015 sin aplicar) se entra como antes.
+  let estado;
+  try { estado = await estadoPasskeys(); }
+  catch (e) {
+    await logWarn('auth/passkey-estado', 'No se pudo revisar si hay passkeys; se rechazó el acceso', { error: (e as Error).message });
+    await reclasificar('auth/login-bloqueado', 'warn', 'Intento de acceso rechazado: no se pudo revisar la passkey');
+    return intentaEnUnosMinutos();
+  }
+
+  if (pasoDespuesDeContrasena(estado) === 'pedir_passkey') {
+    await reclasificar('auth/login-ok', 'info', 'Contraseña correcta; falta confirmar con passkey');
+    ponerPaso(cookies);
+    return redirect('/admin/login?paso=passkey');
+  }
+
   await reclasificar('auth/login-ok', 'info', 'Acceso al panel');
 
   // Cookie de sesión: token firmado que vence en 8 horas (httpOnly).
-  cookies.set(COOKIE_ADMIN, crearTokenAdmin(), {
-    path:     '/',
-    httpOnly: true,
-    sameSite: 'lax',   // 'lax' permite que la cookie viaje en el redirect de vuelta de Google OAuth
-    secure:   import.meta.env.PROD,
-    maxAge:   DURACION_SESION_MS / 1000,
-  });
+  ponerSesion(cookies, 'contrasena');
 
   return redirect('/admin');
 };

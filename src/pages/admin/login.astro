@@ -1,14 +1,24 @@
 ---
 export const prerender = false;
 
-import { tokenAdminValido } from '../../lib/adminSession';
+import { leerPaso, estadoPasskeys, rpDe, sesionAceptada } from '../../lib/passkey/servidor';
+import { puedeOmitirPasskey } from '../../lib/passkey/nucleo';
 
-// Si ya tiene sesión, redirigir al panel
-if (tokenAdminValido(Astro.cookies.get('vo_admin_token')?.value)) {
+// Si ya tiene una sesión que sirve, redirigir al panel. Una sesión solo con
+// contraseña NO sirve si la passkey se volvió obligatoria (16 oct 2026): en ese
+// caso se muestra el formulario (si no, /admin y el login se redirigían en círculo).
+if (await sesionAceptada(Astro.cookies.get('vo_admin_token')?.value)) {
   return Astro.redirect('/admin');
 }
 
 const error = Astro.url.searchParams.get('error');
+
+// Segundo paso: contraseña correcta hace menos de 10 minutos (cookie de paso).
+const paso = Astro.url.searchParams.get('paso') === 'passkey' && !!leerPaso(Astro.cookies);
+let puedeOmitir = false;
+if (paso) { try { puedeOmitir = puedeOmitirPasskey(await estadoPasskeys()); } catch { puedeOmitir = false; } }
+// En un dominio que no es valentinaorellana.cl (p. ej. vista previa de Vercel) la passkey no funciona.
+const passkeyDisponible = !!rpDe(Astro.url);
 ---
 
 <!doctype html>
@@ -94,6 +104,23 @@ const error = Astro.url.searchParams.get('error');
       color: #ef4444;
       text-align: center;
     }
+    .paso-texto { font-size: 0.85rem; color: #1A1916; line-height: 1.6; margin-bottom: 0.25rem; }
+    button.secundario { background: transparent; color: #1A1916; border: 1px solid #E8E4DC; margin-top: 0.75rem; }
+    button.secundario:hover { background: #F7F5F0; }
+    details { margin-top: 1.75rem; border-top: 1px solid #E8E4DC; padding-top: 1rem; }
+    summary { font-size: 0.75rem; color: #6B6860; cursor: pointer; }
+    details label { margin-top: 1rem; }
+    input[type="text"] {
+      width: 100%; border: none; border-bottom: 1px solid #E8E4DC; padding: 0.6rem 0;
+      font-size: 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em;
+      color: #1A1916; background: transparent; outline: none; text-transform: uppercase;
+    }
+    input[type="text"]:focus { border-color: #1A1916; }
+    .omitir { margin-top: 1.25rem; text-align: center; }
+    .omitir button { background: none; color: #6B6860; border: none; padding: 0; margin: 0; width: auto; font-size: 0.75rem; letter-spacing: 0; text-transform: none; text-decoration: underline; }
+    .omitir button:hover { background: none; color: #1A1916; }
+    .estado { margin-top: 1rem; font-size: 0.75rem; color: #6B6860; text-align: center; min-height: 1.1em; }
+    .estado.mal { color: #ef4444; }
   </style>
 </head>
 <body>
@@ -101,14 +128,85 @@ const error = Astro.url.searchParams.get('error');
     <h1>Panel Admin</h1>
     <p class="sub">Ps. Valentina Orellana</p>
 
+    {paso ? (
+      <div>
+        <p class="paso-texto">Contraseña correcta. Ahora confirma que eres tú con Face ID, Touch ID o la huella de tu dispositivo.</p>
+        {passkeyDisponible
+          ? <button type="button" id="btn-passkey" autofocus>Usar Face ID o huella</button>
+          : <p class="error">La passkey solo funciona en valentinaorellana.cl. Aquí usa un código de respaldo.</p>}
+        <p class="estado" id="estado-passkey" role="status" aria-live="polite"></p>
+        {error === 'codigo' && <p class="error">Código incorrecto o ya usado. Cada código sirve una sola vez.</p>}
+        {error === 'obligatoria' && <p class="error">La passkey es obligatoria: usa Face ID, huella o un código de respaldo.</p>}
+        {error === 'estado' && <p class="error">No pude revisar el acceso en este momento. Intenta en unos minutos.</p>}
+
+        <details open={error === 'codigo' || !passkeyDisponible}>
+          <summary>¿No tienes tu teléfono o computador? Usa un código de respaldo</summary>
+          <form method="POST" action="/api/admin/passkey/acceso">
+            <input type="hidden" name="accion" value="codigo" />
+            <label for="codigo">Código de respaldo</label>
+            <input id="codigo" name="codigo" type="text" required autocomplete="one-time-code" inputmode="text" placeholder="XXXXX-XXXXX" maxlength="13" />
+            <button type="submit" class="secundario">Entrar con el código</button>
+          </form>
+        </details>
+
+        {puedeOmitir && (
+          <form method="POST" action="/api/admin/passkey/acceso" class="omitir">
+            <input type="hidden" name="accion" value="omitir" />
+            <button type="submit">Entrar sin passkey esta vez</button>
+          </form>
+        )}
+      </div>
+    ) : (
     <form method="POST" action="/api/admin/login">
       <label for="password">Contraseña</label>
       <input id="password" name="password" type="password" required autocomplete="current-password" autofocus />
       <button type="submit">Ingresar</button>
       {Astro.url.searchParams.get('expirada') === '1' && !error && <p class="error">Tu sesión venció. Vuelve a entrar; si estabas escribiendo algo, revisa que se haya guardado.</p>}
+      {Astro.url.searchParams.get('passkey') === '1' && !error && <p class="error">Ahora se necesita tu passkey para entrar. Ingresa tu contraseña y luego confirma con Face ID o huella.</p>}
+      {error === 'paso' && <p class="error">Pasaron más de 10 minutos. Ingresa tu contraseña de nuevo.</p>}
       {error === 'bloqueado' && <p class="error">Demasiados intentos fallidos. Espera 15 minutos y vuelve a intentarlo.</p>}
-      {error && error !== 'bloqueado' && <p class="error">Contraseña incorrecta.</p>}
+      {error && error !== 'bloqueado' && error !== 'paso' && <p class="error">Contraseña incorrecta.</p>}
     </form>
+    )}
   </div>
+
+  <script>
+    import { startAuthentication, browserSupportsWebAuthn, WebAuthnError } from '@simplewebauthn/browser';
+
+    const boton = document.getElementById('btn-passkey') as HTMLButtonElement | null;
+    const estado = document.getElementById('estado-passkey');
+    const decir = (texto: string, mal = false) => { if (estado) { estado.textContent = texto; estado.classList.toggle('mal', mal); } };
+    const post = (cuerpo: unknown) => fetch('/api/admin/passkey/acceso', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo), credentials: 'same-origin',
+    });
+
+    if (boton) {
+      if (!browserSupportsWebAuthn()) {
+        boton.disabled = true;
+        decir('Este navegador no permite passkeys. Usa Safari o Chrome actualizado, o un código de respaldo.', true);
+      }
+      boton.addEventListener('click', async () => {
+        boton.disabled = true;
+        decir('Esperando Face ID o huella…');
+        try {
+          const r1 = await post({ accion: 'opciones' });
+          const opciones = await r1.json();
+          if (!r1.ok) { if (opciones.volver) location.href = '/admin/login?error=paso'; throw new Error(opciones.error || 'No pude preparar la passkey.'); }
+          const respuesta = await startAuthentication({ optionsJSON: opciones });
+          decir('Verificando…');
+          const r2 = await post({ accion: 'verificar', respuesta });
+          const fin = await r2.json();
+          if (!r2.ok) { if (fin.volver) location.href = '/admin/login?error=paso'; throw new Error(fin.error || 'No se pudo verificar la passkey.'); }
+          decir('Listo. Entrando…');
+          location.href = fin.ir || '/admin';
+        } catch (e) {
+          const cancelado = (e as Error)?.name === 'NotAllowedError' || (e instanceof WebAuthnError && e.code === 'ERROR_CEREMONY_ABORTED');
+          decir(cancelado ? 'Se canceló o no se reconoció. Intenta de nuevo o usa un código de respaldo.'
+            : (e as Error)?.message || 'No se pudo usar la passkey.', true);
+          boton.disabled = false;
+        }
+      });
+    }
+  </script>
 </body>
 </html>
