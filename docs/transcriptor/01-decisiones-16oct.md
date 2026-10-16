@@ -13,3 +13,7 @@
 9. **Consentimiento**: la firma v2 con la autorización `accept_recording = true` SÍ habilita grabar (Vale quiere que sirva para quienes ya firmaron; la abogada lo confirmará). La v3 (nueva, amplia, para pacientes nuevos) también. En pareja, cada persona presente debe tener su firma vigente con grabación autorizada. Revocación o `accept_recording=false` bloquea.
 10. Ficha sin fecha de nacimiento: se permite grabar (Vale atiende solo adultos).
 11. Vale decide en cada sesión si graba (no hay grabación obligatoria).
+12. **Todo completo para todos** (v2 con grabación autorizada o v3): grabar, transcribir, resumen IA y preguntas. Vale no atenderá a nadie sin transcripción (ya está en las preguntas a la abogada).
+13. **Aviso a pacientes con v2**: se muestra UNA sola vez, escrito abajo en el mensaje/correo de confirmación de su siguiente hora (texto en 12-consentimiento-nuevo.md §c, adaptado a "cambié de herramienta"); se registra que se mostró y no se repite. Activo solo cuando el transcriptor esté en uso.
+14. Consentimiento v3 amplio se publica YA para pacientes nuevos (rama consentimiento-v3 desde main) junto con la lista de proveedores en /condiciones.
+15. Correos a la abogada: juntar TODAS las dudas en un solo correo.
