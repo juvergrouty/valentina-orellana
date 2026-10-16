@@ -23,7 +23,7 @@ import {
 import { leaseVencido, marcarError, soltar, tomar, transicionar } from './estados';
 import { elegirModelo } from './reglas';
 import { borrarTranscriptTrasGuardar, decisionTrasErrorAAI, ErrorAssemblyAI, sanearMensaje } from './assemblyai';
-import { armarTranscripcionClara } from './hablantes';
+import { armarTranscripcionClara, esTramoHueco } from './hablantes';
 import {
   cargarInstrucciones, contextoSesionAnterior, nombreDePila, plantillaDesdeTipo, resumirSesion,
   type Participante, type PeticionResumenCompleta, type ResultadoResumen,
@@ -32,12 +32,21 @@ import { clasificarError, type ClienteMensajes, type OpcionesReintento } from '.
 import { auditar } from './auditoria';
 import { registrarAlerta as registrarAlertaP8, resolverAlertasDe as resolverAlertasDeP8, type NuevaAlerta, type AlertaTipo } from './alertas';
 import type { AlmacenamientoTranscriptor, ResultadoGuardado } from './almacenamiento';
+import { columnasContenidoCifrado } from './resumenCifrado';
+import type { CifradoVOT1 } from './cifrado';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-/** Tiempo de trabajo por ejecución (maxDuration de Vercel = 60 s; margen para responder). */
+/** Tiempo de trabajo de los pasos cortos por ejecución (vigilar, bots, envíos, guardar, limpiar). */
 export const PRESUPUESTO_MS = 50_000;
-/** Un resumen no se empieza si quedan menos de esto (Sonnet tarda ~20–40 s). */
+/**
+ * El resumen tiene presupuesto propio (82-revision-codigo A1): una sesión de pareja de 60 min puede
+ * tardar más de 45 s en Sonnet. Requiere maxDuration = 300 en astro.config.mjs (Fluid compute).
+ * LIMITE_RESUMEN_MS = tope de UNA llamada; PRESUPUESTO_RESUMEN_MS = desde el inicio de la corrida.
+ */
+export const LIMITE_RESUMEN_MS = 240_000;
+export const PRESUPUESTO_RESUMEN_MS = 285_000;
+/** Un resumen no se empieza si quedan menos de esto (Sonnet tarda ~20–90 s). */
 export const MIN_RESUMEN_MS = 30_000;
 /** Mínimo para empezar a guardar una transcripción (descargar, unir, cifrar, borrar). */
 export const MIN_GUARDAR_MS = 12_000;
@@ -85,7 +94,7 @@ export interface AlertasDeps {
 
 export interface DepsPipeline {
   db: SupabaseClient;
-  almacenamiento: Pick<AlmacenamientoTranscriptor, 'urlLectura' | 'guardarTranscripcion' | 'leerTranscripcion' | 'borrarAudio'>;
+  almacenamiento: Pick<AlmacenamientoTranscriptor, 'urlLectura' | 'guardarTranscripcion' | 'leerTranscripcion' | 'borrarAudio' | 'copiarAB2'>;
   aai: AssemblyAI;
   bot: Bot;
   puedeGrabar: PuedeGrabar;
@@ -97,6 +106,9 @@ export interface DepsPipeline {
   /** Reloj para el presupuesto de tiempo (ms). */
   reloj?: () => number;
   presupuestoMs?: number;
+  presupuestoResumenMs?: number;
+  /** Cifrado del contenido de resumenes_ia (H7). Sin esto, el de las variables de entorno. */
+  cifrado?: Pick<CifradoVOT1, 'cifrar' | 'descifrar'>;
 }
 
 export interface Ajustes {
@@ -133,13 +145,15 @@ function horaChile(iso: string): string {
   return new Intl.DateTimeFormat('es-CL', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 }
 
-/** "sesión individual presencial del 16/10 a las 15:00" — sin nombres ni contenido. */
-export function etiquetaSesion(g: Pick<Grabacion, 'tipo' | 'origen' | 'session_date' | 'inicio_at' | 'hora_fin_prevista'>): string {
-  const tipo = g.tipo === 'pareja' ? 'de pareja ' : g.tipo === 'individual' ? 'individual ' : '';
+/**
+ * "sesión presencial del 16/10 a las 15:00" — sin nombres, contenido NI tipo de terapia: el título
+ * viaja también en el asunto del correo de respaldo (81-revision-etica-clinica H17).
+ */
+export function etiquetaSesion(g: Pick<Grabacion, 'origen' | 'session_date' | 'inicio_at' | 'hora_fin_prevista'> & Partial<Pick<Grabacion, 'tipo'>>): string {
   const [, m, d] = String(g.session_date ?? '').split('-');
   const fecha = d && m ? `${d}/${m}` : String(g.session_date ?? '');
   const hora = g.inicio_at ? horaChile(g.inicio_at) : null;
-  return `sesión ${tipo}${g.origen} del ${fecha}${hora ? ` a las ${hora}` : ''}`;
+  return `sesión ${g.origen} del ${fecha}${hora ? ` a las ${hora}` : ''}`;
 }
 
 /** Espera antes del intento n+1 tras n fallos (n ≥ 1). */
@@ -176,7 +190,10 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
   const reloj = deps.reloj ?? (() => Date.now());
   const alertas: AlertasDeps = deps.alertas ?? { registrarAlerta: registrarAlertaP8, resolverAlertasDe: resolverAlertasDeP8 };
   let limite = reloj() + (deps.presupuestoMs ?? PRESUPUESTO_MS);
+  let limiteResumen = reloj() + (deps.presupuestoResumenMs ?? PRESUPUESTO_RESUMEN_MS);
   const queda = () => limite - reloj();
+  const quedaResumen = () => limiteResumen - reloj();
+  const cif = deps.cifrado;
   let ajustesCache: Ajustes | null = null;
 
   async function alerta(a: NuevaAlerta): Promise<void> {
@@ -361,10 +378,13 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       if (e0) throw new Error(`grabaciones: ${e0.message}`);
       if (previa) continue;
       const v = await deps.puedeGrabar(s.patientId, s.tipo);
-      const d = elegirModelo({ tipo: s.tipo, origen: 'online', lugarConRuido: false });
+      // H2: si la ficha es de pareja (deducido en el servidor), la grabación es de pareja aunque el
+      // evento no diga el tipo: exige ambas firmas (ya lo hizo puedeGrabar) y deja MAX_HUMANOS = 3.
+      const tipo = (v as { tipoEfectivo?: typeof s.tipo }).tipoEfectivo ?? s.tipo;
+      const d = elegirModelo({ tipo, origen: 'online', lugarConRuido: false });
       const fila = {
         patient_id: s.patientId, booking_id: s.bookingId, google_event_id: s.googleEventId,
-        consent_ids: v.consentIds, origen: 'online', tipo: s.tipo, modelo: d.modelo, diarizacion: d.diarizacion,
+        consent_ids: v.consentIds, origen: 'online', tipo, modelo: d.modelo, diarizacion: d.diarizacion,
         session_date: fechaChile(s.inicio), hora_fin_prevista: s.fin, meet_url: s.meetUrl, creada_por: 'cron',
         estado: v.puede ? 'bot_lanzando' : 'sin_consentimiento',
         nota_sistema: v.puede ? null : 'No se envió el asistente de notas: falta el consentimiento de grabación o la ficha.',
@@ -386,8 +406,10 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         await soltar(g.id, db);
       }
     }
-    // Reintentos de lanzamiento (Fly falló en un minuto anterior).
-    const pendientes = await grabacionesEn(['bot_lanzando'], ahora, (q) => q.eq('origen', 'online').is('bot_machine_id', null).gt('intentos', 0));
+    // Reintentos de lanzamiento (Fly falló en un minuto anterior, o Vale tocó Reintentar: M3).
+    // Sin `intentos > 0`: tras Reintentar los intentos vuelven a 0. Un lanzamiento en curso no se
+    // repite porque está tomado (tomada_en) y uno exitoso ya tiene bot_machine_id.
+    const pendientes = await grabacionesEn(['bot_lanzando'], ahora, (q) => q.eq('origen', 'online').is('bot_machine_id', null));
     for (const g0 of pendientes) {
       if (queda() < 5_000) break;
       if (!g0.hora_fin_prevista || Date.parse(g0.hora_fin_prevista) <= ahora.getTime()) continue; // lo cierra el vigilante
@@ -417,7 +439,15 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       try {
         const audioUrl = await deps.almacenamiento.urlLectura(s.r2_key, TIEMPOS.urlLecturaAssemblyAISeg);
         const { id } = await deps.aai.enviar({ audioUrl, decision });
-        await actualizarSegmento(s.id, { aai_transcript_id: id, aai_estado: 'enviado', aai_enviado_at: ahora.toISOString(), aai_error: null, aai_completado_at: null });
+        // M4: solo si el segmento sigue sin transcript; si otro proceso guardó el suyo, el nuevo se borra.
+        const { data: guardado, error: eu } = await db.from('grabacion_segmentos')
+          .update({ aai_transcript_id: id, aai_estado: 'enviado', aai_enviado_at: ahora.toISOString(), aai_error: null, aai_completado_at: null })
+          .eq('id', s.id).is('aai_transcript_id', null).select('id').maybeSingle();
+        if (eu || !guardado) {
+          await deps.aai.borrar(id).catch((e2) => console.warn('[transcriptor/pipeline] no se pudo borrar un transcript duplicado:', msg(e2)));
+          if (eu) throw new Error(`segmentos update: ${eu.message}`);
+          continue;
+        }
         if (decision.modelo !== g.modelo) {
           await actualizarGrabacion(g.id, { modelo: decision.modelo });
           g.modelo = decision.modelo;
@@ -511,7 +541,8 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       const mapa = mapaPorDefecto(g, (await ajustes()).nombresVale);
       if (mapa !== g.mapa_hablantes) await actualizarGrabacion(g.id, { mapa_hablantes: mapa });
       const clara = armarTranscripcionClara({ grabacion: { ...g, mapa_hablantes: mapa }, segmentos: resultados });
-      palabras = clara.segmentos.reduce((a, t) => a + (t.texto.trim() ? t.texto.trim().split(/\s+/).length : 0), 0);
+      // Los tramos-marca de huecos (H13) no cuentan como voz.
+      palabras = clara.segmentos.filter((t) => !esTramoHueco(t)).reduce((a, t) => a + (t.texto.trim() ? t.texto.trim().split(/\s+/).length : 0), 0);
       duracionS = clara.duracion_s;
       const res: ResultadoGuardado = await deps.almacenamiento.guardarTranscripcion(clara);
       const largo = clara.segmentos.reduce((a, t) => a + t.texto.length, 0);
@@ -525,6 +556,13 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       await auditar('cron', 'transcripcion_guardada', { grabacionId: g.id, patientId: g.patient_id, detalle: { palabras, bytes: res.bytes, segmentos: segs.length, copia_b2: !!res.b2Key }, cliente: db });
       if (res.b2Error) await auditar('cron', 'copia_b2', { grabacionId: g.id, resultado: 'error', detalle: { error: res.b2Error }, cliente: db });
     }
+    // B4 (80-revision-seguridad): el audio y el transcript de AssemblyAI se borran SOLO con las dos
+    // copias confirmadas (R2 verificada + B2). Si la copia a B2 falló, se reintenta primero (con el
+    // backoff del paso, el audio sigue guardado); si se agotan los intentos, como la transcripción
+    // cifrada ya está verificada en R2 y el audio se borra solo a las 24 h de todas formas, se sigue
+    // con el borrado, la copia queda PENDIENTE (b2_key null) y hay aviso en el panel. El paso
+    // `respaldos` vuelve a intentar las copias pendientes en cada corrida.
+    if (!(await asegurarCopiaB2(g, ahora))) return;
     // Recién con la transcripción cifrada guardada se borra en AssemblyAI y el audio (regla 5 de §4).
     for (const s of segs) {
       const ok = await borrarTranscriptTrasGuardar(s, { aai: deps.aai, db, ahora });
@@ -549,6 +587,62 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         detalle: 'La grabación llegó, pero la transcripción quedó vacía (¿micrófono tapado o en silencio?). No se genera resumen.',
       });
     }
+  }
+
+  /** Copia en B2 de una transcripción. true = hay copia (o ya no tiene sentido esperar). */
+  async function copiarPendienteB2(tr: { id: string; r2_key: string }, ahora: Date): Promise<boolean> {
+    try {
+      const { b2Key } = await deps.almacenamiento.copiarAB2(tr.r2_key);
+      await db.from('transcripciones').update({ b2_key: b2Key, b2_copiada_at: ahora.toISOString() }).eq('id', tr.id).is('b2_key', null);
+      return true;
+    } catch (e) {
+      console.warn('[transcriptor/pipeline] copia a B2 pendiente:', msg(e));
+      return false;
+    }
+  }
+
+  /**
+   * B4: false = no seguir (se programó otro intento: el audio NO se borra todavía).
+   * true = hay copia en B2, o se agotaron los intentos y se sigue con la copia marcada pendiente.
+   */
+  async function asegurarCopiaB2(g: GrabacionP6, ahora: Date): Promise<boolean> {
+    const { data: tr, error } = await db.from('transcripciones').select('id, r2_key, b2_key')
+      .eq('grabacion_id', g.id).is('deleted_at', null).maybeSingle();
+    if (error) throw new Error(`transcripciones: ${error.message}`);
+    if (!tr || (tr as { b2_key?: string | null }).b2_key) return true;
+    if (await copiarPendienteB2(tr as { id: string; r2_key: string }, ahora)) return true;
+    const n = (g.intentos ?? 0) + 1;
+    if (n < MAX_GUARDADO) {
+      await actualizarGrabacion(g.id, {
+        intentos: n, ultimo_error: 'Copia de respaldo en B2 pendiente',
+        proximo_intento_at: new Date(ahora.getTime() + esperaTrasFallos(n)).toISOString(),
+      });
+      return false;
+    }
+    await auditar('cron', 'copia_b2', { grabacionId: g.id, resultado: 'error', detalle: { pendiente: true, intentos: n }, cliente: db });
+    await alerta({
+      tipo: 'respaldo', grabacionId: g.id, clave: `respaldo:${g.id}`, accion: 'revisar',
+      titulo: `La copia de respaldo (B2) de la transcripción de la ${etiquetaSesion(g)} quedó pendiente`,
+      detalle: 'La transcripción está guardada y cifrada en R2 (verificada). La copia en B2 se reintenta sola en cada corrida; si el aviso sigue, revisa las llaves de B2.',
+    });
+    return true;
+  }
+
+  /** Paso `respaldos`: copias en B2 que quedaron pendientes (B4). Cierra el aviso cuando lo logra. */
+  async function respaldos(ahora: Date): Promise<number> {
+    const { data, error } = await db.from('transcripciones').select('id, grabacion_id, r2_key')
+      .is('b2_key', null).is('deleted_at', null).limit(LOTE);
+    if (error) throw new Error(`transcripciones: ${error.message}`);
+    let n = 0;
+    for (const tr of (data ?? []) as { id: string; grabacion_id: string; r2_key: string }[]) {
+      if (queda() < 3_000) break;
+      if (await copiarPendienteB2(tr, ahora)) {
+        n++;
+        await auditar('cron', 'copia_b2', { grabacionId: tr.grabacion_id, detalle: { reintento: true }, cliente: db });
+        await alertas.resolverAlertasDe(tr.grabacion_id, 'respaldo').catch(() => undefined);
+      }
+    }
+    return n;
   }
 
   async function procesarTranscripciones(ahora: Date): Promise<number> {
@@ -626,7 +720,17 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
 
   async function participantes(g: GrabacionP6): Promise<Participante[]> {
     const out: Participante[] = [{ rol: 'Terapeuta', nombre: 'Valentina' }];
-    if (g.tipo === 'pareja' || !g.patient_id) return out; // pareja: una ficha para dos personas, sin nombres
+    if (!g.patient_id) return out;
+    if (g.tipo === 'pareja') {
+      // H14: nombres de pila de las dos personas que firmaron (consent_ids de la grabación), sin
+      // apellidos. El orden no dice quién habló primero: el prompt pide asignar por el contenido.
+      const ids = (g.consent_ids ?? []).filter(Boolean);
+      if (!ids.length) return out;
+      const { data } = await db.from('consents').select('id, signer_name').in('id', ids);
+      const pilas = [...new Set(((data ?? []) as { signer_name?: string | null }[]).map((c) => nombreDePila(c.signer_name)).filter(Boolean))];
+      for (const n of pilas.slice(0, 2)) out.push({ rol: 'Miembro', nombre: n });
+      return out;
+    }
     const { data } = await db.from('patients').select('name').eq('id', g.patient_id).maybeSingle();
     const pila = nombreDePila((data as { name?: string } | null)?.name);
     if (pila) out.push({ rol: 'Paciente', nombre: pila });
@@ -658,14 +762,14 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         return true;
       }
       const tramos = (await deps.almacenamiento.leerTranscripcion(tr.r2_key as string)).segmentos;
-      if (!tramos.length) {
+      if (!tramos.some((t) => !esTramoHueco(t))) {
         await db.from('resumenes_ia').update({ estado: 'error', ultimo_error: 'sin_voz' }).eq('id', fila.id);
         await transicionar(g.id, ['resumiendo'], 'lista', { nota_sistema: 'No se reconoció voz en la grabación; no hay resumen.', intentos: 0, proximo_intento_at: null } as Partial<Grabacion>, db);
         return true;
       }
       const instr = await cargarInstrucciones('resumen', db);
       instruccionesId = instr.id;
-      const previo = await contextoSesionAnterior(g, db).catch(() => null);
+      const previo = await contextoSesionAnterior(g, db, cif).catch(() => null);
       peticion = {
         resumenId: fila.id, customId: `res_${fila.id.replace(/-/g, '')}`.slice(0, 64),
         plantilla: plantillaDesdeTipo(g.tipo), instrucciones: instr.texto, transcripcion: tramos, contextoPrevio: previo,
@@ -687,9 +791,12 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     try {
       const resumir = deps.resumir ?? resumirSesion;
       // Un solo intento por minuto y con el tiempo que queda: los reintentos los da el cron (backoff).
-      const r = await resumir(peticion, { intentos: 1, timeoutMs: Math.max(5_000, queda() - 2_000), ...(deps.claude ? { cliente: deps.claude } : {}) });
+      const timeoutMs = Math.max(5_000, Math.min(LIMITE_RESUMEN_MS, quedaResumen() - 5_000));
+      const r = await resumir(peticion, { intentos: 1, timeoutMs, ...(deps.claude ? { cliente: deps.claude } : {}) });
+      // H7: el contenido se guarda cifrado (VOT1, DEK propia); `contenido` en claro queda null.
+      const cifradas = await columnasContenidoCifrado(fila.id, r.contenido, cif);
       const { error } = await db.from('resumenes_ia').update({
-        estado: 'listo', contenido: r.contenido, modelo: r.modelo, modo: 'directo', prompt_version: r.promptVersion,
+        estado: 'listo', ...cifradas, modelo: r.modelo, modo: 'directo', prompt_version: r.promptVersion,
         instrucciones_id: instruccionesId, transcripcion_id: transcripcionId, intentos: intento, ultimo_error: null,
         tokens_entrada: r.uso.entrada + r.uso.cacheEscritura + r.uso.cacheLectura, tokens_salida: r.uso.salida,
         costo_usd: Number(r.costoUsd.toFixed(5)), listo_at: ahora.toISOString(),
@@ -730,7 +837,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     const lista = await grabacionesEn(['transcrita', 'resumiendo'], ahora);
     let n = 0;
     for (const g0 of lista) {
-      if (queda() < MIN_RESUMEN_MS) break;
+      if (quedaResumen() < MIN_RESUMEN_MS) break;
       await conToma(g0, ahora, async (g) => { if (await resumirUna(g, ahora)) n++; });
     }
     return n;
@@ -765,6 +872,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
   async function correr(ahora: Date = new Date()): Promise<ResultadoCorrida> {
     const t0 = reloj();
     limite = t0 + (deps.presupuestoMs ?? PRESUPUESTO_MS);
+    limiteResumen = t0 + (deps.presupuestoResumenMs ?? PRESUPUESTO_RESUMEN_MS);
     ajustesCache = null;
     const pasos: Record<string, number> = {};
     const errores: string[] = [];
@@ -795,6 +903,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     await paso('resumenes', resumir);
     await paso('envios', reintentarEnvios);
     await paso('transcripciones', procesarTranscripciones);
+    await paso('respaldos', respaldos);
     await paso('limpieza', limpiar);
     return { ok: errores.length === 0, apagado: false, pasos, errores, ms: reloj() - t0 };
   }

@@ -15,6 +15,7 @@ import { COOKIE_ADMIN, tokenAdminValido, tokenRevocado } from '../../../../lib/a
 import { auditar, auditarObligatorio } from '../../../../lib/transcriptor/auditoria';
 import { almacenamiento } from '../../../../lib/transcriptor/almacenamiento';
 import { cifrado } from '../../../../lib/transcriptor/cifrado';
+import { conContenidoClaro, type FilaConContenido } from '../../../../lib/transcriptor/resumenCifrado';
 import { ErrorClaude, clasificarError } from '../../../../lib/transcriptor/claude';
 import {
   SIN_RESPUESTA, cargarInstrucciones, fechaLegible, plantillaDesdeTipo, responderPregunta,
@@ -87,7 +88,7 @@ export const POST: APIRoute = async ({ request, url, cookies, clientAddress }) =
   }
 
   // Grabaciones: SOLO de este paciente (nunca mezclar pacientes).
-  let q = supabase.from('grabaciones').select('id, patient_id, session_date, tipo, pausas').eq('patient_id', patientId);
+  let q = supabase.from('grabaciones').select('id, patient_id, session_date, tipo, pausas, excluir_ia_at').eq('patient_id', patientId);
   if (pedidas) q = q.in('id', pedidas);
   const { data: grabaciones, error: eg } = await q.order('session_date', { ascending: true }).limit(MAX_SESIONES);
   if (eg) return json({ ok: false, error: 'No se pudieron leer las sesiones.' }, 500);
@@ -95,19 +96,29 @@ export const POST: APIRoute = async ({ request, url, cookies, clientAddress }) =
     await auditar('vale', 'preguntar', { patientId, request, clientAddress, resultado: 'denegado', detalle: { motivo: 'grabacion_de_otro_paciente_o_inexistente', pedidas: pedidas.length } });
     return json({ ok: false, error: 'Alguna sesión no pertenece a esta ficha.' }, 400);
   }
-  const ids = (grabaciones ?? []).map((g) => g.id as string);
-  if (!ids.length) return json({ ok: false, error: 'Esta ficha no tiene sesiones grabadas.' }, 404);
+  // H5: sesiones excluidas de la IA a pedido del paciente (grabaciones.excluir_ia_at, 0019): nunca entran.
+  const excluidas = (grabaciones ?? []).filter((g) => g.excluir_ia_at);
+  if (pedidas && excluidas.length) {
+    return json({ ok: false, error: 'Alguna de las sesiones elegidas fue excluida de las preguntas a la IA a pedido del paciente.' }, 400);
+  }
+  const permitidas = (grabaciones ?? []).filter((g) => !g.excluir_ia_at);
+  const ids = permitidas.map((g) => g.id as string);
+  if (!ids.length) return json({ ok: false, error: excluidas.length ? 'Las sesiones de esta ficha están excluidas de las preguntas a la IA.' : 'Esta ficha no tiene sesiones grabadas.' }, 404);
 
   const [{ data: transcripciones, error: et }, { data: resumenes }] = await Promise.all([
     supabase.from('transcripciones').select('id, grabacion_id, r2_key').in('grabacion_id', ids).is('deleted_at', null),
-    supabase.from('resumenes_ia').select('grabacion_id, version, contenido').in('grabacion_id', ids)
+    supabase.from('resumenes_ia').select('id, grabacion_id, version, contenido, contenido_cifrado').in('grabacion_id', ids)
       .eq('estado', 'listo').is('oculto_at', null).order('version', { ascending: false }),
   ]);
   if (et) return json({ ok: false, error: 'No se pudieron leer las transcripciones.' }, 500);
   const trPorGrab = new Map((transcripciones ?? []).map((t) => [t.grabacion_id as string, t.r2_key as string]));
+  // H7: el resumen puede estar cifrado; aquí solo se ve si existe (se descifra DESPUÉS de la bitácora).
+  const resFilaPorGrab = new Map<string, FilaConContenido>();
+  for (const r of resumenes ?? []) {
+    if (!resFilaPorGrab.has(r.grabacion_id as string) && (r.contenido || r.contenido_cifrado)) resFilaPorGrab.set(r.grabacion_id as string, r as FilaConContenido);
+  }
   const resPorGrab = new Map<string, string>();
-  for (const r of resumenes ?? []) if (!resPorGrab.has(r.grabacion_id as string) && r.contenido) resPorGrab.set(r.grabacion_id as string, r.contenido as string);
-  const usables = (grabaciones ?? []).filter((g) => trPorGrab.has(g.id as string) || resPorGrab.has(g.id as string));
+  const usables = permitidas.filter((g) => trPorGrab.has(g.id as string) || resFilaPorGrab.has(g.id as string));
   if (!usables.length) return json({ ok: false, error: 'Aún no hay transcripciones listas para esta ficha.' }, 404);
 
   const p1 = trPorGrab.size ? await cargarP1() : null;
@@ -123,7 +134,12 @@ export const POST: APIRoute = async ({ request, url, cookies, clientAddress }) =
     return json({ ok: false, error: 'No se pudo registrar el acceso en la bitácora; por seguridad no se responde.' }, 503);
   }
 
-  // Descifrar transcripciones (las que fallen quedan con su resumen, si existe).
+  // Descifrar resúmenes (H7) y transcripciones (las que fallen quedan con su resumen, si existe).
+  {
+    const claves = [...resFilaPorGrab.keys()];
+    const { filas } = await conContenidoClaro(claves.map((k) => resFilaPorGrab.get(k)!), cifrado);
+    filas.forEach((f, i) => { if (f.contenido) resPorGrab.set(claves[i], f.contenido); });
+  }
   const sesiones: SesionParaPregunta[] = [];
   const grabDeSesion: string[] = [];
   let fallasLectura = 0;

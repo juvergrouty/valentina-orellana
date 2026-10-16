@@ -41,7 +41,7 @@ const BOTON: Record<string, string> = { reintentar: 'Reintentar', reintentar_res
               <p class="tr-que"><span class="tr-tipo">{etiquetaTipo(a.tipo)}:</span> {a.titulo}</p>
               <p class="tr-meta">
                 {fecha ? <>Sesión {fecha}{a.sesion?.paciente && a.sesion.patient_id
-                  ? <> · <a href={`/admin/pacientes/${a.sesion.patient_id}?tab=ia`}>{a.sesion.paciente}</a></> : ''}</>
+                  ? <> · <a href={`/admin/pacientes/${a.sesion.patient_id}?tab=notas${a.grabacion_id ? `#ia-${a.grabacion_id}` : ''}`}>{a.sesion.paciente}</a></> : ''}</>
                   : 'Sin sesión asociada'}
                 {' · '}{a.veces > 1 ? `${a.veces} veces, la última el ${cuando(a.ultima_vez)}` : `el ${cuando(a.ultima_vez)}`}
               </p>

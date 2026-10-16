@@ -14,6 +14,7 @@ import { transicionar } from '../../../../lib/transcriptor/estados';
 import { MAX_RESUMEN_EDITADO, ROTULO_EDITADO } from '../../../../lib/transcriptor/panel';
 import { esUuid, guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
 import { cargarInstrucciones, plantillaDesdeTipo } from '../../../../lib/transcriptor/resumen';
+import { columnasContenidoCifrado } from '../../../../lib/transcriptor/resumenCifrado';
 import { AJUSTES, type TipoSesion } from '../../../../lib/transcriptor/tipos';
 
 export const prerender = false;
@@ -47,7 +48,16 @@ export const POST: APIRoute = async (ctx) => {
     const base = (versiones ?? []).find((v) => v.id === body.resumen_id);
     if (!esUuid(body.resumen_id) || !base) return json({ ok: false, error: 'No se encontró la versión que estás editando.' }, 404);
     if (base.estado !== 'listo') return json({ ok: false, error: 'Esa versión todavía no está lista.' }, 409);
+    // H7: el texto editado se guarda cifrado (la llave del objeto lleva el id de la fila nueva).
+    const nuevoId = crypto.randomUUID();
+    let cifradas: Awaited<ReturnType<typeof columnasContenidoCifrado>>;
+    try {
+      cifradas = await columnasContenidoCifrado(nuevoId, contenido);
+    } catch {
+      return json({ ok: false, error: 'No se pudo cifrar el resumen editado (revisa la llave del transcriptor). No se guardó nada.' }, 503);
+    }
     const { data: nueva, error } = await supabase.from('resumenes_ia').insert({
+      id: nuevoId,
       grabacion_id: grabacionId,
       patient_id: g.patient_id,
       booking_id: g.booking_id,
@@ -62,7 +72,7 @@ export const POST: APIRoute = async (ctx) => {
       modelo: base.modelo,
       modo: base.modo,
       estado: 'listo',
-      contenido,
+      ...cifradas,
       listo_at: new Date().toISOString(),
     }).select('id, version').single();
     if (error || !nueva) {
@@ -91,15 +101,9 @@ export const POST: APIRoute = async (ctx) => {
   ]);
   const modo = ajusteModo?.value === 'batch' ? 'batch' : 'directo';
 
-  let movida;
-  try {
-    movida = await transicionar(grabacionId, ['lista'], 'resumiendo');
-  } catch (e) {
-    console.warn('[transcriptor/regenerar-resumen]', e instanceof Error ? e.message : e);
-    return json({ ok: false, error: 'No se pudo pedir el resumen nuevo. Intenta de nuevo.' }, 500);
-  }
-  if (!movida) return json({ ok: false, error: 'La sesión cambió de estado recién. Recarga la página.' }, 409);
-
+  // M1 (82-revision-codigo): PRIMERO la fila 'pendiente' y DESPUÉS la transición lista → resumiendo.
+  // Al revés, si el cron corría entre ambas veía como última versión la 'listo' anterior, cerraba la
+  // grabación en 'lista' y la 'pendiente' quedaba huérfana para siempre (botón bloqueado).
   const { data: nueva, error: ei } = await supabase.from('resumenes_ia').insert({
     grabacion_id: grabacionId,
     patient_id: g.patient_id,
@@ -113,10 +117,23 @@ export const POST: APIRoute = async (ctx) => {
     estado: 'pendiente',
   }).select('id, version').single();
   if (ei || !nueva) {
-    // Se devuelve la grabación a 'lista' para no dejarla "escribiendo" sin resumen pedido.
-    await transicionar(grabacionId, ['resumiendo'], 'lista').catch(() => null);
     await auditar('vale', 'regenerar_resumen', { grabacionId, patientId: g.patient_id, request, clientAddress, resultado: 'error', detalle: { codigo: ei?.code ?? null } });
-    return json({ ok: false, error: 'No se pudo pedir el resumen nuevo. Intenta de nuevo.' }, 500);
+    return json({ ok: false, error: ei?.code === '23505' ? 'Alguien pidió otra versión recién. Recarga la página.' : 'No se pudo pedir el resumen nuevo. Intenta de nuevo.' }, ei?.code === '23505' ? 409 : 500);
+  }
+
+  let movida;
+  try {
+    movida = await transicionar(grabacionId, ['lista'], 'resumiendo');
+  } catch (e) {
+    console.warn('[transcriptor/regenerar-resumen]', e instanceof Error ? e.message : e);
+    movida = null;
+  }
+  if (!movida) {
+    // La grabación no estaba (o ya no está) en 'lista': la fila pedida no la va a tomar nadie.
+    await supabase.from('resumenes_ia').update({ estado: 'error', ultimo_error: 'regenerar_sin_transicion' })
+      .eq('id', nueva.id).eq('estado', 'pendiente');
+    await auditar('vale', 'regenerar_resumen', { grabacionId, patientId: g.patient_id, request, clientAddress, resultado: 'error', detalle: { version: nueva.version, motivo: 'estado_cambio' } });
+    return json({ ok: false, error: 'La sesión cambió de estado recién. Recarga la página.' }, 409);
   }
   await auditar('vale', 'regenerar_resumen', {
     grabacionId, patientId: g.patient_id, request, clientAddress,

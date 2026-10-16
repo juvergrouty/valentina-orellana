@@ -1,14 +1,15 @@
 // POST /api/admin/transcriptor/reintentar — P7 (50-arquitectura §3.8 y §4).
-// "Reintentar" desde el panel: vuelve la grabación de 'error' a estado_antes_error (transición
-// atómica de estados.ts; si otro proceso ya la movió, no hace nada). Si falló el resumen, el
-// último resumen de la IA en 'error' vuelve a 'pendiente' para que el orquestador (P6) lo tome.
+// "Reintentar" desde la ficha y desde /admin/transcriptor. Usa EXACTAMENTE la misma lógica que el
+// botón del aviso rojo (reintentoAlerta.ts, 82-revision-codigo M5): vuelve de 'error' a
+// estado_antes_error con intentos y backoff reiniciados (estados.reintentar), relanza un bot caído
+// antes de grabar, reabre el último resumen de la IA en 'error' (intentos 0) y no deja una sesión
+// online quieta en 'grabando'. Si queda resuelto, cierra los avisos de esa grabación.
 // Cuerpo: { grabacion_id: uuid }. Auth del panel + Origin/Referer propio + X-Panel + bitácora.
 import type { APIRoute } from 'astro';
-import { supabase } from '../../../../lib/supabase';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
-import { reintentar } from '../../../../lib/transcriptor/estados';
+import { resolverAlertasDe } from '../../../../lib/transcriptor/alertas';
+import { ejecutarReintento, opsReintentoSupabase } from '../../../../lib/transcriptor/reintentoAlerta';
 import { esUuid, guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
-import type { Grabacion } from '../../../../lib/transcriptor/tipos';
 
 export const prerender = false;
 
@@ -21,34 +22,18 @@ export const POST: APIRoute = async (ctx) => {
   const grabacionId = body?.grabacion_id;
   if (!esUuid(grabacionId)) return json({ ok: false, error: 'Falta la grabación.' }, 400);
 
-  const { data: antes, error: e0 } = await supabase.from('grabaciones')
-    .select('id, patient_id, estado').eq('id', grabacionId).maybeSingle();
-  if (e0) return json({ ok: false, error: 'No se pudo leer la grabación. Intenta de nuevo.' }, 500);
-  if (!antes) return json({ ok: false, error: 'No se encontró la grabación.' }, 404);
-  if (antes.estado !== 'error') return json({ ok: true, sin_cambios: true, estado: antes.estado });
-
-  let g: Grabacion | null;
   try {
-    g = await reintentar(grabacionId);
+    const r = await ejecutarReintento(grabacionId, 'reintentar', await opsReintentoSupabase());
+    await auditar('vale', 'reintentar', {
+      grabacionId, request, clientAddress, resultado: r.ok ? 'ok' : 'error',
+      detalle: { origen: 'ficha', desde: r.desde ?? null, hacia: r.hacia ?? null },
+    });
+    if (r.ok && r.resolver) await resolverAlertasDe(grabacionId).catch(() => undefined);
+    if (!r.ok) return json({ ok: false, error: r.mensaje }, r.mensaje === 'No se encontró la grabación.' ? 404 : 409);
+    return json({ ok: true, estado: r.hacia ?? r.desde ?? null, mensaje: r.mensaje, sin_cambios: r.desde === r.hacia && r.desde !== 'error' });
   } catch (e) {
     console.warn('[transcriptor/reintentar]', e instanceof Error ? e.message : e);
-    await auditar('vale', 'reintentar', { grabacionId, patientId: antes.patient_id, request, clientAddress, resultado: 'error' });
+    await auditar('vale', 'reintentar', { grabacionId, request, clientAddress, resultado: 'error', detalle: { origen: 'ficha' } });
     return json({ ok: false, error: 'No se pudo reintentar. Intenta de nuevo en un minuto.' }, 500);
   }
-  if (!g) return json({ ok: false, error: 'Esta grabación no se puede reintentar desde aquí.' }, 409);
-
-  let resumenReactivado = false;
-  if (g.estado === 'transcrita' || g.estado === 'resumiendo') {
-    const { data: r } = await supabase.from('resumenes_ia').select('id, estado')
-      .eq('grabacion_id', grabacionId).eq('autor', 'ia').order('version', { ascending: false }).limit(1).maybeSingle();
-    if (r?.estado === 'error') {
-      const { error } = await supabase.from('resumenes_ia').update({ estado: 'pendiente' }).eq('id', r.id).eq('estado', 'error');
-      resumenReactivado = !error;
-    }
-  }
-  await auditar('vale', 'reintentar', {
-    grabacionId, patientId: g.patient_id, request, clientAddress,
-    detalle: { hacia: g.estado, resumen_reactivado: resumenReactivado },
-  });
-  return json({ ok: true, estado: g.estado });
 };

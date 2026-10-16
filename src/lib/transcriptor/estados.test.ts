@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   TRANSICIONES, TERMINALES, TransicionInvalidaError,
   destinoReintento, esTransicionValida, estadoParaReintentar, leaseVencido, origenesValidos,
-  transicionar, validarTransicion,
+  transicionar, validarTransicion, limpiezaReintento, reintentar,
 } from './estados';
 import { ESTADOS, type EstadoGrabacion } from './tipos';
 
@@ -95,4 +95,25 @@ test('transicionar arma el update condicional y no deja pisar estado', async () 
   assert.deepEqual(fila, { id: 'g1', estado: 'subiendo' });
   assert.deepEqual(llamadas.find((l) => l[0] === 'update'), ['update', { fin_at: 'T', estado: 'subiendo' }]);
   assert.deepEqual(llamadas.find((l) => l[0] === 'in'), ['in', 'estado', ['grabando', 'pausada']]);
+});
+
+// ─── Correcciones 82-revision-codigo (M2, M3) ────────────────────────────────
+
+test('M2: Reintentar reinicia intentos y backoff (y M3: hacia bot_lanzando suelta la máquina vieja)', async () => {
+  const { SupabaseMemoria } = await import('./pruebas/supabaseMemoria');
+  const db = new SupabaseMemoria();
+  db.tabla('grabaciones').push(
+    { id: 'g1', estado: 'error', estado_antes_error: 'subida', intentos: 6, proximo_intento_at: '2026-10-20T15:00:00Z', ultimo_error: 'x', tomada_en: null },
+    { id: 'g2', estado: 'error', estado_antes_error: 'bot_lanzando', intentos: 3, bot_machine_id: 'maq1', ultimo_error: 'x', tomada_en: null },
+  );
+  const r1 = await reintentar('g1', db.cliente);
+  assert.equal(r1?.estado, 'subida');
+  const g1 = db.tabla('grabaciones')[0];
+  assert.deepEqual([g1.intentos, g1.proximo_intento_at, g1.ultimo_error, g1.estado_antes_error], [0, null, null, null]);
+  assert.equal(g1.bot_machine_id, undefined, 'solo hacia bot_lanzando se toca bot_machine_id');
+  const r2 = await reintentar('g2', db.cliente);
+  assert.equal(r2?.estado, 'bot_lanzando');
+  assert.equal(db.tabla('grabaciones')[1].bot_machine_id, null);
+  assert.equal(db.tabla('grabaciones')[1].intentos, 0);
+  assert.deepEqual(limpiezaReintento('resumiendo'), { estado_antes_error: null, ultimo_error: null, tomada_en: null, intentos: 0, proximo_intento_at: null });
 });

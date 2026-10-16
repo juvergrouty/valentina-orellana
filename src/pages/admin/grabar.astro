@@ -7,7 +7,7 @@ import { getValidAccessToken } from '../../lib/syncCalendar';
 import { pacienteDeTitulo } from '../../lib/boxCala';
 import { mismaPersona } from '../../lib/mismaPersona';
 import { tipoDesdeSessionType } from '../../lib/transcriptor/reglas';
-import { evaluarEnBase, transcriptorActivo, textoMotivo } from '../../lib/transcriptor/consentimiento';
+import { evaluarEnBase, motivoVisible, transcriptorActivo, textoMotivo } from '../../lib/transcriptor/consentimiento';
 
 // Grabador presencial del transcriptor IA (paquete P4). Diseño: docs/transcriptor/40-ux-diseno.md
 // y mockup-grabador.html. Única ruta con micrófono permitido (vercel.json).
@@ -136,7 +136,8 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo')) {
       try {
         const v = await evaluarEnBase(c.patientId, c.tipo);
         c.consentOk = v.puede; c.firmantes = v.firmantes;
-        c.consentTexto = v.puede ? null : textoMotivo(v.motivo, c.nombre);
+        if (v.parejaDeducida) c.tipo = 'pareja'; // H2: la ficha es de pareja (lo decide el servidor)
+        c.consentTexto = v.puede ? null : textoMotivo(motivoVisible(v), c.nombre);
       } catch { /* se verifica igual al preparar */ }
     }));
   } catch (e) {

@@ -5,8 +5,9 @@ import { ejecutarReintento, planReintento, type EstadoParaReintento, type OpsRei
 import { REINTENTABLES, destinoReintento } from './estados';
 import { ESTADOS, type EstadoGrabacion } from './tipos';
 
+const FIN_FUTURO = new Date(Date.now() + 3600_000).toISOString();
 const g = (estado: EstadoGrabacion, antes: EstadoGrabacion | null = null, origen: 'presencial' | 'online' = 'online'): EstadoParaReintento =>
-  ({ estado, estado_antes_error: antes, origen });
+  ({ estado, estado_antes_error: antes, origen, hora_fin_prevista: origen === 'online' ? FIN_FUTURO : null });
 
 test('desde error: vuelve exactamente a estado_antes_error (cada estado reintentable)', () => {
   const telefono = ['creada', 'grabando', 'pausada', 'subiendo'];
@@ -114,4 +115,21 @@ test('ejecución: si otro proceso ya movió la grabación, no se marca resuelta'
   assert.equal(r.ok, false); assert.equal(r.resolver, false);
   const sin = await ejecutarReintento('g1', 'reintentar', { ...a.o, leer: async () => null });
   assert.equal(sin.ok, false);
+});
+
+test('M3: bot caído antes de grabar → se relanza solo si la sesión online no ha terminado', () => {
+  const ahora = new Date('2026-10-20T13:00:00Z');
+  const enCurso = planReintento({ estado: 'error', estado_antes_error: 'bot_lanzando', origen: 'online', hora_fin_prevista: '2026-10-20T13:40:00Z' }, 'reintentar', false, ahora);
+  assert.deepEqual(enCurso, { tipo: 'reintentar_error', destino: 'bot_lanzando', reabrirResumen: false });
+  const terminada = planReintento({ estado: 'error', estado_antes_error: 'bot_lanzando', origen: 'online', hora_fin_prevista: '2026-10-20T12:50:00Z' }, 'reintentar', false, ahora);
+  assert.equal(terminada.tipo, 'manual');
+  if (terminada.tipo === 'manual') assert.match(terminada.mensaje, /ya terminó/);
+});
+
+test('M5: la misma lógica sirve al botón de la ficha (reintentar.ts) y al del aviso', async () => {
+  // Desde la ficha se llama con accion 'reintentar': si falló el resumen, se reabre igual.
+  const a = ops('error', 'resumiendo', 'r9');
+  const r = await ejecutarReintento('g1', 'reintentar', a.o);
+  assert.deepEqual(a.llamadas, ['reintentar', 'reabrir:r9']);
+  assert.equal(r.hacia, 'resumiendo');
 });

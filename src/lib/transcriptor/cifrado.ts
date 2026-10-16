@@ -23,8 +23,16 @@
 //
 // Usa Web Crypto (globalThis.crypto.subtle, Node ≥ 20 y Vercel). Nunca registra llaves
 // ni contenido; los errores solo dicen qué falló.
-import { FORMATO_CIFRADO_MAGIA, FORMATO_CIFRADO_VERSION, type Cifrado, type ContextoCifrado } from './tipos';
+import { FORMATO_CIFRADO_MAGIA, FORMATO_CIFRADO_VERSION, type Cifrado, type ContextoCifrado as ContextoCifradoBase } from './tipos';
 import { variable } from './entorno';
+
+/**
+ * Contexto del cifrado: el de tipos.ts más el tipo 'resumen' (resumenes_ia.contenido_cifrado,
+ * 81-revision-etica-clinica H7). El tipo va en el AAD: un resumen no se descifra como transcripción.
+ */
+export type TipoObjetoCifrado = ContextoCifradoBase['tipo'] | 'resumen';
+export type ContextoCifrado = Omit<ContextoCifradoBase, 'tipo'> & { tipo: TipoObjetoCifrado };
+const TIPOS_OBJETO: readonly TipoObjetoCifrado[] = ['transcripcion', 'pregunta', 'respuesta', 'resumen'];
 
 export const LARGO_CABECERA = 78;
 const LARGO_IV = 12;
@@ -114,7 +122,7 @@ function validarContexto(ctx: ContextoCifrado): void {
   if (!ctx || typeof ctx.claveObjeto !== 'string' || ctx.claveObjeto.length === 0 || ctx.claveObjeto.length > 512) {
     throw new ErrorCifrado('contexto', 'claveObjeto inválida');
   }
-  if (!['transcripcion', 'pregunta', 'respuesta'].includes(ctx.tipo)) {
+  if (!TIPOS_OBJETO.includes(ctx.tipo)) {
     throw new ErrorCifrado('contexto', 'tipo de objeto inválido');
   }
 }
@@ -219,6 +227,8 @@ async function descifrarCon(llaves: LlavesKEK, datos: Uint8Array, ctx: ContextoC
 }
 
 export interface CifradoVOT1 extends Cifrado {
+  cifrar(claro: Uint8Array, ctx: ContextoCifrado): Promise<{ datos: Uint8Array; kekV: number; dekEnvuelta: Uint8Array }>;
+  descifrar(datos: Uint8Array, ctx: ContextoCifrado): Promise<Uint8Array>;
   /**
    * Rotación de KEK (§3.6): descifra con la KEK de la cabecera y vuelve a cifrar con la KEK
    * activa y una DEK NUEVA (sirve también ante filtración). Los objetos son pequeños.

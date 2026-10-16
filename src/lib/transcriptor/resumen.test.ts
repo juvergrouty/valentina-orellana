@@ -148,7 +148,7 @@ test('parser: ejemplo 1 sin Atención; ejemplo 3 con Atención primera', () => {
   const p3 = parsearResumen(EJ3_RESUMEN);
   assert.equal(p3.tieneAtencion, true);
   assert.equal(p3.atencionPrimera, true);
-  assert.equal(p3.citas.length, 2);
+  assert.equal(p3.citas.length, 3); // H15: Temas usa la cita literal «se fue la Fran»
 });
 
 test('normalizarSalida: quita saludo, título y línea del modelo; pone los del código', () => {
@@ -162,7 +162,7 @@ test('normalizarSalida: quita saludo, título y línea del modelo; pone los del 
 
 test('lineaEncabezado de pareja lista solo nombres de pila de los miembros', () => {
   const l = lineaEncabezado('pareja', { fecha: '2026-10-08', modalidad: 'presencial', duracionMin: 60, participantes: [{ rol: 'Terapeuta', nombre: 'Valentina' }, { rol: 'Miembro', nombre: 'Diego Soto' }, { rol: 'Miembro', nombre: 'Javiera' }] });
-  assert.equal(l, '*Sesión de pareja · 8 oct 2026 · presencial · 60 min · Participantes: Diego, Javiera · Generado automáticamente a partir de la transcripción. No reemplaza el juicio clínico.*');
+  assert.equal(l, '*Sesión de pareja · 8 oct 2026 · presencial · 60 min · Participantes: Diego, Javiera · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*');
 });
 
 test('atencionAlInicio sube la sección Atención si el modelo la dejó abajo', () => {
@@ -264,7 +264,7 @@ test('posprocesarResumen (ejemplo 3): encabezado del código, Atención primera,
   const r = posprocesarResumen(salidaModelo, { plantilla: 'individual', sesion: { fecha: '2026-10-10', modalidad: 'presencial', duracionMin: 50 }, transcripcion: T3 });
   assert.equal(r.contenido, EJ3_RESUMEN);
   assert.equal(r.tieneAtencion, true);
-  assert.equal(r.verificacion.verificadas, 2);
+  assert.equal(r.verificacion.verificadas, 3);
 });
 
 test('resumirSesion: Sonnet 5.5 directo, sin metadatos, costo registrado', async () => {

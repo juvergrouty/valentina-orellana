@@ -27,7 +27,7 @@ export const EJ1_TRANSCRIPCION = `
 [00:47:00] Valentina: La próxima vez retomamos lo de "la que puede con todo", que quedó abierto.`;
 
 export const EJ1_RESUMEN = `## Resumen automático (IA)
-*Sesión individual · 3 oct 2026 · online · 50 min · Generado automáticamente a partir de la transcripción. No reemplaza el juicio clínico.*
+*Sesión individual · 3 oct 2026 · online · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*
 
 ### Temas tratados
 - Sobrecarga y plazos en el trabajo.
@@ -119,10 +119,11 @@ export const EJ3_TRANSCRIPCION = `
 
 /**
  * Ejemplo 3 reescrito según 01-decisiones-16oct (Atención neutra: sin prioridad, sin evaluación).
+ * H15 (81-revision): Temas sin inferencias ("se fue" no dice separación): cita literal.
  * Las citas son las del ejemplo original de 20-clinico §5.
  */
 export const EJ3_RESUMEN = `## Resumen automático (IA)
-*Sesión individual · 10 oct 2026 · presencial · 50 min · Generado automáticamente a partir de la transcripción. No reemplaza el juicio clínico.*
+*Sesión individual · 10 oct 2026 · presencial · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*
 
 ### Atención
 - Se habló de ideas de no despertar — Dicho por: Tomás (inferido) — [15:40]
@@ -132,7 +133,7 @@ export const EJ3_RESUMEN = `## Resumen automático (IA)
 _Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._
 
 ### Temas tratados
-- Ánimo desde la separación de "la Fran".
+- Ánimo desde que, en sus palabras, «se fue la Fran» [02:05].
 
 ### Tareas y acuerdos
 - Tomás: si "se pone más fuerte", llamar a su hermano o al *4141 — hasta la próxima sesión.
