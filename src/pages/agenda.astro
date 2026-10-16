@@ -8,8 +8,20 @@ import { getCachedReviews } from '../lib/googleReviews';
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 
+// Las tres lecturas van en paralelo (16 oct 2026): antes una tras otra y la
+// página tardaba ~1 s en empezar a responder.
+const [{ data: settingsRows }, resenas, { data: catalogServices }] = await Promise.all([
+  supabase.from('settings').select('key, value'),
+  getCachedReviews().catch(() => null),
+  supabase
+    .from('services_catalog')
+    .select('id, name, description, type, modality, price, duration_min, price_online, price_presencial, duration_min_online, duration_min_presencial')
+    .eq('visible', true)
+    .order('sort_order')
+    .order('created_at'),
+]);
+
 // Verificar si el pago en consulta está habilitado
-const { data: settingsRows } = await supabase.from('settings').select('key, value');
 const settings: Record<string, string> = {};
 (settingsRows ?? []).forEach(({ key, value }: { key: string; value: string }) => { settings[key] = value; });
 // Pago en consulta y transferencia NO se ofrecen en la web (Valentina, 3 oct
@@ -24,18 +36,11 @@ const recaptchaSiteKey        = settings['recaptcha_site_key'] ?? '';
 // Prueba social y WhatsApp en la agenda (14 oct 2026, panel de expertos): la
 // agenda no mostraba reseñas y quien prefiere que Valentina le agende tenía que
 // buscar el botón flotante.
-const resenas = await getCachedReviews().catch(() => null);
 const lineaResenas = resenas?.total ? `★ ${(resenas.rating ?? 5).toFixed(1).replace('.', ',')} en Google · ${resenas.total} reseñas` : '';
 const waAgendaHref = 'https://wa.me/56972735696?text=' + encodeURIComponent('Hola Valentina, quiero agendar mi hora de terapia. ¿Me ayudas a coordinarla?');
 const grupoParam    = Astro.url.searchParams.get('grupo')    ?? null;
 const servicioParam = Astro.url.searchParams.get('servicio') ?? null;
 
-const { data: catalogServices } = await supabase
-  .from('services_catalog')
-  .select('id, name, description, type, modality, price, duration_min, price_online, price_presencial, duration_min_online, duration_min_presencial')
-  .eq('visible', true)
-  .order('sort_order')
-  .order('created_at');
 
 // Precio y duración que se muestran en las tarjetas Individual / Pareja.
 // Si online y presencial cuestan distinto, se muestra "Desde" el menor.
