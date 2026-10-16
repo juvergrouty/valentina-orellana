@@ -44,7 +44,7 @@ function repoMemoria() {
     async liberarCorreo(id, previo) { const f = filas.find((x) => x.id === id); if (f) f.correo_enviado_at = previo; },
     async obtener(id) { chk(); return structuredClone(filas.find((f) => f.id === id) ?? null); },
     async listarAbiertas(lim) { chk(); return filas.filter((f) => !f.resuelta_at).slice(0, lim).map((f) => ({ ...f, sesion: null }) as AlertaAbierta); },
-    async resolver(fl, por, ahora) {
+    async resolver(fl, ahora) {
       chk();
       let k = 0;
       for (const f of filas) {
@@ -54,7 +54,7 @@ function repoMemoria() {
         if (fl.tipo && f.tipo !== fl.tipo) continue;
         if (fl.prefijo && !f.clave.startsWith(fl.prefijo)) continue;
         if (fl.salvo?.includes(f.clave)) continue;
-        f.resuelta_at = ahora; f.resuelta_por = por; k++;
+        f.resuelta_at = ahora; f.resuelta_por = 'sistema'; k++;
       }
       return k;
     },
@@ -158,7 +158,7 @@ test('nunca lanza: base caída → console.error y correo de respaldo con freno 
   assert.equal(correos[0].para, 'vinculosquesostienen@gmail.com');
 });
 
-test('resolverAlerta (Vale) cierra solo esa; resolverPorPrefijo respeta las que siguen fallando', async () => {
+test('cerrarAlerta (sistema) cierra solo esa; resolverPorPrefijo respeta las que siguen fallando', async () => {
   const { s, m } = servicio();
   await s.registrarAlerta({ tipo: 'salud', titulo: 'a', clave: 'salud:atascadas:g1' });
   await s.registrarAlerta({ tipo: 'salud', titulo: 'b', clave: 'salud:atascadas:g2' });
@@ -166,9 +166,9 @@ test('resolverAlerta (Vale) cierra solo esa; resolverPorPrefijo respeta las que 
   assert.equal(await s.resolverPorPrefijo('salud:atascadas', ['salud:atascadas:g2']), 1);
   assert.equal(m.filas.find((f) => f.clave === 'salud:atascadas:g2')!.resuelta_at, null);
   const id = m.filas.find((f) => f.clave === 'salud:gasto')!.id;
-  assert.equal(await s.resolverAlerta(id), true);
-  assert.equal(m.filas.find((f) => f.id === id)!.resuelta_por, 'vale');
-  assert.equal(await s.resolverAlerta(id), false, 'ya resuelta');
+  assert.equal(await s.cerrarAlerta(id), true);
+  assert.equal(m.filas.find((f) => f.id === id)!.resuelta_por, 'sistema', 'nunca hay cierre manual');
+  assert.equal(await s.cerrarAlerta(id), false, 'ya resuelta');
 });
 
 test('funciones puras: clave, saneo, normalización, freno y correo sin datos de la sesión', () => {

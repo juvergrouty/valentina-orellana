@@ -3,6 +3,11 @@
 // clave (aviso rojo en el panel, correo solo de respaldo). Si todo está bien NO avisa nada: solo
 // guarda el resultado en transcriptor_salud (0014). Cuando un chequeo vuelve a OK, sus alertas
 // 'salud:<chequeo>…' se cierran solas (resuelta_por = 'sistema').
+// Decisión A (02-decisiones-16oct-noche.md): cada aviso tiene una acción que lo repara o "Volver a
+// revisar", que re-ejecuta SOLO ese chequeo al instante: ejecutarSalud(…, { solo: [chequeo] }).
+// Los avisos de sesiones atascadas ('salud:atascadas:<id>:<paso>') NO se cierran porque la sesión
+// "ya no parezca atascada" (p. ej. justo después de Reintentar): se cierran cuando la grabación
+// pasa el paso que estaba atascado (accionesAlerta.alertaSuperada, vía `reconciliar`).
 //
 // Privacidad: las llamadas a proveedores son mínimas y sin datos clínicos (listar 1 objeto, listar
 // 1 transcript, leer la ficha de un modelo). Los detalles guardados son conteos y estados; nunca
@@ -233,7 +238,7 @@ async function chequeoAtascadas({ f, ahora }: Ctx): Promise<ResultadoP8> {
       if (conAlerta.has(g.id)) continue; // ya hay un aviso abierto de esta sesión (lo abrió el orquestador)
       const antes = g.estado_antes_error;
       alertas.push({
-        tipo: tipoPorEstado(antes, g.origen), grabacionId: g.id, clave: clave('atascadas', g.id),
+        tipo: tipoPorEstado(antes, g.origen), grabacionId: g.id, clave: clave('atascadas', antes ? `${g.id}:${antes}` : g.id),
         accion: antes === 'transcrita' || antes === 'resumiendo' ? 'reintentar_resumen'
           : !antes || (g.origen === 'online' && ['grabando', 'pausada', 'subiendo'].includes(antes)) ? 'revisar' : 'reintentar',
         titulo: `Una sesión quedó con error${antes && NOMBRE_PASO[antes] ? ` (${NOMBRE_PASO[antes]})` : ''}`,
@@ -256,7 +261,7 @@ async function chequeoAtascadas({ f, ahora }: Ctx): Promise<ResultadoP8> {
     if (conAlerta.has(g.id)) continue;
     const horas = Math.floor((ahora.getTime() - referencia) / H);
     alertas.push({
-      tipo: tipoPorEstado(g.estado, g.origen), grabacionId: g.id, clave: clave('atascadas', g.id),
+      tipo: tipoPorEstado(g.estado, g.origen), grabacionId: g.id, clave: clave('atascadas', `${g.id}:${g.estado}`),
       accion: presencialEnTelefono || ['grabando', 'pausada', 'subiendo', 'bot_en_lobby'].includes(g.estado) ? 'revisar'
         : g.estado === 'transcrita' || g.estado === 'resumiendo' ? 'reintentar_resumen' : 'reintentar',
       titulo: presencialEnTelefono
@@ -361,6 +366,21 @@ export async function borrarTranscriptsHuerfanos(
     try { await borrar(h.id); borrados.push(h.id); } catch { fallidos.push(h.id); }
   }
   return { borrados, fallidos, omitidos };
+}
+
+/** Botón "Borrar transcripciones sueltas" del aviso: lista, clasifica y borra (con los desconocidos si se pide). */
+export async function borrarHuerfanosAhora(
+  f: Pick<FuentesSalud, 'listarTranscriptsAai' | 'origenTranscriptsAai' | 'borrarTranscriptAai' | 'env'>, ahora: Date,
+  op: { incluirDesconocidos?: boolean } = {},
+): Promise<{ borrados: number; omitidos: number; fallidos: number }> {
+  if (!f.listarTranscriptsAai || !f.origenTranscriptsAai || !f.borrarTranscriptAai || !f.env('ASSEMBLYAI_API_KEY')) {
+    throw new Error('falta ASSEMBLYAI_API_KEY');
+  }
+  const lista = await f.listarTranscriptsAai(new Date(ahora.getTime() - VENTANA_HUERFANOS_MS));
+  const candidatos = lista.filter((x) => !x.borrado).map((x) => x.id);
+  const origen = candidatos.length ? await f.origenTranscriptsAai(candidatos) : { segmentos: [], webhooks: [] };
+  const r = await borrarTranscriptsHuerfanos(clasificarHuerfanos(lista, origen, ahora), f.borrarTranscriptAai, op);
+  return { borrados: r.borrados.length, omitidos: r.omitidos.length, fallidos: r.fallidos.length };
 }
 
 async function chequeoAaiHuerfanos({ f, ahora }: Ctx): Promise<ResultadoP8> {
@@ -511,6 +531,13 @@ export interface DepsEjecucion {
   guardarSalud: (filas: ReturnType<typeof filaSalud>[]) => Promise<void>;
   /** Tiempo máximo por chequeo (default 15 s). */
   timeoutMs?: number;
+  /** Cierra los avisos de sesiones cuyo paso ya salió bien (accionesAlerta.alertaSuperada). */
+  reconciliar?: () => Promise<void>;
+}
+
+export interface OpcionesSalud {
+  /** "Volver a revisar" de un aviso: corre SOLO estos chequeos (aunque el transcriptor esté apagado). */
+  solo?: readonly ChequeoP8[];
 }
 
 export interface ResumenSalud {
@@ -518,6 +545,8 @@ export interface ResumenSalud {
   activo: boolean;
   resultados: { chequeo: ChequeoP8; ok: boolean; revisado: boolean }[];
   alertas: number;
+  /** false = no se pudo guardar el resultado en transcriptor_salud (aviso 'salud:registro'). */
+  registroOk: boolean;
 }
 
 function conTiempo<T>(p: Promise<T>, ms: number, nombre: string): Promise<T> {
@@ -528,7 +557,7 @@ function conTiempo<T>(p: Promise<T>, ms: number, nombre: string): Promise<T> {
   ]);
 }
 
-export async function ejecutarSalud(d: DepsEjecucion): Promise<ResumenSalud> {
+export async function ejecutarSalud(d: DepsEjecucion, op: OpcionesSalud = {}): Promise<ResumenSalud> {
   const ahora = d.ahora ?? new Date();
   // Dos chequeos leen los mismos segmentos: una sola consulta.
   let segmentos: Promise<SegmentoSalud[]> | null = null;
@@ -539,7 +568,7 @@ export async function ejecutarSalud(d: DepsEjecucion): Promise<ResumenSalud> {
 
   // Con el transcriptor apagado solo se revisan los datos que ya existan y la regla del micrófono
   // (no tiene sentido avisar que faltan llaves de algo que Vale todavía no activa).
-  const tareas: [ChequeoP8, () => Promise<ResultadoP8> | ResultadoP8][] = [
+  let tareas: [ChequeoP8, () => Promise<ResultadoP8> | ResultadoP8][] = [
     ['permisos_microfono', () => chequeoMicrofono(ctx)],
     ['atascadas', () => chequeoAtascadas(ctx)],
     ['audio_borrado', () => chequeoAudioBorrado(ctx)],
@@ -547,7 +576,7 @@ export async function ejecutarSalud(d: DepsEjecucion): Promise<ResumenSalud> {
     ['aai_huerfanos', () => chequeoAaiHuerfanos(ctx)],
     ['copias_b2', () => chequeoCopiasB2(ctx)],
   ];
-  if (ajustes.activo) {
+  if (ajustes.activo || op.solo) {
     tareas.unshift(['config', () => chequeoConfig(ctx)]);
     tareas.push(
       ['r2', () => chequeoProveedor('r2', f.probarR2, 'Cloudflare R2 (audio y transcripciones)')],
@@ -560,6 +589,7 @@ export async function ejecutarSalud(d: DepsEjecucion): Promise<ResumenSalud> {
   } else {
     // Sin el transcriptor activo, R2 solo se revisa si hay datos (lo hacen los chequeos de arriba).
   }
+  if (op.solo) tareas = tareas.filter(([c]) => op.solo!.includes(c));
 
   const resultados = await Promise.all(tareas.map(async ([chequeo, correr]) => {
     try {
@@ -582,16 +612,26 @@ export async function ejecutarSalud(d: DepsEjecucion): Promise<ResumenSalud> {
   for (const { r } of resultados) for (const a of r.alertas) { await d.registrar(a); nAlertas++; }
   for (const { r, revisado } of resultados) {
     if (!revisado) continue;
+    if (r.chequeo === 'atascadas') {
+      // Las de cada sesión se cierran cuando su paso sale bien (reconciliar), no por dejar de verse atascadas.
+      await d.resolverPorPrefijo(clave('atascadas', 'no_revisado'), []);
+      continue;
+    }
     await d.resolverPorPrefijo(clave(r.chequeo), r.alertas.map((a) => a.clave!).filter(Boolean));
+  }
+  if (d.reconciliar) {
+    try { await d.reconciliar(); } catch (e) { console.warn('[transcriptor/salud] reconciliar avisos:', err(e)); }
   }
 
   // Resultado en transcriptor_salud (si falla, se avisa: es el registro del chequeo).
+  let registroOk = true;
   try {
     const previas = new Map((await d.saludPrevia()).map((p) => [p.chequeo, p]));
     await d.guardarSalud(resultados.map(({ r }) => filaSalud(previas.get(r.chequeo as ChequeoSalud), r, ahora)));
   } catch (e) {
     await d.registrar({ tipo: 'salud', clave: 'salud:registro', accion: 'revisar', titulo: 'No se pudo guardar el resultado del chequeo diario', detalle: err(e) });
     nAlertas++;
+    registroOk = false;
   }
 
   return {
@@ -599,6 +639,7 @@ export async function ejecutarSalud(d: DepsEjecucion): Promise<ResumenSalud> {
     activo: ajustes.activo,
     resultados: resultados.map(({ r, revisado }) => ({ chequeo: r.chequeo, ok: r.ok, revisado })),
     alertas: nAlertas,
+    registroOk,
   };
 }
 
@@ -785,12 +826,18 @@ export async function fuentesReales(): Promise<FuentesSalud> {
   };
 }
 
-/** Ejecución completa con Supabase + alertas reales. */
-export async function ejecutarSaludReal(ahora = new Date()): Promise<ResumenSalud> {
+/** Ejecución completa (o solo algunos chequeos) con Supabase + alertas reales. */
+export async function ejecutarSaludReal(ahora = new Date(), op: OpcionesSalud = {}): Promise<ResumenSalud> {
   const { supabase: db } = await import('../supabase');
   const alertas = await import('./alertas');
   return ejecutarSalud({
     ahora,
+    async reconciliar() {
+      // Listar cierra los avisos de sesiones cuyo paso ya salió bien. En el chequeo completo
+      // también se revisan los avisos sueltos que nadie más cierra (calendario, ajustes).
+      await alertas.listarAlertasAbiertas(500);
+      if (!op.solo) await (await import('./accionesAlerta')).revisarAvisosSueltos();
+    },
     fuentes: await fuentesReales(),
     registrar: alertas.registrarAlerta,
     resolverPorPrefijo: alertas.resolverAlertasPorPrefijo,
@@ -804,5 +851,5 @@ export async function ejecutarSaludReal(ahora = new Date()): Promise<ResumenSalu
       const { error } = await db.from('transcriptor_salud').upsert(filas, { onConflict: 'chequeo' });
       if (error) throw new Error(`transcriptor_salud: ${error.message}`);
     },
-  });
+  }, op);
 }

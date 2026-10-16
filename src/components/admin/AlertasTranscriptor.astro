@@ -1,14 +1,20 @@
 ---
 // Aviso rojo del transcriptor en TODAS las páginas del panel (decisión 8, 16 oct 2026).
-// Muestra cada error técnico abierto (qué falló, de qué sesión) con su botón para resolverlo ahí
-// mismo. Queda hasta que se resuelve. Datos: src/lib/transcriptor/alertas.ts (tabla 0017).
+// Muestra cada error técnico abierto (qué falló, de qué sesión) con los botones que lo REPARAN
+// (decisión A, 16 oct noche): Reintentar, Reintentar resumen, Rehacer copia en B2, Borrar en
+// AssemblyAI, Lanzar respaldo ahora… y siempre "Volver a revisar". NO hay cierre manual:
+// el aviso desaparece solo cuando el problema está arreglado. Tabla: docs/transcriptor/84-avisos-acciones.md.
+// Datos: src/lib/transcriptor/alertas.ts (tabla 0017) + accionesAlerta.ts.
 // Si la tabla aún no existe o la base falla, no muestra nada (nunca rompe el panel).
-// `alertas` por props solo para la vista previa/pruebas visuales.
+// `alertas` por props solo para la vista previa/pruebas visuales; `?demo=avisos` solo en `astro dev`.
 import { listarAlertasAbiertas, etiquetaTipo, type AlertaAbierta } from '../../lib/transcriptor/alertas';
+import { accionesDisponibles, etiquetaAccion, instruccionDe, INFO_ACCION } from '../../lib/transcriptor/accionesAlerta';
+import { alertasDemo } from '../../lib/transcriptor/pruebas/avisosDemo';
 
 interface Props { alertas?: AlertaAbierta[] }
 const MAX_VISIBLES = 6;
-const alertas = Astro.props.alertas ?? await listarAlertasAbiertas(MAX_VISIBLES + 20);
+const demo = import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'avisos';
+const alertas = Astro.props.alertas ?? (demo ? alertasDemo() : await listarAlertasAbiertas(MAX_VISIBLES + 20));
 const visibles = alertas.slice(0, MAX_VISIBLES);
 const n = alertas.length;
 
@@ -25,7 +31,6 @@ function fechaSesion(a: AlertaAbierta): string | null {
   return `${txt} · ${s.origen === 'online' ? 'online' : 'presencial'}`;
 }
 const cuando = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
-const BOTON: Record<string, string> = { reintentar: 'Reintentar', reintentar_resumen: 'Reintentar resumen' };
 ---
 {n > 0 && (
   <section id="tr-alertas" class="tr-alertas" role="alert" aria-labelledby="tr-alertas-titulo">
@@ -35,6 +40,9 @@ const BOTON: Record<string, string> = { reintentar: 'Reintentar', reintentar_res
     <ul class="tr-lista">
       {visibles.map((a) => {
         const fecha = fechaSesion(a);
+        const sesion = a.sesion_desconocida ? undefined : a.sesion;
+        const acciones = accionesDisponibles(a, sesion);
+        const instruccion = instruccionDe(a, sesion);
         return (
           <li class="tr-item" data-id={a.id}>
             <div class="tr-texto">
@@ -46,13 +54,14 @@ const BOTON: Record<string, string> = { reintentar: 'Reintentar', reintentar_res
                 {' · '}{a.veces > 1 ? `${a.veces} veces, la última el ${cuando(a.ultima_vez)}` : `el ${cuando(a.ultima_vez)}`}
               </p>
               {a.detalle && <p class="tr-detalle">{a.detalle}</p>}
+              {instruccion && <p class="tr-instr">{instruccion}</p>}
               <p class="tr-estado" aria-live="polite"></p>
             </div>
             <div class="tr-botones">
-              {(a.accion === 'reintentar' || a.accion === 'reintentar_resumen') && a.grabacion_id && (
-                <button type="button" class="tr-btn tr-btn-principal" data-accion={a.accion}>{BOTON[a.accion]}</button>
-              )}
-              <button type="button" class="tr-btn tr-btn-sec" data-accion="resolver">Marcar como resuelto</button>
+              {acciones.map((acc, i) => (
+                <button type="button" class={`tr-btn ${i === 0 ? 'tr-btn-principal' : 'tr-btn-sec'}`} data-accion={acc}
+                  data-confirmar={INFO_ACCION[acc].confirmar ?? ''} title={INFO_ACCION[acc].queHace}>{etiquetaAccion(acc, sesion)}</button>
+              ))}
             </div>
           </li>
         );
@@ -73,8 +82,9 @@ const BOTON: Record<string, string> = { reintentar: 'Reintentar', reintentar_res
   .tr-texto { flex: 1 1 320px; min-width: 0; }
   .tr-que { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
   .tr-tipo { font-weight: 700; }
-  .tr-meta, .tr-detalle { margin: 0.15rem 0 0; font-size: 0.8rem; color: rgba(255,255,255,.88); overflow-wrap: anywhere; }
+  .tr-meta, .tr-detalle, .tr-instr { margin: 0.15rem 0 0; font-size: 0.8rem; color: rgba(255,255,255,.88); overflow-wrap: anywhere; }
   .tr-detalle { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
+  .tr-instr { color: #fff; font-weight: 500; }
   .tr-meta a, .tr-mas a { color: #fff; font-weight: 600; text-decoration: underline; }
   .tr-estado { margin: 0.25rem 0 0; font-size: 0.8rem; font-weight: 600; }
   .tr-estado:empty { display: none; }
@@ -96,17 +106,43 @@ const BOTON: Record<string, string> = { reintentar: 'Reintentar', reintentar_res
 </style>
 
 <script>
-  // Botones del aviso: llaman a /api/admin/transcriptor/alertas (cabecera X-Panel exigida por el servidor).
+  // Botones del aviso: POST /api/admin/transcriptor/alertas (cabecera X-Panel exigida por el
+  // servidor). El aviso solo se quita cuando el servidor confirma que quedó cerrado (problema
+  // arreglado). Tras Reintentar se consulta cada 15 s (hasta 10 min) si el paso ya salió bien.
   const caja = document.getElementById('tr-alertas');
+  const quitar = (li: HTMLLIElement) => {
+    li.remove();
+    const quedan = caja?.querySelectorAll('.tr-item').length ?? 0;
+    const total = Math.max(0, Number(document.getElementById('tr-alertas-n')?.textContent ?? '1') - 1);
+    if (quedan === 0 && total === 0) { caja?.remove(); return; }
+    if (quedan === 0) { location.reload(); return; }
+    document.getElementById('tr-alertas-n')!.textContent = String(total);
+    document.getElementById('tr-alertas-pal')!.textContent = total === 1 ? 'problema' : 'problemas';
+  };
+  const vigilar = (li: HTMLLIElement, estado: HTMLElement) => {
+    let vueltas = 0;
+    const t = setInterval(async () => {
+      if (++vueltas > 40 || !li.isConnected) { clearInterval(t); return; }
+      try {
+        const r = await fetch(`/api/admin/transcriptor/alertas?id=${encodeURIComponent(li.dataset.id ?? '')}`, { headers: { 'X-Panel': '1' } });
+        const j = await r.json() as { ok?: boolean; abierta?: boolean };
+        if (j.ok && j.abierta === false) {
+          clearInterval(t);
+          estado.textContent = '✓ Arreglado: el paso salió bien.';
+          setTimeout(() => quitar(li), 1600);
+        }
+      } catch { /* se vuelve a intentar */ }
+    }, 15_000);
+  };
   caja?.querySelectorAll<HTMLLIElement>('.tr-item').forEach((li) => {
     const estado = li.querySelector<HTMLElement>('.tr-estado')!;
     const botones = li.querySelectorAll<HTMLButtonElement>('.tr-btn');
     botones.forEach((btn) => btn.addEventListener('click', async () => {
       const accion = btn.dataset.accion;
-      if (accion === 'resolver' && !confirm('¿Marcar como resuelto? El aviso desaparece del panel (si el error vuelve a pasar, aparece de nuevo).')) return;
+      if (btn.dataset.confirmar && !confirm(btn.dataset.confirmar)) return;
       botones.forEach((b) => (b.disabled = true));
-      estado.textContent = accion === 'resolver' ? 'Guardando…' : 'Reintentando…';
-      let res: { ok?: boolean; mensaje?: string; error?: string } = {};
+      estado.textContent = accion === 'revisar' ? 'Revisando…' : 'Haciéndolo…';
+      let res: { ok?: boolean; cerrada?: boolean; mensaje?: string; error?: string } = {};
       try {
         const r = await fetch('/api/admin/transcriptor/alertas', {
           method: 'POST',
@@ -115,21 +151,14 @@ const BOTON: Record<string, string> = { reintentar: 'Reintentar', reintentar_res
         });
         res = await r.json().catch(() => ({ ok: false, error: `Error ${r.status}` }));
       } catch { res = { ok: false, error: 'Sin conexión. Intenta de nuevo.' }; }
-      if (res.ok) {
-        estado.textContent = `✓ ${res.mensaje ?? 'Listo.'}`;
-        setTimeout(() => {
-          li.remove();
-          const quedan = caja.querySelectorAll('.tr-item').length;
-          const total = Math.max(0, Number(document.getElementById('tr-alertas-n')?.textContent ?? '1') - 1);
-          if (quedan === 0 && total === 0) { caja.remove(); return; }
-          if (quedan === 0) { location.reload(); return; }
-          document.getElementById('tr-alertas-n')!.textContent = String(total);
-          document.getElementById('tr-alertas-pal')!.textContent = total === 1 ? 'problema' : 'problemas';
-        }, 1600);
-      } else {
-        estado.textContent = `⚠ ${res.error ?? 'No se pudo completar.'}`;
-        botones.forEach((b) => (b.disabled = false));
+      if (res.cerrada) {
+        estado.textContent = `✓ ${res.mensaje ?? 'Arreglado.'}`;
+        setTimeout(() => quitar(li), 1600);
+        return;
       }
+      estado.textContent = res.ok ? `✓ ${res.mensaje ?? 'Listo.'}` : `⚠ ${res.error ?? 'No se pudo completar.'}`;
+      botones.forEach((b) => (b.disabled = false));
+      if (res.ok && (accion === 'reintentar' || accion === 'reintentar_resumen' || accion === 'rescatar')) vigilar(li, estado);
     }));
   });
 </script>

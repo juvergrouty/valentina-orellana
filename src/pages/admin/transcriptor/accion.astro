@@ -1,0 +1,201 @@
+---
+// /admin/transcriptor/accion?alerta=<id>&accion=<accion> — a donde llevan los botones del correo
+// de respaldo de un aviso del transcriptor (decisión A, 02-decisiones-16oct-noche.md).
+//   • Exige la sesión del panel (y la passkey cuando es obligatoria), igual que todo /admin: lo
+//     hace el middleware. Además aquí la lista de sesiones cerradas se revisa FALLANDO CERRADO.
+//   • NUNCA ejecuta nada por GET: muestra qué se va a hacer y un botón grande "Hacerlo ahora"
+//     que hace POST a /api/admin/transcriptor/alertas con la protección del panel (Origin propio
+//     + cabecera X-Panel + sesión, guardiaPanel).
+//   • Si el aviso ya se resolvió (o su paso ya salió bien), lo dice y no ofrece nada.
+// `?demo=avisos` muestra datos inventados SOLO en `astro dev`.
+export const prerender = false;
+import AdminLayout from '../../../components/admin/AdminLayout.astro';
+import { COOKIE_ADMIN, tokenRevocado } from '../../../lib/adminSession';
+import { etiquetaTipo, type AlertaFila, type SesionDeAlerta } from '../../../lib/transcriptor/alertas';
+import {
+  accionesDisponibles, alertaSuperada, claseDe, esAccionAviso, esDeGrabacion, etiquetaAccion, instruccionDe, INFO_ACCION, opsAccionesReales,
+  type AccionAviso,
+} from '../../../lib/transcriptor/accionesAlerta';
+import { alertasDemo } from '../../../lib/transcriptor/pruebas/avisosDemo';
+import { esUuid } from '../../../lib/transcriptor/peticion';
+
+const idParam = Astro.url.searchParams.get('alerta') ?? '';
+const accionParam = Astro.url.searchParams.get('accion') ?? '';
+const demo = import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'avisos';
+
+type Vista =
+  | { k: 'invalido' } | { k: 'no_disponible' } | { k: 'no_existe' } | { k: 'error' }
+  | { k: 'resuelta'; cuando: string | null }
+  | { k: 'abierta'; alerta: AlertaFila; sesion: SesionDeAlerta | null | undefined; accion: AccionAviso | null; disponibles: AccionAviso[] };
+
+let vista: Vista;
+if (!esUuid(idParam)) {
+  vista = { k: 'invalido' };
+} else if (demo) {
+  const a = alertasDemo().find((x) => x.id === idParam) ?? alertasDemo()[0];
+  if (accionParam === 'resuelta') vista = { k: 'resuelta', cuando: new Date().toISOString() };
+  else {
+    const disponibles = accionesDisponibles(a, a.sesion);
+    vista = { k: 'abierta', alerta: a, sesion: a.sesion, accion: esAccionAviso(accionParam) && disponibles.includes(accionParam) ? accionParam : null, disponibles };
+  }
+} else {
+  let revocada: boolean | 'error';
+  try { revocada = await tokenRevocado(Astro.cookies.get(COOKIE_ADMIN)?.value ?? '', { estricto: true }); }
+  catch { revocada = 'error'; }
+  if (revocada === 'error') vista = { k: 'no_disponible' };
+  else if (revocada) return Astro.redirect('/admin/login');
+  else {
+    try {
+      const ops = await opsAccionesReales();
+      const a = await ops.obtenerAlerta(idParam);
+      if (!a) vista = { k: 'no_existe' };
+      else if (a.resuelta_at) vista = { k: 'resuelta', cuando: a.resuelta_at };
+      else {
+        const deGrabacion = esDeGrabacion(claseDe(a)) && !!a.grabacion_id;
+        const sesion = deGrabacion ? await ops.leerSesion(a.grabacion_id!) : undefined;
+        if (deGrabacion && alertaSuperada(a, sesion)) {
+          await ops.cerrarAlerta(a.id); // el paso ya salió bien: mismo cierre automático que el panel
+          vista = { k: 'resuelta', cuando: new Date().toISOString() };
+        } else {
+          const disponibles = accionesDisponibles(a, sesion);
+          vista = { k: 'abierta', alerta: a, sesion, accion: esAccionAviso(accionParam) && disponibles.includes(accionParam) ? accionParam : null, disponibles };
+        }
+      }
+    } catch (e) {
+      console.error('[admin/transcriptor/accion]', e instanceof Error ? e.message : e);
+      vista = { k: 'error' };
+    }
+  }
+}
+if (vista.k === 'no_disponible') Astro.response.status = 503;
+
+const cuando = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hour12: false });
+const fechaSesion = (s: SesionDeAlerta) => {
+  const [y, m, d] = s.session_date.split('-').map(Number);
+  const f = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('es-CL', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
+  const h = s.inicio_at ? `, ${new Date(s.inicio_at).toLocaleTimeString('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hour12: false })}` : '';
+  return `${f}${h} · ${s.origen === 'online' ? 'online' : 'presencial'}`;
+};
+const enlace = (acc: string) => `/admin/transcriptor/accion?alerta=${encodeURIComponent(idParam)}&accion=${encodeURIComponent(acc)}${demo ? '&demo=avisos' : ''}`;
+---
+<AdminLayout title="Arreglar un aviso del transcriptor" current="/admin/transcriptor">
+  <div class="ac-pagina">
+    <p class="ac-volver"><a href="/admin">← Volver al panel</a></p>
+
+    {vista.k === 'invalido' && (
+      <div class="ac-caja"><h1 class="ac-h1">Enlace incompleto</h1><p>Este enlace no trae un aviso válido. Abre el panel: los avisos están arriba, en rojo.</p></div>
+    )}
+    {vista.k === 'no_disponible' && (
+      <div class="ac-caja"><h1 class="ac-h1">Intenta en unos minutos</h1><p>No se pudo verificar tu sesión del panel en este momento. Por seguridad no se muestra el aviso.</p></div>
+    )}
+    {vista.k === 'error' && (
+      <div class="ac-caja"><h1 class="ac-h1">No se pudo cargar el aviso</h1><p>Intenta de nuevo en un minuto o ábrelo desde el panel.</p></div>
+    )}
+    {vista.k === 'no_existe' && (
+      <div class="ac-caja"><h1 class="ac-h1">Ese aviso ya no existe</h1><p>No hay nada que hacer. Si hay otro problema, aparece arriba en rojo en el panel.</p></div>
+    )}
+    {vista.k === 'resuelta' && (
+      <div class="ac-caja ac-ok" id="ac-resuelta">
+        <h1 class="ac-h1">✓ Este aviso ya se resolvió</h1>
+        <p>El problema quedó arreglado{vista.cuando ? ` (${cuando(vista.cuando)})` : ''}. No hay nada que hacer.</p>
+        <p><a class="ac-link" href="/admin">Ir al panel</a></p>
+      </div>
+    )}
+    {vista.k === 'abierta' && (() => {
+      const a = vista.alerta;
+      const accion = vista.accion;
+      const instruccion = instruccionDe(a, vista.sesion);
+      const otras = vista.disponibles.filter((x) => x !== accion);
+      return (
+        <div class="ac-caja" id="ac-caja" data-id={a.id} data-accion={accion ?? ''}>
+          <p class="ac-tipo">{etiquetaTipo(a.tipo)}</p>
+          <h1 class="ac-h1">{a.titulo}</h1>
+          {vista.sesion && <p class="ac-meta">Sesión del {fechaSesion(vista.sesion)}{vista.sesion.paciente ? ` · ${vista.sesion.paciente}` : ''}</p>}
+          {a.detalle && <p class="ac-detalle">{a.detalle}</p>}
+          {accion ? (
+            <>
+              <h2 class="ac-h2">Qué se va a hacer</h2>
+              <p class="ac-que"><strong>{etiquetaAccion(accion, vista.sesion)}:</strong> {INFO_ACCION[accion].queHace}</p>
+              {INFO_ACCION[accion].confirmar && <p class="ac-advertencia">{INFO_ACCION[accion].confirmar?.replace(' ¿Seguir?', '')}</p>}
+              <button type="button" id="ac-hacer" class="ac-boton">Hacerlo ahora</button>
+              <p id="ac-estado" class="ac-estado" aria-live="polite"></p>
+            </>
+          ) : (
+            <p class="ac-que">Esa acción ya no corresponde a este aviso. Elige una de estas:</p>
+          )}
+          {instruccion && <p class="ac-instr">{instruccion}</p>}
+          {otras.length > 0 && (
+            <div class="ac-otras">
+              <p class="ac-otras-t">{accion ? 'Otras acciones para este aviso' : 'Acciones para este aviso'}</p>
+              {otras.map((x) => <a class="ac-otra" href={enlace(x)}>{etiquetaAccion(x, vista.sesion)}</a>)}
+            </div>
+          )}
+          <p class="ac-nota">El aviso se cierra solo cuando el problema queda arreglado.</p>
+        </div>
+      );
+    })()}
+  </div>
+</AdminLayout>
+
+<style>
+  .ac-pagina { max-width: 560px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+  .ac-volver { margin: 0 0 1rem; font-size: 0.9rem; }
+  .ac-volver a, .ac-link { color: #b91c1c; font-weight: 600; }
+  .ac-caja { background: #fff; border: 1px solid #e7e2dc; border-top: 4px solid #b91c1c; border-radius: 10px; padding: 1.25rem; }
+  .ac-ok { border-top-color: #15803d; }
+  .ac-tipo { margin: 0 0 0.25rem; font-size: 0.75rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #b91c1c; }
+  .ac-h1 { margin: 0 0 0.5rem; font-size: 1.15rem; line-height: 1.35; font-weight: 700; color: #1a1a18; overflow-wrap: anywhere; }
+  .ac-h2 { margin: 1.25rem 0 0.35rem; font-size: 0.95rem; font-weight: 700; color: #1a1a18; }
+  .ac-meta, .ac-detalle, .ac-nota { margin: 0.25rem 0 0; font-size: 0.85rem; color: #6b6860; overflow-wrap: anywhere; }
+  .ac-detalle { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+  .ac-que, .ac-instr { margin: 0.25rem 0 0; font-size: 0.92rem; line-height: 1.5; color: #1a1a18; }
+  .ac-instr { margin-top: 1rem; padding: 0.75rem; background: #fef2f2; border-radius: 8px; }
+  .ac-advertencia { margin: 0.5rem 0 0; font-size: 0.85rem; font-weight: 600; color: #b91c1c; }
+  .ac-boton { display: block; width: 100%; min-height: 56px; margin: 1.25rem 0 0; border: 0; border-radius: 10px; background: #b91c1c; color: #fff;
+    font: inherit; font-size: 1.1rem; font-weight: 700; cursor: pointer; touch-action: manipulation; }
+  .ac-boton:hover { background: #991b1b; }
+  .ac-boton:focus-visible { outline: 3px solid #fde68a; outline-offset: 2px; }
+  .ac-boton:disabled { opacity: .6; cursor: wait; }
+  .ac-estado { margin: 0.75rem 0 0; font-size: 0.95rem; font-weight: 600; }
+  .ac-estado:empty { display: none; }
+  .ac-estado.ok { color: #15803d; }
+  .ac-estado.mal { color: #b91c1c; }
+  .ac-otras { margin: 1.25rem 0 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .ac-otras-t { width: 100%; margin: 0; font-size: 0.8rem; color: #6b6860; }
+  .ac-otra { display: inline-flex; align-items: center; min-height: 44px; padding: 0 0.9rem; border: 2px solid #b91c1c; border-radius: 8px;
+    color: #b91c1c; font-weight: 600; font-size: 0.88rem; text-decoration: none; }
+  .ac-nota { margin-top: 1.25rem; }
+</style>
+
+<script>
+  // "Hacerlo ahora": POST con la protección del panel (X-Panel + Origin propio + sesión).
+  const caja = document.getElementById('ac-caja');
+  const boton = document.getElementById('ac-hacer') as HTMLButtonElement | null;
+  const estado = document.getElementById('ac-estado');
+  boton?.addEventListener('click', async () => {
+    if (!caja || !estado) return;
+    boton.disabled = true;
+    estado.className = 'ac-estado';
+    estado.textContent = 'Haciéndolo…';
+    let res: { ok?: boolean; cerrada?: boolean; mensaje?: string; error?: string } = {};
+    try {
+      const r = await fetch('/api/admin/transcriptor/alertas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+        body: JSON.stringify({ id: caja.dataset.id, accion: caja.dataset.accion }),
+      });
+      res = await r.json().catch(() => ({ ok: false, error: `Error ${r.status}` }));
+      if (r.status === 401) res = { ok: false, error: 'Tu sesión del panel venció. Vuelve a entrar y abre otra vez el enlace del correo.' };
+    } catch { res = { ok: false, error: 'Sin conexión. Intenta de nuevo.' }; }
+    if (res.cerrada) {
+      estado.className = 'ac-estado ok';
+      estado.textContent = `✓ ${res.mensaje ?? 'Arreglado.'}`;
+      boton.remove();
+      return;
+    }
+    estado.className = `ac-estado ${res.ok ? 'ok' : 'mal'}`;
+    estado.textContent = res.ok ? `✓ ${res.mensaje ?? 'Listo.'}` : `⚠ ${res.error ?? 'No se pudo completar.'}`;
+    boton.disabled = false;
+    if (res.ok) boton.textContent = 'Hacerlo otra vez';
+  });
+</script>

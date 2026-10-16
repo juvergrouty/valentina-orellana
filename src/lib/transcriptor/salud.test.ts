@@ -123,9 +123,10 @@ test('atascadas: >2 h en estado intermedio; error sin aviso; respeta avisos ya a
   assert.equal(por.get('g-res')!.tipo, 'resumen'); assert.equal(por.get('g-res')!.accion, 'reintentar_resumen');
   assert.equal(por.get('g-err')!.accion, 'reintentar_resumen');
   assert.equal(por.get('g-tel-13h')!.accion, 'revisar'); assert.match(por.get('g-tel-13h')!.titulo, /teléfono/);
-  assert.equal(por.get('g-trans')!.clave, 'salud:atascadas:g-trans');
-  const r = resueltas.find((x) => x.prefijo === 'salud:atascadas')!;
-  assert.ok(r.salvo.includes('salud:atascadas:g-trans'), 'no cierra las que siguen fallando');
+  assert.equal(por.get('g-trans')!.clave, 'salud:atascadas:g-trans:transcribiendo', 'la clave lleva el paso atascado');
+  // Las de cada sesión NO se cierran por prefijo (se cierran cuando el paso sale bien, reconciliar).
+  assert.ok(!resueltas.some((x) => x.prefijo === 'salud:atascadas'));
+  assert.ok(resueltas.some((x) => x.prefijo === 'salud:atascadas:no_revisado'));
 });
 
 test('audio que debió borrarse (base y bucket) y transcripts de AssemblyAI sin borrar', async () => {
