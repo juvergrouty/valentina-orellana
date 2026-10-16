@@ -72,7 +72,7 @@ export function consentSections(contactEmail: string): ConsentSection[] {
       titulo: 'Tus derechos',
       parrafos: [
         'Puedes pedir en cualquier momento acceder a tus datos, corregirlos, eliminarlos, oponerte a un uso, pedir una copia para llevártela o que se bloqueen, escribiendo al correo de arriba. La eliminación tiene un límite: la ficha clínica debe conservarse el plazo legal.',
-        'Puedes retirar este consentimiento cuando quieras, sin dar explicaciones. Retirarlo no afecta lo que ya se hizo antes, y retirar las autorizaciones 2 o 3 no cambia en nada tu atención. Puedes retirar la autorización de grabación por el mismo link de este consentimiento, por correo o por WhatsApp. Desde ese momento dejo de grabar, y lo ya transcrito queda en tu ficha con la misma confidencialidad.',
+        'Puedes retirar este consentimiento cuando quieras, sin dar explicaciones. Retirarlo no afecta lo que ya se hizo antes, y retirar las autorizaciones 2 o 3 no cambia en nada tu atención. Puedes retirar solo la autorización de grabación escribiéndome por correo o por WhatsApp. Desde ese momento dejo de grabar, y lo ya transcrito queda en tu ficha con la misma confidencialidad.',
         'Si sientes que tus derechos no fueron respetados, puedes reclamar ante la Agencia de Protección de Datos Personales.',
       ],
     },
