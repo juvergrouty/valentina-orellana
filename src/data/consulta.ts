@@ -47,4 +47,6 @@ export const PERFILES = {
   // a psicologiahoy.com con otro slug. Verificado con curl -sIL.
   psychologyToday:'https://www.psicologiahoy.com/cl/psicologos/ps-valentina-orellana-jaramillo-psicologa-adult-las-condes-rm/1580324',
   encuadrado:     'https://encuadrado.com/p/valentina-orellana-jaramillo',
+  // Perfil personal (16 oct 2026): solo en el JSON-LD de la persona.
+  linkedin:       'https://www.linkedin.com/in/valentina-orellana-jaramillo-575971161/',
 };

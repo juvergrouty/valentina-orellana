@@ -3,11 +3,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import PageHero   from '../components/sections/PageHero.astro';
 ---
 
-<BaseLayout title="Sobre mí · Psicóloga en Las Condes" description="Conoce a la Ps. Valentina Orellana: más de 15 años acompañando a adultos y parejas, su formación en terapia sistémica y su forma de trabajar.">
+<BaseLayout title="Sobre mí · Valentina Orellana Jaramillo" description="Conoce a la Ps. Valentina Orellana Jaramillo: psicóloga UDD en ejercicio desde 2011, enfoque sistémico, adultos y parejas en Las Condes y online.">
 
   <!-- Celular: la foto con su hijo va en la portada y no se repite abajo; computador:
        portada del escritorio y la foto al lado del texto (Vale, 14 oct 2026). -->
-  <PageHero label="Mi historia" title="Sobre mí" image="/images/banner-sobre-mi.webp" imageMobile="/images/sobre-mi-2.webp" imageMobilePosition="50% 20%" />
+  <PageHero label="Sobre mí · Psicóloga" title="Valentina Orellana Jaramillo" image="/images/banner-sobre-mi.webp" imageMobile="/images/sobre-mi-2.webp" imageMobilePosition="50% 20%" />
 
   <!-- Contenido -->
   <section class="py-section bg-sand">
@@ -45,6 +45,24 @@ import PageHero   from '../components/sections/PageHero.astro';
             <p>Tampoco creo que la terapia tenga que ser un camino en solitario, ni para ti ni para mí. Si siento que alguien más puede aportar en tu proceso, como un psiquiatra u otro especialista, te lo voy a decir con honestidad. Y si llega un momento en que lo que hacemos juntos ya no te está ayudando, prefiero decírtelo y acompañarte a encontrar a quien sí pueda hacerlo. Tu proceso siempre va primero.</p>
             <p>Mi objetivo es ofrecer un espacio seguro, humano y directo, donde puedas hablar con honestidad, pero también trabajar con claridad. La terapia puede contener, pero también debe ayudarte a moverte.</p>
           </div>
+        </div>
+
+        <!-- Datos profesionales a la vista (SEO, 16 oct 2026) -->
+        <div>
+          <p class="label text-stone mb-4">Datos profesionales</p>
+          <div class="divider mb-6"></div>
+          <ul class="space-y-2 body-text">
+            {[
+              'Psicóloga, Universidad del Desarrollo',
+              'En ejercicio clínico desde 2011',
+              'Registro Superintendencia de Salud N°\u00a0360070',
+              'Enfoque sistémico',
+              'Atiendo a adultos y parejas',
+              'Online a todo Chile y presencial en Las Condes',
+            ].map((dato) => (
+              <li class="flex gap-3"><span aria-hidden="true" class="text-forest">—</span><span>{dato}</span></li>
+            ))}
+          </ul>
         </div>
 
         <div>

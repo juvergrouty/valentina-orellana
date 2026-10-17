@@ -70,6 +70,7 @@ const jsonLd = esPublica ? {
       ],
       availableLanguage: 'es',
       founder: { '@id': `${SITIO}/#valentina` },
+      employee: { '@id': `${SITIO}/#valentina` },
       sameAs,
       hasOfferCatalog: {
         '@type': 'OfferCatalog',
@@ -90,11 +91,20 @@ const jsonLd = esPublica ? {
     {
       '@type': 'Person',
       '@id': `${SITIO}/#valentina`,
-      name: 'Valentina Orellana',
-      jobTitle: 'Psicóloga clínica',
+      name: 'Valentina Orellana Jaramillo',
+      alternateName: ['Ps. Valentina Orellana', 'Valentina Alejandra Orellana Jaramillo'],
+      givenName: 'Valentina',
+      familyName: 'Orellana Jaramillo',
+      jobTitle: 'Psicóloga',
       url: `${SITIO}/sobre-mi`,
+      image: new URL('/images/hero-home.webp', Astro.site).href, // retrato solo (no la foto con su hijo)
       telephone: '+56972735696',
       alumniOf: { '@type': 'CollegeOrUniversity', name: 'Universidad del Desarrollo' },
+      identifier: {
+        '@type': 'PropertyValue',
+        propertyID: 'Registro Superintendencia de Salud',
+        value: '360070',
+      },
       hasCredential: {
         '@type': 'EducationalOccupationalCredential',
         name: 'Registro Superintendencia de Salud N° 360070',
@@ -111,7 +121,8 @@ const jsonLd = esPublica ? {
       ],
       worksFor: { '@id': `${SITIO}/#consulta` },
       address: { '@type': 'PostalAddress', addressLocality: DIRECCION.comuna, addressRegion: DIRECCION.region, addressCountry: DIRECCION.pais },
-      sameAs,
+      // Solo perfiles de la persona (la ficha de Google Maps es de la consulta).
+      sameAs: [...sameAs.filter((u) => u !== GOOGLE_MAPS_URL), PERFILES.linkedin],
     },
   ],
 } : null;
