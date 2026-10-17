@@ -722,10 +722,16 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
       fuente = null;
     }
   }
-  function conectarMedidor(s: MediaStream) {
+  // iOS Safari: el AudioContext solo arranca si se crea/reanuda DENTRO del toque (antes de cualquier await).
+  function despertarAudio() {
     try {
       audioCtx ??= new (window.AudioContext || (window as any).webkitAudioContext)();
       if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
+    } catch { /* sin medidor */ }
+  }
+  function conectarMedidor(s: MediaStream) {
+    try {
+      despertarAudio();
       analizador ??= Object.assign(audioCtx.createAnalyser(), { fftSize: 1024 });
       fuente = audioCtx.createMediaStreamSource(s);
       fuente.connect(analizador);
@@ -747,7 +753,7 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
     const rms = nivel();
     if (modo === 'listo' && fuente) {
       pintarMedidor('gr-medidor-prueba', rms);
-      if (rms > 0.02 && !micProbado) { micProbado = true; tick('gr-ck-mic', 'ok', '✓'); }
+      if (rms > 0.006 && !micProbado) { micProbado = true; tick('gr-ck-mic', 'ok', '✓'); }
     }
     if (modo === 'grabando') {
       pintarMedidor('gr-medidor-rec', rms);
@@ -761,7 +767,15 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
     requestAnimationFrame(bucle);
   }
   $('gr-probar-mic').addEventListener('click', async () => {
-    try { await abrirMicrofono(); tick('gr-ck-mic', micProbado ? 'ok' : 'warn', micProbado ? '✓' : '…'); $('gr-probar-mic').textContent = 'Habla para ver el medidor'; setTimeout(() => { if (!micProbado && modo === 'listo') { tick('gr-ck-mic', 'warn', '!'); bloqueo('El micrófono no capta sonido.', 'Cierra WhatsApp u otras apps que lo usen, y si sigue igual, reinicia Safari.'); } }, 8000); }
+    despertarAudio();
+    try { await abrirMicrofono(); tick('gr-ck-mic', micProbado ? 'ok' : 'warn', micProbado ? '✓' : '…'); $('gr-probar-mic').textContent = 'Habla para ver el medidor'; setTimeout(() => {
+      if (micProbado || modo !== 'listo') return;
+      // Si el micrófono está entregando audio (pista viva y sin silenciar) no se bloquea: el medidor puede fallar en iOS
+      // aunque la grabación funcione. Solo se bloquea si la pista está muerta o silenciada.
+      const viva = !!stream && stream.getAudioTracks().some((t) => t.readyState === 'live' && !t.muted);
+      if (viva) { tick('gr-ck-mic', 'ok', '✓'); micProbado = true; return; }
+      tick('gr-ck-mic', 'warn', '!'); bloqueo('El micrófono no capta sonido.', 'Cierra WhatsApp u otras apps que lo usen, y si sigue igual, reinicia Safari.');
+    }, 8000); }
     catch (e) { errorMicrofono(e); }
   });
   function errorMicrofono(e: unknown) {
@@ -882,12 +896,13 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
     pedirWakeLock();
   }
   $('gr-grabar').addEventListener('click', () => {
+    despertarAudio();
     if (!gidPreparado) return;
     if (navigator.onLine) { $('gr-hoja').hidden = false; ($('gr-hoja-avion') as HTMLButtonElement).focus(); return; }
     empezarGrabacion();
   });
   $('gr-hoja-avion').addEventListener('click', () => { $('gr-hoja').hidden = true; });
-  $('gr-hoja-igual').addEventListener('click', () => empezarGrabacion());
+  $('gr-hoja-igual').addEventListener('click', () => { despertarAudio(); empezarGrabacion(); });
 
   const CAUSAS: Record<string, string> = {
     mute: 'Otra app o una llamada tomó el micrófono.',
@@ -906,6 +921,7 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
     await cerrarSegmento();
   }
   async function continuar() {
+    despertarAudio();
     if (!grab || (modo !== 'interrumpida' && modo !== 'pausa')) return;
     const veniaDePausa = modo === 'pausa';
     errorIdb = false;
