@@ -96,7 +96,7 @@ export const CONSENT_OPTIONS: ConsentOption[] = [
   {
     key: 'accept_recording',
     titulo: '2. Grabación de sesiones (opcional)',
-    texto: 'Autorizo grabar el audio de mis sesiones para transcribirlo y procesarlo con herramientas tecnológicas, incluida IA, solo para elaborar las notas de mi ficha y preparar mi atención, mediante proveedores por encargo, algunos fuera de Chile (principalmente Estados Unidos). El audio se borra al transcribirse, la transcripción queda en mi ficha y ninguna herramienta decide sobre mi tratamiento. Es voluntario: sin esto me atienden igual. Puedo pedir en cualquier momento que se deje de grabar o retirar esta autorización; lo ya grabado queda en mi ficha clínica. En pareja, cada persona firma y solo se graba si todas lo autorizan.',
+    texto: 'Autorizo grabar el audio de mis sesiones para transcribirlo y procesarlo con herramientas tecnológicas, incluida IA, solo para elaborar las notas de mi ficha y preparar mi atención, mediante proveedores por encargo, algunos fuera de Chile (principalmente Estados Unidos). El audio se borra al transcribirse, la transcripción queda en mi ficha y ninguna herramienta decide sobre mi tratamiento. Es voluntario: sin esto me atienden igual. Puedo pedir en cualquier momento que se deje de grabar o retirar esta autorización; lo ya transcrito queda en mi ficha clínica. En pareja, cada persona firma y solo se graba si todas lo autorizan.',
     obligatoria: false,
   },
   {
