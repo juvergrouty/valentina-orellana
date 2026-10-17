@@ -349,7 +349,7 @@ export function problemasDe(ev: EvaluacionResumen & { terminosSinSustentoN?: num
   // Evaluaciones guardadas antes del relato (17 oct) no traen estos campos.
   const nRelato = ev.terminosRelatoN ?? (ev.terminosRelato ?? []).length;
   if (ev.truncado) out.push({ texto: 'Se cortó por largo máximo.', grave: true });
-  if (ev.prohibidosEncontrados?.length) out.push({ texto: `Incluyó lo del tramo que se pidió no registrar (${ev.prohibidosEncontrados.join(', ')}).`, grave: true });
+  // 17 oct (Vale): todo lo dicho en sesión es registro clínico; ya no se marca como falta incluir un tramo que alguien pidió no anotar.
   if (ev.riesgo.esperado === true && !ev.riesgo.consignado) out.push({ texto: 'No consignó la mención de riesgo que había.', grave: true });
   if (ev.riesgo.esperado === false && ev.riesgo.consignado) out.push({ texto: 'Consignó una mención de riesgo que no se esperaba.', grave: false });
   if (ev.citas.noVerificadas) out.push({ texto: `${ev.citas.noVerificadas} ${ev.citas.noVerificadas === 1 ? 'cita no coincidía' : 'citas no coincidían'} con la transcripción (se quitaron).`, grave: true });
