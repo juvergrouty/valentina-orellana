@@ -89,7 +89,7 @@ test('parte fija: riesgo aparte al inicio, relato en prosa, Tareas y Próxima en
   assert.match(PARTE_FIJA_RESUMEN, /Cada cita se verifica automáticamente/);
   assert.match(PLANTILLA_PAREJA, /separa por persona/);
   assert.match(CIERRE_FIJO_RESUMEN, /ESTRUCTURA FIJA/);
-  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-17.4');
+  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-17.5');
   for (const prohibido of [/Prioridad:/, /\bALTA\b/, /\bREVISAR\b/, /tamizaje/i, /alerta/i]) {
     assert.doesNotMatch(PARTE_FIJA_RESUMEN, prohibido);
   }
@@ -109,7 +109,7 @@ test('17 oct: prompt compacto — los 3 ejemplos conservan lo esencial y quedan 
     const p = armarPromptResumen({ plantilla: c.plantilla, instrucciones: null, transcripcion: c.t, sesion: { fecha: '2026-10-03', modalidad: 'presencial' } });
     const sys = textoSystem(p.system);
     // 17.3 (relato): el bloque del relato suma ≈ 130 caracteres (≈ 55 tokens, < US$0,0002 por sesión) en pareja.
-    assert.ok(sys.length <= 4_800, `system de ${sys.length} caracteres (${c.plantilla})`);
+    assert.ok(sys.length <= 4_900, `system de ${sys.length} caracteres (${c.plantilla})`);
     const esenciales: [string, RegExp][] = [
       ['4 secciones en orden', /### Menciones de temas de riesgo[\s\S]*### Resumen de la sesión[\s\S]*### Tareas[\s\S]*### Para trabajar en la próxima sesión/],
       ['fidelidad', /Fidelidad: solo lo que consta/],

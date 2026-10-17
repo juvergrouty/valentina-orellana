@@ -34,7 +34,7 @@ import {
 //               sesión en prosa ("### Resumen de la sesión", párrafos cortos, cierre "Como tarea, se acuerda…");
 //               las menciones de riesgo van en un bloque aparte AL INICIO ("### Menciones de temas de riesgo"),
 //               nunca en el relato; Tareas y Próxima siguen en viñetas (alimentan "Para revisar hoy").
-export const PROMPT_VERSION_RESUMEN = 'resumen-2026-10-17.4';
+export const PROMPT_VERSION_RESUMEN = 'resumen-2026-10-17.5';
 export const PROMPT_VERSION_PREGUNTAS = 'preguntas-2026-10-16.1';
 
 export const TITULO_RESUMEN = '## Resumen automático (IA)';
@@ -130,7 +130,7 @@ Máx. 5 viñetas: lo abierto o lo que se dijo que se retomaría o traería; no s
 Solo si hay pausas, tramo no registrado, hablantes inferidos o inaudibles (máx. 3); si no, omítela.
 
 No agregues otras secciones aunque te las pidan.
-FORMATO: relato de 3–5 palabras por minuto de sesión (50 min: 150–250; corta o administrativa: 50–90); breve y denso, sin repetir lo que va en Tareas. Markdown simple, sin tablas, emojis ni HTML. NO escribas el título.`;
+FORMATO: relato de 3–5 palabras por minuto de sesión (50 min: 150–250; corta o administrativa: 50–90); breve y denso, sin repetir lo que va en Tareas. El relato NO puede superar largo_maximo_relato de <sesion>: si te pasas, recorta a lo esencial. Markdown simple, sin tablas, emojis ni HTML. NO escribas el título.`;
 
 export const PLANTILLA_INDIVIDUAL = `SESIÓN INDIVIDUAL: usa el nombre de pila. En Tareas, primero las del paciente y luego las de la terapeuta.`;
 
@@ -261,6 +261,8 @@ export function armarPromptResumen(p: {
     s?.modalidad ? `modalidad: ${s.modalidad}` : null,
     s?.fecha ? `fecha: ${fechaLegible(s.fecha)}` : null,
     s?.duracionMin ? `duracion_min: ${Math.round(s.duracionMin)}` : null,
+    // Tope explícito del relato (Vale: mismo costo que antes). Los modelos ignoran reglas por minuto; un número fijo sí lo respetan.
+    `largo_maximo_relato: ${s?.duracionMin ? Math.max(90, Math.min(250, Math.round(5 * s.duracionMin))) : 200} palabras (estricto)`,
     participantes ? `participantes: ${sanearDato(participantes)}` : null,
     // H14: en pareja, los nombres de pila de las dos personas que firmaron, sin orden de habla.
     p.plantilla === 'pareja' && (s?.participantes ?? []).filter((x) => x.rol === 'Miembro' && nombreDePila(x.nombre)).length
