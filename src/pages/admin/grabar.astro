@@ -8,6 +8,7 @@ import { pacienteDeTitulo } from '../../lib/boxCala';
 import { mismaPersona } from '../../lib/mismaPersona';
 import { tipoDesdeSessionType } from '../../lib/transcriptor/reglas';
 import { evaluarEnBase, motivoVisible, transcriptorActivo, textoMotivo } from '../../lib/transcriptor/consentimiento';
+import { preseleccion } from '../../lib/transcriptor/preseleccion';
 
 // Grabador presencial del transcriptor IA (paquete P4). Diseño: docs/transcriptor/40-ux-diseno.md
 // y mockup-grabador.html. Única ruta con micrófono permitido (vercel.json).
@@ -22,6 +23,9 @@ import { evaluarEnBase, motivoVisible, transcriptorActivo, textoMotivo } from '.
 const VENTANA_MIN = 20;
 const hoy = todayCL();
 const paramSesion = Astro.url.searchParams.get('sesion') ?? Astro.url.searchParams.get('booking') ?? '';
+// ?evento=<googleEventId> (panel lateral del calendario) y ?paciente=<id> (botón de la ficha).
+const paramEvento = (Astro.url.searchParams.get('evento') ?? '').slice(0, 1024);
+const paramPaciente = Astro.url.searchParams.get('paciente') ?? '';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Tipo = 'individual' | 'pareja';
@@ -45,7 +49,9 @@ async function eventosGoogleHoy(): Promise<{ id: string; hora: string; dur: numb
   const out: { id: string; hora: string; dur: number; titulo: string }[] = [];
   for (const ev of (data.items ?? []) as Array<{ id?: string; summary?: string; status?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }>) {
     const inicio = ev.start?.dateTime, titulo = ev.summary ?? '';
-    if (!inicio || ev.status === 'cancelled' || !/presencial/i.test(titulo) || !/sesi[oó]n/i.test(titulo)) continue;
+    if (!inicio || ev.status === 'cancelled') continue;
+    // El evento pedido por ?evento= entra aunque su título no diga "presencial" (p. ej. online sin Meet).
+    if ((!/presencial/i.test(titulo) || !/sesi[oó]n/i.test(titulo)) && !(paramEvento && ev.id === paramEvento)) continue;
     if (inicio.slice(0, 10) !== hoy) continue; // con timeZone=America/Santiago viene en hora de Chile
     const dur = ev.end?.dateTime ? Math.max(20, Math.round((Date.parse(ev.end.dateTime) - Date.parse(inicio)) / 60000)) : 50;
     out.push({ id: String(ev.id ?? ''), hora: inicio.slice(11, 16), dur, titulo });
@@ -59,6 +65,7 @@ let candidatas: Candidata[] = [];
 let pacientes: { id: string; name: string }[] = [];
 let recientes: string[] = [];
 let demo: string | null = null;
+const aliasEvento: Record<string, string> = {};
 
 // Datos de prueba SOLO en `astro dev` (import.meta.env.DEV es false en el build de producción):
 // /admin/grabar?demo=<vista> para la revisión visual sin base de datos.
@@ -94,7 +101,7 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo')) {
     errorLectura = !!resReservas.error || !!resPacientes.error;
     const todos = (resPacientes.data ?? []) as Paciente[];
     const porEmail = new Map(todos.filter((p) => p.email).map((p) => [String(p.email).trim().toLowerCase(), p]));
-    pacientes = todos.filter((p) => p.active !== false).map((p) => ({ id: p.id, name: p.name }));
+    pacientes = todos.filter((p) => p.active !== false || p.id === paramPaciente).map((p) => ({ id: p.id, name: p.name }));
     for (const r of resRecientes.data ?? []) {
       const p = porEmail.get(String(r.patient_email ?? '').trim().toLowerCase());
       if (p && !recientes.includes(p.id)) recientes.push(p.id);
@@ -119,7 +126,8 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo')) {
     }
     for (const ev of google ?? []) {
       const nombre = pacienteDeTitulo(ev.titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, ''));
-      if (candidatas.some((c) => c.fecha === hoy && mismaPersona(c.nombre, nombre))) continue; // ya está (evento de la página o duplicado de Encuadrado)
+      const ya = candidatas.find((c) => c.fecha === hoy && mismaPersona(c.nombre, nombre));
+      if (ya) { if (ev.id) aliasEvento[ev.id] = ya.clave; continue; } // ya está (evento de la página o duplicado de Encuadrado)
       const coinciden = todos.filter((p) => p.active !== false && mismaPersona(p.name, nombre));
       candidatas.push({
         clave: `g:${ev.id}`, fuente: 'calendario', bookingId: null, googleEventId: ev.id || null,
@@ -146,10 +154,14 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo')) {
   }
 }
 
-// En curso o empieza en ≤ 20 min (la pedida por ?sesion= siempre entra).
-const ahoraVentana = candidatas.filter((c) => (c.faltaMin <= VENTANA_MIN && c.faltaMin > -c.dur) || c.bookingId === paramSesion);
+// Qué preseleccionar según ?sesion= / ?evento= / ?paciente= (lógica en preseleccion.ts, con pruebas).
+const pre = preseleccion(candidatas, { sesion: paramSesion, evento: paramEvento, paciente: UUID.test(paramPaciente) || demo ? paramPaciente : '' }, aliasEvento);
+const clavePedida = pre?.modo === 'sesion' ? pre.clave : null;
+// En curso o empieza en ≤ 20 min (la pedida siempre entra).
+const ahoraVentana = candidatas.filter((c) => (c.faltaMin <= VENTANA_MIN && c.faltaMin > -c.dur) || c.clave === clavePedida);
 const otrasHoy = candidatas.filter((c) => !ahoraVentana.includes(c) && c.faltaMin > -c.dur);
-const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHoy, pacientes, recientes, demo, pedida: paramSesion || null };
+const pacientePedido = pre?.modo === 'ficha' && pacientes.some((p) => p.id === pre.patientId) ? pre.patientId : null;
+const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHoy, pacientes, recientes, demo, pedida: clavePedida, pacientePedido };
 ---
 
 <AdminLayout title="Grabar sesión" current="/admin/grabar">
@@ -467,7 +479,7 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
   // trozos se borran del teléfono SOLO cuando grabacion-finalizar responde ok.
   type Tipo = 'individual' | 'pareja';
   interface Candidata { clave: string; fuente: string; bookingId: string | null; googleEventId: string | null; patientId: string | null; nombre: string; fecha: string; hora: string; dur: number; tipo: Tipo | null; faltaMin: number; consentOk: boolean | null; consentTexto: string | null; firmantes: string[] }
-  interface Datos { activo: boolean; errorLectura: boolean; hoy: string; ventana: Candidata[]; otras: Candidata[]; pacientes: { id: string; name: string }[]; recientes: string[]; demo: string | null; pedida: string | null }
+  interface Datos { activo: boolean; errorLectura: boolean; hoy: string; ventana: Candidata[]; otras: Candidata[]; pacientes: { id: string; name: string }[]; recientes: string[]; demo: string | null; pedida: string | null; pacientePedido: string | null }
   interface SegLocal { seq: number; inicioMs: number; finMs: number | null; mime: string; uploadId?: string | null; partes?: Record<number, string>; reiniciar?: boolean; bytes?: number; sha256?: string | null }
   interface GrabLocal { gid: string; nombre: string; patientId: string | null; etiqueta: string; ruido: boolean; inicioMs: number; finMs: number | null; estado: 'grabando' | 'terminada'; segmentos: SegLocal[]; pausas: { desde_ms: number; hasta_ms: number }[]; vivoMs?: number }
   interface Trozo { gid: string; seq: number; i: number; t: number; datos: ArrayBuffer }
@@ -578,9 +590,13 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
     for (const p of lista) {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'gr-opcion';
       const n = document.createElement('b'); n.textContent = p.name; b.append(n);
-      b.addEventListener('click', () => elegir({ clave: `p:${p.id}`, fuente: 'ficha', bookingId: null, googleEventId: null, patientId: p.id, nombre: p.name, fecha: D.hoy, hora: horaTxt(Date.now()), dur: 50, tipo: null, faltaMin: 0, consentOk: null, consentTexto: null, firmantes: [] }));
+      b.addEventListener('click', () => elegir(sinReserva(p)));
       caja.append(b);
     }
+  }
+  // "Grabar sin reserva" para un paciente (buscador o botón "Grabar sesión" de la ficha).
+  function sinReserva(p: { id: string; name: string }): Candidata {
+    return { clave: `p:${p.id}`, fuente: 'ficha', bookingId: null, googleEventId: null, patientId: p.id, nombre: p.name, fecha: D.hoy, hora: horaTxt(Date.now()), dur: 50, tipo: null, faltaMin: 0, consentOk: null, consentTexto: null, firmantes: [] };
   }
   function mostrarElegir() {
     const v = $('gr-lista-ventana'); v.textContent = '';
@@ -1249,8 +1265,10 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
     if (D.demo) { demoVista(D.demo); return; }
     if (typeof indexedDB === 'undefined') bloqueo('Este navegador no puede guardar la grabación.', 'Usa Safari en el iPhone (sin modo privado) o Chrome en el Mac.');
     subirPendientes();
-    const pedida = D.pedida ? D.ventana.find((c) => c.bookingId === D.pedida) : null;
+    const pedida = D.pedida ? D.ventana.find((c) => c.clave === D.pedida) : null;
+    const paciente = D.pacientePedido ? D.pacientes.find((p) => p.id === D.pacientePedido) : null;
     if (pedida) elegir(pedida);
+    else if (paciente) elegir(sinReserva(paciente));
     else if (D.ventana.length === 1 && D.ventana[0].patientId) elegir(D.ventana[0]);
     else mostrarElegir();
   }

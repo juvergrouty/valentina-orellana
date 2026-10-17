@@ -176,7 +176,8 @@ patientList.forEach((p: { id: string; email: string | null; rut: string | null }
 
 // ── Eventos de Google Calendar de la semana (solo lectura) ──────────────────
 const minutosDe = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + (m || 0); };
-type GEvent = { date: string; time: string; dur: number; title: string };
+// grabar: sesión de paciente de HOY (botón Grabar / texto del asistente de Meet en su panel).
+type GEvent = { date: string; time: string; dur: number; title: string; id: string; grabar: '' | 'grabar' | 'meet' };
 const gcalByDate: Record<string, GEvent[]> = {};
 try {
   const auth = await getValidAccessToken();
@@ -233,7 +234,15 @@ try {
           });
           if (coincide) continue;
         }
-        (gcalByDate[date] ??= []).push({ date, time, dur, title: ev.summary ?? 'Ocupado' });
+        // Transcriptor: en una sesión de paciente de hoy (título con "sesión" o evento de
+        // Encuadrado) el bloque se puede tocar y abre un panel con "Grabar"; si es online con
+        // link de Meet, la graba el asistente de Meet.
+        const titulo = String(ev.summary ?? '');
+        const esSesion = /sesi[oó]n/i.test(titulo) || /encuadrado\.com\/reagendar/i.test(String(ev.description ?? ''));
+        const tieneMeet = !!ev.hangoutLink || /meet\.google\.com\/[a-z]/i.test(`${ev.location ?? ''} ${ev.description ?? ''}`);
+        const esOnline = /online/i.test(titulo) || tieneMeet;
+        const grabar: GEvent['grabar'] = date === todayStr && ev.id && ev.status !== 'cancelled' && esSesion ? (esOnline && tieneMeet ? 'meet' : 'grabar') : '';
+        (gcalByDate[date] ??= []).push({ date, time, dur, title: ev.summary ?? 'Ocupado', id: String(ev.id ?? ''), grabar });
       }
     }
   }
@@ -674,7 +683,10 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
             ))}
 
             {(gcalByDate[day.isoDate] ?? []).map(g => (
-              <div class="cal-gcal-event" data-date={g.date} data-time={g.time} style={evStyle(g.time, g.dur)} title={`${g.title} · ${g.time} (Google Calendar)`}>
+              <div class={`cal-gcal-event${g.grabar ? ' cal-gcal-grabable' : ''}`} data-date={g.date} data-time={g.time} data-dur={g.dur}
+                data-gid={g.grabar ? g.id : undefined} data-grabar={g.grabar || undefined} data-titulo={g.grabar ? g.title : undefined}
+                role={g.grabar ? 'button' : undefined} tabindex={g.grabar ? 0 : undefined}
+                style={evStyle(g.time, g.dur)} title={`${g.title} · ${g.time} (Google Calendar)`}>
                 <span class="ev-time">{g.time}</span>
                 <span class="ev-name">{g.title}</span>
                 {g.dur > 35 && <span class="ev-type">Google Calendar</span>}
@@ -1099,6 +1111,35 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
   <!-- ════════════════════════════════════════════════════════════════════
        SESSION PANEL — detalle de cita existente
        ════════════════════════════════════════════════════════════════════ -->
+  <!-- Panel de un evento de Google Calendar / Encuadrado (sesión de paciente de hoy).
+       Solo lectura; existe para el botón Grabar del transcriptor. -->
+  <div class="side-panel" id="gcal-panel" aria-label="Sesión de Google Calendar">
+    <div class="sp-header">
+      <div style="flex:1;min-width:0;">
+        <div class="sp-service">Google Calendar / Encuadrado</div>
+        <div class="sp-status" id="gp-hora"></div>
+      </div>
+      <button class="sp-close-btn" id="gp-close" aria-label="Cerrar">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="sp-body">
+      <div class="sp-section">
+        <div class="sp-patient-name" id="gp-titulo" style="overflow-wrap:anywhere;"></div>
+      </div>
+      <div class="sp-section" style="border-bottom:none;">
+        <a href="/admin/grabar" id="gp-btn-grabar" class="sp-action-row" style="display:none;font-weight:600;color:#576352;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>
+          Grabar
+        </a>
+        <div id="gp-grabar-meet" class="sp-grabar-meet" style="display:none;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>
+          La graba el asistente de Meet
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="side-panel" id="session-panel">
     <div class="sp-header">
       <div style="flex:1;min-width:0;display:flex;align-items:center;gap:0.4rem;">
@@ -1168,6 +1209,10 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>
           Grabar
         </a>
+        <div id="sp-grabar-meet" class="sp-grabar-meet" style="display:none;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>
+          La graba el asistente de Meet
+        </div>
         <a href="#" id="sp-btn-ficha" class="sp-action-row">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
           Ver ficha del paciente
@@ -1579,6 +1624,10 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 }
 .sp-action-row:hover { color: #4f5ce8; background: #f3f4ff; }
 .sp-action-row:active { transform: scale(0.98); background: #e7e9fe; }
+.sp-grabar-meet { display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: #6b7280; padding: 0.4rem 0; }
+/* Sesión de paciente de hoy en Google Calendar: se puede tocar (abre el panel con Grabar). */
+.cal-gcal-event.cal-gcal-grabable { pointer-events: auto; cursor: pointer; }
+.cal-gcal-event.cal-gcal-grabable:hover { filter: brightness(0.96); }
 
 /* ── Booking panel specific ──────────────────────────────────────────────── */
 .bp-date-label { font-size: 0.875rem; font-weight: 600; color: #111827; margin-bottom: 0.5rem; }
@@ -1992,27 +2041,32 @@ if (calScroll && window.matchMedia('(max-width: 768px)').matches) {
 // ── Panel helpers ─────────────────────────────────────────────────────────────
 const bookingPanel = document.getElementById('booking-panel');
 const sessionPanel = document.getElementById('session-panel');
+const gcalPanel = document.getElementById('gcal-panel');
 
 function openBookingPanel(date, time) {
   sessionPanel.classList.remove('open');
+  gcalPanel?.classList.remove('open');
   bookingPanel.classList.add('open');
 }
 function openSessionPanel() {
   bookingPanel.classList.remove('open');
+  gcalPanel?.classList.remove('open');
   sessionPanel.classList.add('open');
 }
 function closeAll() {
   bookingPanel.classList.remove('open');
   sessionPanel.classList.remove('open');
+  gcalPanel?.classList.remove('open');
   if (typeof clearDragSel === 'function') clearDragSel();
 }
 
 document.getElementById('bp-close')?.addEventListener('click', closeAll);
 document.getElementById('sp-close')?.addEventListener('click', closeAll);
+document.getElementById('gp-close')?.addEventListener('click', closeAll);
 
 document.addEventListener('click', e => {
-  if (bookingPanel.classList.contains('open') || sessionPanel.classList.contains('open')) {
-    if (!bookingPanel.contains(e.target) && !sessionPanel.contains(e.target) && !e.target.closest('.cal-event') && !e.target.closest('.cal-col') && !e.target.closest('#open-new-btn')) {
+  if (bookingPanel.classList.contains('open') || sessionPanel.classList.contains('open') || gcalPanel?.classList.contains('open')) {
+    if (!bookingPanel.contains(e.target) && !sessionPanel.contains(e.target) && !gcalPanel?.contains(e.target) && !e.target.closest('.cal-event') && !e.target.closest('.cal-col') && !e.target.closest('#open-new-btn')) {
       closeAll();
     }
   }
@@ -2082,7 +2136,7 @@ function applyDragSel(startIdx, endIdx, fromSnap, toSnap) {
 
 allCols.forEach(col => {
   col.addEventListener('mousedown', e => {
-    if (e.target.closest('.cal-event')) return;
+    if (e.target.closest('.cal-event, .cal-gcal-grabable')) return;
     if (e.button !== 0) return;
     e.preventDefault();
 
@@ -2477,6 +2531,25 @@ document.querySelectorAll('.cal-event').forEach(el => {
   });
 });
 
+// ── Evento de Google Calendar / Encuadrado de hoy: panel con Grabar (transcriptor) ──
+function openGcalDetail(el) {
+  document.getElementById('gp-titulo').textContent = el.dataset.titulo || 'Sesión';
+  const dur = Number(el.dataset.dur) || 0;
+  document.getElementById('gp-hora').textContent = `Hoy · ${el.dataset.time}${dur ? ` · ${dur} min` : ''}`;
+  const meet = el.dataset.grabar === 'meet';
+  const btn = document.getElementById('gp-btn-grabar');
+  btn.style.display = meet ? 'none' : '';
+  btn.href = `/admin/grabar?evento=${encodeURIComponent(el.dataset.gid || '')}`;
+  document.getElementById('gp-grabar-meet').style.display = meet ? '' : 'none';
+  bookingPanel.classList.remove('open');
+  sessionPanel.classList.remove('open');
+  gcalPanel.classList.add('open');
+}
+document.querySelectorAll('.cal-gcal-grabable').forEach(el => {
+  el.addEventListener('click', e => { e.stopPropagation(); openGcalDetail(el); });
+  el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openGcalDetail(el); } });
+});
+
 // Cualquier acción del panel de sesión (marcar pagado, cobrar, reagendar,
 // renombrar, etc.) recarga la página entera al enviarse — antes eso cerraba
 // el panel sin dar ninguna señal de si funcionó, y había que volver a buscar
@@ -2644,13 +2717,17 @@ function openSessionDetail(b) {
   document.getElementById('sp-no-show-action').value = isNoShow ? 'unmark_no_show' : 'mark_no_show';
   document.getElementById('sp-btn-no-show-label').textContent = isNoShow ? 'Quitar marca de inasistencia' : 'Marcar inasistencia';
 
-  // Grabar (transcriptor, P7): sesiones presenciales de HOY (fecha de Chile) no canceladas.
+  // Grabar (transcriptor): toda sesión de HOY (fecha de Chile) no cancelada. Si es online y
+  // ya tiene link de Meet, la graba el asistente de Meet (texto, no botón).
   const grabarBtn = document.getElementById('sp-btn-grabar');
+  const grabarMeet = document.getElementById('sp-grabar-meet');
   if (grabarBtn) {
     const hoyCL = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
-    const esPresencialHoy = !isOnlineSession && b.session_date === hoyCL && b.status !== 'cancelled';
-    grabarBtn.style.display = esPresencialHoy ? '' : 'none';
+    const esHoy = b.session_date === hoyCL && b.status !== 'cancelled' && b.status !== 'expired';
+    const porMeet = esHoy && isOnlineSession && !!meetMatch;
+    grabarBtn.style.display = esHoy && !porMeet ? '' : 'none';
     grabarBtn.href = `/admin/grabar?sesion=${encodeURIComponent(b.id)}`;
+    if (grabarMeet) grabarMeet.style.display = porMeet ? '' : 'none';
   }
 
   // Ver ficha link
