@@ -852,12 +852,16 @@ const formatCLP = (n: number) =>
         <label style="margin-right:1rem;font-size:0.85rem;">
           <input type="radio" name="payment_mode" value="manual" checked /> Pago en consulta
         </label>
-        <label style="font-size:0.85rem;">
+        <label style="margin-right:1rem;font-size:0.85rem;">
           <input type="radio" name="payment_mode" value="link" /> Enviar link de pago
+        </label>
+        <label style="font-size:0.85rem;">
+          <input type="radio" name="payment_mode" value="free" /> Sin costo
         </label>
         <p style="font-size:0.72rem;color:var(--stone);margin-top:0.35rem;">
           "En consulta" confirma la cita de inmediato. "Link de pago" la deja pendiente y le envía al paciente
-          un enlace de Flow por correo (y por WhatsApp si ya lo conectaste en Configuración).
+          un enlace de Flow por correo (y por WhatsApp si ya lo conectaste en Configuración). "Sin costo" (obra
+          social) la confirma en $0, sin boleta, y si es su primera sesión le envía Pasos a seguir y el consentimiento.
         </p>
       </div>
 

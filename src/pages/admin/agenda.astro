@@ -441,6 +441,9 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       {errorParam === 'missing_fields' && (
         <div class="cal-error-banner">⚠ Faltan datos obligatorios (servicio, fecha, hora o paciente) — no se agendó nada.</div>
       )}
+      {errorParam === 'ya_pagada' && (
+        <div class="cal-error-banner">⚠ Esa sesión ya figura pagada, así que no se pasó a sin costo. Recarga la página para ver su estado real.</div>
+      )}
       {errorParam === 'precio_invalido' && (
         <div class="cal-error-banner">⚠ El servicio no tiene precio para esa modalidad. Revísalo en Servicios o escribe el monto a mano. No se agendó nada.</div>
       )}
@@ -892,9 +895,12 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
             <label class="bp-radio-opt">
               <input type="radio" name="payment_mode" value="link"> Enviar link de pago
             </label>
+            <label class="bp-radio-opt">
+              <input type="radio" name="payment_mode" value="free"> Sin costo
+            </label>
           </div>
           <p id="bp-pay-note" style="font-size:0.72rem;color:#6b7280;margin-top:0.35rem;">
-            "En consulta" confirma la cita de inmediato. "Link de pago" la deja pendiente y le envía al paciente un enlace de Flow por correo.
+            "En consulta" confirma la cita de inmediato. "Link de pago" la deja pendiente y le envía al paciente un enlace de Flow por correo. "Sin costo" (obra social) la confirma en $0, sin boleta, y si es su primera sesión le envía Pasos a seguir y el consentimiento.
           </p>
         </div>
 
@@ -1310,6 +1316,15 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           <button type="button" id="sp-btn-void-debt" class="sp-action-row" style="padding:0.4rem 0;color:var(--stone);">
             Anular deuda (no se cobrará esta sesión)
           </button>
+          <button type="button" id="sp-btn-sin-costo" class="sp-action-row" style="padding:0.4rem 0;color:var(--stone);">
+            Pasar a sin costo (obra social: envía lo que le falte al paciente)
+          </button>
+          <form method="POST" action="/api/admin/bookings" id="sp-sin-costo-form" style="margin:0;display:none;">
+            <input type="hidden" name="action" value="mark_paid">
+            <input type="hidden" name="medio" value="Sin costo">
+            <input type="hidden" name="id" id="sp-sin-costo-id">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+          </form>
           <form method="POST" action="/api/admin/bookings" id="sp-void-debt-form" style="margin:0;display:none;">
             <input type="hidden" name="action" value="void_debt">
             <input type="hidden" name="id" id="sp-void-debt-id">
@@ -2327,6 +2342,11 @@ function updatePrice() {
     price = parseInt(opt.dataset.price || '0');
   }
   const count = parseInt(bpSessionsSel?.value || '1');
+  if (document.querySelector('input[name="payment_mode"][value="free"]')?.checked) {
+    bpPriceValue.textContent = 'Sin costo';
+    bpPriceNote.textContent  = 'No se cobra ni se emite boleta';
+    return;
+  }
   bpPriceValue.textContent = formatCLP(price);
   bpPriceNote.textContent  = count > 1
     ? `Precio total del paquete · ${count} sesiones semanales`
@@ -2341,6 +2361,7 @@ bpServiceSel?.addEventListener('change', () => {
 });
 bpSessionsSel?.addEventListener('change', updatePrice);
 document.querySelectorAll('input[name="modality_choice"]').forEach(r => r.addEventListener('change', updatePrice));
+document.querySelectorAll('input[name="payment_mode"]').forEach(r => r.addEventListener('change', updatePrice));
 
 // ── Booking panel: tabs ───────────────────────────────────────────────────────
 document.getElementById('bp-tab-agenda')?.addEventListener('click', () => {
@@ -2853,6 +2874,7 @@ function openSessionDetail(b) {
   document.getElementById('sp-confirm-form').style.display = showMarkPaid ? 'block' : 'none';
   document.getElementById('sp-confirm-id').value    = b.id;
   document.getElementById('sp-void-debt-id').value  = b.id;
+  document.getElementById('sp-sin-costo-id').value  = b.id;
   document.getElementById('sp-mark-paid-rut').value = b.patient_rut || '';
 
   // "Anular pago" — deshacer un "Marcar como pagado" hecho por error.
@@ -3057,6 +3079,13 @@ document.addEventListener('click', (e) => {
 document.getElementById('sp-btn-void-debt')?.addEventListener('click', () => {
   if (confirm('¿Anular la deuda de esta sesión? No se marcará como pagada, solo dejará de aparecer como pendiente de cobro.')) {
     document.getElementById('sp-void-debt-form').submit();
+  }
+});
+
+// ── Pasar a sin costo (obra social) ─────────────────────────────────────────
+document.getElementById('sp-btn-sin-costo')?.addEventListener('click', () => {
+  if (confirm('¿Pasar esta sesión a sin costo? Queda en $0 y sin boleta. Si es su primera sesión, al paciente le llegan Pasos a seguir y el consentimiento.')) {
+    document.getElementById('sp-sin-costo-form').submit();
   }
 });
 
