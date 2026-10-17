@@ -155,7 +155,7 @@ test('ejemplo 1 (individual): system = fija + plantilla individual + instruccion
   assert.match(u, /etiquetas_hablante: reales/);
   assert.match(u, /\[00:09:50\] Camila: Siento que si digo que no/);
   assert.doesNotMatch(u, /contexto_sesion_anterior/);
-  assert.ok(u.trim().endsWith('Escribe el resumen de esta sesión.'));
+  assert.match(u.trim(), /Escribe el resumen de esta sesión. El relato .* tiene como MÁXIMO \d+ palabras: cuéntalas y recorta si te pasas.$/);
 });
 
 test('ejemplo 2 (pareja): plantilla de pareja, diarización declarada, contexto previo incluido', () => {
