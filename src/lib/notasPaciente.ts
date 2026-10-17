@@ -17,6 +17,7 @@ const REEMPLAZOS: [RegExp, string][] = [
   [/(evaluaci[oó]n)(?=enviada)/gi, '$1-'],                         // EvaluacionEnviada
   [/(cobro manual)(\s+)(generado)/gi, '$1-$3'],                    // Cobro manual generado desde admin
   [/(meet)(\s*):/gi, '$1 -$2'],                                   // Meet: <link> (en cualquier parte de la línea)
+  [/(monto)(?=antesdesincosto)/gi, '$1-'],                        // MontoAntesDeSinCosto
 ];
 
 export function limpiarNotasPaciente(texto: string | null | undefined): string | null {
