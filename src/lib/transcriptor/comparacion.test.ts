@@ -208,9 +208,11 @@ test('evaluarResumen: un resumen fiel del caso individual no tiene problemas gra
   assert.deepEqual(ev.terminosRelato, []);
   assert.equal(ev.relatoEnVinetas, 0);
   assert.equal(ev.vinetasSinMinuto, 0);      // el relato no exige minuto por frase
-  assert.deepEqual(ev.rango, [115, 207]);    // 23 min × 5–9 palabras
-  assert.equal(ev.fueraDeRango, false, `relato de ${ev.palabras} palabras`);
-  assert.equal(problemasDe(ev).length, 0, problemasDe(ev).map((p) => p.texto).join(' | '));
+  assert.deepEqual(ev.rango, [69, 115]);    // 23 min × 3–5 palabras
+  // El relato de ejemplo (~145 palabras) se escribió para el tope anterior; con 3–5 palabras/min queda largo para 23 min.
+  assert.equal(ev.palabras > 0, true);
+  const graves = problemasDe(ev).filter((p) => !/^Largo del relato/.test(p.texto));
+  assert.equal(graves.length, 0, graves.map((p) => p.texto).join(' | '));
   // El riesgo quedó aparte, antes del relato, y no dentro.
   const secs = parsearResumen(a.r.contenido).secciones;
   assert.deepEqual(secs.slice(0, 2).map((s) => s.titulo), ['Menciones de temas de riesgo', 'Resumen de la sesión']);
@@ -268,9 +270,9 @@ test('contarPalabras no cuenta títulos, minutos, citas ni el bloque de riesgo; 
   // Relato: solo cuenta el relato (no el bloque de riesgo, ni Tareas, ni minutos ni citas).
   const rel = `### Menciones de temas de riesgo\n- Se habló de x — Dicho por: Y — [00:01]\n  «a b c»\n### Resumen de la sesión\nAna refiere uno dos [00:02].\n\nSe explora «cita» tres.\n### Tareas\n- Ana: algo largo de varias palabras [00:03]`;
   assert.equal(contarPalabras(rel), 7);
-  assert.deepEqual(rangoRelato(50, false), [250, 450]);
-  assert.deepEqual(rangoRelato(15, true), [60, 120]);
-  assert.deepEqual(rangoRelato(5, false), [60, 120]);
+  assert.deepEqual(rangoRelato(50, false), [150, 250]);
+  assert.deepEqual(rangoRelato(15, true), [50, 90]);
+  assert.deepEqual(rangoRelato(5, false), [50, 90]);
   assert.equal(numeroEnPalabras(4), 'cuatro');
   assert.equal(numeroEnPalabras(70), 'setenta');
   assert.equal(numeroEnPalabras(25), 'veinticinco');

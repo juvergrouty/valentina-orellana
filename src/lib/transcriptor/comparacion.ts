@@ -278,11 +278,11 @@ export interface EntradaEvaluacion {
   minutos?: number | null;
 }
 
-/** Largo pedido para el relato: 5–9 palabras por minuto (50 min: 250–450); corta: 60–120. */
+/** Largo pedido para el relato: 3–5 palabras por minuto (50 min: 150–250); corta: 50–90. */
 export function rangoRelato(minutos: number, corta: boolean): [number, number] {
-  if (corta) return [60, 120];
+  if (corta) return [50, 90];
   const m = Math.max(1, minutos || 0);
-  return [Math.max(60, Math.round(5 * m)), Math.max(120, Math.round(9 * m))];
+  return [Math.max(50, Math.round(3 * m)), Math.max(90, Math.round(5 * m))];
 }
 
 /** Líneas en viñeta dentro del relato. */
