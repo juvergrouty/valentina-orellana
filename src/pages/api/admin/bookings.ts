@@ -19,6 +19,10 @@ import { rutaInterna } from '../../../lib/rutaInterna';
 
 export const prerender = false;
 
+// payment_note de una sesión que no se cobra (obra social). La usan "Agendar
+// hora" con pago "Sin costo" y el botón "Pasar a sin costo" de la sesión.
+const SIN_COSTO = 'Sin costo';
+
 export const POST: APIRoute = async ({ request, redirect }) => {
   const form   = await request.formData();
   const action = form.get('action')?.toString();
@@ -119,7 +123,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   if (action === 'mark_paid') {
     const id     = form.get('id')?.toString();
     const medio  = form.get('medio')?.toString()?.trim() || 'Manual';
-    const emitir = form.get('emitir_boleta') === 'on';
+    // "Pasar a sin costo" (17 oct 2026): misma ruta que un pago (confirmación,
+    // calendario en verde, Pasos a seguir y consentimiento si es el primero),
+    // con monto $0 y nunca boleta.
+    const sinCosto = medio === SIN_COSTO;
+    const emitir = !sinCosto && form.get('emitir_boleta') === 'on';
     const rut    = form.get('rut')?.toString()?.trim();
     if (!id) return redirect(dest);
 
@@ -130,11 +138,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Sesión que ya pasó (deuda): sin correo de "reserva confirmada" ni
     // invitación de Google a una fecha pasada.
     const sesionFutura = !!previa?.session_date && previa.session_date !== '2099-12-31' && previa.session_date >= todayCL();
+    // Una sesión ya pagada (ej. pagó por Flow con el panel abierto) nunca se
+    // pasa a $0: se perdería ese ingreso y no cuadraría con su boleta.
+    if (sinCosto && previa?.paid_at) return redirect(conParam(dest) + 'error=ya_pagada');
 
     let { error } = await supabase.from('bookings')
       // Si ya estaba pagada (ej. reintento tras un error de boleta), se conserva
       // la fecha de pago original para no moverla de mes en Finanzas.
-      .update({ paid_at: previa?.paid_at ?? new Date().toISOString(), payment_note: medio, status: 'confirmed' })
+      .update({ paid_at: previa?.paid_at ?? new Date().toISOString(), payment_note: medio, status: 'confirmed', ...(sinCosto ? { amount: 0 } : {}) })
       .eq('id', id);
     if (error?.code === '42703') {
       return redirect(conParam(dest) + 'error=missing_migration');
@@ -167,7 +178,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         await sendConfirmationToClient({
           patient_name: pagada.patient_name, patient_email: pagada.patient_email, patient_phone: pagada.patient_phone ?? '',
           session_type: pagada.session_type, session_date: pagada.session_date, session_time: String(pagada.session_time).slice(0, 5),
-          amount: pagada.amount ?? 0, payment_method: /transfer/i.test(medio) ? 'transferencia' : /flow/i.test(medio) ? 'flow' : medio,
+          amount: pagada.amount ?? 0, payment_method: sinCosto ? 'sin_costo' : /transfer/i.test(medio) ? 'transferencia' : /flow/i.test(medio) ? 'flow' : medio,
           service_name: serviceName, booking_id: id,
         });
       } catch (e) { console.error('[mark_paid] confirmación:', e); }
@@ -539,8 +550,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const remWhatsappOn   = form.get('whatsapp_reminder_enabled') !== null;
     const evalEmailOn     = form.get('evaluation_email_enabled') !== null;
     const reviewEmailOn   = form.get('review_email_enabled') !== null;
-    // Modo de pago: 'manual' (pago en consulta, confirma de una) o 'link' (envía link de pago Flow)
-    const payment_mode    = form.get('payment_mode')?.toString() === 'link' ? 'link' : 'manual';
+    // Modo de pago: 'manual' (pago en consulta, confirma de una), 'link' (envía
+    // link de pago Flow) o 'free' (sin costo, ej. obra social: $0 y queda como
+    // pagada, para que el paciente reciba igual Pasos a seguir y el consentimiento).
+    const pmRaw           = form.get('payment_mode')?.toString();
+    const payment_mode    = pmRaw === 'link' ? 'link' : pmRaw === 'free' ? 'free' : 'manual';
     const notesText        = form.get('notes')?.toString()?.trim() ?? '';
 
     if (!service_id || !session_date || !session_time) {
@@ -614,8 +628,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const precioModalidad = svc.modality === 'ambos'
       ? (svcModality === 'online' ? (svc.price_online || svc.price) : (svc.price_presencial || svc.price))
       : svc.price;
-    const totalPrice     = overrideAmount ?? precioModalidad;
-    if (!Number.isFinite(totalPrice) || totalPrice < 100) return redirect(conParam(dest) + 'error=precio_invalido');
+    const totalPrice     = payment_mode === 'free' ? 0 : (overrideAmount ?? precioModalidad);
+    if (payment_mode !== 'free' && (!Number.isFinite(totalPrice) || totalPrice < 100)) return redirect(conParam(dest) + 'error=precio_invalido');
     const durMin         = (svc.modality === 'ambos'
       ? (svcModality === 'online' ? svc.duration_min_online : svc.duration_min_presencial)
       : null) ?? svc.duration_min ?? 50;
@@ -674,6 +688,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         status:         payment_mode === 'link' ? 'pending_payment' : 'confirmed',
         payment_method: payment_mode === 'link' ? 'flow' : 'manual',
         amount:         montoSesion,
+        ...(payment_mode === 'free' ? { paid_at: new Date().toISOString(), payment_note: SIN_COSTO } : {}),
         duration_min:   durMin,
         created_by_admin: true, // creada desde el panel admin: nunca debe auto-eliminarse por falta de pago,
                                  // ni siquiera cuando payment_mode==='link' (queda en pending_payment esperando el pago)
@@ -894,7 +909,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       }
     }
 
-    // ── Modo MANUAL: confirmar de una (calendario + correos) ──────────────────
+    // ── Modo MANUAL / SIN COSTO: confirmar de una (calendario + correos) ───────
+    // Sin costo: paid_at ya viene puesto, así que el evento sale en verde y con
+    // invitación, como una sesión pagada.
     for (const bid of bookingIds) {
       const { data: b } = await supabase.from('bookings').select('*').eq('id', bid).single();
       if (b) { try { await syncBookingToCalendar(b); } catch (e) { console.error('[create-admin] sync:', e); } }
@@ -910,11 +927,18 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         session_date:   primeraFecha || session_date,
         session_time,
         amount:         totalCobrado,
-        payment_method: 'manual',
+        payment_method: payment_mode === 'free' ? 'sin_costo' : 'manual',
         service_name:   svc.name,
       };
       try { await sendConfirmationToClient(emailData); } catch (e) { console.error('[create-admin] email:', e); }
       try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[create-admin] notif:', e); }
+    }
+
+    // Sin costo cuenta como "primer pago": Pasos a seguir + consentimiento si es
+    // la primera sesión del paciente (Valentina, 17 oct 2026: obra social).
+    if (payment_mode === 'free' && finalEmail && bookingIds.length) {
+      try { await sendStepsOnFirstPayment({ patient_name: finalName, patient_email: finalEmail, patient_phone: finalPhone, rut: finalRut }, bookingIds); }
+      catch (e) { console.error('[create-admin] pasos sin costo:', e); }
     }
 
     return redirect(avisoPack ? conParam(dest) + avisoPack.slice(1) : dest);

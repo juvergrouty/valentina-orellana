@@ -112,6 +112,9 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
   const lugar = await lugarSesion(data.session_type);
+  // Sesión que Valentina no cobra (obra social): "Sin costo" y sin fila de pago.
+  // 'Sin costo' llega así desde el reenvío manual (usa el payment_note).
+  const sinCosto = data.payment_method === 'sin_costo' || data.payment_method === 'Sin costo';
   const payLabel = data.payment_method === 'pendiente'
     ? 'Pendiente de pago'
     : data.payment_method === 'manual'
@@ -160,12 +163,12 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
             </tr>
             <tr>
               <td style="padding:0.4rem 0;color:#6B6860;">Valor</td>
-              <td style="padding:0.4rem 0;font-weight:500;">${formatCLP(data.amount)}</td>
-            </tr>
+              <td style="padding:0.4rem 0;font-weight:500;">${sinCosto ? 'Sin costo' : formatCLP(data.amount)}</td>
+            </tr>${sinCosto ? '' : `
             <tr>
               <td style="padding:0.4rem 0;color:#6B6860;">Pago</td>
               <td style="padding:0.4rem 0;font-weight:500;">${payLabel}</td>
-            </tr>
+            </tr>`}
           </table>
         </div>
 
@@ -177,7 +180,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
           <ul style="font-family:'Inter',sans-serif;font-size:0.82rem;color:#6B6860;line-height:1.7;margin:0;padding-left:1.1rem;">
             <li>Puedes <strong>reagendar tu sesión sin costo</strong> avisando con al menos <strong>24 horas de anticipación</strong>. Las sesiones no se cancelan: se reagendan. Con menos de 24 horas de aviso, la sesión se considera realizada.</li>
             <li>Si soy yo quien debe cancelar, reagendamos tu sesión sin costo.</li>
-            <li>Tu reserva está confirmada porque el <strong>pago fue procesado</strong>. Sin pago, el horario queda libre.</li>
+            ${sinCosto ? '' : `<li>Tu reserva está confirmada porque el <strong>pago fue procesado</strong>. Sin pago, el horario queda libre.</li>`}
             <li>Este espacio no atiende urgencias. Si estás en crisis o piensas en hacerte daño, llama al *4141 (gratis, 24/7), a Salud Responde 600 360 7777 o al SAMU 131, o acude al servicio de urgencia más cercano.</li>
           </ul>
           <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#9B9485;margin-top:0.75rem;">
@@ -976,7 +979,7 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Hora</td>
               <td style="padding:0.35rem 0;font-weight:600;font-size:1rem;">${String(data.session_time).slice(0, 5)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Método de pago</td>
-              <td style="padding:0.35rem 0;">${data.payment_method === 'manual' ? '💵 Pago en consulta' : '💳 Flow'}</td></tr>
+              <td style="padding:0.35rem 0;">${data.payment_method === 'manual' ? '💵 Pago en consulta' : data.payment_method === 'sin_costo' ? '🤝 Sin costo' : '💳 Flow'}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Monto</td>
               <td style="padding:0.35rem 0;font-weight:500;">${formatCLP(data.amount)}</td></tr>
         </table>
