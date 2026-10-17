@@ -244,7 +244,7 @@ Martina cuenta que su pareja tiene deudas por apuestas online [19:05]. Su amiga 
   assert.ok(!ev.terminosSinSustento.includes('4'), '4 = "cuatro" sí está en la transcripción');
   assert.deepEqual(ev.tareasFaltantes, ['registro de sueño', 'jefa', 'respiración', 'guía']);
   const graves = problemasDe(ev).filter((p) => p.grave).map((p) => p.texto).join(' | ');
-  assert.match(graves, /no registrar/);
+  assert.doesNotMatch(graves, /no registrar/); // 17 oct: ya no es falta (todo es registro clínico)
   assert.match(graves, /mención de riesgo/);
   assert.match(graves, /1 cita no coincidía/);
 });
