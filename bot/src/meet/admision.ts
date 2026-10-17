@@ -3,7 +3,8 @@
 // Si aparece un reCAPTCHA, el bot NO lo resuelve: sale con error (Google sospecha de él).
 import type { Pagina } from '../navegador.js';
 import {
-  indicadoresAdmision, indicadoresRechazo, indicadoresSalaEspera, selectorRecaptcha, textosRechazoExplicito,
+  indicadoresAdmision, indicadoresRechazo, indicadoresSalaEspera, selectorRecaptcha, selectorRecaptchaDesafio,
+  MIN_LADO_DESAFIO, textosRechazoExplicito,
 } from './selectores.js';
 
 export type ResultadoAdmision =
@@ -40,12 +41,36 @@ export async function revisarRechazo(p: Pagina): Promise<ResultadoAdmision | nul
   for (const sel of indicadoresRechazo) {
     if (!esRechazoExplicito(sel) && await visible(p, sel)) return { tipo: 'bloqueado', detalle: 'Meet mostró una página de error' };
   }
-  try {
-    if ((await p.locator(selectorRecaptcha).count()) > 0 && await visible(p, selectorRecaptcha)) {
-      return { tipo: 'bloqueado', detalle: 'Google pidió un reCAPTCHA (bloqueo de invitado automatizado)' };
-    }
-  } catch { /* sin iframe */ }
+  if (await hayDesafioRecaptcha(p)) {
+    return { tipo: 'bloqueado', detalle: 'Google pidió un reCAPTCHA (bloqueo de invitado automatizado)' };
+  }
   return null;
+}
+
+/** true solo si el desafío de reCAPTCHA (bframe) está visible y con tamaño real. */
+export async function hayDesafioRecaptcha(p: Pagina): Promise<boolean> {
+  try {
+    const cajas = await p.locator(selectorRecaptchaDesafio).evaluateAll((els) => els.map((e) => {
+      const r = (e as HTMLElement).getBoundingClientRect();
+      const st = getComputedStyle(e as HTMLElement);
+      const oculto = st.visibility === 'hidden' || st.display === 'none' || Number(st.opacity) === 0;
+      return { w: r.width, h: r.height, oculto };
+    }));
+    return cajas.some((c) => !c.oculto && c.w >= MIN_LADO_DESAFIO && c.h >= MIN_LADO_DESAFIO);
+  } catch { return false; }
+}
+
+/** Diagnóstico sin datos personales: ruta (sin query) y tamaño de cada iframe de reCAPTCHA. */
+export async function diagnosticoRecaptcha(p: Pagina): Promise<string> {
+  try {
+    const info = await p.locator(selectorRecaptcha).evaluateAll((els) => els.map((e) => {
+      const r = (e as HTMLElement).getBoundingClientRect();
+      let ruta = '';
+      try { ruta = new URL((e as HTMLIFrameElement).src).pathname; } catch { /* */ }
+      return `${ruta} ${Math.round(r.width)}x${Math.round(r.height)}`;
+    }));
+    return info.length ? info.join(' | ') : 'sin iframes de reCAPTCHA';
+  } catch { return 'diagnóstico no disponible'; }
 }
 
 export async function estaAdmitido(p: Pagina): Promise<boolean> {
@@ -61,9 +86,13 @@ export async function esperarAdmision(p: Pagina, plazoMs: number, log: (m: strin
   const limite = ahora() + plazoMs;
   let vueltas = 0;
   while (ahora() < limite) {
-    const rechazo = await revisarRechazo(p);
-    if (rechazo) return rechazo;
+    // Primero "admitido": dentro de la llamada no hay rechazo posible y se evitan falsos positivos.
     if (await estaAdmitido(p)) return { tipo: 'admitido' };
+    const rechazo = await revisarRechazo(p);
+    if (rechazo) {
+      if (rechazo.tipo === 'bloqueado') log(`bloqueo detectado: ${rechazo.detalle} · reCAPTCHA: ${await diagnosticoRecaptcha(p)}`);
+      return rechazo;
+    }
     if (++vueltas % 30 === 0) log(`sigue en la sala de espera (${Math.round((limite - ahora()) / 60_000)} min restantes)`);
     await p.waitForTimeout(2000);
   }

@@ -76,6 +76,11 @@ export const indicadoresRechazo: string[] = [
 
 /** Desafío reCAPTCHA (Google sospecha de automatización). El bot NO lo resuelve. */
 export const selectorRecaptcha = 'iframe[src*="recaptcha"]';
+/** Solo el DESAFÍO visible (bframe = ventana de imágenes). Meet carga además un iframe "anchor" de
+ *  reCAPTCHA Enterprise invisible en páginas normales: ese NO es un bloqueo. */
+export const selectorRecaptchaDesafio = 'iframe[src*="recaptcha"][src*="bframe"]';
+/** Tamaño mínimo (px) para considerar que el desafío está realmente a la vista. */
+export const MIN_LADO_DESAFIO = 150;
 
 /** Expulsión o fin de la llamada estando dentro. (Sin [role="alert"]: falsos positivos.) */
 export const indicadoresExpulsion: string[] = [
