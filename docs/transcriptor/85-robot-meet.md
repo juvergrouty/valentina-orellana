@@ -7,7 +7,8 @@ Fecha: 16 oct 2026. Decisión G de `02-decisiones-16oct-noche.md`. Paquete P-bot
 - **Nombre**: el robot se llama exactamente **"Notas Ps. Valentina Orellana"** en todo el código, la configuración y los textos.
 - **Recomendación: opción (a)**. El robot tiene **su propia cuenta de Gmail**. El sitio lo agrega solo como invitado de cada sesión online, sin mandarle correo a nadie. Así entra a Meet **sin pedir permiso**, **con su nombre y la foto de la marca**, y sin el aviso de "no inició sesión". Si algo falla, entra como hoy: como invitado anónimo, y tú lo admites. La sesión nunca se pierde por esto.
 - **Costo**: $0 extra. La cuenta de Gmail es gratis y la máquina de Fly es la misma de siempre.
-- **Lo que tienes que hacer tú**: crear la cuenta de Google (yo no puedo crear cuentas) siguiendo los pasos de la §7. Después hay que iniciar sesión UNA vez en esa cuenta dentro de la máquina del robot. Ese paso tiene un pendiente técnico (§6.3).
+- **Lo que tienes que hacer tú**: crear la cuenta de Google del robot con el correo `notas@valentinaorellana.cl` (yo no puedo crear cuentas) siguiendo los pasos de la §7.1. Después, iniciar sesión UNA vez en esa cuenta dentro de la máquina del robot (§7.2.4, unos 5 minutos).
+- **Actualización 17 oct 2026**: el modo 'invitado' NO sirve desde las IPs de Fly. En la primera prueba real Google le mostró al robot un reCAPTCHA ("bloqueo de invitado automatizado", en `transcriptor_auditoria`). La solución es este modo 'cuenta'. El módulo que faltaba (§6.3) ya está construido (rama `t-bot-sesion`).
 - Mientras tanto todo sigue en **modo 'invitado'**, el modo por defecto. Nada cambia hasta que la cuenta exista y pongamos el ajuste en 'cuenta'.
 
 ## 2. Qué dice Google (verificado en fuentes oficiales)
@@ -82,20 +83,29 @@ La contraseña la escribe Vale con sus manos en la pantalla de Google. El sistem
 3. Cuando aparecen las cookies de sesión y el correo correcto, la máquina sube el estado al sitio (`X-VO-Aprovisionar`, Bearer `BOT_APROVISIONAR_SECRET`). **Esta parte ya está implementada en el sitio.** Después borra el perfil temporal y se destruye (`--rm`).
 4. Vale borra `BOT_APROVISIONAR_SECRET` de Vercel. Sin esa variable, la ruta de aprovisionamiento responde 404.
 
-### 6.3 PENDIENTE: el módulo del bot que hace los pasos 2–3
-No quedó en el repo. Al escribir `bot/src/iniciar-sesion.ts`, que abre el Chromium sin automatización, espera las cookies de sesión y exporta el estado, el clasificador de permisos de este entorno bloqueó la acción. Por eso no lo intenté de otra forma.
-
-Para terminar falta: (1) que Vale o quien coordina autorice escribir ese módulo; (2) agregar `x11vnc`, `novnc` y `websockify` a la imagen y el arranque de VNC en `entrypoint.sh` cuando `MODO=iniciar_sesion`. Hay que verificar en la primera prueba que websockify escuche en IPv6 (`[::]:6080`), porque `fly proxy` llega por la red privada 6PN.
-
-Alternativa sin código nuevo: no hay una que sea segura. Copiar las cookies a mano desde el navegador de Vale expone su cuenta y se descarta.
+### 6.3 Módulo `MODO=iniciar_sesion` (hecho, rama `t-bot-sesion`, 17 oct 2026)
+- **`bot/entrypoint.sh`**: con `MODO=iniciar_sesion` levanta Xvfb, `x11vnc` (solo en `127.0.0.1:5900`, con una **contraseña VNC aleatoria de 8 caracteres** que se imprime **una sola vez** en `fly logs`) y `websockify` con noVNC en **`[::]:6080`** (IPv6, red privada 6PN). Después ejecuta `dist/iniciar-sesion.js`. Sin `MODO`, el arranque del bot es idéntico al de antes (Xvfb + PulseAudio + `dist/index.js`).
+- **`bot/Dockerfile`**: suma los paquetes `x11vnc`, `novnc` y `websockify` de Ubuntu noble. No se usan en el modo normal.
+- **`bot/src/iniciar-sesion.ts`**:
+  1. Abre el Chromium de la imagen como **proceso normal**, sin Playwright, sin `--remote-debugging`, sin `--enable-automation` y sin `AutomationControlled`. Usa un perfil temporal en `/tmp` y abre accounts.google.com en inglés. Si el sandbox no arranca, se relanza sin sandbox.
+  2. Cada 3 s revisa el archivo `Cookies` del perfil. Solo mira los nombres, en texto plano; los valores van cifrados y no se leen. Espera `__Secure-1PSID` y `__Secure-3PSID` de google.com, o que Vale cierre el navegador. El plazo es de **15 min** (`PLAZO_INICIO_MS`). Cuando aparecen, avisa en el log, espera 20 s y cierra Chromium de forma ordenada para que guarde las cookies.
+  3. Abre el **mismo perfil** con Playwright (`launchPersistentContext`) solo para exportar el `storageState`. No abre ninguna página de Google. Filtra a google.com y exige **`SID`, `__Secure-1PSID` y `__Secure-3PSID`**. Confirma el correo con `accounts.google.com/ListAccounts` (con respaldo en Mi cuenta), pedido desde Node con las cookies del perfil. Si la cuenta no es `BOT_CUENTA_EMAIL`, **no sube nada**.
+  4. Sube `{tipo:'sesion_inicial', correo, sesion}` a `EVENTO_URL` con `X-VO-Aprovisionar: 1` y `Authorization: Bearer <BOT_APROVISIONAR>`. Es lo que espera `procesarSesionInicial`, que la guarda cifrada. Imprime **`LISTO`**, borra el perfil y sale con 0. Con error sale con 1 y un mensaje claro.
+  - Nunca pide, lee ni registra contraseñas. Nunca imprime cookies ni el secreto. Los procesos de apoyo (Xvfb, x11vnc y websockify) arrancan sin `BOT_APROVISIONAR` (`env -u`). El módulo lo borra de su entorno antes de abrir Chromium y Playwright, así que ningún proceso hijo lo recibe.
+- Lógica pura y pruebas sin red: `bot/src/aprovisionar.ts` y `bot/src/aprovisionar.test.ts`.
+- **Por verificar en la primera ejecución real** (no hay Docker en el Mac de desarrollo, así que la imagen no se construyó localmente):
+  - que la imagen construye;
+  - que `websockify` escucha en IPv6;
+  - que Google acepta el inicio de sesión en el Chromium de Playwright (es "Chrome for Testing" y muestra ese aviso arriba).
 
 ## 7. Pasos exactos para Vale
 
 ### 7.1 Crear la cuenta del robot (Vale; yo no puedo crear cuentas)
+La cuenta será una **cuenta de Google con un correo que ya existe**: `notas@valentinaorellana.cl`. Es un alias de ImprovMX con catch-all hacia tu Gmail. **No es un Gmail nuevo.** El código de verificación de Google llegará a tu Gmail por el reenvío de ImprovMX (si no lo ves, revisa Spam).
 1. En una **ventana privada** de Chrome entra a <https://accounts.google.com/signup> → "Para mi uso personal".
 2. **Nombre**: `Notas Ps.` · **Apellido**: `Valentina Orellana`. Meet mostrará "Notas Ps. Valentina Orellana". Si Google no acepta el punto, usa `Notas Ps` y avísanos para ajustar el nombre en el código: tiene que ser idéntico.
 3. **Fecha de nacimiento**: la tuya (la cuenta debe ser de un adulto; Meet rechaza cuentas de menores). **Género**: "Prefiero no decirlo".
-4. **Correo**: `notas.valentinaorellana@gmail.com`. Si está tomado, elige otro parecido y anótalo exacto.
+4. **Correo**: cuando Google proponga crear una dirección de Gmail, elige **"Usar tu dirección de correo electrónico existente"** y escribe `notas@valentinaorellana.cl`. Ingresa el código que llegue a tu Gmail.
 5. **Contraseña**: larga y única. Guárdala en tu gestor (Llavero de iCloud). **No la mandes por chat ni la pongas en el sitio.**
 6. **Teléfono**: el tuyo, para verificar y recuperar. **Correo de recuperación**: `vinculosquesostienen@gmail.com`. Recall recomienda tener ambos para evitar fallas de inicio de sesión.
 7. Acepta los términos. Después, en <https://myaccount.google.com>:
@@ -105,20 +115,28 @@ Alternativa sin código nuevo: no hay una que sea segura. Copiar las cookies a m
 8. Abre una vez <https://meet.google.com> con esa cuenta y acepta los avisos iniciales. Si quedan pendientes, el robot se puede trabar (Recall lo documenta). Luego **cierra sesión** en esa ventana.
 9. En **tu** cuenta, deja el acceso de tus reuniones como viene: **Trusted** (en Meet: Controles del organizador → Acceso a la reunión). Con "Restricted" también funciona. No uses "Open".
 
-### 7.2 Encender el modo cuenta (cuando 6.3 esté listo; con Claude)
+### 7.2 Encender el modo cuenta (con Claude)
 1. Aplicar `supabase/migrations/0022_transcriptor_bot_cuenta.sql` en el SQL Editor de Supabase.
 2. En Vercel: crear `BOT_APROVISIONAR_SECRET` (Sensitive) con `openssl rand -base64 48`, y redeploy.
-3. Publicar la imagen del bot con el modo de inicio de sesión (`fly deploy --build-only --push --image-label v2`) y actualizar `FLY_IMAGEN`.
-4. Iniciar sesión una vez (unos 5 minutos):
+3. Publicar la imagen del bot con el modo de inicio de sesión: en `bot/`, `fly deploy --build-only --push --image-label v2`. Luego cambiar `FLY_IMAGEN` en Vercel a `registry.fly.io/vo-bot-meet:v2` y hacer redeploy.
+4. Iniciar sesión una vez (unos 5 minutos). En una terminal:
    ```bash
    fly machine run registry.fly.io/vo-bot-meet:v2 -a vo-bot-meet -r iad --rm --restart no \
      --vm-cpus 2 --vm-memory 2048 -n robot-sesion \
-     -e MODO=iniciar_sesion -e BOT_CUENTA_EMAIL=notas.valentinaorellana@gmail.com \
+     -e MODO=iniciar_sesion -e BOT_CUENTA_EMAIL=notas@valentinaorellana.cl \
      -e EVENTO_URL=https://www.valentinaorellana.cl/api/transcriptor/bot-evento \
-     -e BOT_APROVISIONAR='<el mismo valor de Vercel>'
-   fly proxy 6080:6080 -a vo-bot-meet --select     # en otra terminal
+     -e BOT_APROVISIONAR='<el mismo valor de BOT_APROVISIONAR_SECRET de Vercel>'
+   fly logs -a vo-bot-meet          # en una 2.ª terminal: aquí sale la contraseña VNC y luego "LISTO"
+   fly proxy 6080:6080 -a vo-bot-meet --select   # en una 3.ª terminal (elige la máquina robot-sesion)
    ```
-   Abre `http://localhost:6080/vnc.html`, inicia sesión en la cuenta del robot y espera en `fly logs -a vo-bot-meet` el mensaje "LISTO".
+   - Abre <http://localhost:6080/vnc.html> → "Connect".
+   - Escribe la **contraseña VNC** que aparece una sola vez en `fly logs`, en la línea "Contraseña VNC de esta máquina: …". Es aleatoria y solo sirve para esa máquina.
+   - En el Chromium que aparece, inicia sesión en `notas@valentinaorellana.cl`: contraseña y el aviso en tu teléfono.
+   - Cuando el log diga "sesión de Google detectada", no hagas nada más. A los pocos segundos debe decir **"LISTO"** y la máquina se borra sola (`--rm`).
+   - Plazo: 15 min. Si se pasa, sale con "ERROR" y no sube nada; se repite el paso.
+   - Si dice que la sesión no es de `notas@valentinaorellana.cl`, entraste con otra cuenta: repite el paso.
+   - Escribe el comando `fly machine run` con un **espacio al inicio**. Así zsh/bash con `HIST_IGNORE_SPACE`/`HISTCONTROL=ignorespace` no lo guardan en el historial. Igual, el paso 5 deja inservible ese valor.
+   - `BOT_APROVISIONAR` queda en la config de esa máquina solo mientras existe. `--rm` la destruye al terminar y el paso 5 deja inservible el valor.
 5. Borrar `BOT_APROVISIONAR_SECRET` de Vercel.
 6. En Supabase `settings`: `transcriptor_bot_modo` = `cuenta`.
 7. Prueba de humo: una reunión tuya de prueba creada por el sitio. El robot debe entrar solo, con nombre y foto. Revisa `fly logs`: debe decir "entró con la cuenta del robot (sin pedir permiso)".

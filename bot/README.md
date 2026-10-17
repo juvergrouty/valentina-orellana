@@ -54,6 +54,12 @@ sesión, avisa `sesion_invalida` y entra como invitado anónimo (Vale lo admite)
 riesgos y pasos para Vale: `docs/transcriptor/85-robot-meet.md`. Foto de perfil de la cuenta:
 `perfil/foto-robot.png`.
 
+Inicio de sesión UNA vez (`MODO=iniciar_sesion`, `src/iniciar-sesion.ts`): la misma imagen abre
+un Chromium normal, sin automatización, visible por noVNC en `[::]:6080` (solo por `fly proxy`).
+Vale inicia sesión con sus manos, y la máquina exporta las cookies de google.com, confirma la
+cuenta y las sube al sitio (`X-VO-Aprovisionar`). Nunca toca contraseñas. Comandos exactos:
+`docs/transcriptor/85-robot-meet.md` §7.2.4.
+
 El bot **no tiene ninguna llave de proveedor** (ni R2, ni Supabase, ni AssemblyAI). Solo
 conoce `/api/transcriptor/bot-evento` y su token, que únicamente permite avanzar SU grabación
 y pedir URLs PUT de SU audio. Ningún endpoint del bot devuelve datos.
