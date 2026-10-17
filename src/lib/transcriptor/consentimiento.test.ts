@@ -1,6 +1,7 @@
 // Pruebas del chequeo de consentimiento para grabar (P4). Correr: pnpm test:transcriptor
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { edadEn, esVersionGrabacion, evaluarConsentimientos, identidadFirmante, numeroVersion, type FilaConsentimiento } from './consentimiento';
 
 const HOY = '2026-10-16';
@@ -21,6 +22,22 @@ test('versiones (decisión 9, 16 oct): v1 no sirve para grabar; v2, v3 y posteri
   assert.equal(esVersionGrabacion('2026-11-v3'), true);
   assert.equal(esVersionGrabacion('2027-03-v4'), true);
   assert.equal(esVersionGrabacion(null), false);
+});
+
+// v4 corta (17 oct): la versión que firman los pacientes nuevos también habilita grabar, y las
+// firmas v2/v3 previas siguen valiendo. Se lee CONSENT_VERSION del archivo (consent.ts importa
+// supabase, que exige variables de entorno) para que la prueba falle si la versión vigente no cuenta.
+test('v4 vigente (consent.ts) habilita grabar; v2 y v3 ya firmadas siguen valiendo', () => {
+  const fuente = readFileSync(new URL('../consent.ts', import.meta.url), 'utf8');
+  const vigente = /export const CONSENT_VERSION = '([^']+)'/.exec(fuente)?.[1];
+  assert.equal(vigente, '2026-10-v4');
+  assert.equal(numeroVersion(vigente), 4);
+  assert.equal(esVersionGrabacion(vigente), true);
+  assert.equal(evaluar('individual', [fila({ version: vigente })]).puede, true);
+  assert.equal(evaluar('individual', [fila({ version: vigente, accept_recording: false })]).puede, false);
+  for (const v of ['2026-10-v2', '2026-10-v3']) assert.equal(evaluar('individual', [fila({ version: v })]).puede, true, v);
+  // Pareja con firmas de distinta versión (v3 previa + v4 nueva): ambas cuentan.
+  assert.equal(evaluar('pareja', [fila({ version: '2026-10-v3' }), fila({ version: vigente, signer_rut: '9.876.543-2', signer_name: 'Diego Pérez' })]).puede, true);
 });
 
 test('individual con v3 firmada y grabación autorizada → puede', () => {
