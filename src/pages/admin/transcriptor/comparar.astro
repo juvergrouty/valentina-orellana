@@ -1,0 +1,372 @@
+---
+// /admin/transcriptor/comparar — prueba ciega Sonnet 5.5 vs Haiku 5.5 del resumen automático.
+//  • Exige sesión del panel confirmada con passkey (acceso.ts) ANTES de leer nada; falla cerrado.
+//  • "Generar comparación" crea una corrida (casos reales de la ficha "Prueba Transcriptor" + 3 casos
+//    sintéticos del repo) y genera caso por caso en el servidor (la llave de Anthropic solo está en
+//    Vercel; cada request cabe en el maxDuration de 300 s).
+//  • Por caso: "Resumen 1" y "Resumen 2" lado a lado, en un orden sorteado y guardado en el servidor.
+//    El modelo, el costo y los tokens de cada uno NO se muestran hasta votar todos los casos.
+//  • Evaluación automática de fidelidad (sin otra IA) bajo cada resumen: citas no verificadas,
+//    secciones faltantes, minutos y términos sin sustento, etc. (comparacion.ts).
+//  • Los resúmenes de casos reales se guardan cifrados y se descifran aquí con `ver_resumen` en la bitácora.
+// `?demo=comparar` (y `&revelar=1`) muestra datos inventados SOLO en `astro dev`.
+export const prerender = false;
+import AdminLayout from '../../../components/admin/AdminLayout.astro';
+import { URL_CONFIRMAR_PASSKEY, accesoClinicoCookies } from '../../../lib/transcriptor/acceso';
+import {
+  MAX_CASOS_REALES, TOPE_CORRIDA_USD, costoCorrida, evaluarResumen, nombreModelo, problemasDe, revelar, sortearOrden,
+  MODELO_HAIKU, MODELO_SONNET, type DetalleResumen,
+} from '../../../lib/transcriptor/comparacion';
+import { CASOS_SINTETICOS, casoSintetico, tramosDeGuion } from '../../../lib/transcriptor/pruebas/comparacion';
+import { resumenAHtml } from '../../../lib/transcriptor/panel';
+import { PROMPT_VERSION_RESUMEN } from '../../../lib/transcriptor/resumen';
+import type { CasoVista, CorridaVista } from '../../../lib/transcriptor/comparacionDatos';
+
+const esDemo = import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'comparar';
+const acceso = esDemo ? { ok: true as const } : await accesoClinicoCookies(Astro.cookies);
+if (!acceso.ok && acceso.motivo === 'sesion') return Astro.redirect('/admin/login');
+const bloqueo = acceso.ok ? null : acceso;
+if (bloqueo) Astro.response.status = bloqueo.status;
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+
+let corrida: CorridaVista | null = null;
+let aviso: string | null = null;
+let faltaMigracion = false;
+
+if (bloqueo) {
+  // Sin acceso clínico: no se consulta ni se descifra nada.
+} else if (esDemo) {
+  // Datos inventados: resúmenes de mentira sobre los fixtures, para ver el diseño.
+  const revelarDemo = Astro.url.searchParams.get('revelar') === '1';
+  const det = (modelo: string, md: string, clave: string, entrada: number, salida: number): DetalleResumen => {
+    const c = casoSintetico(clave)!;
+    const ev = evaluarResumen({ textoModelo: md, contenido: md, verificacion: { total: 3, verificadas: 3, minutosCorregidos: 0, eliminadas: modelo === MODELO_HAIKU ? 1 : 0 }, tramos: tramosDeGuion(c.guion, c.finSeg), truncado: false, conocidos: c.participantes.map((p) => p.nombre), esperado: c.esperado });
+    const usd = modelo === MODELO_SONNET ? (entrada * 2 + salida * 10) / 1e6 : (entrada * 0.1 + salida * 0.5) / 1e6;
+    return { modelo, promptVersion: PROMPT_VERSION_RESUMEN, uso: { entrada, salida, cacheEscritura: 0, cacheLectura: 0 }, costoUsd: Math.round(usd * 1e5) / 1e5, ms: 20000, evaluacion: ev };
+  };
+  const md1 = '## Resumen automático (IA)\n*Sesión individual · 14 oct 2026 · presencial · 23 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*\n\n### Puntos más importantes\n- Se habló de que a veces piensa que sería más fácil no despertar — Dicho por: Martina (inferido) — [12:28]\n  «pienso que sería más fácil no despertar al otro día»\n_Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._\n- Martina cuenta que duerme cuatro a cinco horas por noche y que revisa el correo de madrugada [01:07].\n- Dice sentir miedo de que la nueva jefa la evalúe mal [02:19].\n### Tareas\n- Martina: registro de sueño cada mañana — hasta la próxima sesión [06:21]\n- Martina: preguntar a la jefa por el horario de respuesta — lunes [08:09]\n- Terapeuta: enviar la guía de higiene del sueño — hoy [08:47]\n### Para trabajar en la próxima sesión\n- Cómo le fue con la jefa [21:05].\n### Notas sobre la transcripción\n- En [18:31] se pidió que algo no quedara registrado; ese tramo no se resume.';
+  const md2 = md1.replace('- Dice sentir miedo de que la nueva jefa la evalúe mal [02:19].\n', '- Su amiga Fernanda la acompaña al yoga [24:59].\n').replace('### Para trabajar en la próxima sesión\n- Cómo le fue con la jefa [21:05].\n', '');
+  const casos: CasoVista[] = CASOS_SINTETICOS.map((c, i) => {
+    const o = sortearOrden(() => (i % 2 ? 0.8 : 0.2));
+    const listo = i < 2;
+    return {
+      id: `00000000-0000-4000-8000-00000000000${i + 1}`, corrida_id: 'demo', orden: i + 1, tipo: 'sintetico', caso_clave: c.clave, etiqueta: c.etiqueta,
+      grabacion_id: null, patient_id: null, ...o, estado: listo ? 'listo' : i === 2 ? 'error' : 'pendiente', error_codigo: i === 2 ? 'r2_sobrecarga' : null,
+      resumen_1: null, resumen_2: null, texto_1: listo ? (o.modelo_1 === MODELO_SONNET ? md1 : md2) : null, texto_2: listo ? (o.modelo_2 === MODELO_SONNET ? md1 : md2) : null,
+      detalle_1: listo ? det(o.modelo_1, o.modelo_1 === MODELO_SONNET ? md1 : md2, c.clave, 9200, o.modelo_1 === MODELO_SONNET ? 640 : 520) : null,
+      detalle_2: listo ? det(o.modelo_2, o.modelo_2 === MODELO_SONNET ? md1 : md2, c.clave, 9200, o.modelo_2 === MODELO_SONNET ? 640 : 520) : null,
+      costo_usd_1: null, costo_usd_2: null,
+      preferencia: revelarDemo && listo ? (i ? 'iguales' : '1') : i === 0 ? '1' : null, comentario: null, comentario_claro: i === 0 ? 'El 1 consigna mejor la mención y no inventa.' : null,
+      created_at: '2026-10-17T15:00:00Z', generando_at: null, listo_at: listo ? '2026-10-17T15:01:00Z' : null, votado_at: null, fallo_lectura: false,
+    };
+  });
+  for (const c of casos) { c.costo_usd_1 = c.detalle_1?.costoUsd ?? null; c.costo_usd_2 = c.detalle_2?.costoUsd ?? null; }
+  if (revelarDemo) casos[2] = { ...casos[2], estado: 'error' };
+  corrida = { corridaId: 'demo', creada: '2026-10-17T15:00:00Z', casos, corridasPrevias: 1 };
+} else {
+  try {
+    const { leerUltimaCorrida } = await import('../../../lib/transcriptor/comparacionDatos');
+    let clientAddress: string | null = null;
+    try { clientAddress = Astro.clientAddress ?? null; } catch { /* sin IP */ }
+    corrida = await leerUltimaCorrida({ request: Astro.request, clientAddress });
+    if (corrida?.casos.some((c) => c.fallo_lectura)) aviso = 'Algún resumen cifrado no se pudo abrir (o no se pudo registrar el acceso en la bitácora). Por seguridad no se muestra; recarga en un momento.';
+  } catch (e) {
+    const codigo = (e as { codigo?: string })?.codigo;
+    if (codigo === 'sin_migracion') faltaMigracion = true;
+    else aviso = 'No se pudieron leer las comparaciones en este momento. Recarga la página en unos minutos.';
+    console.warn('[transcriptor/comparar]', e instanceof Error ? e.name : 'error');
+  }
+}
+
+const casos = corrida?.casos ?? [];
+const resultado = revelar(casos);
+const costoTotal = costoCorrida(casos);
+const pendientes = casos.filter((c) => c.estado === 'pendiente' || c.estado === 'error' || c.estado === 'generando').map((c) => c.id);
+const listos = casos.filter((c) => c.estado === 'listo');
+const votados = listos.filter((c) => c.preferencia).length;
+const usd = (n: number | null | undefined) => `US$${(Number(n) || 0).toLocaleString('es-CL', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`;
+const miles = (n: number) => Math.round(n).toLocaleString('es-CL');
+const fmtFechaHora = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const PREF_TXT: Record<string, string> = { '1': 'Prefiero el 1', '2': 'Prefiero el 2', iguales: 'Iguales' };
+const ESTADO_TXT: Record<string, string> = { pendiente: 'Por generar', generando: 'Generando…', listo: 'Listo', error: 'No se pudo generar' };
+const notaDe = (c: CasoVista) => (c.tipo === 'sintetico' ? casoSintetico(c.caso_clave) : null);
+const tokensEntrada = (d: DetalleResumen | null) => (d ? d.uso.entrada + d.uso.cacheEscritura + d.uso.cacheLectura : 0);
+---
+
+<AdminLayout title="Comparar modelos" current="/admin/transcriptor">
+  <div class="cm">
+    <header style="margin-bottom:1.25rem;">
+      <p class="cm-sub"><a href="/admin/transcriptor" class="cm-volver">← Transcriptor</a></p>
+      <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:400;">Comparar modelos del resumen</h2>
+      <p class="cm-sub">Prueba ciega: para cada caso se escriben dos resúmenes con el mismo prompt y la misma verificación de citas, uno con cada modelo. No sabrás cuál es cuál hasta votar todos los casos. Ningún resumen de esta prueba va a la ficha.</p>
+    </header>
+
+    {bloqueo && (
+      <div class="alert-error" role="alert">
+        🔒 {bloqueo.error} {bloqueo.motivo === 'passkey' && <a href={URL_CONFIRMAR_PASSKEY} style="text-decoration:underline;">Ir a Seguridad →</a>}
+      </div>
+    )}
+    {faltaMigracion && <div class="alert-error" role="alert">Falta aplicar la migración <code>0025_transcriptor_comparaciones.sql</code> en Supabase. Sin ella no se puede generar ni guardar la comparación.</div>}
+    {aviso && <div class="alert-error" role="alert">✕ {aviso}</div>}
+
+    {!bloqueo && !faltaMigracion && (
+      <section class="card cm-card" aria-labelledby="cm-gen">
+        <h3 id="cm-gen" class="cm-h3">Generar</h3>
+        <p class="cm-sub">Casos: las transcripciones de la ficha "Prueba Transcriptor" (hasta {MAX_CASOS_REALES}, las más recientes que quepan bajo el tope de costo) y {CASOS_SINTETICOS.length} transcripciones inventadas (individual con riesgo y tramo no registrado, pareja con versiones contrapuestas, sesión corta con poco contenido). Se generan uno por uno; puedes dejar la página abierta mientras tanto.</p>
+        <p class="cm-sub" style="margin-top:0.35rem;">Costo estimado de una corrida: menos de US${TOPE_CORRIDA_USD.toLocaleString('es-CL', { minimumFractionDigits: 2 })} (sale de la cuenta de Anthropic; no se suma al gasto del mes del transcriptor).</p>
+        <div class="cm-acciones">
+          <button type="button" class="btn btn-dark btn-sm" id="cm-crear" data-confirmar={casos.length && !resultado ? '1' : ''}>{casos.length ? 'Generar comparación nueva' : 'Generar comparación'}</button>
+          {pendientes.length > 0 && <button type="button" class="btn btn-outline btn-sm" id="cm-seguir" data-ids={pendientes.join(',')}>Continuar ({pendientes.length} {pendientes.length === 1 ? 'caso' : 'casos'} por generar)</button>}
+        </div>
+        <p class="cm-msg" id="cm-progreso" role="status" aria-live="polite"></p>
+        {corrida && (
+          <dl class="cm-datos">
+            <div><dt>Corrida</dt><dd>{fmtFechaHora(corrida.creada)}</dd></div>
+            <div><dt>Casos listos</dt><dd>{listos.length} de {casos.length}</dd></div>
+            <div><dt>Votados</dt><dd>{votados} de {listos.length}</dd></div>
+            <div><dt>Costo de esta corrida</dt><dd class={costoTotal > TOPE_CORRIDA_USD ? 'cm-alto' : ''}>{usd(costoTotal)}</dd></div>
+          </dl>
+        )}
+        {corrida && corrida.corridasPrevias > 0 && <p class="cm-nota">Hay {corrida.corridasPrevias} {corrida.corridasPrevias === 1 ? 'corrida anterior guardada' : 'corridas anteriores guardadas'}; aquí se muestra la última.</p>}
+      </section>
+    )}
+
+    {resultado && (
+      <section class="card cm-card cm-resultado" aria-labelledby="cm-res">
+        <h3 id="cm-res" class="cm-h3">Resultado</h3>
+        <div class="cm-tabla" role="table" aria-label="Resultado por modelo">
+          <div class="cm-tr cm-th" role="row"><span role="columnheader">Modelo</span><span role="columnheader">Preferido</span><span role="columnheader">Costo</span><span role="columnheader">Tokens (entrada / salida)</span></div>
+          {resultado.totales.map((t) => (
+            <div class="cm-tr" role="row">
+              <span role="cell"><strong>{t.nombre}</strong></span>
+              <span role="cell" data-et="Preferido">{t.preferido} {t.preferido === 1 ? 'vez' : 'veces'}</span>
+              <span role="cell" data-et="Costo">{usd(t.costoUsd)}</span>
+              <span role="cell" data-et="Tokens">{miles(t.entrada)} / {miles(t.salida)}</span>
+            </div>
+          ))}
+        </div>
+        <p class="cm-nota">Iguales: {resultado.iguales}. Total de la corrida: {usd(costoTotal)}. Costo por resumen = una sesión. Precios: Sonnet 5.5 US$2/US$10 y Haiku 5.5 US$0,10/US$0,50 por millón de tokens (sin IVA).</p>
+      </section>
+    )}
+
+    {casos.map((c, i) => {
+      const sint = notaDe(c);
+      const r = resultado?.porCaso.find((x) => x.id === c.id);
+      const lados = [
+        { n: '1', texto: c.texto_1, det: c.detalle_1, modelo: c.modelo_1, costo: c.costo_usd_1 },
+        { n: '2', texto: c.texto_2, det: c.detalle_2, modelo: c.modelo_2, costo: c.costo_usd_2 },
+      ];
+      return (
+        <section class="card cm-card cm-caso" id={`caso-${c.id}`} aria-labelledby={`cm-c-${c.id}`}>
+          <div class="cm-cab">
+            <h3 id={`cm-c-${c.id}`} class="cm-h3" style="margin:0;">Caso {i + 1} · {c.etiqueta}</h3>
+            <span class={`cm-estado cm-estado-${c.estado}`}>{ESTADO_TXT[c.estado]}</span>
+          </div>
+          {sint && <p class="cm-sub">{sint.descripcion} <span class="cm-mirar">Qué mirar: {sint.esperado.nota}</span></p>}
+          {c.tipo === 'real' && <p class="cm-sub">Transcripción real de la ficha de prueba. Estos resúmenes se guardan cifrados.</p>}
+          {c.estado === 'error' && <p class="cm-nota">No se pudieron generar los dos resúmenes (código {c.error_codigo ?? 'desconocido'}). Toca "Continuar" para reintentar.</p>}
+          {c.estado === 'listo' && !c.fallo_lectura && (
+            <>
+              <div class="cm-par">
+                {lados.map((l) => {
+                  const probs = l.det ? problemasDe(l.det.evaluacion) : [];
+                  const ev = l.det?.evaluacion;
+                  return (
+                    <article class="cm-resumen" aria-label={`Resumen ${l.n}`}>
+                      <p class="cm-titulo-res">
+                        Resumen {l.n}
+                        {resultado && <span class="cm-modelo">{nombreModelo(l.modelo)}{r && r.preferido === l.modelo ? ' · preferido' : ''}</span>}
+                      </p>
+                      <div class="cm-cuerpo" set:html={resumenAHtml(l.texto)} />
+                      {ev && (
+                        <div class="cm-eval">
+                          <p class="cm-eval-tit">Revisión automática (sin IA)</p>
+                          <p class="cm-eval-datos">{ev.citas.verificadas} de {ev.citas.total} citas verificadas · {ev.palabras} palabras{ev.riesgo.consignado ? ' · consignó mención de riesgo' : ''}</p>
+                          {probs.length ? (
+                            <ul class="cm-probs">
+                              {probs.map((p) => <li class={p.grave ? 'cm-grave' : ''}>{p.grave ? '⚠ ' : ''}{p.texto}</li>)}
+                            </ul>
+                          ) : <p class="cm-eval-ok">✓ Sin observaciones automáticas.</p>}
+                        </div>
+                      )}
+                      {resultado && l.det && (
+                        <p class="cm-costo">{usd(l.costo)} · {miles(tokensEntrada(l.det))} tokens de entrada · {miles(l.det.uso.salida)} de salida · {Math.round(l.det.ms / 1000)} s</p>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+              <form class="cm-voto" data-id={c.id}>
+                <fieldset>
+                  <legend class="cm-switch-titulo">¿Cuál prefieres?</legend>
+                  <div class="cm-opciones" role="radiogroup">
+                    {(['1', '2', 'iguales'] as const).map((p) => (
+                      <label class={`cm-op ${c.preferencia === p ? 'cm-op-sel' : ''}`}>
+                        <input type="radio" name={`pref-${c.id}`} value={p} checked={c.preferencia === p} disabled={!!resultado} />
+                        <span>{PREF_TXT[p]}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <label class="cm-sub" for={`com-${c.id}`} style="display:block;margin-top:0.6rem;">Comentario (opcional)</label>
+                <textarea id={`com-${c.id}`} class="cm-com" rows="2" maxlength="2000" disabled={!!resultado} placeholder="Qué te hizo preferirlo, qué faltó o sobró…">{c.comentario_claro ?? ''}</textarea>
+                {!resultado && (
+                  <div class="cm-acciones">
+                    <button type="submit" class="btn btn-dark btn-sm">{c.preferencia ? 'Cambiar voto' : 'Guardar voto'}</button>
+                    <span class="cm-msg" role="status" aria-live="polite"></span>
+                  </div>
+                )}
+              </form>
+            </>
+          )}
+        </section>
+      );
+    })}
+
+    {!bloqueo && !faltaMigracion && corrida && !resultado && listos.length > 0 && (
+      <p class="cm-nota" style="margin-bottom:2rem;">Cuando votes todos los casos listos se revela qué modelo escribió cada resumen, con su costo y sus tokens. Después de revelar, los votos quedan fijos.</p>
+    )}
+  </div>
+</AdminLayout>
+
+<style>
+  .cm { max-width: 1100px; }
+  .cm-card { margin-bottom: 1.25rem; }
+  .cm-h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
+  .cm-sub { font-size: 0.8rem; color: var(--stone); line-height: 1.5; }
+  .cm-volver { color: var(--stone); text-decoration: none; }
+  .cm-volver:hover { text-decoration: underline; }
+  .cm-nota { font-size: 0.76rem; color: var(--stone); margin-top: 0.5rem; line-height: 1.5; }
+  .cm-msg { font-size: 0.78rem; margin-top: 0.4rem; }
+  .cm-msg:empty { display: none; }
+  .cm-mirar { display: block; margin-top: 0.2rem; font-style: italic; }
+  .cm-acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
+  .cm-datos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.9rem; }
+  .cm-datos dt { font-size: 0.7rem; color: var(--stone); text-transform: uppercase; letter-spacing: 0.04em; }
+  .cm-datos dd { font-size: 0.92rem; font-weight: 600; }
+  .cm-alto { color: #92400e; }
+  .cm-cab { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.35rem; }
+  .cm-estado { font-size: 0.72rem; font-weight: 600; border-radius: 99px; padding: 0.15rem 0.6rem; border: 1px solid; white-space: nowrap; }
+  .cm-estado-listo { color: #15803d; background: #f0fdf4; border-color: #86efac; }
+  .cm-estado-pendiente, .cm-estado-generando { color: #374151; background: #f3f4f6; border-color: #e5e7eb; }
+  .cm-estado-error { color: #92400e; background: #fffbeb; border-color: #fcd34d; }
+  .cm-par { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem; margin-top: 0.75rem; }
+  .cm-resumen { border: 1px solid var(--enc-border, #e5e7eb); border-radius: var(--enc-radius-lg, 10px); padding: 0.85rem 0.95rem; background: #fff; min-width: 0; display: flex; flex-direction: column; }
+  .cm-titulo-res { font-weight: 700; font-size: 0.9rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
+  .cm-modelo { font-size: 0.74rem; font-weight: 600; color: #576352; background: #f6f8f5; border: 1px solid #c9d2c4; border-radius: 99px; padding: 0.05rem 0.5rem; }
+  .cm-cuerpo { font-size: 0.84rem; line-height: 1.6; color: var(--ink); margin-top: 0.35rem; overflow-wrap: anywhere; flex: 1; }
+  .cm-cuerpo :global(h4) { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--stone); font-weight: 600; margin: 0.85rem 0 0.25rem; }
+  .cm-cuerpo :global(ul) { padding-left: 1.15rem; list-style: disc; }
+  .cm-cuerpo :global(li) { margin: 0.15rem 0; }
+  .cm-cuerpo :global(p) { margin: 0.3rem 0; }
+  .cm-cuerpo :global(p.ia-meta) { font-size: 0.74rem; color: var(--stone); font-style: italic; }
+  .cm-eval { border-top: 1px solid var(--warm); margin-top: 0.75rem; padding-top: 0.55rem; }
+  .cm-eval-tit { font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--stone); font-weight: 600; }
+  .cm-eval-datos { font-size: 0.76rem; color: var(--stone); margin-top: 0.15rem; }
+  .cm-eval-ok { font-size: 0.78rem; color: #15803d; margin-top: 0.25rem; }
+  .cm-probs { font-size: 0.78rem; margin: 0.3rem 0 0 1rem; list-style: disc; color: #374151; }
+  .cm-probs li { margin: 0.12rem 0; overflow-wrap: anywhere; }
+  .cm-grave { color: #9a3412; font-weight: 600; }
+  .cm-costo { font-size: 0.74rem; color: #576352; margin-top: 0.5rem; font-weight: 600; }
+  .cm-voto { margin-top: 0.9rem; }
+  .cm-voto fieldset { border: none; padding: 0; margin: 0; min-width: 0; }
+  .cm-switch-titulo { font-weight: 600; font-size: 0.88rem; padding: 0; }
+  .cm-opciones { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.45rem; }
+  .cm-op { display: flex; gap: 0.5rem; align-items: center; min-height: 44px; padding: 0.55rem 0.75rem; border: 1px solid var(--enc-border, #e5e7eb); border-radius: var(--enc-radius-lg, 10px); cursor: pointer; background: #fff; font-size: 0.86rem; }
+  .cm-op input { width: 18px; height: 18px; accent-color: #576352; flex-shrink: 0; margin: 0; }
+  .cm-op.cm-op-sel, .cm-op:has(input:checked) { border-color: #576352; box-shadow: 0 0 0 1px #576352 inset; background: #f6f8f5; }
+  .cm-op:has(input:disabled) { cursor: default; }
+  .cm-op:has(input:focus-visible) { outline: 2px solid #4f5ce8; outline-offset: 2px; }
+  .cm-com { width: 100%; font-size: 0.85rem; padding: 0.5rem 0.6rem; border: 1px solid var(--enc-border, #e5e7eb); border-radius: 8px; margin-top: 0.25rem; font-family: inherit; resize: vertical; box-sizing: border-box; }
+  .cm-tabla { margin-top: 0.4rem; font-size: 0.85rem; }
+  .cm-tr { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1.6fr; gap: 0.5rem; padding: 0.5rem 0; border-top: 1px solid var(--warm); }
+  .cm-th { font-size: 0.7rem; color: var(--stone); text-transform: uppercase; letter-spacing: 0.04em; border-top: none; }
+  @media (max-width: 760px) {
+    .cm-par { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 600px) {
+    .cm-datos { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cm-opciones { grid-template-columns: minmax(0, 1fr); }
+    .cm-acciones .btn { min-height: 44px; }
+    .cm-th { display: none; }
+    .cm-tr { grid-template-columns: minmax(0, 1fr); gap: 0.15rem; }
+    .cm-tr span[data-et]::before { content: attr(data-et) ': '; color: var(--stone); font-size: 0.76rem; }
+  }
+</style>
+
+<script>
+  async function postPanel(body: unknown): Promise<{ ok: boolean; error?: string; [k: string]: unknown }> {
+    const res = await fetch('/api/admin/transcriptor/comparar', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+      body: JSON.stringify(body),
+    });
+    try { return await res.json(); } catch { return { ok: false, error: 'Respuesta inesperada del servidor.' }; }
+  }
+  const pinta = (el: Element | null | undefined, texto: string, color: string) => {
+    if (el instanceof HTMLElement) { el.textContent = texto; el.style.color = color; }
+  };
+  const progreso = document.getElementById('cm-progreso');
+  const botones = () => [document.getElementById('cm-crear'), document.getElementById('cm-seguir')].filter(Boolean) as HTMLButtonElement[];
+
+  // Genera caso por caso (cada request cabe en los 300 s de Vercel). Al terminar, recarga.
+  async function generar(ids: string[]) {
+    botones().forEach((b) => { b.disabled = true; });
+    let fallidos = 0;
+    for (let i = 0; i < ids.length; i++) {
+      pinta(progreso, `Generando caso ${i + 1} de ${ids.length}… (cada uno toma alrededor de medio minuto; no cierres la página)`, '#6b7280');
+      try {
+        const d = await postPanel({ accion: 'generar', id: ids[i] });
+        if (!d.ok) fallidos++;
+      } catch { fallidos++; }
+    }
+    pinta(progreso, fallidos ? `Listo, con ${fallidos} ${fallidos === 1 ? 'caso' : 'casos'} sin generar (puedes reintentar con "Continuar").` : '✓ Listo. Cargando…', fallidos ? '#92400e' : '#15803d');
+    setTimeout(() => location.reload(), fallidos ? 1800 : 600);
+  }
+
+  document.getElementById('cm-crear')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget as HTMLButtonElement;
+    if (b.dataset.confirmar === '1' && !confirm('La comparación actual no está terminada. ¿Generar una nueva igual? La actual queda guardada.')) return;
+    botones().forEach((x) => { x.disabled = true; });
+    pinta(progreso, 'Preparando los casos…', '#6b7280');
+    try {
+      const d = await postPanel({ accion: 'crear' });
+      if (!d.ok) throw new Error(d.error ?? 'No se pudo crear la comparación.');
+      await generar((d.casos as string[]) ?? []);
+    } catch (err) {
+      pinta(progreso, '✕ ' + (err instanceof Error ? err.message : 'Error de conexión'), '#dc2626');
+      botones().forEach((x) => { x.disabled = false; });
+    }
+  });
+
+  document.getElementById('cm-seguir')?.addEventListener('click', (e) => {
+    const ids = ((e.currentTarget as HTMLButtonElement).dataset.ids ?? '').split(',').filter(Boolean);
+    if (ids.length) void generar(ids);
+  });
+
+  document.querySelectorAll<HTMLFormElement>('.cm-voto').forEach((f) => {
+    f.querySelectorAll<HTMLInputElement>('input[type=radio]').forEach((r) => r.addEventListener('change', () => {
+      f.querySelectorAll('.cm-op').forEach((op) => op.classList.toggle('cm-op-sel', !!op.querySelector('input:checked')));
+    }));
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = f.querySelector('.cm-msg');
+      const pref = f.querySelector<HTMLInputElement>('input[type=radio]:checked')?.value;
+      if (!pref) { pinta(msg, 'Elige 1, 2 o Iguales.', '#dc2626'); return; }
+      const comentario = f.querySelector('textarea')?.value ?? '';
+      const btn = f.querySelector<HTMLButtonElement>('button[type=submit]');
+      if (btn) btn.disabled = true;
+      pinta(msg, 'Guardando…', '#6b7280');
+      try {
+        const d = await postPanel({ accion: 'votar', id: f.dataset.id, preferencia: pref, comentario });
+        if (!d.ok) throw new Error(d.error ?? 'No se pudo guardar.');
+        pinta(msg, d.revelado ? '✓ Guardado. Votaste todos: revelando…' : '✓ Guardado.', '#15803d');
+        if (d.revelado) setTimeout(() => location.reload(), 700);
+        else if (btn) { btn.textContent = 'Cambiar voto'; btn.disabled = false; }
+      } catch (err) {
+        pinta(msg, '✕ ' + (err instanceof Error ? err.message : 'Error de conexión'), '#dc2626');
+        if (btn) btn.disabled = false;
+      }
+    });
+  });
+</script>

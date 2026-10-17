@@ -21,6 +21,7 @@ export function esRutaTranscriptor(pathname: string): boolean {
   const p = (pathname.replace(/\/+$/, '') || '/').toLowerCase();
   return p === '/admin/grabar'
     || p === '/admin/transcriptor'
+    || p === '/admin/transcriptor/comparar' // prueba ciega de modelos (muestra resúmenes)
     || p === '/api/admin/transcriptor' || p.startsWith('/api/admin/transcriptor/')
     || /^\/admin\/pacientes\/[^/]+\/sesion(\/|$)/.test(p);
 }

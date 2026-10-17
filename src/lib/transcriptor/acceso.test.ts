@@ -70,7 +70,8 @@ test('tokenRevocado estricto lanza si Supabase falla; el modo general sigue deja
 
 test('esRutaTranscriptor: solo las rutas del transcriptor fallan cerrado en el middleware', () => {
   for (const p of ['/admin/grabar', '/admin/grabar/', '/admin/transcriptor', '/api/admin/transcriptor/preguntar',
-    '/api/admin/transcriptor/ajustes', '/admin/pacientes/abc/sesion/123', '/admin/pacientes/abc/sesion']) {
+    '/api/admin/transcriptor/ajustes', '/admin/pacientes/abc/sesion/123', '/admin/pacientes/abc/sesion',
+    '/admin/transcriptor/comparar', '/api/admin/transcriptor/comparar']) {
     assert.equal(esRutaTranscriptor(p), true, p);
   }
   for (const p of ['/admin', '/admin/agenda', '/admin/pacientes', '/admin/pacientes/abc', '/api/admin/settings',

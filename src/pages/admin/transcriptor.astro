@@ -290,7 +290,10 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
 
     <!-- ── Mis instrucciones para el resumen ───────────────────────────── -->
     <section class="card tx-card" aria-labelledby="tx-instr">
-      <h3 id="tx-instr" class="tx-h3">Mis instrucciones para el resumen</h3>
+      <div class="tx-cab-fila" style="margin-bottom:0.5rem;">
+        <h3 id="tx-instr" class="tx-h3" style="margin:0;">Mis instrucciones para el resumen</h3>
+        <a href="/admin/transcriptor/comparar" class="btn btn-outline btn-sm">Comparar modelos (prueba ciega)</a>
+      </div>
       <p class="tx-sub" style="margin-bottom:0.6rem;">Secciones, orden, tono y largo del resumen. Lo que no se puede cambiar desde aquí: no inventar, no diagnosticar, la sección "Atención" cuando corresponde y el rótulo de IA. Los cambios valen para los resúmenes nuevos.</p>
       <form class="tx-instr-form" data-uso="resumen">
         <textarea id="tx-instr-resumen" rows="16" maxlength={MAX_INSTRUCCIONES} style="resize:vertical;font-size:0.85rem;line-height:1.55;">{repararMojibake(activaResumen?.texto) ?? INSTRUCCIONES_RESUMEN_POR_DEFECTO}</textarea>
