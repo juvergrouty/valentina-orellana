@@ -89,7 +89,7 @@ test('parte fija: riesgo aparte al inicio, relato en prosa, Tareas y Próxima en
   assert.match(PARTE_FIJA_RESUMEN, /Cada cita se verifica automáticamente/);
   assert.match(PLANTILLA_PAREJA, /separa por persona/);
   assert.match(CIERRE_FIJO_RESUMEN, /ESTRUCTURA FIJA/);
-  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-17.6');
+  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-17.7');
   for (const prohibido of [/Prioridad:/, /\bALTA\b/, /\bREVISAR\b/, /tamizaje/i, /alerta/i]) {
     assert.doesNotMatch(PARTE_FIJA_RESUMEN, prohibido);
   }

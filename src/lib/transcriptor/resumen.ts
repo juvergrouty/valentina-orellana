@@ -34,7 +34,7 @@ import {
 //               sesión en prosa ("### Resumen de la sesión", párrafos cortos, cierre "Como tarea, se acuerda…");
 //               las menciones de riesgo van en un bloque aparte AL INICIO ("### Menciones de temas de riesgo"),
 //               nunca en el relato; Tareas y Próxima siguen en viñetas (alimentan "Para revisar hoy").
-export const PROMPT_VERSION_RESUMEN = 'resumen-2026-10-17.6';
+export const PROMPT_VERSION_RESUMEN = 'resumen-2026-10-17.7';
 export const PROMPT_VERSION_PREGUNTAS = 'preguntas-2026-10-16.1';
 
 export const TITULO_RESUMEN = '## Resumen automático (IA)';
@@ -278,7 +278,8 @@ export function armarPromptResumen(p: {
     bloqueSesion,
     previo ? `<contexto_sesion_anterior>\n${sanearDato(previo)}\n</contexto_sesion_anterior>` : null,
     `<transcripcion>\n${formatearTranscripcion(p.transcripcion, pausas)}\n</transcripcion>`,
-    'Escribe el resumen de esta sesión.',
+    // Recordatorio al final (recencia): en la prueba ciega Sonnet se pasó del tope en pareja.
+    `Escribe el resumen de esta sesión. El relato (### Resumen de la sesión) tiene como MÁXIMO ${s?.duracionMin ? Math.max(90, Math.min(250, Math.round(5 * s.duracionMin))) : 200} palabras: cuéntalas y recorta si te pasas.`,
   ].filter(Boolean) as string[];
 
   return {
