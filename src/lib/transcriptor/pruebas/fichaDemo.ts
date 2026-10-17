@@ -7,6 +7,9 @@
 import type { GrabFicha, ResFicha } from '../fichaNotas';
 
 const res = (puntos: string, tareas: string, proxima: string) => `## Resumen automático (IA)\n*Sesión individual · presencial · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*\n\n### Puntos más importantes\n${puntos}\n\n### Tareas\n${tareas}\n\n### Para trabajar en la próxima sesión\n${proxima}`;
+/** Formato actual (resumen-2026-10-17.3): riesgo aparte al inicio + relato en prosa. Las demás sesiones quedan
+ * con el formato anterior para ver que los resúmenes viejos se siguen mostrando. */
+const resRelato = (riesgo: string, relato: string, tareas: string, proxima: string) => `## Resumen automático (IA)\n*Sesión individual · presencial · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*\n\n${riesgo ? `### Menciones de temas de riesgo\n${riesgo}\n\n` : ''}### Resumen de la sesión\n${relato}\n\n### Tareas\n${tareas}\n\n### Para trabajar en la próxima sesión\n${proxima}`;
 const G = (n: number) => `00000000-0000-4000-8000-${`a${n}`.padStart(12, '0')}`;
 
 export interface FichaDemo {
@@ -40,8 +43,9 @@ export function fichaDemo(id: string, params: URLSearchParams): FichaDemo {
   const grabaciones = [dg(1, 'b1', '2026-10-15'), dg(2, 'b2', '2026-10-08'), dg(3, 'b3', '2026-10-01'), dg(4, 'b4', '2026-09-24', 'online'), dg(5, 'b5', '2026-09-17'), dg(6, 'b6', '2026-09-10')];
   const dr = (n: number, contenido: string | null, archivado = false): ResFicha =>
     ({ id: `00000000-0000-4000-8000-${`r${n}`.padStart(12, '0')}`, grabacion_id: G(n), version: 1, autor: 'ia', estado: 'listo', rotulo: null, modelo: 'claude-sonnet-5-5', listo_at: '2026-10-15T20:10:00Z', created_at: '2026-10-15T20:00:00Z', contenido: archivado ? null : contenido, archivado_at: archivado ? '2026-10-16T03:00:00Z' : null, archivo_r2_key: archivado ? 't/demo.bin' : null });
-  const r1 = res(
-    '- Se habló de no dar más con el trabajo — Dicho por: Camila — [23:40]\n  «a veces siento que no doy más»\n_Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._\n- Refiere dormir mejor desde que deja el celular fuera de la pieza [05:12].\n- La conversación pendiente con su jefa sigue siendo lo que más le preocupa [18:30].\n- Cuenta que el registro de pensamientos le ayudó a notar que se anticipa a lo peor [31:05].',
+  const r1 = resRelato(
+    '- Se habló de no dar más con el trabajo — Dicho por: Camila — [23:40]\n  «a veces siento que no doy más»\n_Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._',
+    'Camila refiere que duerme mejor desde que deja el celular fuera de la pieza [05:12]. Relata que la conversación pendiente con su jefa sigue siendo lo que más le preocupa y que la ha postergado dos semanas.\n\nSe aborda el registro de pensamientos de la semana. Camila cuenta que le ayudó a notar que se anticipa a lo peor antes de las reuniones [31:05], y se explora qué le diría a su jefa si la reunión fuera mañana.\n\nComo tarea, se acuerda que repita el registro de pensamientos tres veces y que pida la reunión con su jefa para el jueves.',
     '- Camila: registro de pensamientos 3 veces — antes de la próxima sesión [41:00].\n- Camila: pedir la reunión con su jefa para el jueves [44:10].',
     '- Cómo le fue con la conversación con su jefa.\n- Retomar "siempre tengo que poder con todo", que quedó abierto [47:00].',
   );

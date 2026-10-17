@@ -1,5 +1,7 @@
 // Los 3 ejemplos sintéticos de 20-clinico.md §5 (datos 100 % inventados), como fixtures de prueba.
-// Resúmenes esperados con la estructura fija de Vale (02-decisiones-16oct-noche, B; prompt resumen-2026-10-16.3).
+// Resúmenes esperados con la estructura de relato (prompt resumen-2026-10-17.3): menciones de riesgo aparte
+// al inicio (si las hay) · "Resumen de la sesión" en prosa · Tareas · Próxima sesión · Notas.
+// EJ1_RESUMEN_ANTIGUO conserva el formato anterior ("Puntos más importantes") para probar retrocompatibilidad.
 import type { TramoTranscrito } from './tipos';
 
 /** "[hh:mm:ss] Hablante: texto" o "[hh:mm:ss] texto" → tramos (fin = inicio del siguiente). */
@@ -27,8 +29,28 @@ export const EJ1_TRANSCRIPCION = `
 [00:38:30] Camila: Sí, lo anoto en el celular.
 [00:47:00] Valentina: La próxima vez retomamos lo de "la que puede con todo", que quedó abierto.`;
 
-/** Ejemplo 1 con la estructura fija de Vale (02-decisiones-16oct-noche, B). */
+/** Ejemplo 1 con el relato (17 oct). */
 export const EJ1_RESUMEN = `## Resumen automático (IA)
+*Sesión individual · 3 oct 2026 · online · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*
+
+### Resumen de la sesión
+Camila refiere una semana pesada. Relata que el lunes su jefa le pidió un informe para el mismo día, que se bloqueó y que se quedó hasta las once en la oficina [01:14]. Describe que se le apretó el pecho y no podía pensar, y que esa noche durmió alrededor de cuatro horas [02:35].
+
+Expresa temor a que, si dice que no, la vean como floja: «Siempre he sido la que puede con todo.» [09:50]
+
+Se explora qué pasaría si le dice a su jefa cuándo sí puede entregar [12:05]. Camila cuenta que el miércoles avisó que otro informe estaría el viernes «y no pasó nada» [25:40].
+
+Como tarea, se acuerda que Camila anote en el celular cada vez que diga que sí a algo que no quería y qué sintió.
+
+### Tareas
+- Camila: anotar en el celular cada vez que diga que sí a algo que no quería y qué sintió — durante la semana [38:15].
+
+### Para trabajar en la próxima sesión
+- Retomar "la que puede con todo", que la terapeuta dijo que quedó abierto [47:00].
+- Revisar el registro de la semana.`;
+
+/** Ejemplo 1 con el formato ANTERIOR ("Puntos más importantes"): resúmenes ya guardados. */
+export const EJ1_RESUMEN_ANTIGUO = `## Resumen automático (IA)
 *Sesión individual · 3 oct 2026 · online · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*
 
 ### Puntos más importantes
@@ -59,12 +81,13 @@ export const EJ2_TRANSCRIPCION = `
 [00:52:40] C: Yo elijo [inaudible] y las compras.
 [00:58:00] A: La próxima vez vemos cómo les fue y lo de los horarios, que no alcanzamos.`;
 
-/** Ejemplo 2 (pareja) con la estructura fija: tareas por persona y "no consta" cuando falta. */
-export const EJ2_RESUMEN = `### Puntos más importantes
-- Javiera cuenta que discutieron otra vez por la casa; dice que llega a las siete y encuentra a Diego en el sillón [00:45].
-- Diego cuenta que trabaja desde las seis de la mañana y llega «muerto» [01:20]; dice sentir que lo que hace «nunca es suficiente» [03:15].
-- Javiera plantea que no se trata de cocinar el fin de semana: «se trata de que yo tengo que acordarme de todo» [04:02]
-- Tras hacer en sesión la lista de lo que hay que hacer en la casa, ambos dijeron que verla escrita les sirvió [31:00].
+/** Ejemplo 2 (pareja) con el relato: espacio equivalente, versiones atribuidas, tareas por persona. */
+export const EJ2_RESUMEN = `### Resumen de la sesión
+Javiera relata que volvieron a discutir por la casa; cuenta que llega a las siete y encuentra a Diego en el sillón [00:45]. Diego, por su parte, refiere que trabaja desde las seis de la mañana y llega «muerto» [01:20], y expresa que lo que hace «nunca es suficiente» [03:15].
+
+Javiera plantea que no se trata de cocinar el fin de semana: «se trata de que yo tengo que acordarme de todo» [04:02]. Se aborda en sesión una lista de lo que hay que hacer en la casa, incluido lo que "hay que acordarse"; ambos refieren que verla escrita les sirvió [31:00].
+
+Como tarea, se acuerda que cada uno elija dos cosas de la lista de las que se hace cargo completo, incluido acordarse.
 
 ### Tareas
 - De la pareja: cada uno elige dos cosas de la lista de las que se hace cargo completo, incluido acordarse — próxima semana [52:20].
@@ -91,21 +114,24 @@ export const EJ3_TRANSCRIPCION = `
 [00:45:00] Quedamos en que si se pone más fuerte llamas a tu hermano o al *4141, y nos vemos el jueves.`;
 
 /**
- * Ejemplo 3 con la estructura fija: los temas de riesgo van PRIMERO dentro de "Puntos más importantes",
- * literales y neutros, con minuto (01-decisiones-16oct, decisión 2; 02-decisiones-16oct-noche, B).
+ * Ejemplo 3: los temas de riesgo van en su bloque aparte AL INICIO, antes del relato, literales y
+ * neutros, con minuto (01-decisiones-16oct, decisión 2); el relato no los repite.
  * H15 (81-revision): sin inferencias ("se fue" no dice separación): cita literal.
  */
 export const EJ3_RESUMEN = `## Resumen automático (IA)
 *Sesión individual · 10 oct 2026 · presencial · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*
 
-### Puntos más importantes
+### Menciones de temas de riesgo
 - Se habló de ideas de no despertar — Dicho por: Tomás (inferido) — [15:40]
   «A veces pienso que sería más fácil no despertar. No es que vaya a hacer algo, pero lo pienso.»
 - Se habló de pastillas guardadas — Dicho por: Tomás (inferido) — [33:10]
   «Tengo guardadas las pastillas que me dio el doctor el año pasado, las [inaudible].»
 _Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._
-- Habla de su ánimo desde que, en sus palabras, «se fue la Fran» [02:05].
-- Dice que cuenta con su hermano [16:25].
+
+### Resumen de la sesión
+Tomás refiere que sigue igual y habla de su ánimo desde que, en sus palabras, «se fue la Fran» [02:05]. Cuando se le pregunta con quién cuenta, responde que con su hermano [16:25].
+
+Como tarea, se acuerda que llame a su hermano o al *4141 si "se pone más fuerte", y volver a verse el jueves [45:00].
 
 ### Tareas
 - Tomás: si "se pone más fuerte", llamar a su hermano o al *4141 — hasta la próxima sesión [45:00].

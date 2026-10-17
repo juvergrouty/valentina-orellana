@@ -5,11 +5,11 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { CONFIG_RESUMEN, costoUsd, paramsMensaje, type ClienteMensajes } from './claude';
 import {
   MODELO_HAIKU, MODELO_SONNET, TOPE_CORRIDA_USD, azarSeguro, configComparacion, contarPalabras, costoCorrida,
-  detalleDe, estimarCostoCasoUsd, evaluarResumen, generarPar, realesBajoTope, minutosSinTramo, nombreModelo, numeroEnPalabras, problemasDe,
+  detalleDe, estimarCostoCasoUsd, rangoRelato, evaluarResumen, generarPar, realesBajoTope, minutosSinTramo, nombreModelo, numeroEnPalabras, problemasDe,
   promptComparacion, puedeRevelar, revelar, sortearOrden, terminosSinSustento, type CasoParaRevelar, type EntradaPar,
 } from './comparacion';
 import { CASOS_SINTETICOS, casoSintetico, tramosDeGuion } from './pruebas/comparacion';
-import { PROMPT_VERSION_RESUMEN, estimarTokens, formatearTranscripcion } from './resumen';
+import { PROMPT_VERSION_RESUMEN, estimarTokens, formatearTranscripcion, parsearResumen } from './resumen';
 
 function mensaje(texto: string, usage = { input_tokens: 9000, output_tokens: 600 }) {
   return {
@@ -73,7 +73,7 @@ test('paramsMensaje: mismo system y messages para los dos modelos, sin metadata,
   assert.deepEqual(ph.output_config, { effort: 'medium' });
   assert.equal(ps.model, MODELO_SONNET);
   assert.equal(ph.model, MODELO_HAIKU);
-  assert.match(JSON.stringify(ps.system), /TEMAS DE RIESGO PRIMERO/); // es el prompt de producción
+  assert.match(JSON.stringify(ps.system), /### Menciones de temas de riesgo[^]*### Resumen de la sesión/); // es el prompt de producción
 });
 
 // ─── Orden ciego ─────────────────────────────────────────────────────────────
@@ -140,11 +140,18 @@ test('realesBajoTope: elige casos reales en orden mientras la corrida estimada q
 
 // ─── Generación con cliente falso ────────────────────────────────────────────
 
-const RESUMEN_BUENO = `### Puntos más importantes
+const RESUMEN_BUENO = `### Menciones de temas de riesgo
 - Se habló de que a veces piensa que sería más fácil no despertar — Dicho por: Martina (inferido) — [12:28]
   «pienso que sería más fácil no despertar al otro día»
 _Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._
-- Martina cuenta que duerme cuatro a cinco horas por noche [01:07].
+### Resumen de la sesión
+Martina refiere una semana pesada: la cambiaron de equipo y tiene una jefa nueva. Relata que revisa el correo en la noche, queda dándole vueltas y duerme cuatro a cinco horas por noche [01:07]. Expresa que siente que la nueva jefa la está evaluando todo el rato [02:19].
+
+Se explora la noche del jueves, cuando despertó a las tres y media y pensó que el informe estaba mal; ella lo describe como «una película completa a las cuatro de la mañana» [05:40]. También cuenta que dejó el yoga hace como tres semanas y que el jueves lloró en el baño de la oficina.
+
+Se prepara cómo preguntarle a la jefa por el horario en que espera respuestas. Martina dice sentirse más liviana y, al cierre, «Más ordenada. Con un plan.» [21:30]
+
+Como tarea, se acuerda un registro de sueño cada mañana, preguntar a la jefa por el horario de respuesta el lunes y practicar la respiración cuatro siete ocho dos veces al día.
 ### Tareas
 - Martina: registro de sueño cada mañana — hasta la próxima sesión [06:21]
 - Martina: preguntar a la jefa por el horario de respuesta — lunes [08:09]
@@ -198,16 +205,24 @@ test('evaluarResumen: un resumen fiel del caso individual no tiene problemas gra
   assert.equal(ev.riesgo.consignado, true);
   assert.deepEqual(ev.minutosSinTramo, []);
   assert.deepEqual(ev.terminosSinSustento, []);
-  assert.equal(problemasDe(ev).filter((p) => p.grave).length, 0);
+  assert.deepEqual(ev.terminosRelato, []);
+  assert.equal(ev.relatoEnVinetas, 0);
+  assert.equal(ev.vinetasSinMinuto, 0);      // el relato no exige minuto por frase
+  assert.deepEqual(ev.rango, [115, 207]);    // 23 min × 5–9 palabras
+  assert.equal(ev.fueraDeRango, false, `relato de ${ev.palabras} palabras`);
+  assert.equal(problemasDe(ev).length, 0, problemasDe(ev).map((p) => p.texto).join(' | '));
+  // El riesgo quedó aparte, antes del relato, y no dentro.
+  const secs = parsearResumen(a.r.contenido).secciones;
+  assert.deepEqual(secs.slice(0, 2).map((s) => s.titulo), ['Menciones de temas de riesgo', 'Resumen de la sesión']);
+  assert.doesNotMatch(secs[1].cuerpo, /Se habló de|Mención consignada/);
 });
 
 test('evaluarResumen: detecta tramo no registrado, riesgo omitido, sección faltante, sección extra, minuto y nombre inventados', () => {
   const e = entradaDe('sint-individual-25');
   const caso = casoSintetico('sint-individual-25')!;
-  const malo = `### Puntos más importantes
-- Martina cuenta que su pareja tiene deudas por apuestas online [19:05].
-- Su amiga Fernanda la acompaña al yoga [24:59].
-- Duerme 4 horas y llora 37 veces [01:07].
+  const malo = `### Resumen de la sesión
+Martina cuenta que su pareja tiene deudas por apuestas online [19:05]. Su amiga Fernanda la acompaña al yoga [24:59]. Duerme 4 horas y llora 37 veces [01:07].
+- Sesión productiva.
 ### Resumen general
 - Sesión productiva.
 ### Tareas
@@ -220,6 +235,9 @@ test('evaluarResumen: detecta tramo no registrado, riesgo omitido, sección falt
   assert.equal(ev.riesgo.esperado, true);
   assert.ok(ev.minutosSinTramo.includes('24:59'));
   assert.ok(ev.terminosSinSustento.includes('Fernanda'));
+  assert.ok(ev.terminosRelato.includes('Fernanda'));
+  assert.equal(ev.relatoEnVinetas, 1);
+  assert.match(problemasDe(ev).map((p) => p.texto).join(' '), /en el relato\.[\s\S]*1 línea en viñeta/);
   assert.ok(ev.terminosSinSustento.includes('37'));
   assert.ok(!ev.terminosSinSustento.includes('4'), '4 = "cuatro" sí está en la transcripción');
   assert.deepEqual(ev.tareasFaltantes, ['registro de sueño', 'jefa', 'respiración', 'guía']);
@@ -231,11 +249,13 @@ test('evaluarResumen: detecta tramo no registrado, riesgo omitido, sección falt
 
 test('evaluación de un caso REAL se guarda sin texto (solo conteos)', () => {
   const tramos = [{ inicio_ms: 0, fin_ms: 5000, hablante: 'A', texto: 'hola' }];
-  const md = '### Puntos más importantes\n- Habla de Rodolfo [00:00].\n### Tareas\n- No consta en la transcripción.\n### Para trabajar en la próxima sesión\n- No consta en la transcripción.';
+  const md = '### Resumen de la sesión\nAna refiere que habla de Rodolfo [00:00].\n### Tareas\n- No consta en la transcripción.\n### Para trabajar en la próxima sesión\n- No consta en la transcripción.';
   const ev = evaluarResumen({ textoModelo: md, contenido: md, verificacion: { total: 0, verificadas: 0, minutosCorregidos: 0, eliminadas: 0 }, tramos, truncado: false });
   assert.deepEqual(ev.terminosSinSustento, ['Rodolfo']);
   const d = detalleDe({ modelo: MODELO_HAIKU, contenido: md, textoModelo: md, verificacion: ev.citas as never, uso: { entrada: 1, salida: 1, cacheEscritura: 0, cacheLectura: 0 }, costoUsd: 0, truncado: false, ms: 1 }, ev, true);
   assert.deepEqual(d.evaluacion.terminosSinSustento, []);
+  assert.deepEqual(d.evaluacion.terminosRelato, []);
+  assert.equal((d.evaluacion as { terminosRelatoN?: number }).terminosRelatoN, 1);
   assert.equal(d.evaluacion.terminosSinSustentoN, 1);
   assert.equal(d.promptVersion, PROMPT_VERSION_RESUMEN);
   assert.ok(!JSON.stringify(d).includes('Rodolfo'));
@@ -244,7 +264,13 @@ test('evaluación de un caso REAL se guarda sin texto (solo conteos)', () => {
 
 test('contarPalabras no cuenta títulos, minutos, citas ni el bloque de riesgo; numeroEnPalabras', () => {
   const md = '## Resumen automático (IA)\n*Sesión individual · algo*\n\n### Puntos más importantes\n- Se habló de algo — Dicho por: X — [00:01]\n  «cita larga de muchas palabras»\n_Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._\n- Uno dos tres [00:02].';
-  assert.equal(contarPalabras(md), 3);
+  assert.equal(contarPalabras(md), 3); // formato antiguo
+  // Relato: solo cuenta el relato (no el bloque de riesgo, ni Tareas, ni minutos ni citas).
+  const rel = `### Menciones de temas de riesgo\n- Se habló de x — Dicho por: Y — [00:01]\n  «a b c»\n### Resumen de la sesión\nAna refiere uno dos [00:02].\n\nSe explora «cita» tres.\n### Tareas\n- Ana: algo largo de varias palabras [00:03]`;
+  assert.equal(contarPalabras(rel), 7);
+  assert.deepEqual(rangoRelato(50, false), [250, 450]);
+  assert.deepEqual(rangoRelato(15, true), [60, 120]);
+  assert.deepEqual(rangoRelato(5, false), [60, 120]);
   assert.equal(numeroEnPalabras(4), 'cuatro');
   assert.equal(numeroEnPalabras(70), 'setenta');
   assert.equal(numeroEnPalabras(25), 'veinticinco');

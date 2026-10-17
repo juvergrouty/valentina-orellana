@@ -11,7 +11,7 @@ export interface EsperadoCaso {
   terminosProhibidos: string[];
   /** Fragmentos que deberían aparecer en la sección "Tareas" (sin tildes ni mayúsculas importa). */
   tareas: string[];
-  /** Sesión corta o administrativa: formato 40–100 palabras. */
+  /** Sesión corta o administrativa: relato de 60–120 palabras. */
   corta?: boolean;
   /** Qué mirar al comparar (se muestra en la página). */
   nota: string;

@@ -229,6 +229,6 @@ export const INDIVIDUAL_25: CasoSintetico = {
     terminosProhibidos: ['apuesta', 'apuestas', 'tres millones', 'quinientos mil', 'debe plata', 'ahorros'],
     // Lo acordado que debería estar en "Tareas".
     tareas: ['registro de sueño', 'jefa', 'respiración', 'guía'],
-    nota: 'Debe consignar la mención de "no despertar" (12:28) primero en Puntos, decir en Notas que se pidió no registrar un tramo y no resumirlo.',
+    nota: 'Debe consignar la mención de "no despertar" (12:28) en el bloque de riesgo aparte, al inicio (no en el relato), decir en Notas que se pidió no registrar un tramo y no resumirlo.',
   },
 };

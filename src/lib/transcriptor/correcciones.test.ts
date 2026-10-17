@@ -174,7 +174,7 @@ test('H7: el contenido del resumen se cifra con su id y tipo; las filas antiguas
 // ─── H8, H9, H14, H16, H10: prompt y rótulo ──────────────────────────────────
 
 test('prompt del resumen: textos de 81-revision y versión nueva', () => {
-  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-17.2'); // misma estructura, texto compactado (17 oct)
+  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-17.3'); // relato en prosa + riesgo aparte (17 oct)
   assert.match(PARTE_FIJA_RESUMEN, /no incluyas en ninguna sección del resumen lo dicho en ese tramo/); // H8
   assert.doesNotMatch(PARTE_FIJA_RESUMEN, /NO lo omitas por tu cuenta/);
   assert.match(PARTE_FIJA_RESUMEN, /sin términos clínicos ni calificativos de gravedad como "pasiva", "leve", "grave", "niega"/); // H9

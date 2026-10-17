@@ -218,7 +218,7 @@ export async function generarCaso(id: string, deps: Deps = {}): Promise<{ estado
   const conocidos = (entrada.sesion.participantes ?? []).map((p) => p.nombre);
   const evaluar = (r: typeof a.r) => evaluarResumen({
     textoModelo: r.textoModelo, contenido: r.contenido, verificacion: r.verificacion, tramos: entrada.transcripcion,
-    truncado: r.truncado, conocidos, esperado,
+    truncado: r.truncado, conocidos, esperado, minutos: entrada.sesion.duracionMin ?? null,
   });
   const cambios: Record<string, unknown> = {
     estado: 'listo', listo_at: new Date().toISOString(), error_codigo: null,

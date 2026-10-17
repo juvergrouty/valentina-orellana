@@ -10,13 +10,15 @@
 //     misma verificación de citas). Se arma UNA vez y se manda igual a los dos modelos.
 //   • Orden ciego: qué modelo es "Resumen 1" se sortea por caso en el servidor (sortearOrden).
 //   • Evaluación automática de fidelidad SIN otra IA: citas que no se verificaron, secciones fijas que
-//     faltaron o sobraron en la salida del modelo, minutos que no calzan con la transcripción, viñetas
-//     sin minuto, términos (nombres propios, números) que no aparecen en la transcripción, largo, y —en
-//     los casos sintéticos— lo esperado (riesgo consignado, tramo no registrado respetado, tareas).
+//     faltaron o sobraron en la salida del modelo, minutos que no calzan con la transcripción, viñetas de
+//     Tareas/Próxima sin minuto, relato escrito en viñetas, términos (nombres propios, números) que no
+//     aparecen en la transcripción (y cuántos de ellos están en el relato), largo del relato según la
+//     duración, y —en los casos sintéticos— lo esperado (riesgo consignado, tramo no registrado, tareas).
+//     El relato (17 oct) NO exige minuto por frase: solo en momentos clave.
 //   • Revelado: solo cuando todos los casos listos tienen voto (revelar).
 import { CONFIG_RESUMEN, costoUsd, llamarClaude, type ClienteMensajes, type ConfigUso, type OpcionesReintento, type UsoTokens } from './claude';
 import {
-  PROMPT_VERSION_RESUMEN, RE_CITA, armarPromptResumen, claveSeccion, normalizarParaComparar, normalizarSalida,
+  PROMPT_VERSION_RESUMEN, RE_CITA, SECCION_RELATO, armarPromptResumen, claveSeccion, normalizarParaComparar, normalizarSalida,
   parsearResumen, posprocesarResumen, segundosDeMarca, type MetaSesion, type Plantilla, type PromptArmado,
 } from './resumen';
 import { MODELO_PREGUNTAS, MODELO_RESUMEN, type AccionAuditoria, type TramoTranscrito } from './tipos';
@@ -118,8 +120,12 @@ export interface EvaluacionResumen {
   seccionesExtra: number;
   /** [mm:ss] del resumen que no calzan con ningún tramo (±90 s) o pasan del final. */
   minutosSinTramo: string[];
-  /** Viñetas de Puntos/Tareas/Próxima sin minuto ni cita (no rastreables a la transcripción). */
+  /** Viñetas de Tareas/Próxima (y "Puntos" antiguo) sin minuto ni cita (no rastreables a la transcripción). */
   vinetasSinMinuto: number;
+  /** Líneas en viñeta dentro del relato (debía ser prosa). */
+  relatoEnVinetas: number;
+  /** Términos sin sustento que están en el relato ("Resumen de la sesión"). */
+  terminosRelato: string[];
   /** Nombres propios o números del resumen que no aparecen en la transcripción (posible invención). */
   terminosSinSustento: string[];
   riesgo: { consignado: boolean; esperado: boolean | null };
@@ -130,8 +136,8 @@ export interface EvaluacionResumen {
   truncado: boolean;
 }
 
-const SECCIONES_OBLIGATORIAS: { clave: 'puntos' | 'tareas' | 'proxima'; titulo: string }[] = [
-  { clave: 'puntos', titulo: 'Puntos más importantes' },
+const SECCIONES_OBLIGATORIAS: { clave: 'relato' | 'tareas' | 'proxima'; titulo: string }[] = [
+  { clave: 'relato', titulo: SECCION_RELATO },
   { clave: 'tareas', titulo: 'Tareas' },
   { clave: 'proxima', titulo: 'Para trabajar en la próxima sesión' },
 ];
@@ -157,6 +163,7 @@ const PALABRAS_DE_FORMATO = new Set([
   'sesion', 'pareja', 'proxima', 'para', 'trabajar', 'importantes', 'mas', 'pendiente', 'anterior', 'transcripcion',
   'ambos', 'ambas', 'segun', 'un', 'una', 'y', 'o', 'que', 'su', 'sus', 'al', 'lo', 'le', 'les', 'es', 'esta', 'este',
   'hablantes', 'inferido', 'inferida', 'cuenta', 'dice', 'refiere', 'menciona', 'indica', 'comenta', 'senala', 'relata',
+  'resumen', 'menciones', 'temas', 'riesgo', 'como', 'tarea', 'expresa', 'aborda', 'explora', 'acuerda',
 ]);
 
 function sinTildes(s: string): string {
@@ -170,8 +177,13 @@ function cuerpoEvaluable(md: string): string[] {
     .map((l) => l.replace(RE_CITA, ' ').replace(/«[^»]*»/g, ' ').replace(/\[[^\]]*\]/g, ' '));
 }
 
-/** Cuenta palabras como el FORMATO del prompt: sin títulos ni bloques de mención de riesgo. */
+/**
+ * Cuenta palabras como el FORMATO del prompt: si hay relato ("Resumen de la sesión"), solo el relato;
+ * en el formato antiguo, todo menos títulos y bloques de mención de riesgo.
+ */
 export function contarPalabras(md: string): number {
+  const relato = parsearResumen(md).secciones.filter((s) => claveSeccion(s.titulo) === 'relato').map((s) => s.cuerpo).join('\n');
+  if (relato.trim()) return cuerpoEvaluable(relato).reduce((n, l) => n + (l.trim().replace(/^[-*•]\s+/, '').match(/[\p{L}\p{N}]+/gu) ?? []).length, 0);
   let enRiesgo = false;
   let n = 0;
   for (const l of cuerpoEvaluable(md)) {
@@ -238,7 +250,7 @@ export function vinetasSinMinuto(md: string): number {
   let n = 0;
   for (const s of parsearResumen(md).secciones) {
     const k = claveSeccion(s.titulo);
-    if (k !== 'puntos' && k !== 'tareas' && k !== 'proxima') continue;
+    if (k !== 'puntos' && k !== 'tareas' && k !== 'proxima') continue; // el relato no exige minuto por frase
     for (const l of s.cuerpo.split('\n')) {
       const t = l.trim();
       if (!/^[-*•]\s+/.test(t)) continue;
@@ -262,15 +274,31 @@ export interface EntradaEvaluacion {
   conocidos?: string[];
   esperado?: EsperadoCaso | null;
   corta?: boolean;
+  /** Duración de la sesión en minutos (si falta, se toma del último tramo). */
+  minutos?: number | null;
+}
+
+/** Largo pedido para el relato: 5–9 palabras por minuto (50 min: 250–450); corta: 60–120. */
+export function rangoRelato(minutos: number, corta: boolean): [number, number] {
+  if (corta) return [60, 120];
+  const m = Math.max(1, minutos || 0);
+  return [Math.max(60, Math.round(5 * m)), Math.max(120, Math.round(9 * m))];
+}
+
+/** Líneas en viñeta dentro del relato. */
+export function relatoEnVinetas(md: string): number {
+  return parsearResumen(md).secciones.filter((s) => claveSeccion(s.titulo) === 'relato')
+    .flatMap((s) => s.cuerpo.split('\n')).filter((l) => /^\s*[-*•]\s+/.test(l)).length;
 }
 
 export function evaluarResumen(e: EntradaEvaluacion): EvaluacionResumen {
   const crudo = parsearResumen(normalizarSalida(e.textoModelo, ''));
   const claves = crudo.secciones.map((s) => claveSeccion(s.titulo));
   const faltantes = SECCIONES_OBLIGATORIAS.filter((s) => !claves.includes(s.clave)).map((s) => s.titulo);
-  const extra = claves.filter((k) => k === null || k === 'atencion').length;
+  const extra = claves.filter((k) => k === null || k === 'atencion' || k === 'puntos').length;
   const corta = e.corta ?? e.esperado?.corta ?? false;
-  const rango: [number, number] = corta ? [40, 100] : e.esperado ? [120, 250] : [40, 250];
+  const minutos = e.minutos || e.tramos.reduce((m, t) => Math.max(m, t.fin_ms), 0) / 60_000;
+  const rango = rangoRelato(minutos, corta);
   const palabras = contarPalabras(e.contenido);
   const final = parsearResumen(e.contenido);
   const textoNorm = ` ${normalizarParaComparar(e.contenido)} `;
@@ -290,7 +318,11 @@ export function evaluarResumen(e: EntradaEvaluacion): EvaluacionResumen {
     seccionesExtra: extra,
     minutosSinTramo: minutosSinTramo(e.contenido, e.tramos),
     vinetasSinMinuto: vinetasSinMinuto(e.contenido),
+    relatoEnVinetas: relatoEnVinetas(e.contenido),
     terminosSinSustento: terminosSinSustento(e.contenido, e.tramos, e.conocidos ?? []),
+    terminosRelato: terminosSinSustento(
+      final.secciones.filter((s) => claveSeccion(s.titulo) === 'relato').map((s) => `### ${s.titulo}\n${s.cuerpo}`).join('\n'),
+      e.tramos, e.conocidos ?? []),
     riesgo: { consignado: final.tieneMencionRiesgo, esperado: e.esperado ? e.esperado.riesgo : null },
     prohibidosEncontrados: e.esperado
       ? e.esperado.terminosProhibidos.filter((t) => textoNorm.includes(` ${normalizarParaComparar(t)}`))
@@ -306,14 +338,16 @@ export function evaluarResumen(e: EntradaEvaluacion): EvaluacionResumen {
  * Versión para guardar de un caso REAL: sin ningún texto del resumen (solo conteos). Los términos sin
  * sustento podrían ser nombres o datos de la sesión, así que se guarda cuántos son, no cuáles.
  */
-export function evaluacionSinTexto(ev: EvaluacionResumen): EvaluacionResumen & { terminosSinSustentoN: number } {
-  return { ...ev, terminosSinSustento: [], terminosSinSustentoN: ev.terminosSinSustento.length };
+export function evaluacionSinTexto(ev: EvaluacionResumen): EvaluacionResumen & { terminosSinSustentoN: number; terminosRelatoN: number } {
+  return { ...ev, terminosSinSustento: [], terminosSinSustentoN: ev.terminosSinSustento.length, terminosRelato: [], terminosRelatoN: (ev.terminosRelato ?? []).length };
 }
 
 /** Problemas legibles (para la página), sin decir el modelo. */
-export function problemasDe(ev: EvaluacionResumen & { terminosSinSustentoN?: number }): { texto: string; grave: boolean }[] {
+export function problemasDe(ev: EvaluacionResumen & { terminosSinSustentoN?: number; terminosRelatoN?: number }): { texto: string; grave: boolean }[] {
   const out: { texto: string; grave: boolean }[] = [];
   const nTerm = ev.terminosSinSustentoN ?? ev.terminosSinSustento.length;
+  // Evaluaciones guardadas antes del relato (17 oct) no traen estos campos.
+  const nRelato = ev.terminosRelatoN ?? (ev.terminosRelato ?? []).length;
   if (ev.truncado) out.push({ texto: 'Se cortó por largo máximo.', grave: true });
   if (ev.prohibidosEncontrados?.length) out.push({ texto: `Incluyó lo del tramo que se pidió no registrar (${ev.prohibidosEncontrados.join(', ')}).`, grave: true });
   if (ev.riesgo.esperado === true && !ev.riesgo.consignado) out.push({ texto: 'No consignó la mención de riesgo que había.', grave: true });
@@ -322,10 +356,11 @@ export function problemasDe(ev: EvaluacionResumen & { terminosSinSustentoN?: num
   if (ev.seccionesFaltantes.length) out.push({ texto: `No escribió: ${ev.seccionesFaltantes.join(', ')} (el sistema la completó con "No consta").`, grave: false });
   if (ev.seccionesExtra) out.push({ texto: `Agregó ${ev.seccionesExtra} ${ev.seccionesExtra === 1 ? 'sección' : 'secciones'} fuera de la estructura.`, grave: false });
   if (ev.minutosSinTramo.length) out.push({ texto: `Minutos que no calzan con la transcripción: ${ev.minutosSinTramo.join(', ')}.`, grave: false });
-  if (nTerm) out.push({ texto: ev.terminosSinSustento.length ? `Términos que no aparecen en la transcripción: ${ev.terminosSinSustento.join(', ')}.` : `${nTerm} ${nTerm === 1 ? 'término' : 'términos'} (nombres o números) que no aparecen en la transcripción.`, grave: false });
+  if (nTerm) out.push({ texto: `${ev.terminosSinSustento.length ? `Términos que no aparecen en la transcripción: ${ev.terminosSinSustento.join(', ')}.` : `${nTerm} ${nTerm === 1 ? 'término' : 'términos'} (nombres o números) que no aparecen en la transcripción.`}${nRelato ? ` ${nRelato === nTerm ? (nTerm === 1 ? 'Está' : 'Todos están') : `${nRelato} de ellos están`} en el relato.` : ''}`, grave: false });
   if (ev.tareasFaltantes?.length) out.push({ texto: `Faltó en Tareas: ${ev.tareasFaltantes.join(', ')}.`, grave: false });
+  if (ev.relatoEnVinetas) out.push({ texto: `El relato tiene ${ev.relatoEnVinetas} ${ev.relatoEnVinetas === 1 ? 'línea' : 'líneas'} en viñeta (debía ser prosa).`, grave: false });
   if (ev.vinetasSinMinuto) out.push({ texto: `${ev.vinetasSinMinuto} ${ev.vinetasSinMinuto === 1 ? 'viñeta' : 'viñetas'} sin minuto ni cita.`, grave: false });
-  if (ev.fueraDeRango) out.push({ texto: `Largo: ${ev.palabras} palabras (lo pedido: ${ev.rango[0]}–${ev.rango[1]}).`, grave: false });
+  if (ev.fueraDeRango) out.push({ texto: `Largo del relato: ${ev.palabras} palabras (lo pedido: ${ev.rango[0]}–${ev.rango[1]}).`, grave: false });
   return out;
 }
 

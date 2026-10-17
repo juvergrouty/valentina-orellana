@@ -3,7 +3,7 @@
 // automática de una sesión individual online de ~15 min con POCO contenido: el paciente llega
 // cansado, dice que no pasó nada especial, se corta la conexión un rato (pausa de la grabación)
 // y gran parte es administrativa (cambio de horario, boleta). Sirve para ver si el resumen se
-// mantiene corto (40–100 palabras) y no rellena con cosas que no se dijeron.
+// mantiene corto (relato de 60–120 palabras) y no rellena con cosas que no se dijeron.
 import type { CasoSintetico } from './tipos';
 
 const GUION = `
@@ -146,6 +146,6 @@ export const CORTA_15: CasoSintetico = {
     terminosProhibidos: [],
     tareas: ['viernes', 'boleta'],
     corta: true,
-    nota: 'Debe quedar corto (40–100 palabras), sin inventar contenido, y mencionar la pausa en Notas.',
+    nota: 'Debe quedar corto (relato de 60–120 palabras), sin inventar contenido, y mencionar la pausa en Notas.',
   },
 };
