@@ -28,7 +28,7 @@
 <script>
   // Página estática (sin datos de pacientes). La sirve public/grabar-sw.js cuando /admin/grabar no carga.
   (function () {
-    var volver = function () { location.replace('/admin/grabar'); };
+    var volver = function () { location.replace(location.pathname.indexOf('/admin/grabar') === 0 ? location.pathname + location.search : '/admin/grabar'); };
     document.getElementById('reintentar').addEventListener('click', volver);
     window.addEventListener('online', volver);
     var el = document.getElementById('pendientes');

@@ -82,7 +82,7 @@ test('parte fija: estructura de Vale, riesgo primero y neutro, sin tamizaje ni p
   assert.match(PARTE_FIJA_RESUMEN, /Cada cita se verifica automáticamente/);
   assert.match(PLANTILLA_PAREJA, /separa por persona/);
   assert.match(CIERRE_FIJO_RESUMEN, /ESTRUCTURA FIJA/);
-  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-17.1');
+  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-17.2');
   for (const prohibido of [/Prioridad:/, /\bALTA\b/, /\bREVISAR\b/, /tamizaje/i, /alerta/i]) {
     assert.doesNotMatch(PARTE_FIJA_RESUMEN, prohibido);
   }
@@ -101,7 +101,7 @@ test('17 oct: prompt compacto — los 3 ejemplos conservan lo esencial y quedan 
   for (const c of casos) {
     const p = armarPromptResumen({ plantilla: c.plantilla, instrucciones: null, transcripcion: c.t, sesion: { fecha: '2026-10-03', modalidad: 'presencial' } });
     const sys = textoSystem(p.system);
-    assert.ok(sys.length <= 4_300, `system de ${sys.length} caracteres (${c.plantilla})`);
+    assert.ok(sys.length <= 4_600, `system de ${sys.length} caracteres (${c.plantilla})`);
     const esenciales: [string, RegExp][] = [
       ['3 secciones en orden', /### Puntos más importantes[\s\S]*### Tareas[\s\S]*### Para trabajar en la próxima sesión/],
       ['fidelidad', /Fidelidad: solo lo que consta/],

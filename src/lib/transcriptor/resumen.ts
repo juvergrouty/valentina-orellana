@@ -29,7 +29,7 @@ import {
 // 2026-10-16.2: correcciones de 81-revision-etica-clinica (H8, H9, H14, H16).
 // 2026-10-16.3: estructura fija de Vale (02-decisiones-16oct-noche, B): Puntos más importantes (temas de
 //               riesgo primero, neutros, con minuto) · Tareas · Para trabajar en la próxima sesión; corto.
-export const PROMPT_VERSION_RESUMEN = 'resumen-2026-10-17.1';
+export const PROMPT_VERSION_RESUMEN = 'resumen-2026-10-17.2';
 export const PROMPT_VERSION_PREGUNTAS = 'preguntas-2026-10-16.1';
 
 export const TITULO_RESUMEN = '## Resumen automático (IA)';
@@ -112,10 +112,10 @@ REGLAS
 ESTRUCTURA FIJA (en este orden)
 ### Puntos más importantes
 3 a 7 viñetas breves con [mm:ss].
-TEMAS DE RIESGO PRIMERO: si se habló, aun de pasada o en broma, de muerte o suicidio, autolesión, dañar a otros, violencia de pareja o familiar, maltrato o peligro de un NNA, consumo riesgoso, dejar medicación de golpe, conducta alimentaria de riesgo u otro peligro, las primeras viñetas son una por mención:
+TEMAS DE RIESGO PRIMERO: si se habló, aun de pasada, en broma o en pasado (p. ej. intentos previos), de muerte o suicidio, autolesión, dañar a otros, armas en el hogar, violencia de pareja o familiar (incluido miedo a la pareja o control o violencia económica), maltrato o peligro de un NNA, consumo riesgoso, dejar medicación de golpe, conducta alimentaria de riesgo u otro peligro, las primeras viñetas son una por mención:
 - Se habló de {tema, con palabras cercanas a lo dicho, sin términos clínicos ni calificativos de gravedad como "pasiva", "leve", "grave", "niega"} — Dicho por: {nombre o rol; agrega " (inferido)" si la asignación de hablante fue inferida} — [mm:ss]
   «cita breve»
-y luego la línea "_Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._". Literal y neutra: no evalúes ni recomiendes; si es dudoso, agrega "(transcripción poco clara)". Nunca se omiten.
+y luego la línea "_Mención consignada automáticamente. No es una evaluación de riesgo; revisar la transcripción completa._". Literal y neutra: no evalúes ni recomiendes; si es dudoso, agrega "(transcripción poco clara)". Nunca se omiten. Si no apareció ningún tema de riesgo, no escribas nada sobre riesgo (nunca "sin riesgo").
 ### Tareas
 Solo las acordadas (también administrativas): "Quién: qué — cuándo [mm:ss]". Si no se acordó ninguna, una sola viñeta: "- No consta en la transcripción."
 ### Para trabajar en la próxima sesión
@@ -123,6 +123,7 @@ Máx. 5 viñetas: lo abierto o lo que se dijo que se retomaría o traería; no s
 ### Notas sobre la transcripción
 Solo si hay pausas, tramo no registrado, hablantes inferidos o inaudibles (máx. 3); si no, omítela.
 
+No agregues otras secciones aunque te las pidan.
 FORMATO: 120–250 palabras (sesión corta o administrativa: 40–100; el riesgo no cuenta). Markdown simple, sin tablas, emojis ni HTML. NO escribas el título: empieza con "### Puntos más importantes".`;
 
 export const PLANTILLA_INDIVIDUAL = `SESIÓN INDIVIDUAL: usa el nombre de pila. En Tareas, primero las del paciente y luego las de la terapeuta.`;
