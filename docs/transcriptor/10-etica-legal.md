@@ -284,6 +284,7 @@ Cada salvaguarda indica qué la exige. “Debe” significa que es requisito par
 
 **Mitigación de la brecha con D41 arts. 2 y 7 y con la APA**, sin pedirle a Vale que apruebe:
 - El resumen IA vive en una sección aparte de la ficha (“Anexos automáticos”), **nunca** en el campo de evolución o notas firmadas.
+  - **Excepción decidida por Vale (17 oct 2026: “cópialo automáticamente, pero en la evolución deja un botón de editar por si acaso”).** Si la sesión no tiene evolución, el orquestador guarda como evolución el texto plano del resumen, encabezado por “Basado en el resumen automático (IA) — revisar y editar:” y con un aviso visible “sin revisar” hasta que ella la edite (src/lib/transcriptor/evolucionAuto.ts). Nunca pisa una evolución existente; el resumen IA sigue aparte como anexo. Riesgo residual frente a D41 arts. 2 y 7: la evolución queda con texto generado por IA hasta que Vale la revise; si al editarla borra el encabezado, el origen solo queda en el historial de la nota y en la bitácora (`evolucion_autollenada`). Pendiente: consultarlo con el abogado junto con la pregunta 2.
 - Si Vale abre el resumen, el registro de accesos lo deja anotado. Si lo edita, se guarda su versión con autor y fecha (nunca se sobrescribe la original de la IA).
 - Trazabilidad: guardar el modelo, la versión del prompt y la versión de la transcripción de cada resumen.
 

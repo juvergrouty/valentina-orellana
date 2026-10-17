@@ -33,7 +33,8 @@ import { clasificarError, type ClienteMensajes, type OpcionesReintento } from '.
 import { auditar } from './auditoria';
 import { registrarAlerta as registrarAlertaP8, resolverAlertasDe as resolverAlertasDeP8, type NuevaAlerta, type AlertaTipo } from './alertas';
 import type { AlmacenamientoTranscriptor, ResultadoGuardado } from './almacenamiento';
-import { columnasContenidoCifrado } from './resumenCifrado';
+import { columnasContenidoCifrado, leerContenidoResumen } from './resumenCifrado';
+import { ACCION_EVOLUCION_AUTO, autollenarEvolucion } from './evolucionAuto';
 import type { CifradoVOT1 } from './cifrado';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -738,6 +739,23 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     return out;
   }
 
+  /**
+   * Pedido de Vale (17 oct 2026): si la sesión aún no tiene evolución, se guarda con el texto del
+   * resumen recién listo (evolucionAuto.ts: nunca pisa, idempotente). Jamás lanza ni detiene el
+   * cierre de la grabación; los errores quedan en la bitácora.
+   */
+  async function evolucionDesdeResumen(g: GrabacionP6, fila: ResumenIA, contenido: string | null): Promise<void> {
+    try {
+      const md = contenido ?? (await leerContenidoResumen(fila as never, cif));
+      await autollenarEvolucion({ db, grabacion: g, contenido: md, version: fila.version });
+    } catch (e) {
+      await auditar('sistema', ACCION_EVOLUCION_AUTO, {
+        grabacionId: g.id, patientId: g.patient_id, resultado: 'error', detalle: { etapa: 'leer_resumen' }, cliente: db,
+      }).catch(() => false);
+      console.warn('[transcriptor/pipeline] evolución automática omitida:', e instanceof Error ? e.name : 'error');
+    }
+  }
+
   async function resumirUna(g: GrabacionP6, ahora: Date): Promise<boolean> {
     if (g.estado === 'transcrita') {
       const m = await transicionar(g.id, ['transcrita'], 'resumiendo', { intentos: 0 } as Partial<Grabacion>, db);
@@ -758,6 +776,8 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       fila = await filaResumen(g, transcripcionId);
       if (!fila) throw new Error('No se pudo crear la fila del resumen');
       if (fila.estado === 'listo') {
+        // Recuperación (se cortó entre el resumen y el cierre): la evolución se intenta de nuevo (idempotente).
+        await evolucionDesdeResumen(g, fila, null);
         await transicionar(g.id, ['resumiendo'], 'lista', { intentos: 0, ultimo_error: null, proximo_intento_at: null } as Partial<Grabacion>, db);
         await alertas.resolverAlertasDe(g.id).catch(() => undefined);
         return true;
@@ -808,6 +828,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         detalle: { modelo: r.modelo, prompt_version: r.promptVersion, tokens_salida: r.uso.salida, costo_usd: r.costoUsd, truncado: r.truncado, citas_eliminadas: r.verificacion.eliminadas },
         cliente: db,
       });
+      await evolucionDesdeResumen(g, fila, r.contenido);
       await transicionar(g.id, ['resumiendo'], 'lista', { intentos: 0, ultimo_error: null, proximo_intento_at: null } as Partial<Grabacion>, db);
       await alertas.resolverAlertasDe(g.id).catch(() => undefined);
       return true;

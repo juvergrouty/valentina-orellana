@@ -10,6 +10,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
 import { verificarGrabacion } from '../../../../lib/transcriptor/consentimiento';
+import { reasignarEvolucion } from '../../../../lib/transcriptor/evolucionAuto';
 import type { TipoSesion } from '../../../../lib/transcriptor/tipos';
 import { esUuid, guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
 
@@ -26,7 +27,7 @@ export const POST: APIRoute = async (ctx) => {
   if (!esUuid(grabacionId) || !esUuid(patientId)) return json({ ok: false, error: 'Faltan la grabación o la ficha.' }, 400);
 
   const [{ data: g, error: eg }, { data: p, error: ep }] = await Promise.all([
-    supabase.from('grabaciones').select('id, patient_id, tipo').eq('id', grabacionId).maybeSingle(),
+    supabase.from('grabaciones').select('id, patient_id, tipo, origen, booking_id, session_date').eq('id', grabacionId).maybeSingle(),
     supabase.from('patients').select('id').eq('id', patientId).maybeSingle(),
   ]);
   if (eg || ep) return json({ ok: false, error: 'No se pudo leer la grabación. Intenta de nuevo.' }, 500);
@@ -64,5 +65,8 @@ export const POST: APIRoute = async (ctx) => {
     grabacionId, patientId, request, clientAddress,
     detalle: { anterior: g.patient_id ?? null, resumenes_actualizados: !er, firmas: v.consentIds.length },
   });
+  // Evolución autollenada (17 oct 2026): sigue a la grabación. La copia intacta de la ficha anterior se
+  // archiva y la ficha nueva se autollena si no tiene evolución. Nunca lanza ni cambia la respuesta.
+  await reasignarEvolucion({ db: supabase, grabacion: { ...g, patient_id: patientId }, anteriorPatientId: g.patient_id ?? null });
   return json({ ok: true });
 };

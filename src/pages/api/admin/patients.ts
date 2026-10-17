@@ -3,6 +3,7 @@ import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { limpiarRut, rutValido } from '../../../lib/rut';
 import { rutaInterna } from '../../../lib/rutaInterna';
+import { esEvolucionDesdeResumen } from '../../../lib/transcriptor/panel';
 
 export const prerender = false;
 
@@ -132,6 +133,29 @@ export const POST: APIRoute = async ({ request }) => {
   // ── Agregar nota de sesión ──────────────────────────────────────────────────
   if (action === 'add_note') {
     const bookingId = (form.get('booking_id') as string) || null;
+    const patientId = form.get('patient_id') as string;
+    const sessionDate = form.get('session_date') as string;
+    const content = (form.get('content') as string)?.trim();
+    // Evolución autollenada desde el resumen IA (17 oct 2026): si la ficha estaba abierta desde antes
+    // y Vale guarda "Escribir evolución" para una sesión que ya se autollenó (sin editar), su texto
+    // REEMPLAZA esa copia (con la copia en historial) en vez de dejar dos evoluciones.
+    let previa: { id: string; content: string; historial: unknown } | null = null;
+    if (patientId && content) {
+      let q = supabase.from('session_notes').select('id, content, historial').eq('patient_id', patientId).is('deleted_at', null);
+      q = bookingId ? q.eq('booking_id', bookingId) : q.eq('session_date', sessionDate).is('booking_id', null);
+      const { data: existentes } = await q.limit(5);
+      previa = ((existentes ?? []) as { id: string; content: string; historial: unknown }[])
+        .find((n) => esEvolucionDesdeResumen(n.content) && (!Array.isArray(n.historial) || n.historial.length === 0)) ?? null;
+    }
+    if (previa) {
+      const historial = [{ content: previa.content, reemplazada: new Date().toISOString() }];
+      const { data: guardada, error } = await supabase.from('session_notes').update({ content, historial })
+        .eq('id', previa.id).eq('content', previa.content).select('id');
+      if (error || !guardada?.length) {
+        redirect = withParam(redirect, 'error', `La nota NO quedó guardada${error ? ` (${error.message})` : ' (la evolución de esa sesión cambió recién)'}. Recarga la ficha y vuelve a guardar tu texto.`);
+      }
+      return new Response(null, { status: 302, headers: { Location: redirect } });
+    }
     const { error } = await supabase.from('session_notes').insert({
       patient_id:   form.get('patient_id') as string,
       booking_id:   bookingId,
