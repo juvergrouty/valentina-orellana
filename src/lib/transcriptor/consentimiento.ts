@@ -236,7 +236,7 @@ async function datosFicha(c: SupabaseClient, patientId: string): Promise<DatosFi
 /**
  * ¿Esta ficha se trata como de pareja (pide 2 firmas)? ÚNICA fuente de verdad (86-revisión B1): la usan
  * evaluarEnBase (para grabar), el link de la segunda persona (api/admin/consent.ts) y el bloque de la
- * ficha (ConsentimientoParejaAnexos.astro). Así, si para grabar se exigen 2 firmas, el link para la
+ * ficha (fichaConsentimientos.ts → ConsentimientosFicha.astro y la franja Pendientes). Así, si para grabar se exigen 2 firmas, el link para la
  * segunda persona siempre existe. Lanza si la base falla.
  */
 export async function fichaEsParejaEnBase(patientId: string, cliente?: SupabaseClient): Promise<boolean> {

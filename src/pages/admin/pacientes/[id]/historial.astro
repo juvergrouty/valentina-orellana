@@ -1,0 +1,46 @@
+---
+// Historial de Notas clínicas bajo demanda (17 oct 2026): la ficha trae solo la sesión más reciente y
+// "Para revisar hoy"; el resto llega aquí como HTML parcial (sin layout) cuando Vale aprieta
+// "Ver historial", busca o filtra. Misma lógica que la ficha (lib/transcriptor/fichaNotas.ts): passkey,
+// bitácora (`ver_resumen`, vista 'ficha_historial') antes de descifrar; los archivados siguen con "Ver más".
+// Solo se responde a la ficha (fetch con X-Panel: 1): abierta directo en el navegador, vuelve a la ficha.
+export const prerender = false;
+export const partial = true;
+import { supabase } from '../../../../lib/supabase';
+import { cargarNotasFicha, ENTRADAS_INICIALES } from '../../../../lib/transcriptor/fichaNotas';
+import { fichaDemo } from '../../../../lib/transcriptor/pruebas/fichaDemo';
+import HistorialEntrada from '../../../../components/admin/HistorialEntrada.astro';
+
+const { id } = Astro.params;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const demo = import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia' ? fichaDemo(id!, Astro.url.searchParams) : null;
+if (!id || (!demo && !UUID.test(id))) return new Response('', { status: 404 });
+if (Astro.request.headers.get('x-panel') !== '1') return Astro.redirect(`/admin/pacientes/${id}?tab=notas`);
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+
+let notas: any[] = [];
+let reservas: any[] = [];
+if (demo) {
+  notas = demo.notas; reservas = demo.reservas;
+} else {
+  const { data: p } = await supabase.from('patients').select('id, email').eq('id', id).maybeSingle();
+  if (!p) return new Response('', { status: 404 });
+  const [{ data: ns }, { data: bs }] = await Promise.all([
+    supabase.from('session_notes').select('*').eq('patient_id', id).order('session_date', { ascending: false }),
+    p.email ? supabase.from('bookings').select('id, session_date, session_time, session_type, status, custom_title')
+      .eq('patient_email', p.email).order('session_date', { ascending: false }) : Promise.resolve({ data: [] }),
+  ]);
+  notas = (ns ?? []).filter((n: { deleted_at?: string | null }) => !n.deleted_at);
+  reservas = bs ?? [];
+}
+let clientAddress: string | null = null;
+try { clientAddress = Astro.clientAddress ?? null; } catch { /* sin IP */ }
+const r = await cargarNotasFicha({
+  patientId: id, notas, reservas, cookies: Astro.cookies, request: Astro.request, clientAddress,
+  descifrar: true, vista: 'ficha_historial',
+  demo: demo ? { grabaciones: demo.grabaciones, resumenes: demo.resumenes, archivados: demo.archivados, falta0020: false } : null,
+});
+// Sin passkey, las notas de evolución se ven igual que en la ficha; los resúmenes no (la ficha ya lo avisa).
+const resto = r.historial.slice(ENTRADAS_INICIALES);
+---
+{resto.map((e, k) => <HistorialEntrada e={e} idx={ENTRADAS_INICIALES + k} patientId={id} avisoResumenes={r.avisoResumenes} />)}

@@ -83,14 +83,15 @@ test('M2: el contexto de la sesión anterior (para el resumen nuevo) no se pierd
 });
 
 test('M2: ficha, sesión y preguntas usan consultarResumenes; la ficha avisa en vez de quedar vacía', () => {
-  const ficha = fuente('../../pages/admin/pacientes/[id].astro');
-  assert.match(ficha, /consultarResumenes\(\(cols\) => supabase\.from\('resumenes_ia'\)/);
-  assert.match(ficha, /else if \(falta0020\) iaAvisoBase = AVISO_FALTA_0020/);
-  assert.match(ficha, /if \(er\) iaAvisoBase = /);
-  assert.match(ficha, /\{iaAvisoBase && \(/);
+  // 17 oct: la carga de la ficha se movió a fichaNotas.ts (la usan la ficha y su historial bajo demanda).
+  const carga = fuente('./fichaNotas.ts');
+  assert.match(carga, /consultarResumenes\(\(cols\) => supabase\.from\('resumenes_ia'\)/);
+  assert.match(carga, /else if \(falta0020\) avisoBase = AVISO_FALTA_0020/);
+  assert.match(carga, /if \(er\) avisoBase = /);
+  assert.match(fuente('../../pages/admin/pacientes/[id].astro'), /\{ia\.avisoBase && \(/);
   assert.match(fuente('../../pages/admin/pacientes/[id]/sesion/[gid].astro'), /consultarResumenes\(\(cols\)/);
   assert.match(fuente('../../pages/api/admin/transcriptor/preguntar.ts'), /consultarResumenes(<[^>]+>)?\(\(cols\)/);
-  for (const f of ['../../pages/admin/pacientes/[id].astro', '../../pages/admin/pacientes/[id]/sesion/[gid].astro', '../../pages/api/admin/transcriptor/preguntar.ts', './exportacion.ts', './resumen.ts']) {
+  for (const f of ['../../pages/admin/pacientes/[id].astro', './fichaNotas.ts', '../../pages/admin/pacientes/[id]/sesion/[gid].astro', '../../pages/api/admin/transcriptor/preguntar.ts', './exportacion.ts', './resumen.ts']) {
     assert.doesNotMatch(fuente(f), /\$\{COLUMNAS_ARCHIVO\}/, `${f}: no pide las columnas de 0020 sin respaldo`);
   }
 });
@@ -116,7 +117,7 @@ test('B1: ficha "Ana y Luis" sin reserva de pareja → pide 2 firmas Y tiene lin
 
 test('B1: api/admin/consent.ts y el bloque de la ficha usan fichaEsParejaEnBase (no otra regla)', () => {
   const api = fuente('../../pages/api/admin/consent.ts');
-  const comp = fuente('../../components/admin/ConsentimientoParejaAnexos.astro');
+  const comp = fuente('./fichaConsentimientos.ts');
   assert.match(api, /fichaEsParejaEnBase\(patientId, supabase\)/);
   assert.match(comp, /await fichaEsParejaEnBase\(patient\.id\)/);
   assert.doesNotMatch(api + comp, /fichaEsParejaPorReserva/);
@@ -132,7 +133,7 @@ test('B2: pareja_link/whatsapp/email pasan por guardiaPanel ANTES de crear nada 
   assert.ok(iGuardia < bloque.indexOf('getOrCreatePendingConsent'), 'antes de crear el consentimiento');
   assert.ok(iGuardia < bloque.indexOf('sendConsentLinkEmail'), 'antes de mandar el correo');
   for (const canal of ["canal: 'link'", "canal: 'correo'", "canal: 'whatsapp'"]) assert.ok(bloque.includes(`bitacora({ ${canal}`), canal);
-  assert.match(fuente('../../components/admin/ConsentimientoParejaAnexos.astro'), /'X-Panel': '1'/, 'la ficha manda la cabecera');
+  assert.match(fuente('../../components/admin/ConsentimientosFicha.astro'), /'X-Panel': '1'/, 'la ficha manda la cabecera');
 });
 
 // ─── B3: el correo de la pareja no queda guardado (enmascarado en admin_logs y bitácora) ────────

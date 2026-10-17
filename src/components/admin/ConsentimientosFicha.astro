@@ -1,0 +1,484 @@
+---
+// Bloque ÚNICO "Consentimientos" de la ficha (17 oct 2026: reemplaza el bloque verde, "Autorizaciones por
+// persona", la tarjeta "Consentimiento de la pareja" y "Anexos", que repetían lo mismo).
+//   • Una fila por persona con firma vigente: nombre clickeable (abre la constancia), fecha, versión y
+//     qué autoriza; "Retirar solo la grabación" y "Registrar retiro" por persona (H1); su anexo debajo.
+//   • Si falta una firma (propia o de la pareja), una fila "Falta firmar" con sus opciones de envío
+//     plegadas (WhatsApp / Copiar / QR / Correo). La franja "Pendientes" abre esas mismas opciones.
+//   • Arriba, una línea discreta con el estado de la grabación según la MISMA regla del grabador
+//     (evaluarConsentimientos): si falta una firma, dice que no se graba, aunque el pendiente se haya
+//     marcado "Ya está hecho".
+//   • Historial de consentimientos firmados, plegado.
+// Pareja (decisiones D y E de 02-decisiones-16oct-noche.md): link propio para la segunda persona
+// (consents.persona = 2, 0021); en la consulta, QR grande generado en el servidor (se revisa sola la
+// firma mientras está abierto); antes de la sesión, WhatsApp (texto prellenado, sin número), Copiar
+// link y Correo (solo para ese envío; no queda en la ficha).
+import { vigente, type ConsentRow } from '../../lib/consent';
+import { identidadFirmante, evaluarConsentimientos, textoMotivo } from '../../lib/transcriptor/consentimiento';
+import { anexosDeConsentimientos, TITULO_ANEXO, type AnexoConsentimiento } from '../../lib/transcriptor/avisoV2';
+import { ID_PANEL_PAREJA, ID_PANEL_PROPIO } from '../../lib/transcriptor/pendientes';
+import type { ParejaFicha } from '../../lib/transcriptor/fichaConsentimientos';
+import { todayCL } from '../../lib/dateUtils';
+
+interface Props {
+  patient: { id: string; name: string; rut?: string | null; phone?: string | null; email?: string | null; birthdate?: string | null };
+  consentRows: any[];
+  pareja: ParejaFicha;
+  /** Solo `astro dev` (?demo=ia). */
+  demo?: boolean;
+}
+const { patient, consentRows, pareja, demo = false } = Astro.props;
+const esDemo = import.meta.env.DEV && demo;
+
+const fmtCL = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const fmtDia = (iso: string) => new Date(iso).toLocaleDateString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', year: 'numeric' });
+const CANAL_RETIRO: Record<string, string> = { correo: 'correo', whatsapp: 'WhatsApp', presencial: 'en persona', otro: 'otro medio' };
+const constancia = (cid: string) => `/admin/pacientes/${patient.id}/consentimiento/${cid}`;
+
+const propio = vigente(consentRows as ConsentRow[]);
+const ultimoRetiro = consentRows.find((c: any) => c.revoked_at && Number(c.persona ?? 1) !== 2) as ConsentRow | undefined;
+// Solo el link propio de la paciente (persona 1); el de la pareja (persona 2, 0021) va en su fila.
+const envioPendiente = consentRows.find((c: any) => !c.signed_at && c.sent_at && Number(c.persona ?? 1) !== 2) as ConsentRow | undefined;
+const firmadosHist = consentRows.filter((c: any) => c.signed_at).sort((a: any, b: any) => String(b.signed_at).localeCompare(String(a.signed_at)));
+
+// H1: firma vigente de CADA persona (en pareja, dos). La de la paciente primero.
+const firmasPersona = (() => {
+  const ultimas = new Map<string, any>();
+  for (const c of firmadosHist as any[]) {
+    const k = identidadFirmante(c);
+    if (!ultimas.has(k)) ultimas.set(k, c); // de la más reciente a la más antigua
+  }
+  const lista = [...ultimas.values()].filter((c) => !c.revoked_at);
+  const esPareja = (c: any) => pareja.estado.firma?.id === c.id || Number(c.persona ?? 1) === 2;
+  return lista.sort((a, b) => Number(esPareja(a)) - Number(esPareja(b)));
+})();
+const esFilaPareja = (c: any) => pareja.esPareja && (pareja.estado.firma?.id === c.id || Number(c.persona ?? 1) === 2);
+
+// Estado de la grabación con la MISMA regla del grabador (consentimiento.ts).
+const evaluacion = evaluarConsentimientos({
+  patientId: patient.id, tipo: 'individual', fichaPareja: pareja.esPareja,
+  fechaNacimiento: patient.birthdate ?? null, filas: consentRows as never, hoy: todayCL(),
+});
+// Si alguien retiró la grabación, se nombra a quién (textoMotivo habla de la ficha en general).
+const quienRetiro = evaluacion.motivo === 'revocado' ? firmasPersona.find((c: any) => c.recording_revoked_at) : null;
+const lineaGrabacion = evaluacion.puede
+  ? { ok: true, texto: pareja.esPareja ? 'Grabación autorizada por las dos personas.' : 'Grabación autorizada.' }
+  : { ok: false, texto: quienRetiro
+    ? `No se puede grabar: ${String(quienRetiro.signer_name ?? '').trim().split(/\s+/)[0] || 'una persona'} retiró la autorización de grabación.`
+    : textoMotivo(evaluacion.motivo, patient.name) };
+
+// E: anexos (copia fiel del correo con el aviso v2) de las firmas de esta ficha.
+let anexos: AnexoConsentimiento[] = [];
+if (esDemo) {
+  const v2 = firmadosHist.find((r: any) => String(r.version).endsWith('v2'));
+  if (v2) anexos = [{ id: '00000000-0000-4000-8000-0000000000e1', consent_id: v2.id, tipo: 'aviso_v2', asunto: 'Sesión confirmada — Ps. Valentina Orellana', destinatario: 'tomas@example.com', enviado_at: '2026-10-14T13:20:00Z', resend_id: 'demo', html_sha256: '0'.repeat(64) }];
+} else {
+  anexos = await anexosDeConsentimientos(firmadosHist.map((r: any) => String(r.id)));
+}
+const anexosDe = (cid: string) => anexos.filter((a) => String(a.consent_id) === String(cid));
+const pilaDe = (n: unknown) => String(n ?? '').trim().split(/\s+/)[0] || 'la persona';
+const pilaFicha = pilaDe(patient.name);
+const nombrePareja = pareja.estado.retirada ? String(pareja.estado.retirada.signer_name ?? '').trim() : '';
+---
+
+<section id="consentimiento" class="card cf cp anclado" aria-labelledby="cf-titulo" data-patient-id={patient.id}>
+  <div class="cf-cab">
+    <p id="cf-titulo" class="cf-titulo">Consentimientos</p>
+    <p class={`cf-grab ${lineaGrabacion.ok ? 'cf-grab-ok' : 'cf-grab-no'}`}>
+      <span aria-hidden="true">{lineaGrabacion.ok ? '●' : '○'}</span> {lineaGrabacion.texto}
+    </p>
+  </div>
+
+  <ul class="cf-filas">
+    {firmasPersona.map((c: any) => {
+      const nombre = String(c.signer_name ?? '').trim() || 'Sin nombre';
+      const pila = pilaDe(nombre);
+      const grabacionRetirada = !!c.recording_revoked_at;
+      return (
+        <li class="cf-fila fp-item" data-consent-id={c.id}>
+          <div class="cf-datos">
+            <p class="cf-nombre">
+              <a href={constancia(c.id)} target="_blank" rel="noopener" title="Ver constancia / PDF">{nombre}<span class="cf-ext" aria-hidden="true">↗</span></a>
+              {esFilaPareja(c) && <span class="cf-etq">pareja</span>}
+              <span class="cf-ok">✓ Firmado</span>
+            </p>
+            <p class="cf-sub">
+              Firmó el {fmtDia(c.signed_at)} · versión {c.version}
+              {' · '}Grabación:{' '}
+              {grabacionRetirada
+                ? <strong class="fp-no">retirada el {fmtDia(c.recording_revoked_at)}{c.recording_revoked_via ? ` (por ${CANAL_RETIRO[c.recording_revoked_via] ?? c.recording_revoked_via})` : ''}</strong>
+                : c.accept_recording ? <strong class="fp-si">sí</strong> : <strong class="fp-no">no autoriza</strong>}
+              {' · '}Revisión anónima: {c.accept_case_review ? 'sí' : 'no'}
+            </p>
+            {anexosDe(c.id).map((a) => {
+              const base = `/admin/pacientes/${patient.id}/consentimiento/${a.consent_id}/anexo/${a.id}`;
+              return (
+                <p class="cf-sub cf-anexo">
+                  Anexo: {(TITULO_ANEXO[a.tipo] ?? 'anexo').toLowerCase()} (enviado el {fmtDia(a.enviado_at)} a {a.destinatario}) ·{' '}
+                  <a href={base} target="_blank" rel="noopener">ver</a> · <a href={`${base}?descargar=1`}>descargar</a>
+                </p>
+              );
+            })}
+          </div>
+          <div class="cf-botones">
+            {c.accept_recording && !grabacionRetirada && (
+              <button type="button" class="btn btn-outline cf-btn fp-abrir" data-panel={`fp-grab-${c.id}`}>Retirar solo la grabación</button>
+            )}
+            <button type="button" class="cf-link fp-abrir" data-panel={`fp-todo-${c.id}`}>Registrar retiro</button>
+          </div>
+          {c.accept_recording && !grabacionRetirada && (
+            <div class="fp-confirmar" id={`fp-grab-${c.id}`} hidden>
+              <p class="fp-texto">Desde ahora no se graban las sesiones de {pila}. Lo ya transcrito queda en la ficha con la misma confidencialidad. Su consentimiento para la atención sigue vigente.</p>
+              <label class="fp-label" for={`fp-via-${c.id}`}>¿Cómo lo pidió?</label>
+              <select id={`fp-via-${c.id}`} class="fp-via">
+                <option value="">Elige…</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="correo">Correo</option>
+                <option value="presencial">En persona</option>
+                <option value="otro">Otro</option>
+              </select>
+              <label class="fp-label" for={`fp-nota-${c.id}`}>Nota (opcional: cuándo y qué pidió)</label>
+              <input id={`fp-nota-${c.id}`} class="fp-nota" type="text" maxlength="500" />
+              <div class="fp-acciones">
+                <button type="button" class="btn btn-dark cf-btn fp-enviar" data-accion="revoke_recording" data-consent-id={c.id}>Confirmar: retirar solo la grabación</button>
+                <button type="button" class="btn btn-outline cf-btn fp-cancelar">Cancelar</button>
+              </div>
+            </div>
+          )}
+          <div class="fp-confirmar" id={`fp-todo-${c.id}`} hidden>
+            <p class="fp-texto">Se registra que {pila} retiró su consentimiento de datos completo (atención, grabación y revisión de casos). Lo hecho antes no cambia. Si solo pidió dejar de grabar, usa "Retirar solo la grabación".</p>
+            <label class="fp-label" for={`fp-notatodo-${c.id}`}>Nota (opcional: cómo y cuándo lo pidió)</label>
+            <input id={`fp-notatodo-${c.id}`} class="fp-nota" type="text" maxlength="500" />
+            <div class="fp-acciones">
+              <button type="button" class="btn btn-danger cf-btn fp-enviar" data-accion="revoke" data-consent-id={c.id}>Confirmar retiro del consentimiento</button>
+              <button type="button" class="btn btn-outline cf-btn fp-cancelar">Cancelar</button>
+            </div>
+          </div>
+          <p class="fp-msg" role="status" aria-live="polite"></p>
+        </li>
+      );
+    })}
+
+    {!propio && (
+      <li class="cf-fila cf-falta">
+        <div class="cf-datos">
+          <p class="cf-nombre"><span>{patient.name}</span><span class="cf-chip-falta">Falta firmar</span></p>
+          <p class="cf-sub">
+            {envioPendiente ? `Enviado por ${envioPendiente.sent_via === 'email' ? 'correo' : 'WhatsApp'} el ${fmtCL(envioPendiente.sent_at!)}, aún sin firmar.` : 'Todavía no se le ha enviado.'}
+            {ultimoRetiro && ` Retiró su consentimiento anterior el ${fmtDia(ultimoRetiro.revoked_at!)}${ultimoRetiro.revoked_note ? ` (${ultimoRetiro.revoked_note})` : ''}.`}
+          </p>
+        </div>
+        <div class="cf-botones">
+          <button type="button" class="btn btn-outline cf-btn cf-envio-abrir" data-panel={ID_PANEL_PROPIO} aria-expanded="false" aria-controls={ID_PANEL_PROPIO}>Opciones de envío</button>
+        </div>
+        <div class="cf-envio" id={ID_PANEL_PROPIO} hidden>
+          <div class="cp-botones">
+            <button type="button" class="btn btn-dark cf-btn consent-btn" data-consent-action="whatsapp" disabled={!patient.phone} title={patient.phone ? '' : 'Falta el teléfono en la ficha'}>Enviar por WhatsApp</button>
+            <button type="button" class="btn btn-outline cf-btn consent-btn" data-consent-action="link">Copiar link</button>
+            <button type="button" class="btn btn-outline cf-btn consent-btn" data-consent-action="email" disabled={!patient.email} title={patient.email ? '' : 'Falta el correo en la ficha'}>Enviar por correo</button>
+          </div>
+        </div>
+      </li>
+    )}
+
+    {pareja.falta && (
+      <li class="cf-fila cf-falta">
+        <div class="cf-datos">
+          <p class="cf-nombre"><span>{nombrePareja || 'Segunda persona'}</span><span class="cf-etq">pareja</span><span class="cf-chip-falta">Falta firmar</span></p>
+          <p class="cf-sub">
+            {pareja.estado.retirada ? `Retiró su consentimiento el ${fmtDia(String(pareja.estado.retirada.revoked_at))}. ` : ''}
+            Cada persona firma el suyo, en su propio celular.
+            {pareja.enviado && <> Link enviado {pareja.enviado.via === 'email' ? 'por correo' : pareja.enviado.via === 'whatsapp' ? 'por WhatsApp' : ''} el {fmtCL(pareja.enviado.at)}.</>}
+          </p>
+        </div>
+        <div class="cf-botones">
+          <button type="button" class="btn btn-outline cf-btn cf-envio-abrir" data-panel={ID_PANEL_PAREJA} aria-expanded="false" aria-controls={ID_PANEL_PAREJA}>Opciones de envío</button>
+        </div>
+        <div class="cf-envio" id={ID_PANEL_PAREJA} hidden>
+          {pareja.link ? (
+            <div class="cp-grupos">
+              <div class="cp-grupo">
+                <p class="cp-grupo-t">En la consulta</p>
+                <button type="button" class="btn btn-dark cp-btn cp-qr-abrir" disabled={!pareja.qr} aria-haspopup="dialog">
+                  <svg class="cp-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 14h2v2h-2zM18 14h2M14 18v2M17 17h3v3h-3z"/></svg>
+                  Mostrar código QR
+                </button>
+                <p class="cp-ayuda">La persona lo escanea con la cámara de su celular y firma ahí mismo. Esta ficha se actualiza sola cuando firma.</p>
+              </div>
+              <div class="cp-grupo">
+                <p class="cp-grupo-t">Antes de la sesión</p>
+                <div class="cp-botones">
+                  <a class="btn btn-outline cp-btn cp-wa" href={pareja.waHref} target="_blank" rel="noopener">
+                    <svg class="cp-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.6a8.4 8.4 0 0 1-12.4 7.4L3.5 20.5l1.6-4.4a8.4 8.4 0 1 1 15.4-4.5z"/></svg>
+                    WhatsApp
+                  </a>
+                  <button type="button" class="btn btn-outline cp-btn cp-copiar" data-url={pareja.link}>
+                    <svg class="cp-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>
+                    <span class="cp-copiar-txt">Copiar link</span>
+                  </button>
+                  <button type="button" class="btn btn-outline cp-btn cp-correo-abrir" aria-expanded="false" aria-controls={`cp-correo-${patient.id}`}>
+                    <svg class="cp-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>
+                    Correo
+                  </button>
+                </div>
+                <form class="cp-correo" id={`cp-correo-${patient.id}`} hidden novalidate>
+                  <label class="cp-label" for={`cp-correo-in-${patient.id}`}>Correo de la segunda persona</label>
+                  <div class="cp-correo-fila">
+                    <input id={`cp-correo-in-${patient.id}`} class="cp-correo-in" type="email" inputmode="email" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="120" placeholder="nombre@correo.cl" />
+                    <button type="submit" class="btn btn-dark cp-btn cp-correo-enviar">Enviar</button>
+                  </div>
+                  <p class="cp-ayuda">Solo se usa para mandar el link: no queda guardado en la ficha.</p>
+                </form>
+                <p class="cp-url-fila"><span class="cp-url-k">Link:</span> <a class="cp-url" href={pareja.link} target="_blank" rel="noopener">{pareja.link}</a></p>
+              </div>
+
+              {pareja.qr && (
+                <dialog class="cp-dialogo" aria-labelledby={`cp-qr-t-${patient.id}`}>
+                  <div class="cp-dialogo-in">
+                    <p class="cp-dialogo-t" id={`cp-qr-t-${patient.id}`}>Escanea con la cámara de tu celular</p>
+                    <div class="cp-qr" set:html={pareja.qr} />
+                    <p class="cp-dialogo-sub">Se abre tu consentimiento informado para la terapia de pareja. Lo lees, marcas lo que autorizas y firmas. Toma unos 2 minutos.</p>
+                    <p class="cp-dialogo-estado" role="status" aria-live="polite">Esperando la firma…</p>
+                    <button type="button" class="btn btn-outline cp-btn cp-qr-cerrar">Cerrar</button>
+                  </div>
+                </dialog>
+              )}
+            </div>
+          ) : (
+            <p class="cf-sub fp-no">{pareja.errorLink}</p>
+          )}
+          <p class="cp-msg" role="status" aria-live="polite"></p>
+        </div>
+      </li>
+    )}
+  </ul>
+
+  {pareja.errorReservas && <p class="cf-sub">No se pudieron revisar todas las reservas: se usó lo que muestra la ficha. Recarga en un momento.</p>}
+  <p id="consent-status" data-patient-id={patient.id} class="cf-sub" role="status" aria-live="polite"></p>
+
+  {firmadosHist.length > 0 && (
+    <details class="cf-hist">
+      <summary>Historial de consentimientos firmados ({firmadosHist.length})</summary>
+      <ul>
+        {firmadosHist.map((c: any) => (
+          <li>
+            {fmtCL(c.signed_at)} · {c.signer_name} · versión {c.version} · {c.revoked_at ? `retirado el ${fmtDia(c.revoked_at)}` : 'vigente'} ·{' '}
+            <a href={constancia(c.id)} target="_blank" rel="noopener">ver constancia</a>
+          </li>
+        ))}
+      </ul>
+    </details>
+  )}
+</section>
+
+<style>
+  .cf { margin: 0 0 1.25rem; padding: 0.9rem 1.1rem; }
+  .cf-cab { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.25rem 1rem; margin-bottom: 0.35rem; }
+  .cf-titulo { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: var(--enc-text-3, #6b7280); }
+  .cf-grab { font-size: 0.78rem; line-height: 1.45; }
+  .cf-grab-ok { color: var(--enc-green-dark, #15803d); }
+  .cf-grab-no { color: #92400e; }
+  .cf-filas { list-style: none; margin: 0; padding: 0; }
+  .cf-fila { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem 1rem; padding: 0.55rem 0; border-top: 1px solid var(--warm, #f1ede6); }
+  .cf-fila:first-child { border-top: 0; }
+  .cf-datos { min-width: 0; flex: 1 1 18rem; }
+  .cf-nombre { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; font-weight: 600; font-size: 0.9rem; overflow-wrap: anywhere; }
+  .cf-nombre a { color: var(--enc-text-1, #111827); text-decoration: underline; text-decoration-color: #c7c2b8; text-underline-offset: 3px; }
+  .cf-nombre a:hover { text-decoration-color: currentColor; }
+  .cf-ext { font-size: 0.75rem; margin-left: 0.2rem; color: var(--enc-text-3, #6b7280); }
+  .cf-etq { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #7A6544; background: #f7f1e6; border: 1px solid #e6d9c2; border-radius: 99px; padding: 0.05rem 0.5rem; }
+  .cf-ok { font-size: 0.72rem; font-weight: 600; color: #15803d; }
+  .cf-chip-falta { font-size: 0.72rem; font-weight: 600; color: #92400e; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 99px; padding: 0.05rem 0.55rem; }
+  .cf-sub { font-size: 0.78rem; color: var(--enc-text-3, #6b7280); margin-top: 0.15rem; line-height: 1.5; }
+  .cf-sub:empty { display: none; }
+  .cf-sub a, .cf-hist a { color: var(--enc-blue-dark, #1d4ed8); }
+  .cf-botones { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.75rem; }
+  .btn.cf-btn, .btn.cp-btn { min-height: 48px; padding: 0 1rem !important; font-size: 0.85rem !important; gap: 0.5rem; }
+  .cf-link { background: none; border: 0; min-height: 48px; padding: 0 0.25rem; font: inherit; font-size: 0.8rem; color: var(--enc-text-3, #6b7280); text-decoration: underline; cursor: pointer; }
+  .cf-link:hover { color: var(--red, #b91c1c); }
+  .cf-envio { flex: 1 1 100%; padding: 0.35rem 0 0.25rem; }
+  .cf-envio[hidden] { display: none; }
+  .fp-si { color: var(--enc-green-dark, #16a34a); }
+  .fp-no { color: var(--red, #b91c1c); }
+  .fp-confirmar { flex: 1 1 100%; background: #fffbeb; border-left: 3px solid #b45309; padding: 0.75rem 0.85rem; display: flex; flex-direction: column; gap: 0.4rem; }
+  .fp-confirmar[hidden] { display: none; }
+  .fp-texto { font-size: 0.82rem; line-height: 1.5; color: var(--ink); }
+  .fp-label { font-size: 0.75rem; color: var(--stone); margin-top: 0.2rem; }
+  .fp-via, .fp-nota { width: 100%; max-width: 26rem; font-size: 1rem; min-height: 48px; }
+  .fp-acciones { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.3rem; }
+  .fp-msg { flex: 1 1 100%; font-size: 0.78rem; }
+  .fp-msg:empty { display: none; }
+  .cf-hist { margin-top: 0.4rem; font-size: 0.78rem; color: var(--enc-text-3, #6b7280); }
+  .cf-hist summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; }
+  .cf-hist ul { margin: 0.2rem 0 0 1.1rem; list-style: disc; }
+  .cf-hist li { margin: 0.2rem 0; }
+
+  /* Opciones de envío de la pareja (QR / WhatsApp / Copiar / Correo) */
+  .cp-grupos { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 0.75rem; }
+  .cp-grupo { border: 1px solid var(--enc-border, #e5e7eb); border-radius: var(--enc-radius-lg, 10px); padding: 0.8rem; background: var(--enc-body-bg, #f9fafb); min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+  .cp-grupo-t { font-size: 0.78rem; font-weight: 600; color: var(--enc-text-2, #374151); }
+  .cp-ayuda { font-size: 0.76rem; color: var(--enc-text-3, #6b7280); line-height: 1.5; }
+  .cp-botones { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .cp-ico { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .btn.cp-copiar.cp-hecho { color: #15803d !important; border-color: #86efac !important; background: #f0fdf4 !important; }
+  .cp-correo { display: flex; flex-direction: column; gap: 0.35rem; }
+  .cp-correo[hidden] { display: none; }
+  .cp-label { font-size: 0.76rem; font-weight: 600; color: var(--enc-text-2, #374151); }
+  .cp-correo-fila { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .cp-correo-fila input { min-height: 48px; flex: 1 1 10rem; width: auto; min-width: 0; font-size: 1rem !important; }
+  .cp-correo-fila :global(.cc-sugerencias) { order: 3; flex: 1 1 100%; }
+  .cp-msg { font-size: 0.8rem; line-height: 1.45; margin-top: 0.4rem; }
+  .cp-msg:empty { display: none; }
+  .cp-url-fila { font-size: 0.72rem; color: var(--enc-text-3, #6b7280); overflow-wrap: anywhere; word-break: break-all; line-height: 1.45; }
+  .cp-url-k { font-weight: 600; }
+  .cp-url { color: var(--enc-blue-dark, #1d4ed8); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cp-dialogo { margin: auto; border: none; border-radius: 16px; padding: 0; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+  .cp-dialogo::backdrop { background: rgba(17, 24, 39, 0.55); }
+  .cp-dialogo-in { padding: 1.4rem 1.25rem 1.25rem; display: flex; flex-direction: column; align-items: center; gap: 0.8rem; text-align: center; }
+  .cp-dialogo-t { font-size: 1.15rem; font-weight: 600; color: var(--enc-text-1, #111827); }
+  .cp-qr { width: min(340px, calc(100vw - 80px)); aspect-ratio: 1; }
+  .cp-qr :global(svg) { width: 100%; height: 100%; display: block; }
+  .cp-dialogo-sub { font-size: 0.85rem; color: var(--enc-text-2, #374151); line-height: 1.55; max-width: 34ch; }
+  .cp-dialogo-estado { font-size: 0.85rem; color: var(--enc-text-3, #6b7280); min-height: 1.3em; }
+  .cp-dialogo-estado.cp-firmo { color: #15803d; font-weight: 600; font-size: 1rem; }
+  .cp-dialogo .cp-btn { width: 100%; }
+
+  @media (max-width: 720px) {
+    .cf { padding: 0.8rem 0.9rem; }
+    .cp-grupos { grid-template-columns: minmax(0, 1fr); }
+    .cf-botones { width: 100%; }
+    .cf-botones .cf-btn, .cp-grupo .cp-btn, .cp-botones .cp-btn, .cf-envio .cf-btn { flex: 1 1 100%; justify-content: center; }
+  }
+</style>
+
+<script>
+  // Opciones de envío plegadas (propio y pareja): las abre "Opciones de envío" aquí o "Enviar" en la franja
+  // Pendientes (data-abrir-envio). Pareja: QR (revisa la firma mientras está abierto), WhatsApp, copiar y correo.
+  function abrirEnvio(id: string, enfocar: boolean) {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    panel.hidden = false;
+    document.querySelectorAll(`[aria-controls="${id}"]`).forEach((b) => b.setAttribute('aria-expanded', 'true'));
+    if (enfocar) {
+      panel.closest('.cf-fila')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      panel.querySelector<HTMLElement>('button:not([disabled]), a')?.focus({ preventScroll: true });
+    }
+  }
+  const post = async (cuerpo: Record<string, unknown>) => {
+    const r = await fetch('/api/admin/consent', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Panel': '1' }, body: JSON.stringify(cuerpo) });
+    let d: { ok?: boolean; error?: string; [k: string]: unknown } = {};
+    try { d = await r.json(); } catch { /* respuesta sin JSON */ }
+    if (!r.ok || !d.ok) throw new Error(d.error || 'No se pudo completar. Intenta de nuevo.');
+    return d;
+  };
+  const tarjeta = (el: Element) => el.closest<HTMLElement>('.cp[data-patient-id]');
+  const pinta = (caja: HTMLElement | null, txt: string, color: string) => {
+    const msg = caja?.querySelector<HTMLElement>('.cp-msg');
+    if (msg) { msg.textContent = txt; msg.style.color = color; }
+  };
+
+  // ── QR: abrir/cerrar y revisar la firma cada 4 s mientras está abierto (máx. 20 min) ──
+  const sondeos = new WeakMap<HTMLDialogElement, number>();
+  const detener = (d: HTMLDialogElement) => { const t = sondeos.get(d); if (t) clearInterval(t); sondeos.delete(d); };
+  function abrirQr(card: HTMLElement) {
+    const d = card.querySelector<HTMLDialogElement>('.cp-dialogo');
+    if (!d) return;
+    if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
+    const estado = d.querySelector<HTMLElement>('.cp-dialogo-estado');
+    const pid = card.dataset.patientId;
+    const fin = Date.now() + 20 * 60_000;
+    detener(d);
+    const revisar = async () => {
+      if (!d.open || Date.now() > fin) { detener(d); if (estado && d.open) estado.textContent = 'Si ya firmó, cierra y recarga la página.'; return; }
+      try {
+        const r = await post({ action: 'pareja_estado', patient_id: pid });
+        if (r.firmado) {
+          detener(d);
+          d.dataset.firmo = '1';
+          if (estado) { estado.textContent = `✓ Listo: ${r.nombre ? `firmó ${r.nombre}` : 'ya firmó'}.`; estado.classList.add('cp-firmo'); }
+          const cerrar = d.querySelector<HTMLButtonElement>('.cp-qr-cerrar');
+          if (cerrar) cerrar.textContent = 'Listo';
+        }
+      } catch { /* sin conexión: se reintenta en el próximo ciclo */ }
+    };
+    sondeos.set(d, window.setInterval(revisar, 4000));
+  }
+  document.querySelectorAll<HTMLDialogElement>('.cp-dialogo').forEach((d) => {
+    d.addEventListener('close', () => { detener(d); if (d.dataset.firmo === '1') location.reload(); });
+    d.addEventListener('click', (e) => { if (e.target === d) d.close(); }); // tocar fuera del cuadro cierra
+  });
+
+  document.addEventListener('click', async (e) => {
+    const t = e.target as HTMLElement | null;
+    if (!t) return;
+
+    const desdeFranja = t.closest<HTMLElement>('[data-abrir-envio]');
+    if (desdeFranja) { abrirEnvio(desdeFranja.dataset.abrirEnvio ?? '', true); return; }
+    const plegable = t.closest<HTMLButtonElement>('.cf-envio-abrir');
+    if (plegable) {
+      const panel = document.getElementById(plegable.dataset.panel ?? '');
+      if (!panel) return;
+      if (panel.hidden) abrirEnvio(panel.id, false);
+      else { panel.hidden = true; plegable.setAttribute('aria-expanded', 'false'); }
+      return;
+    }
+
+    const card = tarjeta(t);
+    if (!card) return;
+    if (t.closest('.cp-qr-abrir')) { abrirQr(card); return; }
+    if (t.closest('.cp-qr-cerrar')) { t.closest<HTMLDialogElement>('dialog')?.close(); return; }
+
+    const copiar = t.closest<HTMLButtonElement>('.cp-copiar');
+    if (copiar) {
+      const url = copiar.dataset.url ?? '';
+      const txt = copiar.querySelector<HTMLElement>('.cp-copiar-txt');
+      try {
+        await navigator.clipboard.writeText(url);
+        copiar.classList.add('cp-hecho');
+        if (txt) txt.textContent = '✓ Copiado';
+        pinta(card, 'Link copiado. Pégalo en el mensaje que quieras.', '#15803d');
+        setTimeout(() => { copiar.classList.remove('cp-hecho'); if (txt) txt.textContent = 'Copiar link'; }, 2500);
+      } catch { prompt('Copia este link:', url); }
+      return;
+    }
+
+    const abrirCorreo = t.closest<HTMLButtonElement>('.cp-correo-abrir');
+    if (abrirCorreo) {
+      const f = card.querySelector<HTMLFormElement>('.cp-correo');
+      if (!f) return;
+      f.hidden = !f.hidden;
+      abrirCorreo.setAttribute('aria-expanded', String(!f.hidden));
+      if (!f.hidden) f.querySelector<HTMLInputElement>('input')?.focus();
+      return;
+    }
+
+    // WhatsApp: el enlace abre wa.me con el mensaje listo (Vale elige el contacto). Se registra el envío sin bloquear.
+    if (t.closest('.cp-wa')) {
+      pinta(card, 'WhatsApp abierto con el mensaje listo: elige a la persona y envía.', '#15803d');
+      post({ action: 'pareja_whatsapp', patient_id: card.dataset.patientId }).catch(() => undefined);
+    }
+  });
+
+  document.addEventListener('submit', async (e) => {
+    const f = (e.target as HTMLElement | null)?.closest<HTMLFormElement>('.cp-correo');
+    if (!f) return;
+    e.preventDefault();
+    const card = tarjeta(f);
+    const input = f.querySelector<HTMLInputElement>('.cp-correo-in');
+    const boton = f.querySelector<HTMLButtonElement>('.cp-correo-enviar');
+    const correo = (input?.value ?? '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(correo)) { pinta(card, 'Escribe un correo válido.', '#dc2626'); input?.focus(); return; }
+    if (boton) { boton.disabled = true; boton.textContent = 'Enviando…'; }
+    try {
+      await post({ action: 'pareja_email', patient_id: card?.dataset.patientId, email: correo });
+      pinta(card, `✓ Enviado a ${correo}. El correo no quedó guardado en la ficha.`, '#15803d');
+      if (input) input.value = '';
+      f.hidden = true;
+      card?.querySelector('.cp-correo-abrir')?.setAttribute('aria-expanded', 'false');
+    } catch (err) {
+      pinta(card, `✕ ${err instanceof Error ? err.message : 'No se pudo enviar.'}`, '#dc2626');
+    } finally {
+      if (boton) { boton.disabled = false; boton.textContent = 'Enviar'; }
+    }
+  });
+</script>

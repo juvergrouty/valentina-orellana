@@ -41,16 +41,35 @@ test('"Para revisar hoy": Para trabajar + Tareas del último resumen que las ten
   assert.equal(bloqueParaRevisarHoy([t('x', '2026-10-01', '### Puntos más importantes\n- a')]), null);
 });
 
-test('ficha: "Para revisar hoy" arriba (fuera de las pestañas), historial, buscador, filtro, descarga y panel de IA', () => {
+test('ficha (17 oct): Pendientes → Consentimientos → pestañas; en Notas "Para revisar hoy", la sesión más reciente y el historial al fondo, bajo demanda', () => {
   const f = leer('src/pages/admin/pacientes/[id].astro');
-  const hoy = f.indexOf('Para revisar hoy</p>');
-  assert.ok(hoy > 0 && hoy < f.indexOf('<!-- Tabs -->') && hoy < f.indexOf('<!-- Consentimiento de datos'), 'arriba de todo, en cualquier pestaña');
-  for (const x of ['Escribir evolución', 'Resumen IA', 'Ver más', 'Buscar por palabras clave', 'hist-filtro', '/exportar', 'Preguntar a la IA', 'Escribe tu pregunta…', 'AVISO_IA_PUEDE_ERRAR', 'resumenes-archivados', 'ConsentimientoParejaAnexos']) {
+  const pend = f.indexOf('<section class="pend"');
+  const cons = f.indexOf('<ConsentimientosFicha ');
+  const tabs = f.indexOf('<!-- Tabs -->');
+  assert.ok(pend > 0 && pend < cons && cons < tabs, 'Pendientes justo debajo del nombre, luego Consentimientos, luego pestañas');
+  const notas = f.slice(f.indexOf("{tab === 'notas' && ("));
+  const hoy = notas.indexOf('Para revisar hoy</p>');
+  const reciente = notas.indexOf('Sesión más reciente');
+  const todo = notas.indexOf('class="hist-todo"');
+  assert.ok(hoy > 0 && hoy < reciente && reciente < todo, 'arriba "Para revisar hoy", luego la sesión más reciente y al fondo el historial');
+  assert.match(f, /ia\.historial\.slice\(0, ENTRADAS_INICIALES\)/, 'el HTML inicial trae solo la sesión más reciente');
+  assert.match(f, /\/historial\$\{/, 'el resto se pide al servidor');
+  const entrada = leer('src/components/admin/HistorialEntrada.astro');
+  const parcial = leer('src/pages/admin/pacientes/[id]/historial.astro');
+  assert.match(parcial, /export const partial = true/);
+  assert.match(parcial, /historial\.slice\(ENTRADAS_INICIALES\)/);
+  assert.match(parcial, /x-panel/);
+  for (const x of ['Escribir evolución', 'Resumen IA', 'Ver más']) assert.ok(entrada.includes(x), `la entrada incluye ${x}`);
+  for (const x of ['Buscar por palabras clave', 'hist-filtro', '/exportar', 'Preguntar a la IA', 'Escribe tu pregunta…', 'AVISO_IA_PUEDE_ERRAR', 'resumenes-archivados', 'ConsentimientosFicha', 'Ver historial']) {
     assert.ok(f.includes(x), `la ficha incluye ${x}`);
   }
   assert.equal(AVISO_IA_PUEDE_ERRAR, 'La IA puede cometer errores. Revisa las respuestas.');
-  // F: con passkey los resúmenes se ven siempre (ya no dependen de la pestaña Notas).
-  assert.doesNotMatch(f, /Fuera de Notas no se muestra texto/);
+  // Bitácora antes de descifrar, en la ficha y en el historial (H6/H7).
+  const carga = leer('src/lib/transcriptor/fichaNotas.ts');
+  assert.ok(carga.indexOf("auditarObligatorio('vale', 'ver_resumen'") < carga.indexOf('conContenidoClaro(resumenes'));
+  assert.match(parcial, /vista: 'ficha_historial'/);
+  // Un solo bloque de consentimientos (sin el bloque verde ni "Autorizaciones por persona" aparte).
+  assert.doesNotMatch(f, /Autorizaciones por persona|Consentimiento de datos firmado/);
 });
 
 test('F: retomar una grabación pausada nunca pide passkey (ni toca el servidor)', () => {

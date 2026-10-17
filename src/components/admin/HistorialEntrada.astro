@@ -1,0 +1,173 @@
+---
+// Una entrada del historial de Notas clínicas (una sesión): fecha y tipo, la nota de evolución de Vale y,
+// en su propio bloque, el "Resumen IA" (anexo rotulado). Nunca se mezclan (decisión B/F).
+// La usan la ficha (solo la sesión más reciente) y pacientes/[id]/historial.astro (el resto, bajo demanda).
+// Estilos globales (is:global) porque el historial llega después como HTML parcial.
+import { ETIQUETA_SESION, duracionTexto, fechaLarga, tipoTexto } from '../../lib/transcriptor/panel';
+import type { EntradaFicha } from '../../lib/transcriptor/fichaNotas';
+
+interface Props { e: EntradaFicha; idx: number; patientId: string; avisoResumenes: string | null }
+const { e, idx, patientId, avisoResumenes } = Astro.props;
+const redirectBase = `/admin/pacientes/${patientId}`;
+const tipoSes = e.reserva?.custom_title || (e.sessionType ? ETIQUETA_SESION[e.sessionType] ?? e.sessionType : 'Sesión');
+const formId = `evo-${idx}`;
+---
+<li class="hist-item" data-ia={e.ia.some((t) => t.vigente) ? '1' : '0'} data-nota={e.notas.length ? '1' : '0'}>
+  <span class="hist-punto" aria-hidden="true"></span>
+  <article class="card hist-card">
+    <header class="hist-cab">
+      <div>
+        <p class="hist-fecha">{fechaLarga(e.fecha)}{e.hora ? ` · ${e.hora}` : ''}</p>
+        <p class="ia-sub">{tipoSes}</p>
+      </div>
+      {!e.notas.length && (
+        <button type="button" class="btn btn-dark btn-sm hist-evo-abrir" data-form={formId}>Escribir evolución</button>
+      )}
+    </header>
+
+    {e.notas.map((n: any) => (
+      <div class="hist-nota">
+        <div class="hist-nota-cab">
+          <p class="hist-rotulo">Evolución</p>
+          <div class="hist-nota-acc">
+            <button type="button" class="hist-link hist-nota-editar" data-nota={n.id}>Editar</button>
+            <form method="POST" action="/api/admin/patients" style="margin:0;">
+              <input type="hidden" name="action" value="delete_note" />
+              <input type="hidden" name="id" value={n.id} />
+              <input type="hidden" name="redirect" value={`${redirectBase}?tab=notas`} />
+              <button type="submit" class="hist-link" onclick="return confirm('¿Archivar esta nota? Deja de verse en la ficha, pero se conserva (la ficha clínica se guarda 15 años).')">Archivar</button>
+            </form>
+          </div>
+        </div>
+        <p class="hist-nota-texto hist-buscable" id={`nota-ver-${n.id}`}>{n.content}</p>
+        <form id={`nota-editar-${n.id}`} method="POST" action="/api/admin/patients" class="hist-form" hidden>
+          <input type="hidden" name="action" value="update_note" />
+          <input type="hidden" name="id" value={n.id} />
+          <input type="hidden" name="redirect" value={`${redirectBase}?tab=notas`} />
+          <textarea name="content" rows="6" aria-label="Editar nota de evolución">{n.content}</textarea>
+          <div class="ia-acciones" style="margin-top:0;">
+            <button type="submit" class="btn btn-dark btn-sm">Guardar</button>
+            <button type="button" class="btn btn-outline btn-sm hist-nota-cancelar" data-nota={n.id}>Cancelar</button>
+          </div>
+        </form>
+      </div>
+    ))}
+
+    {!e.notas.length && (
+      <form id={formId} method="POST" action="/api/admin/patients" class="hist-form" hidden>
+        <input type="hidden" name="action" value="add_note" />
+        <input type="hidden" name="patient_id" value={patientId} />
+        {e.reserva && <input type="hidden" name="booking_id" value={e.reserva.id} />}
+        <input type="hidden" name="session_date" value={e.fecha} />
+        <input type="hidden" name="session_type" value={e.sessionType ?? ''} />
+        <input type="hidden" name="redirect" value={`${redirectBase}?tab=notas`} />
+        <label class="hist-rotulo" for={`${formId}-txt`}>Nota de evolución</label>
+        <textarea id={`${formId}-txt`} name="content" rows="6" required placeholder="Evolución de la sesión, temas trabajados, acuerdos…"></textarea>
+        <div class="ia-acciones" style="margin-top:0;">
+          <button type="submit" class="btn btn-dark btn-sm">Guardar evolución</button>
+          <button type="button" class="btn btn-outline btn-sm hist-evo-cancelar" data-form={formId}>Cancelar</button>
+        </div>
+      </form>
+    )}
+
+    {e.ia.map((t) => (
+      <section id={`ia-${t.g.id}`} class={`hist-ia anclado${t.vigente ? '' : ' hist-ia-gris'}`} aria-label={`Resumen automático (IA) del ${fechaLarga(t.g.session_date)}`}>
+        <div class="ia-cab">
+          <span class="ia-badge"><span aria-hidden="true">✦</span> Resumen IA</span>
+          {t.estado.tono !== 'listo' && <span class={`ia-estado ia-estado-${t.estado.tono}`}>{t.estado.texto}</span>}
+        </div>
+        <p class="ia-sub" style="margin-top:0.35rem;">{tipoTexto(t.g)}{t.g.duracion_seg ? ` · ${duracionTexto(t.g.duracion_seg)} grabados` : ''}{t.vigente && t.vigente.version > 1 ? ` · versión ${t.vigente.version}` : ''}</p>
+        {t.vigente && t.archivado ? (
+          <>
+            <div class="ia-cuerpo hist-plegado hist-buscable" data-archivado={t.vigente.id} data-demo-html={t.demoHtml || undefined}><p class="ia-sub">Sesión antigua: el resumen está archivado de forma segura y se trae al abrirlo.</p></div>
+            <button type="button" class="hist-link hist-ver-mas" aria-expanded="false">Ver más</button>
+          </>
+        ) : t.vigente && !t.html && avisoResumenes ? (
+          <p class="ia-texto">{avisoResumenes}</p>
+        ) : t.vigente ? (
+          <>
+            <div class="ia-cuerpo hist-plegado hist-buscable" set:html={t.html} />
+            <button type="button" class="hist-link hist-ver-mas" aria-expanded="false">Ver más</button>
+          </>
+        ) : t.problema ? (
+          <p class="ia-texto">{t.problema}</p>
+        ) : (
+          <p class="ia-texto">Resumen automático (IA): en proceso. Aparecerá aquí solo.</p>
+        )}
+        {t.vigente && t.problema && <p class="ia-nota">{t.problema}</p>}
+        {t.generando && t.vigente && <p class="ia-nota">Se está escribiendo una versión nueva; esta sigue visible mientras tanto.</p>}
+        {t.g.nota_sistema && <p class="ia-nota">{t.g.nota_sistema}</p>}
+        {t.excluida && <p class="ia-nota">Excluida de las preguntas a la IA a pedido del paciente.</p>}
+        {t.vigente && <p class="ia-aviso">{t.aviso}</p>}
+        <div class="ia-acciones">
+          {t.transcrita && (
+            <a class="btn btn-outline btn-sm" href={`/admin/pacientes/${patientId}/sesion/${t.g.id}`}>Ver transcripción</a>
+          )}
+          {t.vigente && t.texto && !e.notas.length && (
+            <button type="button" class="btn btn-outline btn-sm ia-copiar" data-texto={t.texto} data-form={formId}>Usar como base de mi evolución</button>
+          )}
+          {t.reintentable && (
+            <button type="button" class="btn btn-outline btn-sm ia-reintentar" data-gid={t.g.id}>Reintentar</button>
+          )}
+          <span class="ia-msg" data-gid={t.g.id} role="status" aria-live="polite"></span>
+        </div>
+      </section>
+    ))}
+  </article>
+</li>
+
+<style is:global>
+  /* ── Resumen automático (IA): anexo con rótulo dorado oscuro #7A6544 (5,57:1 sobre blanco);
+     el dorado de marca #A8906C solo como borde. ── */
+  .ia-cab { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: space-between; }
+  .ia-badge { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.74rem; font-weight: 700; color: #7A6544; background: #f7f1e6; border: 1px solid #e6d9c2; border-radius: 99px; padding: 0.18rem 0.65rem; line-height: 1.35; }
+  .ia-estado { font-size: 0.72rem; font-weight: 600; border-radius: 99px; padding: 0.15rem 0.6rem; border: 1px solid; }
+  .ia-estado-proceso, .ia-estado-neutro { color: #374151; background: #f3f4f6; border-color: #e5e7eb; }
+  .ia-estado-problema { color: #92400e; background: #fffbeb; border-color: #fcd34d; }
+  .ia-sub { font-size: 0.78rem; color: var(--stone); }
+  .ia-texto { font-size: 0.86rem; color: var(--ink); margin-top: 0.6rem; line-height: 1.55; }
+  .ia-nota { font-size: 0.78rem; color: var(--stone); margin-top: 0.6rem; }
+  .ia-cuerpo { font-size: 0.88rem; line-height: 1.65; color: var(--ink); margin-top: 0.4rem; overflow-wrap: anywhere; }
+  .ia-cuerpo h4 { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--stone); font-weight: 600; margin: 0.95rem 0 0.25rem; }
+  .ia-cuerpo ul { padding-left: 1.15rem; list-style: disc; }
+  .ia-cuerpo li { margin: 0.15rem 0; }
+  .ia-cuerpo p { margin: 0.3rem 0; }
+  .ia-cuerpo p.ia-meta { font-size: 0.76rem; color: var(--stone); font-style: italic; }
+  .ia-cuerpo a.ia-min { color: #576352; font-weight: 600; text-decoration: underline; white-space: nowrap; }
+  .ia-aviso { font-size: 0.75rem; color: var(--stone); border-top: 1px solid var(--warm); margin-top: 0.85rem; padding-top: 0.6rem; }
+  .ia-acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; align-items: center; }
+  .ia-msg { font-size: 0.78rem; }
+
+  /* ── Historial por sesión (estilo Encuadrado, con el diseño del panel) ── */
+  .hist-lista { list-style: none; margin: 0; padding: 0 0 0 1.1rem; position: relative; display: flex; flex-direction: column; gap: 1rem; }
+  .hist-lista::before { content: ''; position: absolute; left: 0.3rem; top: 0.6rem; bottom: 0.6rem; width: 2px; background: var(--dust); }
+  .hist-item { position: relative; }
+  .hist-item[hidden] { display: none; }
+  .hist-punto { position: absolute; left: -1.1rem; top: 1.15rem; width: 0.75rem; height: 0.75rem; border-radius: 50%; background: white; border: 2px solid #A8906C; }
+  .hist-card { padding: 1rem 1.15rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  .hist-cab { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: flex-start; justify-content: space-between; }
+  .hist-fecha { font-weight: 600; font-size: 0.92rem; }
+  .hist-fecha::first-letter { text-transform: uppercase; }
+  .hist-rotulo { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700; color: var(--forest); }
+  .hist-nota { border-top: 1px solid var(--warm); padding-top: 0.6rem; }
+  .hist-nota-cab { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+  .hist-nota-acc { display: flex; gap: 0.75rem; align-items: center; }
+  .hist-nota-texto { font-size: 0.88rem; line-height: 1.65; white-space: pre-wrap; color: var(--ink); margin-top: 0.3rem; overflow-wrap: anywhere; }
+  .hist-form { display: flex; flex-direction: column; gap: 0.5rem; border-top: 1px solid var(--warm); padding-top: 0.6rem; }
+  .hist-form[hidden], .hist-nota-texto[hidden] { display: none; }
+  .hist-form textarea { resize: vertical; background: white; }
+  .hist-link { background: none; border: 0; padding: 0.2rem 0; font: inherit; font-size: 0.8rem; font-weight: 600; color: #576352; text-decoration: underline; cursor: pointer; }
+  .hist-ia { border-left: 4px solid #A8906C; background: #fffdf9; border-radius: 6px; padding: 0.75rem 0.9rem; }
+  .hist-ia-gris { background: var(--warm); border-left-color: #d9cdb8; }
+  .hist-plegado { max-height: 9.5rem; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+  /* En el historial la línea de datos del resumen sobra (el rótulo completo va abajo, en .ia-aviso). */
+  .hist-ia .ia-cuerpo p.ia-meta { display: none; }
+  @media (max-width: 600px) {
+    .ia-acciones .btn { min-height: 48px; }
+    .hist-lista { padding-left: 0; }
+    .hist-lista::before, .hist-punto { display: none; }
+    .hist-card { padding: 0.9rem; }
+    .hist-cab .btn { min-height: 48px; }
+    .hist-link { min-height: 48px; padding: 0 0.25rem; }
+  }
+</style>

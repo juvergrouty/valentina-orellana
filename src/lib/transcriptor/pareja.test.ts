@@ -7,7 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { SupabaseMemoria } from './pruebas/supabaseMemoria';
 import { evaluarConsentimientos, evaluarEnBase, type FilaConsentimiento } from './consentimiento';
 import {
-  esReservaPareja, estadoPareja, FaltaMigracion0021, fichaConReservaPareja, fichaEsParejaPorReserva, mensajeWhatsAppPareja,
+  esReservaPareja, estadoPareja, nombreDicePareja, FaltaMigracion0021, fichaConReservaPareja, fichaEsParejaPorReserva, mensajeWhatsAppPareja,
   pendienteOCrear, personaDe, rutYaFirmoEnFicha, soloPersona1, urlWhatsAppPareja,
 } from './pareja';
 import { avisoV2ParaCorreo, filaAnexo, htmlAvisoV2, registrarAvisoMostrado, sha256Html, anexosDeConsentimientos, type CorreoEnviado } from './avisoV2';
@@ -31,6 +31,36 @@ test('D: pareja por session_type o por el servicio reservado; nunca por la panta
   assert.equal(esReservaPareja({ session_type: 'online', service_id: null }, svc), false);
   assert.equal(fichaConReservaPareja([{ session_type: 'online' }, { session_type: 'presencial', service_id: 's-par' }], svc), true);
   assert.equal(fichaConReservaPareja([], svc), false);
+});
+
+test('D (17 oct): el NOMBRE de la sesión o del servicio con "pareja" (sin mayúsculas ni tildes) hace la ficha de pareja', () => {
+  assert.equal(nombreDicePareja('Terapia de PAREJA'), true);
+  assert.equal(nombreDicePareja('Sesión párejá online'), true, 'sin tildes');
+  assert.equal(nombreDicePareja('Individual'), false);
+  assert.equal(nombreDicePareja(null), false);
+  assert.equal(esReservaPareja({ session_type: 'presencial', custom_title: 'Sesión de Pareja' }, SIN_SVC), true, 'nombre de la sesión');
+  const svc = new Map([['s1', { type: 'individual', name: 'Terapia de pareja online' }], ['s2', { type: 'individual', name: 'Psicoterapia adultos' }]]);
+  assert.equal(esReservaPareja({ session_type: 'online', service_id: 's1' }, svc), true, 'nombre del servicio');
+  assert.equal(esReservaPareja({ session_type: 'online', service_id: 's2' }, svc), false);
+  assert.equal(esReservaPareja({ session_type: 'online', service_id: 's2', custom_title: 'Primera sesión' }, svc), false);
+});
+
+test('D (17 oct) en la base: servicio llamado "Terapia de Pareja" (tipo individual) → la regla única pide 2 firmas', async () => {
+  const db = new SupabaseMemoria();
+  const p = randomUUID(), s = randomUUID();
+  db.tabla('patients').push({ id: p, name: 'Clara Ríos', email: 'clara@ejemplo.cl', birthdate: null, rut: '11.111.111-1' });
+  db.tabla('services_catalog').push({ id: s, type: 'individual', name: 'Terapia de Pareja' });
+  db.tabla('bookings').push({ id: randomUUID(), patient_email: 'clara@ejemplo.cl', session_type: 'presencial', service_id: s });
+  db.tabla('consents').push({ ...fila({ signer_name: 'Clara Ríos', signer_rut: '11.111.111-1' }), patient_id: p });
+  assert.equal(await fichaEsParejaPorReserva(db.cliente, 'clara@ejemplo.cl'), true);
+  const r = await evaluarEnBase(p, 'individual', db.cliente);
+  assert.deepEqual([r.puede, r.motivo, r.requeridas], [false, 'falta_segunda_firma', 2]);
+  // Por el nombre de la sesión (custom_title), sin servicio.
+  const db2 = new SupabaseMemoria();
+  const p2 = randomUUID();
+  db2.tabla('patients').push({ id: p2, name: 'Ana Pérez', email: 'ana@ejemplo.cl', birthdate: null, rut: null });
+  db2.tabla('bookings').push({ id: randomUUID(), patient_email: 'ana@ejemplo.cl', session_type: 'online', service_id: null, custom_title: 'Sesión PAREJA' });
+  assert.equal(await fichaEsParejaPorReserva(db2.cliente, 'ana@ejemplo.cl'), true);
 });
 
 function fichaBase(sessionType = 'presencial', tipoServicio: string | null = null) {

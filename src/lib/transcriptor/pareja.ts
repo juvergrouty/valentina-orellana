@@ -1,7 +1,8 @@
 // Transcriptor IA — parejas (decisión D de 02-decisiones-16oct-noche.md, que manda).
 //   • La ficha es de pareja porque LA RESERVA lo dice: bookings.session_type 'pareja-online' /
 //     'pareja-presencial', o el servicio reservado (bookings.service_id → services_catalog.type
-//     = 'pareja'). El precio de pareja sale de ese mismo servicio (bookings.ts lo toma de
+//     = 'pareja'), o (decisión de Vale, 17 oct) el NOMBRE de la sesión (bookings.custom_title) o del
+//     servicio reservado (services_catalog.name) contiene "pareja" (sin mayúsculas ni tildes). El precio de pareja sale de ese mismo servicio (bookings.ts lo toma de
 //     services_catalog), así que el servicio ya lo cubre; el monto solo no se usa porque cambia
 //     con packs, descuentos y precios manuales. Nunca depende de lo que se elija en pantalla.
 //   • Siempre 2 consentimientos distintos, uno por persona. La persona agendada firma el suyo
@@ -20,33 +21,50 @@ export function personaDe(f: { persona?: number | null }): Persona {
   return Number(f.persona) === 2 ? 2 : 1;
 }
 
-export interface ReservaMinima { session_type?: string | null; service_id?: string | null }
+export interface ReservaMinima { session_type?: string | null; service_id?: string | null; custom_title?: string | null }
 
-/** ¿Esta reserva es de pareja? Por su tipo o por el tipo del servicio reservado. */
-export function esReservaPareja(b: ReservaMinima, tipoServicio: ReadonlyMap<string, string | null | undefined>): boolean {
-  if (String(b.session_type ?? '').startsWith('pareja')) return true;
-  const sid = String(b.service_id ?? '');
-  return !!sid && String(tipoServicio.get(sid) ?? '') === 'pareja';
+/** Lo que se sabe del servicio reservado: su tipo (services_catalog.type) o tipo y nombre. */
+export type InfoServicio = string | null | undefined | { type?: string | null; name?: string | null };
+
+/** ¿El nombre (de la sesión o del servicio) dice "pareja"? Sin distinguir mayúsculas ni tildes. */
+export function nombreDicePareja(nombre: unknown): boolean {
+  return String(nombre ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes('pareja');
 }
 
-export function fichaConReservaPareja(bs: ReservaMinima[], tipoServicio: ReadonlyMap<string, string | null | undefined>): boolean {
-  return bs.some((b) => esReservaPareja(b, tipoServicio));
+/**
+ * ¿Esta reserva es de pareja? ÚNICA regla (la usan fichaEsParejaEnBase → grabar, link de la pareja y
+ * ficha): session_type 'pareja-*', servicio reservado de tipo 'pareja', o el nombre de la sesión
+ * (custom_title) o del servicio reservado contiene "pareja".
+ */
+export function esReservaPareja(b: ReservaMinima, servicios: ReadonlyMap<string, InfoServicio>): boolean {
+  if (String(b.session_type ?? '').startsWith('pareja')) return true;
+  if (nombreDicePareja(b.custom_title)) return true;
+  const sid = String(b.service_id ?? '');
+  if (!sid) return false;
+  const info = servicios.get(sid);
+  const tipo = info && typeof info === 'object' ? info.type : info;
+  if (String(tipo ?? '') === 'pareja') return true;
+  return !!info && typeof info === 'object' && nombreDicePareja(info.name);
+}
+
+export function fichaConReservaPareja(bs: ReservaMinima[], servicios: ReadonlyMap<string, InfoServicio>): boolean {
+  return bs.some((b) => esReservaPareja(b, servicios));
 }
 
 /** Reservas de la ficha (por su correo, sin mayúsculas) y el tipo de cada servicio reservado. Lanza si la base falla. */
-export async function reservasDeFicha(c: SupabaseClient, email: string | null | undefined): Promise<{ reservas: ReservaMinima[]; tipoServicio: Map<string, string | null> }> {
+export async function reservasDeFicha(c: SupabaseClient, email: string | null | undefined): Promise<{ reservas: ReservaMinima[]; tipoServicio: Map<string, InfoServicio> }> {
   const correo = String(email ?? '').trim();
-  const tipoServicio = new Map<string, string | null>();
+  const tipoServicio = new Map<string, InfoServicio>();
   if (!correo) return { reservas: [], tipoServicio };
-  const { data, error } = await c.from('bookings').select('session_type, service_id')
+  const { data, error } = await c.from('bookings').select('session_type, service_id, custom_title')
     .ilike('patient_email', correo.replace(/[\\%_]/g, (m) => `\\${m}`)).limit(500);
   if (error) throw new Error(`pareja: no se pudieron leer las reservas (${error.message})`);
   const reservas = (data ?? []) as ReservaMinima[];
   const ids = [...new Set(reservas.map((b) => String(b.service_id ?? '')).filter(Boolean))];
   if (ids.length) {
-    const { data: svcs, error: es } = await c.from('services_catalog').select('id, type').in('id', ids);
+    const { data: svcs, error: es } = await c.from('services_catalog').select('id, type, name').in('id', ids);
     if (es) throw new Error(`pareja: no se pudieron leer los servicios (${es.message})`);
-    for (const s of (svcs ?? []) as { id: string; type?: string | null }[]) tipoServicio.set(String(s.id), s.type ?? null);
+    for (const s of (svcs ?? []) as { id: string; type?: string | null; name?: string | null }[]) tipoServicio.set(String(s.id), { type: s.type ?? null, name: s.name ?? null });
   }
   return { reservas, tipoServicio };
 }
