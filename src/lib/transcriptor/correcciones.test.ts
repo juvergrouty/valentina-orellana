@@ -174,10 +174,10 @@ test('H7: el contenido del resumen se cifra con su id y tipo; las filas antiguas
 // ─── H8, H9, H14, H16, H10: prompt y rótulo ──────────────────────────────────
 
 test('prompt del resumen: textos de 81-revision y versión nueva', () => {
-  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-16.3'); // estructura fija de Vale (02-decisiones-16oct-noche, B)
+  assert.equal(PROMPT_VERSION_RESUMEN, 'resumen-2026-10-17.1'); // misma estructura, texto compactado (17 oct)
   assert.match(PARTE_FIJA_RESUMEN, /no incluyas en ninguna sección del resumen lo dicho en ese tramo/); // H8
   assert.doesNotMatch(PARTE_FIJA_RESUMEN, /NO lo omitas por tu cuenta/);
-  assert.match(PARTE_FIJA_RESUMEN, /sin términos clínicos ni calificativos de gravedad como "pasiva", "activa", "leve", "grave", "problemático", "niega"/); // H9
+  assert.match(PARTE_FIJA_RESUMEN, /sin términos clínicos ni calificativos de gravedad como "pasiva", "leve", "grave", "niega"/); // H9
   assert.match(PARTE_FIJA_RESUMEN, /agrega " \(inferido\)" si la asignación de hablante fue inferida/); // H9
   assert.match(PARTE_FIJA_RESUMEN, /No recomiendes medicación, derivaciones, altas ni cambios de frecuencia o de tratamiento\./); // H16
   assert.match(PARTE_FIJA_RESUMEN, /No consta en la transcripción/); // H16 simetría

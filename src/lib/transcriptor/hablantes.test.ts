@@ -67,6 +67,37 @@ test('presencial individual sin diarización: un solo hablante genérico', () =>
   assert.deepEqual(tramos, [{ inicio_ms: 0, fin_ms: 700, hablante: HABLANTE_SIN_SEPARAR, texto: 'Hola todos.' }]);
 });
 
+test('presencial individual CON diarización (17 oct): Hablante A/B renombrables con mapa_hablantes', () => {
+  const g: G = { origen: 'presencial', tipo: 'individual', linea_hablantes: null, mapa_hablantes: { A: 'Ps. Valentina' }, pausas: [] };
+  const r = res('t', [['¿Cómo', 0, 300, 'A'], ['estás?', 350, 700, 'A'], ['Bien,', 1200, 1500, 'B'], ['gracias.', 1550, 1900, 'B']]);
+  const tramos = unirTranscripcion({ grabacion: g, segmentos: [{ offset_ms: 0, resultado: r }] });
+  assert.deepEqual(tramos.map((t) => [t.hablante, t.texto]), [['Ps. Valentina', '¿Cómo estás?'], ['Hablante B', 'Bien, gracias.']]);
+  assert.ok(!tramos.some((t) => t.hablante === HABLANTE_SIN_SEPARAR));
+});
+
+test('pareja online, recuadro compartido: Vale con su nombre; la pareja separada por voz de AssemblyAI', () => {
+  const linea = validarLineaHablantes([
+    { t_ms: 0, nombre: 'Valentina Orellana', on: true }, { t_ms: 3000, nombre: 'Valentina Orellana', on: false },
+    { t_ms: 3200, nombre: 'Casa Soto', on: true }, { t_ms: 30_000, nombre: 'Casa Soto', on: false },
+  ]);
+  const palabras: [string, number, number, string?][] = [['Hola,', 100, 400, 'A'], ['¿cómo', 450, 800, 'A'], ['llegaron?', 850, 1300, 'A']];
+  for (let i = 0; i < 10; i++) palabras.push([`b${i}`, 3500 + i * 300, 3700 + i * 300, 'B']);
+  for (let i = 0; i < 10; i++) palabras.push([`c${i}`, 12_000 + i * 300, 12_200 + i * 300, 'C']);
+  palabras.push(['¿sí?', 40_000, 40_300, 'C']); // sin recuadro: hereda el de su voz
+  const g: G = { origen: 'online', tipo: 'pareja', linea_hablantes: linea, pausas: [], mapa_hablantes: { 'Casa Soto · Hablante C': 'Diego' } };
+  const tramos = unirTranscripcion({ grabacion: g, segmentos: [{ offset_ms: 0, resultado: res('t', palabras) }] });
+  assert.deepEqual(tramos.map((t) => t.hablante), ['Valentina Orellana', 'Casa Soto · Hablante B', 'Diego', 'Diego']);
+});
+
+test('online individual con diarización accidental: un recuadro con una voz no se separa', () => {
+  const linea = validarLineaHablantes([{ t_ms: 0, nombre: 'Paciente X', on: true }, { t_ms: 9000, nombre: 'Paciente X', on: false }]);
+  const palabras: [string, number, number, string?][] = [];
+  for (let i = 0; i < 20; i++) palabras.push([`p${i}`, i * 300, i * 300 + 200, i === 5 ? 'B' : 'A']); // 1 palabra B (error)
+  const g: G = { origen: 'online', tipo: 'individual', linea_hablantes: linea, pausas: [], mapa_hablantes: null };
+  const tramos = unirTranscripcion({ grabacion: g, segmentos: [{ offset_ms: 0, resultado: res('t', palabras) }] });
+  assert.deepEqual([...new Set(tramos.map((t) => t.hablante))], ['Paciente X']);
+});
+
 test('online: línea de hablantes del bot asigna nombres; sin intervalo → no identificado', () => {
   const linea = validarLineaHablantes([
     { t_ms: 0, nombre: 'Valentina Orellana', on: true }, { t_ms: 2000, nombre: 'Valentina Orellana', on: false },

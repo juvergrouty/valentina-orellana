@@ -22,6 +22,7 @@ import {
 } from './tipos';
 import { leaseVencido, marcarError, soltar, tomar, transicionar } from './estados';
 import { elegirModelo } from './reglas';
+import { repararMojibake } from './texto';
 import { borrarTranscriptTrasGuardar, decisionTrasErrorAAI, ErrorAssemblyAI, sanearMensaje } from './assemblyai';
 import { armarTranscripcionClara, esTramoHueco } from './hablantes';
 import {
@@ -210,7 +211,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       activo: v.get(AJUSTES.activo)?.toLowerCase() === 'true',
       botActivo: v.get(AJUSTES.botActivo)?.toLowerCase() === 'true',
       resumenModo: v.get(AJUSTES.resumenModo) || 'directo',
-      nombresVale: (v.get(AJUSTE_NOMBRES_VALE) || NOMBRES_VALE_DEFECTO).split('|').map((x) => x.trim()).filter(Boolean),
+      nombresVale: (repararMojibake(v.get(AJUSTE_NOMBRES_VALE)) || NOMBRES_VALE_DEFECTO).split('|').map((x) => x.trim()).filter(Boolean),
     };
     return ajustesCache;
   }
@@ -876,8 +877,8 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     ajustesCache = null;
     const pasos: Record<string, number> = {};
     const errores: string[] = [];
-    const paso = async (nombre: string, fn: (a: Date) => Promise<number>) => {
-      if (queda() <= 1_000) return;
+    const paso = async (nombre: string, fn: (a: Date) => Promise<number>, conPresupuestoResumen = false) => {
+      if ((conPresupuestoResumen ? quedaResumen() : queda()) <= 1_000) return;
       try { pasos[nombre] = await fn(ahora); } catch (e) {
         errores.push(`${nombre}: ${msg(e)}`);
         console.warn(`[transcriptor/pipeline] ${nombre}:`, msg(e));
@@ -903,6 +904,9 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     await paso('resumenes', resumir);
     await paso('envios', reintentarEnvios);
     await paso('transcripciones', procesarTranscripciones);
+    // 17 oct (velocidad): lo que recién quedó 'transcrita' se resume en ESTA corrida, no en la del minuto
+    // siguiente. resumir() toma cada grabación por fila, así que repetir el paso no duplica trabajo.
+    if (pasos.transcripciones) await paso('resumenes_nuevos', resumir, true);
     await paso('respaldos', respaldos);
     await paso('archivo', async (a) => (await import('./pasoArchivo')).pasoArchivo(deps, a)); // 02-decisiones-16oct-noche B: resúmenes fuera de las 4 últimas sesiones → R2+B2
     await paso('limpieza', limpiar);

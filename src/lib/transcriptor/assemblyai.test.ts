@@ -23,14 +23,29 @@ test('pareja presencial: universal-3-5-pro + speaker_labels + speakers_expected 
   });
 });
 
-test('individual y pareja online: sin diarización ni speakers_expected; sin metadata ni language_detection', () => {
-  const ind = cuerpoEnvio(AUDIO, elegirModelo({ tipo: 'individual', origen: 'presencial', lugarConRuido: false }), WH);
+test('individual presencial: universal-2 + speaker_labels + speakers_expected 2 (17 oct)', () => {
+  const c = cuerpoEnvio(AUDIO, elegirModelo({ tipo: 'individual', origen: 'presencial', lugarConRuido: false }), WH);
+  assert.equal(c.speech_models[0], 'universal-2');
+  assert.equal(c.speaker_labels, true);
+  assert.equal(c.speakers_expected, 2);
+  const ruido = cuerpoEnvio(AUDIO, elegirModelo({ tipo: 'individual', origen: 'presencial', lugarConRuido: true }), WH);
+  assert.equal(ruido.speech_models[0], 'universal-3-5-pro');
+  assert.equal(ruido.speaker_labels, true);
+  assert.equal(ruido.speakers_expected, 2);
+  const st = cuerpoEnvio(AUDIO, elegirModelo({ tipo: 'sin_tipo', origen: 'presencial', lugarConRuido: false }), WH);
+  assert.equal(st.speaker_labels, true);
+  assert.ok(!('speakers_expected' in st)); // sin tipo: el modelo decide cuántos (podría ser pareja)
+});
+
+test('online individual: sin diarización ni speakers_expected; pareja online: diarización 3; sin metadata ni language_detection', () => {
+  const ind = cuerpoEnvio(AUDIO, elegirModelo({ tipo: 'individual', origen: 'online', lugarConRuido: false }), WH);
   assert.equal(ind.speech_models[0], 'universal-2');
   assert.equal(ind.speaker_labels, false);
   assert.ok(!('speakers_expected' in ind));
   const po = cuerpoEnvio(AUDIO, elegirModelo({ tipo: 'pareja', origen: 'online', lugarConRuido: false }), WH);
   assert.equal(po.speech_models[0], 'universal-3-5-pro');
-  assert.equal(po.speaker_labels, false);
+  assert.equal(po.speaker_labels, true);
+  assert.equal(po.speakers_expected, 3);
   for (const c of [ind, po]) {
     assert.ok(!('metadata' in c) && !('language_detection' in c) && !('speech_model' in c));
   }

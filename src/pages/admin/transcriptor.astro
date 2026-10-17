@@ -6,6 +6,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { repararMojibake } from '../../lib/transcriptor/texto';
 import { todayCL } from '../../lib/dateUtils';
 import { INSTRUCCIONES_RESUMEN_POR_DEFECTO, MAX_INSTRUCCIONES } from '../../lib/transcriptor/resumen';
 import {
@@ -123,7 +124,7 @@ const botActivo = ajustes[AJUSTES.botActivo] === 'true';
 const modoBot = normalizarModoBot(ajustes[AJUSTE_BOT_MODO]);
 const sesionRobot: EstadoSesionRobot = estadoSesionRobot(filaRobot);
 const textoBot = textoAsistenteMeet(modoBot, sesionRobot);
-const nombresVale = (ajustes[AJUSTE_NOMBRES_VALE] || NOMBRES_VALE_DEFECTO).split('|').join('\n');
+const nombresVale = (repararMojibake(ajustes[AJUSTE_NOMBRES_VALE]) || NOMBRES_VALE_DEFECTO).split('|').join('\n');
 const tope = Number(ajustes[AJUSTES.presupuestoClp]) || 35000;
 const pct = costo ? porcentajeTope(costo.clp.total, tope) : 0;
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
@@ -292,7 +293,7 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
       <h3 id="tx-instr" class="tx-h3">Mis instrucciones para el resumen</h3>
       <p class="tx-sub" style="margin-bottom:0.6rem;">Secciones, orden, tono y largo del resumen. Lo que no se puede cambiar desde aquí: no inventar, no diagnosticar, la sección "Atención" cuando corresponde y el rótulo de IA. Los cambios valen para los resúmenes nuevos.</p>
       <form class="tx-instr-form" data-uso="resumen">
-        <textarea id="tx-instr-resumen" rows="16" maxlength={MAX_INSTRUCCIONES} style="resize:vertical;font-size:0.85rem;line-height:1.55;">{activaResumen?.texto ?? INSTRUCCIONES_RESUMEN_POR_DEFECTO}</textarea>
+        <textarea id="tx-instr-resumen" rows="16" maxlength={MAX_INSTRUCCIONES} style="resize:vertical;font-size:0.85rem;line-height:1.55;">{repararMojibake(activaResumen?.texto) ?? INSTRUCCIONES_RESUMEN_POR_DEFECTO}</textarea>
         <p class="tx-nota"><span class="tx-contador" data-para="tx-instr-resumen"></span> · {activaResumen ? `Versión vigente desde ${fmtFechaHora(activaResumen.created_at)}` : 'Usando el texto original'}</p>
         <div class="tx-acciones">
           <button type="submit" class="btn btn-dark btn-sm">Guardar</button>
@@ -314,7 +315,7 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
       <details class="tx-hist" style="margin-top:1rem;">
         <summary>Instrucciones para "Preguntar a la IA"</summary>
         <form class="tx-instr-form" data-uso="preguntas" style="margin-top:0.6rem;">
-          <textarea id="tx-instr-preguntas" rows="4" maxlength={MAX_INSTRUCCIONES} style="resize:vertical;font-size:0.85rem;">{activaPreguntas?.texto ?? ''}</textarea>
+          <textarea id="tx-instr-preguntas" rows="4" maxlength={MAX_INSTRUCCIONES} style="resize:vertical;font-size:0.85rem;">{repararMojibake(activaPreguntas?.texto) ?? ''}</textarea>
           <p class="tx-nota"><span class="tx-contador" data-para="tx-instr-preguntas"></span></p>
           <div class="tx-acciones">
             <button type="submit" class="btn btn-dark btn-sm">Guardar</button>

@@ -1,9 +1,17 @@
 // Regla FIJA del sitio para elegir el modelo de transcripción (00-decisiones.md).
 // No la decide una IA ni un ajuste: es código, con pruebas de tabla (reglas.test.ts).
-//   pareja                → universal-3-5-pro (+ diarización solo si es presencial)
+//   pareja                → universal-3-5-pro
 //   individual / sin tipo → universal-2
 //   "Lugar con ruido"     → universal-3-5-pro (modelo robusto)
-//   online                → nunca diarización pagada (el bot sabe quién habla)
+//   presencial            → SIEMPRE diarización (speaker_labels): 3 hablantes en pareja, 2 en individual,
+//                           sin número fijo en "sin tipo" (podría ser pareja). +US$0,02/h (17 oct 2026: la
+//                           primera prueba real individual salió en un solo bloque "sin separar hablantes").
+//   online individual     → sin diarización pagada (el bot sabe quién habla por los recuadros de Meet)
+//   online pareja         → diarización (3 voces): la pareja suele compartir un recuadro; se combina con
+//                           la línea del bot (hablantes.ts → separarRecuadroCompartido). 17 oct 2026.
+// AssemblyAI (verificado 17 oct 2026): speaker_labels/speakers_expected funcionan con universal-3-5-pro y
+// universal-2 (https://www.assemblyai.com/docs/pre-recorded-audio/speaker-diarization); diarización async
+// estándar +US$0,02/h en ambos (https://www.assemblyai.com/llms/pricing.md).
 import {
   MODELO_U2, MODELO_U35_PRO,
   type DecisionModelo, type EntradaModelo, type Origen, type TipoSesion,
@@ -34,31 +42,39 @@ export function elegirModelo(entrada: EntradaModelo): DecisionModelo {
   if (!ORIGENES.includes(origen)) throw new Error(`Origen desconocido: ${String(origen)}`);
   if (typeof lugarConRuido !== 'boolean') throw new Error('lugarConRuido debe ser booleano');
 
+  // Pareja online: es común que los dos estén frente al MISMO dispositivo (un solo recuadro en Meet), y la
+  // línea del bot no los distingue → también diarización (3 voces), combinada con la línea (hablantes.ts).
+  const diarizacion = origen === 'presencial' || tipo === 'pareja';
+  const hablantesEsperados = !diarizacion ? null : tipo === 'pareja' ? 3 : tipo === 'individual' ? 2 : null;
+  const conHablantes = diarizacion
+    ? hablantesEsperados ? ` con separación de ${hablantesEsperados} hablantes` : ' con separación de hablantes'
+    : '';
+
   if (tipo === 'pareja') {
-    const diarizacion = origen === 'presencial';
     return {
       modelo: MODELO_U35_PRO,
       diarizacion,
-      hablantesEsperados: diarizacion ? 3 : null,
-      motivo: diarizacion
-        ? 'Pareja presencial: Universal-3.5 Pro con separación de hablantes.'
-        : 'Pareja online: Universal-3.5 Pro; los hablantes salen de Meet (sin diarización pagada).',
+      hablantesEsperados,
+      motivo: origen === 'presencial'
+        ? `Pareja presencial: Universal-3.5 Pro${conHablantes}.`
+        : `Pareja online: Universal-3.5 Pro${conHablantes}, combinada con los recuadros de Meet (pueden compartir uno).`,
     };
   }
 
+  const sufijoOnline = origen === 'online' ? ' (online: los hablantes salen de Meet)' : '';
   if (lugarConRuido) {
     return {
       modelo: MODELO_U35_PRO,
-      diarizacion: false,
-      hablantesEsperados: null,
-      motivo: 'Lugar con ruido: modelo robusto Universal-3.5 Pro.',
+      diarizacion,
+      hablantesEsperados,
+      motivo: `Lugar con ruido: modelo robusto Universal-3.5 Pro${conHablantes}${sufijoOnline}.`,
     };
   }
 
   return {
     modelo: MODELO_U2,
-    diarizacion: false,
-    hablantesEsperados: null,
-    motivo: tipo === 'individual' ? 'Sesión individual: Universal-2.' : 'Sesión sin tipo: Universal-2.',
+    diarizacion,
+    hablantesEsperados,
+    motivo: `${tipo === 'individual' ? 'Sesión individual' : 'Sesión sin tipo'}: Universal-2${conHablantes}${sufijoOnline}.`,
   };
 }

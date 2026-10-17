@@ -9,14 +9,14 @@ type Fila = [TipoSesion, Origen, boolean, string, boolean, number | null];
 const TABLA: Fila[] = [
   ['pareja',     'presencial', false, 'universal-3-5-pro', true,  3],
   ['pareja',     'presencial', true,  'universal-3-5-pro', true,  3],
-  ['pareja',     'online',     false, 'universal-3-5-pro', false, null],
-  ['pareja',     'online',     true,  'universal-3-5-pro', false, null],
-  ['individual', 'presencial', false, 'universal-2',       false, null],
-  ['individual', 'presencial', true,  'universal-3-5-pro', false, null],
+  ['pareja',     'online',     false, 'universal-3-5-pro', true,  3],
+  ['pareja',     'online',     true,  'universal-3-5-pro', true,  3],
+  ['individual', 'presencial', false, 'universal-2',       true,  2],
+  ['individual', 'presencial', true,  'universal-3-5-pro', true,  2],
   ['individual', 'online',     false, 'universal-2',       false, null],
   ['individual', 'online',     true,  'universal-3-5-pro', false, null],
-  ['sin_tipo',   'presencial', false, 'universal-2',       false, null],
-  ['sin_tipo',   'presencial', true,  'universal-3-5-pro', false, null],
+  ['sin_tipo',   'presencial', false, 'universal-2',       true,  null],
+  ['sin_tipo',   'presencial', true,  'universal-3-5-pro', true,  null],
   ['sin_tipo',   'online',     false, 'universal-2',       false, null],
   ['sin_tipo',   'online',     true,  'universal-3-5-pro', false, null],
 ];
@@ -31,10 +31,17 @@ for (const [tipo, origen, ruido, modelo, diar, hablantes] of TABLA) {
   });
 }
 
-test('online nunca paga diarización', () => {
-  for (const tipo of ['pareja', 'individual', 'sin_tipo'] as const)
+test('online individual / sin tipo no paga diarización; pareja online sí (recuadro compartido)', () => {
+  assert.equal(elegirModelo({ tipo: 'pareja', origen: 'online', lugarConRuido: false }).diarizacion, true);
+  for (const tipo of ['individual', 'sin_tipo'] as const)
     for (const ruido of [true, false])
       assert.equal(elegirModelo({ tipo, origen: 'online', lugarConRuido: ruido }).diarizacion, false);
+});
+
+test('toda grabación presencial lleva diarización (17 oct: individual salía en un solo bloque)', () => {
+  for (const tipo of ['pareja', 'individual', 'sin_tipo'] as const)
+    for (const ruido of [true, false])
+      assert.equal(elegirModelo({ tipo, origen: 'presencial', lugarConRuido: ruido }).diarizacion, true);
 });
 
 test('entradas inválidas se rechazan', () => {

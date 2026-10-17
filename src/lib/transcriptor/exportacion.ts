@@ -17,6 +17,7 @@ import { lineasTranscripcion, resumenATexto } from './panel';
 import { avisoAnexoResumen } from './resumen';
 import { generarPdf, type BloquePdf } from './pdf';
 import { crearZip } from './zip';
+import { repararMojibake } from './texto';
 import { createHash } from 'node:crypto';
 
 export type FormatoExportacion = 'zip' | 'pdf' | 'json';
@@ -196,7 +197,7 @@ export async function recopilarFicha(patientId: string, deps: DepsExportacion, o
       resumenes: resumenes.filter((r) => r.grabacion_id === g.id).map((r) => {
         const x = r as FilaArchivo & Record<string, unknown> & { contenido: string | null };
         return {
-          id: x.id, version: Number(x.version), autor: String(x.autor), estado: String(x.estado), rotulo: (x.rotulo as string) ?? null,
+          id: x.id, version: Number(x.version), autor: String(x.autor), estado: String(x.estado), rotulo: repararMojibake((x.rotulo as string | null) ?? null) ?? null,
           aviso: avisoAnexoResumen({ modelo: x.modelo as string, listo_at: x.listo_at as string, autor: x.autor as string }),
           modelo: (x.modelo as string) ?? null, prompt_version: (x.prompt_version as string) ?? null, listo_at: (x.listo_at as string) ?? null,
           oculto_at: (x.oculto_at as string) ?? null, archivado_at: x.archivado_at ?? null, contenido: x.contenido,

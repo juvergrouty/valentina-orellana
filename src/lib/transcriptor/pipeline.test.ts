@@ -203,7 +203,7 @@ test('E2E presencial individual: subida → transcribiendo → transcrita (cifra
 
   await e.correr();
   assert.equal(e.grab(id).estado, 'transcribiendo');
-  assert.deepEqual(e.aai.envios.map((x) => [x.modelo, x.diarizacion]), [['universal-2', false]]);
+  assert.deepEqual(e.aai.envios.map((x) => [x.modelo, x.diarizacion]), [['universal-2', true]]);
   const trId = e.segs(id)[0].aai_transcript_id;
 
   // Sin webhook todavía: no pasa nada.
@@ -215,8 +215,9 @@ test('E2E presencial individual: subida → transcribiendo → transcrita (cifra
   assert.equal((await webhook(e.db, e.aai, trId, 'completed')).efecto, 'repetido'); // idempotente
   e.avanzar(1); await e.correr();
 
+  // 17 oct (velocidad): la misma corrida que guarda la transcripción escribe el resumen.
   const g = e.grab(id);
-  assert.equal(g.estado, 'transcrita');
+  assert.equal(g.estado, 'lista');
   const tr = e.db.tabla('transcripciones').find((x) => x.grabacion_id === id)!;
   assert.match(tr.r2_key, /^t\/[0-9a-f-]+\.bin$/);
   assert.ok(tr.b2_key, 'copia en B2');
@@ -281,7 +282,7 @@ test('E2E presencial pareja (2 segmentos): error de AssemblyAI → reintento con
   e.aai.completar(nuevo.aai_transcript_id, palabras('bueno partamos por lo que pasó el fin de semana', 0, 'A'));
   await webhook(e.db, e.aai, nuevo.aai_transcript_id, 'completed');
   e.avanzar(1); await e.correr();
-  assert.equal(e.grab(id).estado, 'transcrita');
+  assert.equal(e.grab(id).estado, 'lista'); // 17 oct: transcripción y resumen en la misma corrida
   const clara = await e.almacenamiento.leerTranscripcion(e.db.tabla('transcripciones')[0].r2_key);
   assert.ok(clara.hablantes.some((h) => /Hablante A/.test(h)) && clara.hablantes.some((h) => /Hablante B \(parte 2\)/.test(h)));
 
@@ -345,14 +346,16 @@ test('E2E online (consentimiento v2, decisión 9): bot → sondeo sin webhook �
   e.avanzar(10); await e.correr();
   assert.equal(e.grab(id).estado, 'transcribiendo');
   e.avanzar(21); await e.correr();
-  assert.equal(e.grab(id).estado, 'transcrita');
+  // 17 oct: la misma corrida que guarda la transcripción ya intenta el resumen (aquí falla con 529).
+  assert.equal(e.grab(id).estado, 'resumiendo');
+  assert.equal(e.db.tabla('resumenes_ia')[0].intentos, 1);
   const clara = await e.almacenamiento.leerTranscripcion(e.db.tabla('transcripciones')[0].r2_key);
   assert.deepEqual(clara.hablantes, ['Ps. Valentina', 'Diego Soto']);
   assert.deepEqual(e.grab(id).mapa_hablantes, { 'Valentina Orellana': 'Ps. Valentina' });
 
   // 5) Resumen: Anthropic sobrecargado (529) → reintentos con backoff 1/5/15 min → al 4.º, error + alerta.
   for (let i = 1; i <= MAX_RESUMEN; i++) {
-    await e.correr();
+    if (i > 1) await e.correr(); // el 1.er intento ya ocurrió en la corrida que guardó la transcripción
     const r = e.db.tabla('resumenes_ia')[0];
     assert.equal(r.intentos, i);
     if (i < MAX_RESUMEN) {
@@ -544,7 +547,7 @@ test('B4: si la copia a B2 falla, el audio NO se borra hasta reintentarla; agota
   assert.equal(audio(), 1, 'el audio sigue guardado mientras falte la copia en B2');
   assert.deepEqual(e.aai.borrados, [], 'ni se borra en AssemblyAI');
   for (let i = 1; i < MAX_GUARDADO; i++) { e.avanzar(esperaTrasFallos(i) / 60_000); await e.correr(); }
-  assert.equal(e.grab(id).estado, 'transcrita', 'agotados los intentos sigue (R2 verificada) con la copia pendiente');
+  assert.equal(e.grab(id).estado, 'lista', 'agotados los intentos sigue (R2 verificada) con la copia pendiente (y se resume en la misma corrida, 17 oct)');
   assert.equal(audio(), 0);
   assert.ok(e.alertas.some((a) => a.tipo === 'respaldo' && a.grabacionId === id));
   // B2 vuelve: el paso respaldos completa la copia y cierra el aviso.

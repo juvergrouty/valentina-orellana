@@ -22,7 +22,8 @@
 //     necesariamente la "A" del segmento 2 (tras una pausa). Clave = `claveHablante(indice, letra)`:
 //     'A' en el primer segmento, '2-A' en el segundo, '3-A'… Nombre por defecto 'Hablante A',
 //     'Hablante A (parte 2)'.
-//   · Online: clave = nombre de Meet (mapa_hablantes puede renombrarlo).
+//   · Online: clave = nombre de Meet (mapa_hablantes puede renombrarlo). Pareja online con un recuadro
+//     compartido: clave = "Recuadro · Hablante A" (separarRecuadroCompartido; se renombra igual).
 //   · Sin diarización ni línea: HABLANTE_SIN_SEPARAR. Online sin intervalo claro: HABLANTE_NO_IDENTIFICADO.
 import {
   BOT_NOMBRE,
@@ -227,6 +228,62 @@ function asignarOnline(palabras: PalabraAbs[], iv: Intervalo[]): string[] {
   return res.map((r) => r ?? HABLANTE_NO_IDENTIFICADO);
 }
 
+/** Parámetros para decidir que un recuadro de Meet lo comparten 2+ personas (pareja online). */
+export const AJUSTE_RECUADRO = {
+  /** Cada voz debe tener al menos esta fracción de las palabras del recuadro… */
+  fraccionMinima: 0.15,
+  /** …y al menos estas palabras (evita separar por un error puntual de la diarización). */
+  palabrasMinimas: 8,
+  /** Una palabra sin recuadro hereda el de su voz si esa voz está ≥ esta fracción en un recuadro. */
+  dominio: 0.8,
+} as const;
+
+/** Etiqueta de una voz dentro de un recuadro compartido: "Javiera y Diego · Hablante A (parte 2)". */
+export function etiquetaRecuadroCompartido(recuadro: string, clave: string): string {
+  return `${recuadro} · ${nombrePorDefecto(clave)}`;
+}
+
+/**
+ * Pareja online (17 oct 2026): los dos suelen estar frente al mismo computador → un solo recuadro en Meet.
+ * La línea del bot dice "habla ese recuadro" pero no quién de los dos; la diarización de AssemblyAI sí
+ * separa voces (A/B/C, por segmento). Regla: el recuadro de Vale (una sola voz) queda con su nombre; un
+ * recuadro con 2+ voces significativas se separa en "Recuadro · Hablante A/B". Las palabras sin recuadro
+ * claro heredan el de su voz cuando esa voz está casi siempre (≥ 80 %) en un mismo recuadro.
+ * Función pura; recibe nombres de recuadro (antes de aplicar mapa_hablantes) y devuelve etiquetas.
+ */
+export function separarRecuadroCompartido(
+  palabras: { clave: string | null }[],
+  porRecuadro: string[],
+): string[] {
+  const conteo = new Map<string, Map<string, number>>(); // recuadro → voz → palabras
+  const vozEn = new Map<string, Map<string, number>>();  // voz → recuadro → palabras
+  palabras.forEach((w, i) => {
+    const r = porRecuadro[i];
+    if (!w.clave || r === HABLANTE_NO_IDENTIFICADO) return;
+    const m = conteo.get(r) ?? new Map<string, number>(); m.set(w.clave, (m.get(w.clave) ?? 0) + 1); conteo.set(r, m);
+    const v = vozEn.get(w.clave) ?? new Map<string, number>(); v.set(r, (v.get(r) ?? 0) + 1); vozEn.set(w.clave, v);
+  });
+  const compartidos = new Map<string, Set<string>>(); // recuadro → voces significativas
+  for (const [r, m] of conteo) {
+    const total = [...m.values()].reduce((a, b) => a + b, 0);
+    const voces = [...m].filter(([, n]) => n >= AJUSTE_RECUADRO.palabrasMinimas && n / total >= AJUSTE_RECUADRO.fraccionMinima).map(([c]) => c);
+    if (voces.length >= 2) compartidos.set(r, new Set(voces));
+  }
+  const recuadroDeVoz = (c: string): string | null => {
+    const v = vozEn.get(c);
+    if (!v) return null;
+    const total = [...v.values()].reduce((a, b) => a + b, 0);
+    const [mejor, n] = [...v].sort((a, b) => b[1] - a[1])[0];
+    return n / total >= AJUSTE_RECUADRO.dominio ? mejor : null;
+  };
+  return palabras.map((w, i) => {
+    let r = porRecuadro[i];
+    if (r === HABLANTE_NO_IDENTIFICADO && w.clave) r = recuadroDeVoz(w.clave) ?? r;
+    const voces = compartidos.get(r);
+    return voces && w.clave && voces.has(w.clave) ? etiquetaRecuadroCompartido(r, w.clave) : r;
+  });
+}
+
 function nombreFinal(clave: string, mapa: Record<string, string> | null | undefined, porDefecto: (c: string) => string): string {
   const m = mapa?.[clave];
   return typeof m === 'string' && m.trim() ? m.trim().slice(0, 80) : porDefecto(clave);
@@ -311,7 +368,11 @@ export const unirTranscripcion: UnirTranscripcion = ({ grabacion, segmentos }) =
   const linea = grabacion.linea_hablantes;
   if (grabacion.origen === 'online' && linea?.length) {
     const iv = intervalosDesdeLinea(linea, palabras[palabras.length - 1].end + 1);
-    hablantes = asignarOnline(palabras, iv).map((n) => (n === HABLANTE_NO_IDENTIFICADO ? n : nombreFinal(n, mapa, (c) => c)));
+    const porRecuadro = asignarOnline(palabras, iv);
+    // Pareja online con diarización: si un recuadro de Meet tiene 2+ voces (la pareja en un mismo
+    // dispositivo), se separa por la etiqueta de AssemblyAI. Sin diarización, no cambia nada.
+    const conVoces = palabras.some((w) => w.clave) ? separarRecuadroCompartido(palabras, porRecuadro) : porRecuadro;
+    hablantes = conVoces.map((n) => (n === HABLANTE_NO_IDENTIFICADO ? n : nombreFinal(n, mapa, (c) => c)));
   } else if (palabras.some((w) => w.clave)) {
     // Diarización de AssemblyAI (pareja presencial). Una palabra sin etiqueta hereda la anterior.
     let previa: string | null = null;

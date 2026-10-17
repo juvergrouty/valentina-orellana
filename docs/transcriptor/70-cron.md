@@ -1,5 +1,9 @@
 # Transcriptor IA — job de pg_cron del orquestador (P6, 16 oct 2026)
 
+> **17 oct 2026:** además del job de cada minuto, el webhook de AssemblyAI corre el orquestador apenas
+> llega "completed"/"error" (después de responder 200, con `waitUntil` de Vercel), y la misma corrida que
+> guarda la transcripción escribe el resumen. El job de cada minuto sigue siendo la red de seguridad.
+
 `/api/cron/transcriptor` (src/pages/api/cron/transcriptor.ts → src/lib/transcriptor/pipeline.ts) debe
 llamarse **cada minuto**. Igual que el job existente `tareas-cada-5-min` (expire-pending, reminders,
 boletas-pendientes), lo dispara Supabase con **pg_cron + pg_net** y se autentica con

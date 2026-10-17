@@ -661,6 +661,10 @@ Reglas para los agentes: no tocar archivos de otro paquete (si necesitan algo, p
 
 ## 8. Costo mensual recalculado (precios oficiales, 15 oct 2026)
 
+> **Actualizado 17 oct 2026:** la tabla vigente está en `87-ajustes-primera-prueba.md` §7 (resumen por
+> Messages API directa a US$2/US$10 por MTok —ya no Batch—, diarización en toda grabación presencial y en
+> pareja online, y prompt fijo reducido de ~4.300 a ~1.700 tokens). La tabla de abajo queda como historia.
+
 Precios verificados:
 - AssemblyAI (async): Universal-3.5 Pro **US$0,21/h**, Universal-2 **US$0,15/h**, diarización estándar **+US$0,02/h** (página de precios).
 - Anthropic: Sonnet 5.5 Batch **US$1 / MTok entrada, US$5 / MTok salida**; Haiku 5.5 (≤100k tokens de prompt) **US$0,10 / US$0,50 por MTok** (sobre 100k: US$0,50 / US$2,50).

@@ -8,6 +8,7 @@
 //    versión nueva autor='vale'; la de la IA queda intacta (trigger de 0014).
 export const prerender = false;
 import AdminLayout from '../../../../../components/admin/AdminLayout.astro';
+import { repararMojibake } from '../../../../../lib/transcriptor/texto';
 import { supabase } from '../../../../../lib/supabase';
 import { auditarObligatorio } from '../../../../../lib/transcriptor/auditoria';
 import {
@@ -191,7 +192,7 @@ const fmtFechaHora = (iso: string | null) => iso ? new Date(iso).toLocaleString(
         <aside class="ses-lateral">
           <details class="card ia-card" id="ses-resumen" open={false}>
             <summary class="ses-summary">
-              <span class="ia-badge"><span aria-hidden="true">✦</span> {vigente?.rotulo || ROTULO_RESUMEN}</span>
+              <span class="ia-badge"><span aria-hidden="true">✦</span> {repararMojibake(vigente?.rotulo) || ROTULO_RESUMEN}</span>
               {vigente && vigente.version > 1 && <span class="ia-sub">versión {vigente.version}</span>}
             </summary>
             {vigente ? (

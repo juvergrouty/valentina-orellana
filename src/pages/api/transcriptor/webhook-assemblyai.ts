@@ -10,8 +10,8 @@ export const prerender = false;
 // AssemblyAI exige 2xx en < 10 s y no reintenta tras un 4xx (https://www.assemblyai.com/docs/deployment/webhooks):
 //  - cabecera inválida → 401 sin tocar la base; cuerpo inválido → 400;
 //  - falta la variable o falla la consulta a AssemblyAI → 503 (reintenta; el cron además sondea);
-//  - todo lo demás → 200 rápido. Aquí NO se descarga ni se guarda texto: solo se marca el segmento y el
-//    orquestador (cron P6) descarga, cifra y guarda en el minuto siguiente.
+//  - todo lo demás → 200 rápido. La respuesta NO descarga ni guarda texto: solo marca el segmento. Tras
+//    responder (waitUntil), corre el orquestador, que descarga, cifra, guarda y resume (17 oct).
 // No confía en el cuerpo: vuelve a pedir el estado a AssemblyAI con nuestra llave.
 
 export const POST: APIRoute = async ({ request }) => {
@@ -30,6 +30,18 @@ export const POST: APIRoute = async ({ request }) => {
         aai: { obtener: (id) => assemblyAIDesdeEnv({ intentos: 1, timeoutMs: 6_000 }).obtener(id) },
       },
     );
+    // 17 oct (velocidad): antes el texto se guardaba en el siguiente minuto del cron y el resumen en el
+    // minuto después (6–12 min en la primera prueba). Ahora, apenas AssemblyAI avisa que terminó (o falló),
+    // se corre el orquestador DESPUÉS de responder 200 (waitUntil de Vercel): guarda la transcripción y
+    // escribe el resumen en la misma corrida. Es la misma corrida del cron (toma atómica por fila), así que
+    // si coincide con el minuto no se repite trabajo; si waitUntil no existe, el cron sigue cubriendo.
+    if (resultado.efecto === 'completado' || resultado.efecto === 'error_aai') {
+      const { despuesDeResponder } = await import('../../../lib/transcriptor/despuesDeResponder');
+      despuesDeResponder(async () => {
+        const { crearPipeline, depsProduccion } = await import('../../../lib/transcriptor/pipeline');
+        await crearPipeline(await depsProduccion()).correr(new Date());
+      });
+    }
     if (resultado.efecto === 'no_configurado') {
       const { logError } = await import('../../../lib/logger');
       await logError('transcriptor/webhook', 'Falta ASSEMBLYAI_WEBHOOK_SECRET en Vercel: no se pueden recibir avisos de AssemblyAI');

@@ -16,6 +16,7 @@ Usuaria: Ps. Valentina Orellana (Vale), psicóloga clínica en Chile, atiende in
 ## Proveedores (cuentas ya creadas por Vale)
 - AssemblyAI (pago, autopay; entrenamiento con datos DESACTIVADO, TTL 1 día; BAA firmado 15/10).
   - Regla FIJA del sitio (no la decide una IA): pareja → Universal-3.5 Pro + diarización; individual → Universal-2; sin tipo → Universal-2. "Lugar con ruido" → modelo robusto. Online: sin diarización pagada (el bot sabe quién habla).
+  - **Actualizado 17 oct (87-ajustes-primera-prueba.md):** TODA grabación presencial lleva diarización (individual: 2 voces; pareja: 3; sin tipo: sin número fijo) y también la pareja ONLINE (3 voces, porque suele compartir un recuadro de Meet). Solo la individual online sigue sin diarización pagada. +US$0,02/h.
   - Webhooks para saber cuándo termina.
 - Anthropic (Claude Console, org individual de Vale): resúmenes con Sonnet 5.5 vía Batch API (`claude-sonnet-5-5`); Q&A con Haiku 5.5 (`claude-haiku-5-5`). Límite de gasto mensual US$20.
 - Fly.io: máquinas efímeras (región iad) para el bot de Meet, derivado del código Apache-2.0 de Vexa.

@@ -18,6 +18,7 @@
 // Las funciones puras van arriba y tienen pruebas en bot.test.ts (sin red ni base).
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { repararMojibake } from './texto';
 import { tipoDesdeSessionType } from './reglas';
 import { secreto } from '../secretos';
 import {
@@ -540,7 +541,7 @@ export function crearBot(deps: DepsBot = {}): Bot {
     const c = await db();
 
     const { data: ajuste } = await c.from('settings').select('value').eq('key', AJUSTE_NOMBRES_VALE).maybeSingle();
-    const nombresVale = (ajuste?.value as string | undefined)?.trim() || NOMBRES_VALE_DEFECTO;
+    const nombresVale = repararMojibake((ajuste?.value as string | undefined)?.trim()) || NOMBRES_VALE_DEFECTO;
 
     // 0) Modo 'cuenta': solo si hay una sesión vigente del robot; si no, invitado (y queda en la bitácora).
     const { modo, cuentaEmail } = await prepararCuenta(grabacion, c);

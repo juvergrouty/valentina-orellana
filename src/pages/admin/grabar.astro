@@ -184,6 +184,7 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
       <!-- Elegir sesión -->
       <section data-v="elegir" class="gr-pila">
         <h1 class="gr-h1">¿Qué sesión vas a grabar?</h1>
+        <p class="gr-sub">Abre esta página con internet; recién después activa el modo avión.</p>
         <div id="gr-lista-ventana" class="gr-pila"></div>
         <details id="gr-otras-wrap" class="gr-card" hidden>
           <summary class="gr-summary">Otras sesiones presenciales de hoy</summary>
@@ -229,6 +230,7 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
 
         <div class="gr-card">
           <p class="gr-label" style="margin-bottom:4px">Antes de grabar</p>
+          <p class="gr-sub" id="gr-orden-avion"><b>Abre esta página con internet</b>; recién después activa el modo avión. Si la abres ya en modo avión, el iPhone no puede cargarla ni verificar el consentimiento.</p>
           <ul class="gr-check">
             <li><span class="gr-tick" id="gr-ck-avion" aria-hidden="true">!</span><span id="gr-ck-avion-t">Modo avión</span></li>
             <li><span class="gr-tick" id="gr-ck-wifi" aria-hidden="true">!</span><span>Wi-Fi apagado</span></li>
@@ -472,6 +474,7 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
 </style>
 
 <script>
+  import { barrasDesdeDb, dbDesdeRms, dbSuavizado } from '../../lib/transcriptor/medidor';
   // Grabador presencial (P4). Ver la cabecera del archivo y docs/transcriptor/40-ux-diseno.md §2 y §6.
   // Audio: MediaRecorder en trozos de 10 s → IndexedDB (ArrayBuffer: Safari guarda Blobs mal en IDB
   // en versiones antiguas). Cada pausa o interrupción cierra el segmento y la continuación abre uno nuevo
@@ -760,9 +763,15 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
     let suma = 0; for (let i = 0; i < muestras.length; i++) suma += muestras[i] * muestras[i];
     return Math.sqrt(suma / muestras.length);
   }
+  // Escala del medidor (17 oct): voz normal a ~2 m → 2–3 barras; cercana → 4–5 (src/lib/transcriptor/medidor.ts).
+  // Solo cambia lo que se ve; el aviso de silencio sigue usando RMS < 0,004 en bucle().
+  const dbMostrado: Record<string, { db: number; t: number }> = {};
   function pintarMedidor(id: string, rms: number) {
-    const db = rms > 0 ? 20 * Math.log10(rms) : -100;
-    const barras = Math.max(0, Math.min(5, Math.round((db + 60) / 10)));
+    const ahora = performance.now();
+    const previo = dbMostrado[id] ?? { db: -100, t: ahora };
+    const db = dbSuavizado(previo.db, dbDesdeRms(rms), ahora - previo.t);
+    dbMostrado[id] = { db, t: ahora };
+    const barras = barrasDesdeDb(db);
     $(id).querySelectorAll('i').forEach((b, i) => b.classList.toggle('on', i < barras));
   }
   function bucle() {
@@ -1297,6 +1306,14 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
       else { $('gr-progreso').hidden = true; $('gr-aviso-cerrar').hidden = true; $('gr-pasos').hidden = false; $('gr-paso-trans').innerHTML = '<span class="gr-tick ok">✓</span>Transcrita'; $('gr-paso-res').innerHTML = '<span class="gr-spin" aria-hidden="true"></span><b>Escribiendo el resumen…</b>'; }
       pintarPendientes([{ ...g, gid: 'otra', etiqueta: 'Tomás Fuentes, ayer 18:00' }]);
     }
+  }
+
+  // Sin internet (17 oct): un service worker mínimo SOLO para /admin/grabar. Si la página se abre sin red,
+  // muestra /grabar-sin-internet.html (estática, sin datos de pacientes) en vez del error de Safari, y esa
+  // página vuelve aquí sola cuando hay internet, donde subirPendientes() retoma lo guardado en el teléfono.
+  // No guarda en caché nada autenticado ni con datos clínicos (ver public/grabar-sw.js).
+  if ('serviceWorker' in navigator && !D.demo) {
+    navigator.serviceWorker.register('/grabar-sw.js', { scope: '/admin/grabar' }).catch(() => { /* sin SW: igual funciona con internet */ });
   }
 
   iniciar();
