@@ -2865,6 +2865,9 @@ function openSessionDetail(b) {
 
   // Amount & badge — refleja el pago REAL (paid_at), no el estado de la reserva.
   document.getElementById('sp-amount').textContent = formatCLP(b.amount);
+  // Sin boleta para una sesión de $0 (sin costo): el SII no la acepta.
+  const boletaSec = document.getElementById('sp-toggle-boleta')?.closest('.sp-section');
+  if (boletaSec) boletaSec.style.display = (b.amount ?? 0) > 0 ? '' : 'none';
   const badge = document.getElementById('sp-pay-badge');
   if (isVoided)     { badge.textContent = 'Deuda anulada'; badge.className = 'sp-pay-badge badge-manual'; }
   else if (isPaid)  { badge.textContent = b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado'; badge.className = 'sp-pay-badge badge-paid'; }

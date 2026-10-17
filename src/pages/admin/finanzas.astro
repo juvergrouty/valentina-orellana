@@ -32,7 +32,8 @@ const anulada = (b: any) => b.debt_voided === true;
 const fechaChile = (iso: string) => nowCL(new Date(iso)).toISOString().slice(0, 10);
 
 // ── Ingresos del mes: lo pagado, por el MES EN QUE SE PAGÓ ──────────────────
-const pagosMes = bookings.filter(b => pagada(b) && fechaChile(b.paid_at).slice(0, 7) === selYM);
+// Sin las sesiones sin costo ($0, obra social): no son pagos recibidos.
+const pagosMes = bookings.filter(b => pagada(b) && (b.amount ?? 0) > 0 && fechaChile(b.paid_at).slice(0, 7) === selYM);
 const ingresosMes = pagosMes.reduce((s, b) => s + (b.amount ?? 0), 0);
 
 // Medio de pago real (payment_note guarda cómo se pagó; payment_method es cómo se reservó)

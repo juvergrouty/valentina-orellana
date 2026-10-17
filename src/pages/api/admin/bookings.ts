@@ -7,10 +7,11 @@ import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { getTotalOwedByEmail, tagBookingsWithPaymentToken, totalACobrarPorEmail } from '../../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
-import { quitarLineasNotas, MARCA_PROGRAMADA } from '../../../lib/apigateway';
+import { quitarLineasNotas, agregarLineaNotas, MARCA_PROGRAMADA } from '../../../lib/apigateway';
 import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { logWarn } from '../../../lib/logger';
+import { encolarTareas } from '../../../lib/tareasEnvio';
 import { todayCL } from '../../../lib/dateUtils';
 import { chocaConOtraSesion } from '../../../lib/disponibilidad';
 import { limpiarRut, rutValido, RUT_EXTRANJERO_SII } from '../../../lib/rut';
@@ -22,6 +23,21 @@ export const prerender = false;
 // payment_note de una sesión que no se cobra (obra social). La usan "Agendar
 // hora" con pago "Sin costo" y el botón "Pasar a sin costo" de la sesión.
 const SIN_COSTO = 'Sin costo';
+// Línea en notes con el monto que tenía la sesión antes de pasar a sin costo,
+// para que "Anular pago" la devuelva a su precio real (en un pack el precio del
+// servicio es el total, no el de cada sesión).
+const MARCA_MONTO_SIN_COSTO = 'MontoAntesDeSinCosto';
+
+// Pasos a seguir + consentimiento de una sesión sin costo. Si el envío falla,
+// queda en la cola de envíos (cron cada 5 min) para reintentarse, igual que
+// tras un pago con Flow.
+async function pasosSinCosto(p: { patient_name?: string | null; patient_email?: string | null; patient_phone?: string | null; rut?: string | null }, bookingIds: string[]) {
+  let ok = false;
+  try { ok = await sendStepsOnFirstPayment(p, bookingIds); } catch (e) { console.error('[sin costo] pasos:', e); }
+  // Nombre único por intento: si la misma sesión vuelve a pasar a sin costo,
+  // su reintento no choca con uno anterior ya descartado.
+  if (!ok && bookingIds[0]) await encolarTareas(bookingIds[0], ['pasos'], `sincosto-${Date.now()}`);
+}
 
 export const POST: APIRoute = async ({ request, redirect }) => {
   const form   = await request.formData();
@@ -133,7 +149,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     // Estado antes de pagar: una reserva que esperaba pago (pending_payment)
     // recibe el correo de confirmación, igual que cuando pagan con Flow.
-    const { data: previa } = await supabase.from('bookings').select('status, paid_at, session_date').eq('id', id).maybeSingle();
+    const { data: previa } = await supabase.from('bookings').select('status, paid_at, session_date, amount').eq('id', id).maybeSingle();
     const esperabaPago = previa?.status === 'pending_payment' && !previa?.paid_at;
     // Sesión que ya pasó (deuda): sin correo de "reserva confirmada" ni
     // invitación de Google a una fecha pasada.
@@ -154,6 +170,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (error?.code === '23505' || error?.code === '23P01') return redirect(conParam(dest) + 'error=conflict');
     if (error) {
       return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(error.message.slice(0, 200)));
+    }
+    if (sinCosto && (previa?.amount ?? 0) > 0) {
+      await quitarLineasNotas(id, [MARCA_MONTO_SIN_COSTO]);
+      await agregarLineaNotas(id, `${MARCA_MONTO_SIN_COSTO} ${previa!.amount}`);
     }
     // El evento de Google Calendar deja de verse como "Por pagar". Si la sesión
     // no tenía evento (reserva con link de pago que nunca lo tuvo, o un sync
@@ -185,7 +205,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     }
 
     // "Pasos a seguir" (y el consentimiento) automático si es el primer pago del paciente.
-    if (pagada) await sendStepsOnFirstPayment({ ...pagada, rut: pagada.patient_rut }, [id]);
+    if (pagada && sinCosto) await pasosSinCosto({ ...pagada, rut: pagada.patient_rut }, [id]);
+    else if (pagada) await sendStepsOnFirstPayment({ ...pagada, rut: pagada.patient_rut }, [id]);
 
     if (emitir) {
       try {
@@ -258,13 +279,21 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   if (action === 'unmark_paid') {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
+    // Deshacer un "Sin costo" (17 oct 2026): la sesión vuelve al monto que tenía
+    // antes (guardado en notes); si quedara en $0 no aparecería nunca como deuda.
+    const cambios: Record<string, unknown> = { paid_at: null, payment_note: null };
+    const { data: antes } = await supabase.from('bookings').select('payment_note, amount, notes').eq('id', id).maybeSingle();
+    const montoAntes = new RegExp(`^${MARCA_MONTO_SIN_COSTO} (\\d+)$`, 'm').exec(antes?.notes ?? '');
+    const restaurarMonto = antes?.payment_note === SIN_COSTO && !(antes.amount > 0) && !!montoAntes;
+    if (restaurarMonto) cambios.amount = parseInt(montoAntes![1]);
     const { error } = await supabase.from('bookings')
-      .update({ paid_at: null, payment_note: null })
+      .update(cambios)
       .eq('id', id);
     if (error?.code === '42703') return redirect(conParam(dest) + 'error=missing_migration');
     // Si no se guardó, el calendario no se pone rojo (8 oct 2026): antes quedaba
     // "Por pagar" en Google mientras la base la seguía teniendo pagada.
     if (error) return redirect(conParam(dest) + 'error=guardar_reserva&detail=' + encodeURIComponent(error.message.slice(0, 200)));
+    if (restaurarMonto) await quitarLineasNotas(id, [MARCA_MONTO_SIN_COSTO]);
     try { await markBookingPaidInCalendar(id, false); } catch (e) { console.error('[unmark_paid] calendar:', e); }
     // Sin pago no hay boleta programada (8 oct 2026): si se vuelve a marcar
     // pagada, se decide de nuevo con "Emitir boleta".
@@ -635,6 +664,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       : null) ?? svc.duration_min ?? 50;
     const perSessionBase = Math.floor(totalPrice / sessions_count);
     const remainder      = totalPrice - perSessionBase * sessions_count;
+    // Sin costo: lo que costaría cada sesión normalmente (se guarda en notes para
+    // que "Anular pago" la devuelva a su precio real).
+    const precioNormal = overrideAmount ?? precioModalidad;
+    const montoNormalSesion = (creadasAntes: number) => {
+      if (!Number.isFinite(precioNormal) || !(precioNormal > 0)) return 0;
+      const base = Math.floor(precioNormal / sessions_count);
+      return base + (creadasAntes === 0 ? precioNormal - base * sessions_count : 0);
+    };
 
     // Notification email — si el setting no está configurado, se usa el correo
     // real de Valentina (nunca se manda a un tercero al azar ni se pierde el aviso).
@@ -684,7 +721,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         patient_email:  finalEmail,
         patient_phone:  finalPhone,
         patient_rut:    finalRut || null,
-        notes:          notesText || null,
+        notes:          (payment_mode === 'free' && montoNormalSesion(creadas) > 0
+                          ? [notesText, `${MARCA_MONTO_SIN_COSTO} ${montoNormalSesion(creadas)}`].filter(Boolean).join('\n')
+                          : notesText) || null,
         status:         payment_mode === 'link' ? 'pending_payment' : 'confirmed',
         payment_method: payment_mode === 'link' ? 'flow' : 'manual',
         amount:         montoSesion,
@@ -937,8 +976,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Sin costo cuenta como "primer pago": Pasos a seguir + consentimiento si es
     // la primera sesión del paciente (Valentina, 17 oct 2026: obra social).
     if (payment_mode === 'free' && finalEmail && bookingIds.length) {
-      try { await sendStepsOnFirstPayment({ patient_name: finalName, patient_email: finalEmail, patient_phone: finalPhone, rut: finalRut }, bookingIds); }
-      catch (e) { console.error('[create-admin] pasos sin costo:', e); }
+      await pasosSinCosto({ patient_name: finalName, patient_email: finalEmail, patient_phone: finalPhone, rut: finalRut }, bookingIds);
     }
 
     return redirect(avisoPack ? conParam(dest) + avisoPack.slice(1) : dest);
