@@ -14,6 +14,14 @@ export interface Articulo {
 
 export const articulos: Articulo[] = [
   {
+    slug: 'lo-que-haces-tambien-cambia-quien-crees-ser',
+    titulo: 'Lo que haces también cambia quién crees ser',
+    bajada: 'Por qué ante un mismo comentario dos personas reaccionan distinto, y cómo actuar diferente también va cambiando la idea que tenemos de nosotros.',
+    categoria: 'Patrones',
+    etiqueta: 'Identidad y cambio',
+    publicado: true,
+  },
+  {
     slug: 'la-loza-de-las-visitas',
     titulo: 'La loza de las visitas',
     bajada: 'Por qué guardamos lo mejor para los demás, nos castigamos al fallar y qué cambia cuando nos sentimos queridos solo por existir.',
