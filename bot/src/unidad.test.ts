@@ -10,7 +10,7 @@ import { Sitio, TokenRechazadoError, type EventoBot } from './sitio.js';
 import { trayectoria } from './meet/humano.js';
 import { argumentosChromium, conIdiomaFijo } from './meet/argumentos.js';
 import { sanearError } from './saneo.js';
-import { esRechazoExplicito } from './meet/admision.js';
+import { esBloqueoRecaptcha, esRechazoExplicito } from './meet/admision.js';
 
 const ENV_OK = {
   GRABACION_ID: '3f2b8a1e-0c4d-4e5f-9a6b-7c8d9e0f1a2b',
@@ -173,6 +173,36 @@ test('segmentos: si el PUT falla siempre, queda en la lista de fallidos', async 
   segs.agregarTrozo(3, Buffer.from('x'));
   await segs.cerrar(3, 0, 1);
   assert.deepEqual(await segs.vaciar(), [3]);
+});
+
+test('segmentos (auditoría): un segmento que la página nunca cerró se sube igual al terminar', async () => {
+  const eventos: EventoBot[] = [];
+  const sitio = {
+    pedirUrl: async (seq: number) => `https://r2.example/a/${seq}`,
+    enviar: async (e: EventoBot) => { eventos.push(e); return { ok: true }; },
+  };
+  const f = (async () => new Response(null, { status: 200 })) as unknown as typeof fetch;
+  const segs = new Segmentos({ sitio, fetch: f, esperaBaseMs: 1 });
+  segs.agregarTrozo(0, Buffer.from('abc'));
+  await segs.cerrar(0, 0, 900_000);           // cerrado normal
+  segs.agregarTrozo(1, Buffer.from('defg'));  // la página se cayó: nunca llega __voSegFin
+  assert.deepEqual(segs.cerrarHuerfanos((seq) => ({ offsetMs: seq * 897_000, duracionMs: 120_000 })), [1]);
+  assert.deepEqual(await segs.vaciar(), []);
+  assert.deepEqual(eventos.map((e) => e.tipo === 'segmento_subido' ? [e.seq, e.bytes, e.offset_ms] : null), [[0, 3, 0], [1, 4, 897_000]]);
+  assert.deepEqual(segs.cerrarHuerfanos(() => ({ offsetMs: 0, duracionMs: 0 })), []); // nada pendiente
+});
+
+test('reCAPTCHA (auditoría): la casilla "No soy un robot" bloquea; el anchor invisible no', () => {
+  const base = 'https://www.google.com/recaptcha/enterprise/anchor?ar=1&k=x&co=y&hl=en&v=z';
+  assert.equal(esBloqueoRecaptcha({ src: `${base}&size=normal&cb=1`, w: 304, h: 78, oculto: false }), true);
+  assert.equal(esBloqueoRecaptcha({ src: `${base}&size=compact`, w: 164, h: 144, oculto: false }), true);
+  assert.equal(esBloqueoRecaptcha({ src: 'https://www.google.com/recaptcha/api2/anchor?k=x&size=normal', w: 304, h: 78, oculto: false }), true);
+  assert.equal(esBloqueoRecaptcha({ src: `${base}&size=invisible`, w: 256, h: 60, oculto: false }), false);
+  assert.equal(esBloqueoRecaptcha({ src: `${base}&size=normal`, w: 304, h: 78, oculto: true }), false);
+  assert.equal(esBloqueoRecaptcha({ src: `${base}&size=normal`, w: 0, h: 0, oculto: false }), false);
+  const bframe = 'https://www.google.com/recaptcha/enterprise/bframe?hl=en&v=z&k=x';
+  assert.equal(esBloqueoRecaptcha({ src: bframe, w: 400, h: 580, oculto: false }), true);
+  assert.equal(esBloqueoRecaptcha({ src: bframe, w: 400, h: 580, oculto: true }), false);
 });
 
 test('trayectoria del mouse termina exactamente en el destino', () => {

@@ -3,8 +3,8 @@
 // Si aparece un reCAPTCHA, el bot NO lo resuelve: sale con error (Google sospecha de él).
 import type { Pagina } from '../navegador.js';
 import {
-  indicadoresAdmision, indicadoresRechazo, indicadoresSalaEspera, selectorRecaptcha, selectorRecaptchaDesafio,
-  MIN_LADO_DESAFIO, textosRechazoExplicito,
+  indicadoresAdmision, indicadoresRechazo, indicadoresSalaEspera, selectorRecaptcha,
+  MIN_ALTO_CASILLA, MIN_ANCHO_CASILLA, MIN_LADO_DESAFIO, RE_CASILLA_RECAPTCHA, textosRechazoExplicito,
 } from './selectores.js';
 
 export type ResultadoAdmision =
@@ -47,16 +47,30 @@ export async function revisarRechazo(p: Pagina): Promise<ResultadoAdmision | nul
   return null;
 }
 
-/** true solo si el desafío de reCAPTCHA (bframe) está visible y con tamaño real. */
+export interface CajaRecaptcha { src: string; w: number; h: number; oculto: boolean }
+
+/**
+ * ¿Este iframe de reCAPTCHA bloquea al bot? Sí si está a la vista y es (a) el desafío de imágenes
+ * (bframe, ≥150x150) o (b) la casilla "No soy un robot" (anchor con size=normal/compact, ~304x78).
+ * El anchor de reCAPTCHA Enterprise invisible (size=invisible) que Meet carga en páginas normales no.
+ */
+export function esBloqueoRecaptcha(c: CajaRecaptcha): boolean {
+  if (c.oculto) return false;
+  if (/bframe/i.test(c.src)) return c.w >= MIN_LADO_DESAFIO && c.h >= MIN_LADO_DESAFIO;
+  if (RE_CASILLA_RECAPTCHA.test(c.src)) return c.w >= MIN_ANCHO_CASILLA && c.h >= MIN_ALTO_CASILLA;
+  return false;
+}
+
+/** true solo si un desafío de reCAPTCHA (imágenes o casilla) está visible y con tamaño real. */
 export async function hayDesafioRecaptcha(p: Pagina): Promise<boolean> {
   try {
-    const cajas = await p.locator(selectorRecaptchaDesafio).evaluateAll((els) => els.map((e) => {
+    const cajas = await p.locator(selectorRecaptcha).evaluateAll((els) => els.map((e) => {
       const r = (e as HTMLElement).getBoundingClientRect();
       const st = getComputedStyle(e as HTMLElement);
       const oculto = st.visibility === 'hidden' || st.display === 'none' || Number(st.opacity) === 0;
-      return { w: r.width, h: r.height, oculto };
+      return { src: (e as HTMLIFrameElement).src || '', w: r.width, h: r.height, oculto };
     }));
-    return cajas.some((c) => !c.oculto && c.w >= MIN_LADO_DESAFIO && c.h >= MIN_LADO_DESAFIO);
+    return cajas.some(esBloqueoRecaptcha);
   } catch { return false; }
 }
 

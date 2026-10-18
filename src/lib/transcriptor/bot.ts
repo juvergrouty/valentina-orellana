@@ -280,6 +280,23 @@ export function eventoUtil(ev: EventoCalendario): boolean {
   return meetUrlDesdeEvento(ev) !== null;
 }
 
+/** Fila de bookings que usa sesionesOnlineProximas. */
+export interface FilaReservaBot {
+  id: string; session_type: string; status: string; created_by_admin?: boolean | null;
+  patient_email: string | null; notes: string | null;
+}
+
+/**
+ * ¿La reserva es una sesión que de verdad va a ocurrir? Pagada (confirmed) o agendada por Vale con
+ * link de pago (pending_payment + created_by_admin: su evento ya está en Calendar con Meet y la sesión
+ * se hace aunque el pago llegue después; mismo criterio que encuadrado.ts esReal y debt.ts). Una reserva
+ * web sin pagar no tiene evento en Calendar y se libera sola.
+ */
+export function reservaVaAOcurrir(b: Pick<FilaReservaBot, 'status' | 'created_by_admin'>): boolean {
+  if (b.status === 'confirmed') return true;
+  return b.status === 'pending_payment' && b.created_by_admin === true;
+}
+
 /** Humanos permitidos en la llamada: Vale + 1 (individual) o Vale + 2 (pareja). */
 export function maxHumanosPorTipo(tipo: TipoSesion): number {
   return tipo === 'pareja' ? 3 : 2;
@@ -437,15 +454,15 @@ export function crearBot(deps: DepsBot = {}): Bot {
     // Reservas del sitio: google_event_id = id del booking sin guiones (o el id real guardado).
     const ids = eventos.map((e) => e.id);
     const { data: reservas, error: e1 } = await c.from('bookings')
-      .select('id, google_event_id, session_type, status, patient_email, notes')
+      .select('id, google_event_id, session_type, status, created_by_admin, patient_email, notes')
       .in('google_event_id', ids);
     if (e1) throw new Error(`bookings: ${e1.message}`);
-    const porEvento = new Map<string, { id: string; session_type: string; status: string; patient_email: string | null; notes: string | null }>();
+    const porEvento = new Map<string, FilaReservaBot>();
     for (const r of reservas ?? []) porEvento.set(String(r.google_event_id), r as never);
     const faltan = eventos.filter((e) => !porEvento.has(e.id)).map((e) => uuidDesdeEventId(e.id)).filter((x): x is string => !!x);
     if (faltan.length) {
       const { data: r2, error: e2 } = await c.from('bookings')
-        .select('id, google_event_id, session_type, status, patient_email, notes').in('id', faltan);
+        .select('id, google_event_id, session_type, status, created_by_admin, patient_email, notes').in('id', faltan);
       if (e2) throw new Error(`bookings: ${e2.message}`);
       for (const r of r2 ?? []) porEvento.set(String(r.id).replace(/-/g, ''), r as never);
     }
@@ -466,7 +483,7 @@ export function crearBot(deps: DepsBot = {}): Bot {
     const salida = new Map<string, SesionOnline>();
     for (const ev of eventos) {
       const b = porEvento.get(ev.id);
-      if (b && b.status !== 'confirmed') continue;                         // pendiente/cancelada/vencida
+      if (b && !reservaVaAOcurrir(b)) continue;                            // cancelada/vencida/sin pagar (web)
       if (b && !String(b.session_type ?? '').includes('online')) continue; // reserva presencial con Meet: no
       let patientId: string | null = null;
       if (b?.patient_email) patientId = pacientePorCorreo.get(b.patient_email.trim().toLowerCase()) ?? null;

@@ -81,6 +81,11 @@ export const selectorRecaptcha = 'iframe[src*="recaptcha"]';
 export const selectorRecaptchaDesafio = 'iframe[src*="recaptcha"][src*="bframe"]';
 /** Tamaño mínimo (px) para considerar que el desafío está realmente a la vista. */
 export const MIN_LADO_DESAFIO = 150;
+/** Casilla "No soy un robot" (iframe anchor con size=normal ~304x78 o size=compact ~164x144): SÍ es
+ *  un bloqueo. El anchor de reCAPTCHA Enterprise invisible trae size=invisible y no cuenta. */
+export const RE_CASILLA_RECAPTCHA = /\/recaptcha\/(?:enterprise\/|api2\/)?anchor\b[^#]*[?&]size=(?:normal|compact)\b/i;
+export const MIN_ANCHO_CASILLA = 150;
+export const MIN_ALTO_CASILLA = 60;
 
 /** Expulsión o fin de la llamada estando dentro. (Sin [role="alert"]: falsos positivos.) */
 export const indicadoresExpulsion: string[] = [
