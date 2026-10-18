@@ -235,6 +235,15 @@ export async function liberarSesion(c: Cliente, grabacionId: string): Promise<vo
   await c.from(TABLA_SESION_BOT).update({ en_uso_por: null, en_uso_hasta: null }).eq('id', 1).eq('en_uso_por', grabacionId);
 }
 
+/**
+ * El evento cambió de hora con el robot dentro (r2, punto 7): el candado vence con el NUEVO término,
+ * para que no quede libre mientras el robot sigue usando la sesión. Solo si lo tiene esta grabación.
+ */
+export async function extenderUsoSesion(c: Cliente, grabacionId: string, ahora: Date, horaFinPrevista: string): Promise<void> {
+  await c.from(TABLA_SESION_BOT).update({ en_uso_hasta: venceUsoSesion(ahora, horaFinPrevista).toISOString() })
+    .eq('id', 1).eq('en_uso_por', grabacionId);
+}
+
 /** La sesión no sirvió (Google pidió iniciar sesión de nuevo): queda "vencida" hasta que Vale la renueve. */
 export async function marcarSesionVencida(c: Cliente, grabacionId: string, motivo: string): Promise<void> {
   await c.from(TABLA_SESION_BOT).update({

@@ -20,6 +20,12 @@ import { HABLANTE_SIN_SEPARAR } from './hablantes';
 import type { NuevaAlerta } from './alertas';
 import type { AssemblyAI, PalabraAAI, ResultadoTranscripcion } from './tipos';
 import type { ClienteMensajes } from './claude';
+import {
+  debeRelanzarBot, ESPERA_LLEGADA_RELANZADO_MS, NOTA_NADIE_LLEGO, NOTA_RECONECTADO, NOTA_RECONECTANDO, NOTA_SIN_CONSENTIMIENTO_BOT, previaLiberable,
+} from './botReconexion';
+import { notaFinBot } from './bot';
+import { TABLA_SESION_BOT } from './botCuenta';
+import { textoProblema } from './panel';
 
 // ─── Dobles ──────────────────────────────────────────────────────────────────
 
@@ -131,6 +137,7 @@ function escenario(planClaude: (string | number)[] = [RESUMEN]) {
   const eventos: Record<string, unknown>[] = [];
   const maquinas: { id: string; token: string }[] = [];
   const matadas: string[] = [];
+  const estadosMaquina = new Map<string, string>();
   const fetchFalso = (async (url: string, init?: RequestInit) => {
     const u = String(url);
     if (u.startsWith('https://www.googleapis.com/calendar/v3/')) return new Response(JSON.stringify({ items: eventos }), { status: 200 });
@@ -141,6 +148,12 @@ function escenario(planClaude: (string | number)[] = [RESUMEN]) {
       return new Response(JSON.stringify({ id }), { status: 200 });
     }
     if (/\/machines\/maq/.test(u) && init?.method === 'DELETE') { matadas.push(u); return new Response('{}', { status: 200 }); }
+    // r2: estado de la máquina (GET). Sin dato → 500 (no se sabe: el vigilante no toca nada).
+    const enGet = /\/machines\/(maq[a-z0-9]+)$/.exec(u);
+    if (enGet && (!init?.method || init.method === 'GET') && estadosMaquina.has(enGet[1])) {
+      const st = estadosMaquina.get(enGet[1])!;
+      return st === '404' ? new Response('{}', { status: 404 }) : new Response(JSON.stringify({ id: enGet[1], state: st }), { status: 200 });
+    }
     return new Response('no simulado', { status: 500 });
   }) as typeof fetch;
   const BOT_SECRETO = 'secreto-del-bot-de-prueba-0123456789abcdef';
@@ -190,7 +203,7 @@ function escenario(planClaude: (string | number)[] = [RESUMEN]) {
   const segs = (id: string) => db.tabla('grabacion_segmentos').filter((s) => s.grabacion_id === id).sort((a, b) => a.seq - b.seq);
   const correr = async () => { const r = await pipeline.correr(ahora()); assert.deepEqual(r.errores, []); return r; };
 
-  return { db, ahora, avanzar, r2, b2, aai, claude, alertas, resueltas, eventos, maquinas, matadas, BOT_SECRETO, almacenamiento, cifrado, pipeline, paciente, firma, grabarPresencial, grab, segs, correr };
+  return { db, ahora, avanzar, r2, b2, aai, claude, alertas, resueltas, eventos, maquinas, matadas, estadosMaquina, BOT_SECRETO, almacenamiento, cifrado, pipeline, paciente, firma, grabarPresencial, grab, segs, correr };
 }
 
 // ─── Pruebas ─────────────────────────────────────────────────────────────────
@@ -701,4 +714,304 @@ test('auditoría seguridad: relanzar un bot exige consentimiento vigente; retira
   await e.correr();
   assert.equal(e.maquinas.length, 0, 'no se lanzó el bot');
   assert.equal(e.grab(g.id).estado, 'cancelada');
+});
+
+// ─── Segunda ronda del robot (r2, 18 oct) ────────────────────────────────────
+
+/** Sesión online de Diego que empieza en `inicioMin` y dura 50 min (reserva del sitio + evento de Calendar). */
+function sesionOnline(e: ReturnType<typeof escenario>, inicioMin = 2) {
+  const p = e.paciente('Diego Soto', 'diego@ejemplo.cl');
+  e.firma(p, 'Diego Soto', '15.555.555-5');
+  const bookingId = randomUUID();
+  const eventoId = bookingId.replace(/-/g, '');
+  const inicio = new Date(e.ahora().getTime() + inicioMin * 60_000).toISOString();
+  const fin = new Date(e.ahora().getTime() + (inicioMin + 50) * 60_000).toISOString();
+  e.db.tabla('bookings').push({ id: bookingId, google_event_id: eventoId, session_type: 'online', status: 'confirmed', patient_email: 'diego@ejemplo.cl', notes: 'Meet: https://meet.google.com/abc-defg-hij' });
+  const ev = { id: eventoId, status: 'confirmed', start: { dateTime: inicio }, end: { dateTime: fin }, hangoutLink: 'https://meet.google.com/abc-defg-hij', attendees: [{ email: 'diego@ejemplo.cl' }] };
+  e.eventos.push(ev);
+  return { p, eventoId, ev, inicio, fin };
+}
+
+function eventoDe(e: ReturnType<typeof escenario>, token: string) {
+  return (cuerpo: object) => procesarEventoBot(
+    { authorization: `Bearer ${token}`, cuerpoTexto: JSON.stringify(cuerpo) },
+    { db: e.db.cliente, secreto: e.BOT_SECRETO, almacenamiento: async () => e.almacenamiento, ahora: e.ahora },
+  );
+}
+
+async function subirSegmento(e: ReturnType<typeof escenario>, ev: ReturnType<typeof eventoDe>, id: string, seq: number, offset: number, dur: number) {
+  const r = await ev({ tipo: 'pide_url', seq });
+  assert.equal(r.status, 200);
+  const key = e.segs(id).find((s) => s.seq === seq)!.r2_key;
+  e.r2.objetos.set(`${BUCKETS.audio}/${key}`, new Uint8Array(3000 + seq));
+  return ev({ tipo: 'segmento_subido', seq, bytes: 3000 + seq, offset_ms: offset, duracion_ms: dur });
+}
+
+test('r2 punto 1b: el robot se cae a mitad → robot de reemplazo a la MISMA grabación, seq continuo, mismo origen y sin duplicar', async () => {
+  const e = escenario();
+  sesionOnline(e);
+  await e.correr();
+  const id = e.db.tabla('grabaciones')[0].id as string;
+  const bot1 = eventoDe(e, e.maquinas[0].token);
+  assert.equal((await bot1({ tipo: 'lobby' })).status, 200);
+  e.avanzar(3);
+  const act = await bot1({ tipo: 'activo' }); // r2: lo manda al empezar a grabar (hay alguien)
+  assert.equal(act.status, 200);
+  assert.equal(act.cuerpo.hora_fin, e.grab(id).hora_fin_prevista);
+  const inicioAt = e.grab(id).inicio_at as string;
+  e.avanzar(15);
+  assert.equal((await subirSegmento(e, bot1, id, 0, 0, 15 * 60_000)).status, 200);
+  await bot1({ tipo: 'pide_url', seq: 1 }); // pedido pero nunca confirmado (se cayó subiéndolo)
+  e.avanzar(2);
+  const linea1 = [{ t_ms: 1000, nombre: 'Valentina Orellana', on: true }, { t_ms: 5000, nombre: 'Valentina Orellana', on: false }];
+  assert.equal((await bot1({ tipo: 'fin', motivo: 'error', linea_hablantes: linea1 })).status, 200);
+
+  // Sigue grabando, sin máquina; el token viejo ya no sirve; lo no confirmado se descarta.
+  let g = e.grab(id);
+  assert.deepEqual([g.estado, g.bot_machine_id, g.nota_sistema], ['grabando', null, NOTA_RECONECTANDO]);
+  assert.deepEqual(g.linea_hablantes, linea1);
+  assert.deepEqual(e.segs(id).map((s) => s.seq), [0]);
+  assert.equal((await bot1({ tipo: 'lobby' })).status, 404);
+
+  // El cron lanza UN robot nuevo con la numeración y el origen del anterior.
+  await e.correr();
+  assert.equal(e.maquinas.length, 2);
+  e.avanzar(1); await e.correr();
+  assert.equal(e.maquinas.length, 2, 'nunca dos robots a la vez');
+  const env2 = e.db.tabla('grabaciones')[0];
+  assert.equal(env2.bot_machine_id, e.maquinas[1].id);
+  assert.ok(e.maquinas[1].token && e.maquinas[1].token !== e.maquinas[0].token, 'token nuevo');
+  const bot2 = eventoDe(e, e.maquinas[1].token);
+  assert.equal((await bot2({ tipo: 'lobby' })).status, 200);
+  assert.equal((await bot2({ tipo: 'activo' })).status, 200);
+  g = e.grab(id);
+  assert.equal(g.estado, 'grabando');
+  assert.equal(g.inicio_at, inicioAt, 'el origen común no cambia');
+  e.avanzar(20);
+  const off2 = Date.parse(e.ahora().toISOString()) - Date.parse(inicioAt) - 20 * 60_000;
+  assert.equal((await subirSegmento(e, bot2, id, 1, off2, 20 * 60_000)).status, 200);
+  const linea2 = [{ t_ms: off2 + 100, nombre: 'Diego Soto', on: true }, { t_ms: off2 + 900, nombre: 'Diego Soto', on: false }];
+  assert.equal((await bot2({ tipo: 'fin', motivo: 'vale_salio', linea_hablantes: linea2 })).status, 200, 'el fin del 2.º robot no se toma por repetido');
+  g = e.grab(id);
+  assert.equal(g.estado, 'subida');
+  assert.deepEqual(g.linea_hablantes, [...linea1, ...linea2]);
+  assert.equal(g.nota_sistema, NOTA_RECONECTADO);
+  assert.deepEqual(e.segs(id).map((s) => [s.seq, s.offset_ms]), [[0, 0], [1, off2]]);
+  assert.equal(e.db.tabla('transcriptor_auditoria').filter((a) => a.accion === 'bot_lanzar' && a.grabacion_id === id).length, 2);
+  await e.correr();
+  assert.equal(e.aai.envios.length, 2, 'se transcriben los dos tramos');
+});
+
+test('r2 punto 1b: el env del robot de reemplazo lleva SEQ_INICIAL, ORIGEN_MS y la espera corta', async () => {
+  const e = escenario();
+  const p = e.paciente('Ana Paz', 'ana@ejemplo.cl');
+  e.firma(p, 'Ana Paz', '12.222.222-2');
+  const inicio = new Date(e.ahora().getTime() - 20 * 60_000).toISOString();
+  const g = (await e.db.from('grabaciones').insert({
+    patient_id: p, origen: 'online', tipo: 'individual', modelo: 'universal-2', session_date: '2026-10-20', estado: 'grabando',
+    google_event_id: 'evr', meet_url: 'https://meet.google.com/abc-defg-hij', inicio_at: inicio, bot_machine_id: null,
+    hora_fin_prevista: new Date(e.ahora().getTime() + 30 * 60_000).toISOString(),
+  }).select('*').single()).data;
+  for (const seq of [0, 1]) e.db.tabla('grabacion_segmentos').push({ id: randomUUID(), grabacion_id: g.id, seq, r2_key: `a/${randomUUID()}.webm`, mime: 'audio/webm', offset_ms: seq * 900_000, subido_at: e.ahora().toISOString(), aai_errores: 0, aai_transcript_id: null });
+  const enviados: Record<string, string>[] = [];
+  const bot = crearBot({
+    db: e.db.cliente, calendario: async () => ({ token: 't', calendarId: 'primary' }),
+    fetch: (async (_u: string, init?: RequestInit) => { enviados.push(JSON.parse(String(init?.body)).config.env); return new Response(JSON.stringify({ id: 'maqr2abcdef' }), { status: 200 }); }) as typeof fetch,
+    env: { FLY_API_TOKEN: 'fly', FLY_APP_BOT: 'vo-bot', FLY_IMAGEN: 'registry.fly.io/vo-bot:v1', BOT_TOKEN_SECRET: e.BOT_SECRETO, PUBLIC_SITE_URL: 'https://www.valentinaorellana.cl' },
+  });
+  await bot.lanzarBot(e.grab(g.id) as never);
+  assert.equal(enviados[0].SEQ_INICIAL, '2');
+  assert.equal(enviados[0].ORIGEN_MS, String(Date.parse(inicio)));
+  assert.equal(enviados[0].ESPERA_LLEGADA_MS, String(ESPERA_LLEGADA_RELANZADO_MS));
+  // Con máquina asignada no se lanza otro (nunca dos robots a la vez).
+  await assert.rejects(bot.lanzarBot(e.grab(g.id) as never), /otro asistente/);
+  assert.equal(enviados.length, 1);
+});
+
+test('r2 punto 1b: la máquina murió sin mandar fin → el vigilante lo detecta y manda reemplazo; Fly sin respuesta → no toca nada', async () => {
+  const e = escenario();
+  sesionOnline(e);
+  await e.correr();
+  const id = e.db.tabla('grabaciones')[0].id as string;
+  const bot1 = eventoDe(e, e.maquinas[0].token);
+  await bot1({ tipo: 'lobby' }); await bot1({ tipo: 'activo' });
+  e.avanzar(10);
+  await e.correr(); // Fly no responde el GET (500): nada cambia
+  assert.equal(e.grab(id).bot_machine_id, e.maquinas[0].id);
+  e.estadosMaquina.set(e.maquinas[0].id, 'started');
+  e.avanzar(1); await e.correr();
+  assert.equal(e.maquinas.length, 1, 'viva: nada');
+  e.estadosMaquina.set(e.maquinas[0].id, 'stopped');
+  e.avanzar(1); await e.correr();
+  assert.equal(e.maquinas.length, 2, 'caída: robot de reemplazo en la misma corrida');
+  assert.equal(e.grab(id).estado, 'grabando');
+  assert.equal(e.grab(id).bot_machine_id, e.maquinas[1].id);
+  assert.ok(e.db.tabla('transcriptor_auditoria').some((a) => a.accion === 'bot_salio' && a.detalle?.motivo === 'caida'));
+  // Antes de grabar: una máquina caída en la sala de espera también se relanza sola.
+  const e2 = escenario();
+  sesionOnline(e2);
+  await e2.correr();
+  const id2 = e2.db.tabla('grabaciones')[0].id as string;
+  await eventoDe(e2, e2.maquinas[0].token)({ tipo: 'lobby' });
+  e2.estadosMaquina.set(e2.maquinas[0].id, '404');
+  e2.avanzar(2); await e2.correr();
+  assert.equal(e2.maquinas.length, 2);
+  assert.equal(e2.grab(id2).estado, 'bot_lanzando');
+});
+
+test('r2 punto 1b: sin tiempo o con el tope de lanzamientos no hay reemplazo: se cierra con lo grabado', async () => {
+  assert.equal(debeRelanzarBot({ motivo: 'error', horaFinPrevista: '2026-10-20T14:00:00Z', ahora: new Date('2026-10-20T13:50:00Z'), lanzamientos: 1 }), true);
+  assert.equal(debeRelanzarBot({ motivo: 'error', horaFinPrevista: '2026-10-20T14:00:00Z', ahora: new Date('2026-10-20T13:58:00Z'), lanzamientos: 1 }), false);
+  assert.equal(debeRelanzarBot({ motivo: 'solo', horaFinPrevista: '2026-10-20T14:00:00Z', ahora: new Date('2026-10-20T13:55:00Z'), lanzamientos: 1 }), false, 'solo cerca del fin = terminó la sesión');
+  assert.equal(debeRelanzarBot({ motivo: 'solo', horaFinPrevista: '2026-10-20T14:00:00Z', ahora: new Date('2026-10-20T13:30:00Z'), lanzamientos: 1 }), true);
+  assert.equal(debeRelanzarBot({ motivo: 'error', horaFinPrevista: '2026-10-20T14:00:00Z', ahora: new Date('2026-10-20T13:00:00Z'), lanzamientos: 4 }), false);
+  for (const m of ['vale_salio', 'expulsado', 'participantes_extra', 'hora_fin', 'sin_consentimiento', 'nadie_llego']) {
+    assert.equal(debeRelanzarBot({ motivo: m, horaFinPrevista: '2026-10-20T14:00:00Z', ahora: new Date('2026-10-20T13:00:00Z'), lanzamientos: 1 }), false, m);
+  }
+  const e = escenario();
+  sesionOnline(e, -48); // empezó hace 48 min: quedan 2
+  // (fuera de la ventana de despacho: se crea a mano como si el robot hubiera entrado a tiempo)
+  const s = e.eventos[0] as { id: string; end: { dateTime: string } };
+  const g = (await e.db.from('grabaciones').insert({
+    patient_id: e.db.tabla('patients')[0].id, origen: 'online', tipo: 'individual', modelo: 'universal-2', session_date: '2026-10-20', estado: 'bot_lanzando',
+    google_event_id: s.id, meet_url: 'https://meet.google.com/abc-defg-hij', hora_fin_prevista: s.end.dateTime,
+  }).select('*').single()).data;
+  let token = '';
+  await crearBot({
+    db: e.db.cliente, calendario: async () => ({ token: 't', calendarId: 'primary' }),
+    fetch: (async (_u: string, init?: RequestInit) => { token = JSON.parse(String(init?.body)).config.env.BOT_TOKEN; return new Response(JSON.stringify({ id: 'maqx1abcdef' }), { status: 200 }); }) as typeof fetch,
+    env: { FLY_API_TOKEN: 'fly', FLY_APP_BOT: 'vo-bot', FLY_IMAGEN: 'registry.fly.io/vo-bot:v1', BOT_TOKEN_SECRET: e.BOT_SECRETO, PUBLIC_SITE_URL: 'https://www.valentinaorellana.cl' },
+  }).lanzarBot(e.grab(g.id) as never);
+  const ev = eventoDe(e, token);
+  await ev({ tipo: 'lobby' }); await ev({ tipo: 'activo' });
+  assert.equal((await subirSegmento(e, ev, g.id, 0, 0, 60_000)).status, 200);
+  await ev({ tipo: 'fin', motivo: 'error', linea_hablantes: [] });
+  assert.equal(e.grab(g.id).estado, 'subida', 'quedan menos de 3 min: no se relanza, se transcribe ya');
+  assert.equal(e.grab(g.id).nota_sistema, notaFinBot('error', Math.round((e.grab(g.id).duracion_seg as number) / 60)));
+});
+
+test('r2 punto 3: nadie llegó → sin_audio con nota clara, sin alerta de "transcripción vacía"', async () => {
+  const e = escenario();
+  sesionOnline(e);
+  await e.correr();
+  const id = e.db.tabla('grabaciones')[0].id as string;
+  const bot = eventoDe(e, e.maquinas[0].token);
+  await bot({ tipo: 'lobby' });
+  e.avanzar(30);
+  assert.equal((await bot({ tipo: 'fin', motivo: 'nadie_llego', linea_hablantes: [] })).status, 200);
+  const g = e.grab(id);
+  assert.deepEqual([g.estado, g.nota_sistema], ['sin_audio', NOTA_NADIE_LLEGO]);
+  assert.ok(Date.parse(String(g.bot_token_vence_at)) <= e.ahora().getTime(), 'token revocado');
+  e.avanzar(1); await e.correr();
+  assert.deepEqual(e.alertas, [], 'ningún aviso: no es una falla');
+  assert.equal(e.aai.envios.length, 0);
+  assert.equal(textoProblema(g as never), NOTA_NADIE_LLEGO);
+  assert.equal(e.maquinas.length, 1, 'no se relanza');
+});
+
+test('r2 punto 2: sin consentimiento al empezar a grabar o al pedir URL → 403 con codigo; fin sin_consentimiento antes de grabar → cancelada', async () => {
+  const e = escenario();
+  const { p } = sesionOnline(e);
+  await e.correr();
+  const id = e.db.tabla('grabaciones')[0].id as string;
+  const bot = eventoDe(e, e.maquinas[0].token);
+  await bot({ tipo: 'lobby' });
+  e.db.tabla('consents').filter((c) => c.patient_id === p).forEach((c) => { c.revoked_at = e.ahora().toISOString(); });
+  const act = await bot({ tipo: 'activo' });
+  assert.deepEqual([act.status, act.cuerpo.codigo], [403, 'sin_consentimiento']);
+  assert.equal(e.grab(id).estado, 'bot_en_lobby', 'no pasa a grabando');
+  assert.equal((await bot({ tipo: 'fin', motivo: 'sin_consentimiento', linea_hablantes: [] })).status, 200);
+  assert.equal(e.grab(id).estado, 'cancelada');
+  // En plena grabación: pide_url 403 con codigo y el fin cierra con lo grabado (no relanza).
+  const e2 = escenario();
+  const s2 = sesionOnline(e2);
+  await e2.correr();
+  const id2 = e2.db.tabla('grabaciones')[0].id as string;
+  const b2 = eventoDe(e2, e2.maquinas[0].token);
+  await b2({ tipo: 'lobby' }); await b2({ tipo: 'activo' });
+  e2.db.tabla('consents').filter((c) => c.patient_id === s2.p).forEach((c) => { c.revoked_at = e2.ahora().toISOString(); });
+  const pu = await b2({ tipo: 'pide_url', seq: 0 });
+  assert.deepEqual([pu.status, pu.cuerpo.codigo], [403, 'sin_consentimiento']);
+  await b2({ tipo: 'fin', motivo: 'sin_consentimiento', linea_hablantes: [] });
+  assert.equal(e2.grab(id2).estado, 'sin_audio');
+  assert.equal(e2.grab(id2).nota_sistema, NOTA_SIN_CONSENTIMIENTO_BOT);
+  assert.equal(e2.maquinas.length, 1);
+});
+
+test('r2 punto 5: la ventana de despacho cubre hasta 20 min después del inicio, sin duplicar', async () => {
+  const e = escenario();
+  sesionOnline(e, -15); // el cron/Calendar fallaron: la sesión empezó hace 15 min
+  await e.correr();
+  assert.equal(e.maquinas.length, 1);
+  e.avanzar(1); await e.correr();
+  assert.equal(e.db.tabla('grabaciones').length, 1);
+  assert.equal(e.maquinas.length, 1);
+  const tarde = escenario();
+  sesionOnline(tarde, -25);
+  await tarde.correr();
+  assert.equal(tarde.maquinas.length, 0, 'más de 20 min tarde: no');
+  assert.equal(tarde.db.tabla('grabaciones').length, 0);
+});
+
+test('r2 punto 7: evento movido — con robot lanzado sigue la hora nueva; si el robot ya volvió sin audio, se despacha a la hora nueva', async () => {
+  const e = escenario();
+  const s = sesionOnline(e);
+  await e.correr();
+  const id = e.db.tabla('grabaciones')[0].id as string;
+  const bot = eventoDe(e, e.maquinas[0].token);
+  await bot({ tipo: 'lobby' });
+  // Vale alarga el evento 20 min con el robot ya lanzado.
+  const finNuevo = new Date(Date.parse(s.fin) + 20 * 60_000).toISOString();
+  s.ev.end.dateTime = finNuevo;
+  e.avanzar(1); await e.correr();
+  assert.equal(e.grab(id).hora_fin_prevista, finNuevo);
+  assert.equal(e.grab(id).bot_token_vence_at, new Date(Date.parse(finNuevo) + 2 * 60 * 60_000).toISOString());
+  const act = await bot({ tipo: 'activo' });
+  assert.equal(act.cuerpo.hora_fin, finNuevo, 'el robot recibe la hora nueva');
+
+  // Otro caso: el robot fue a la hora vieja, nadie llegó; Vale había movido la sesión 2 h más tarde.
+  const m = escenario();
+  const sm = sesionOnline(m);
+  await m.correr();
+  const idm = m.db.tabla('grabaciones')[0].id as string;
+  const bm = eventoDe(m, m.maquinas[0].token);
+  await bm({ tipo: 'lobby' });
+  m.avanzar(30);
+  await bm({ tipo: 'fin', motivo: 'nadie_llego', linea_hablantes: [] });
+  sm.ev.start.dateTime = new Date(Date.parse(sm.inicio) + 2 * 60 * 60_000).toISOString();
+  sm.ev.end.dateTime = new Date(Date.parse(sm.fin) + 2 * 60 * 60_000).toISOString();
+  m.avanzar(1); await m.correr();
+  assert.equal(m.maquinas.length, 1, 'aún no es la hora nueva');
+  m.avanzar(90); await m.correr();
+  assert.equal(m.maquinas.length, 2, 'se despacha a la hora nueva aunque el google_event_id sea el mismo');
+  const filas = m.db.tabla('grabaciones');
+  assert.equal(filas.length, 2);
+  assert.equal(m.grab(idm).google_event_id, `${sm.eventoId}~movido-${idm.slice(0, 8)}`, 'la fila vieja queda trazable');
+  assert.equal(filas.find((f) => f.id !== idm)!.google_event_id, sm.eventoId);
+  m.avanzar(1); await m.correr();
+  assert.equal(m.maquinas.length, 2, 'sin duplicar');
+});
+
+test('r2 punto 6: el vigilante suelta el candado de la sesión de Google al apagar la máquina', async () => {
+  const e = escenario();
+  const p = e.paciente('Marta Gil', 'marta@ejemplo.cl');
+  e.firma(p, 'Marta Gil', '13.333.333-3');
+  const g = (await e.db.from('grabaciones').insert({
+    patient_id: p, origen: 'online', tipo: 'individual', modelo: 'universal-2', session_date: '2026-10-20', estado: 'grabando',
+    google_event_id: 'ev6', meet_url: 'https://meet.google.com/abc-defg-hij', hora_fin_prevista: new Date(e.ahora().getTime() - 41 * 60_000).toISOString(),
+    inicio_at: new Date(e.ahora().getTime() - 90 * 60_000).toISOString(), bot_machine_id: 'maq6abcdef',
+  }).select('*').single()).data;
+  e.db.tabla(TABLA_SESION_BOT).push({ id: 1, cuenta_email: 'robot@ejemplo.cl', estado: 'vigente', version: 3, en_uso_por: g.id, en_uso_hasta: e.ahora().toISOString() });
+  await e.correr();
+  assert.equal(e.matadas.length, 1);
+  assert.equal(e.db.tabla(TABLA_SESION_BOT)[0].en_uso_por, null);
+});
+
+test('r2 punto 7: previaLiberable solo libera filas sin audio terminadas antes de la hora nueva', () => {
+  const base = { id: 'x', estado_antes_error: null, updated_at: '2026-10-20T13:30:00Z' } as const;
+  assert.equal(previaLiberable({ ...base, estado: 'sin_audio', fin_at: '2026-10-20T13:30:00Z' }, '2026-10-20T15:00:00Z'), true);
+  assert.equal(previaLiberable({ ...base, estado: 'sin_audio', fin_at: '2026-10-20T13:30:00Z' }, '2026-10-20T13:00:00Z'), false, 'mismo horario: no');
+  assert.equal(previaLiberable({ ...base, estado: 'bot_no_admitido', fin_at: '2026-10-20T13:20:00Z' }, '2026-10-20T15:00:00Z'), true);
+  assert.equal(previaLiberable({ ...base, estado: 'lista', fin_at: '2026-10-20T13:20:00Z' }, '2026-10-20T15:00:00Z'), false, 'con audio: nunca');
+  assert.equal(previaLiberable({ ...base, estado: 'cancelada', fin_at: null }, '2026-10-20T15:00:00Z'), false);
 });

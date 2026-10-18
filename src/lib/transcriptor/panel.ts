@@ -9,6 +9,7 @@
 import { MODELO_U2, MODELO_U35_PRO, ROTULO_RESUMEN, type EstadoGrabacion, type Grabacion, type TramoTranscrito } from './tipos';
 import { HABLANTE_NO_IDENTIFICADO, HABLANTE_SIN_SEPARAR, formatearTiempo } from './hablantes';
 import { AJUSTE_NOMBRES_VALE } from './bot';
+import { NOTA_NADIE_LLEGO } from './botReconexion';
 import { paraRevisarHoy } from './resumen';
 
 // ─── Rótulos y textos fijos ──────────────────────────────────────────────────
@@ -60,7 +61,9 @@ export function estadoVisible(estado: EstadoGrabacion | string | null | undefine
  * Qué le pasó a SU grabación y qué hacer, sin términos técnicos (40-ux §7). El detalle técnico
  * (ultimo_error) nunca se muestra aquí: queda en la base y en /admin/logs.
  */
-export function textoProblema(g: Pick<Grabacion, 'estado' | 'estado_antes_error'>): string | null {
+export function textoProblema(g: Pick<Grabacion, 'estado' | 'estado_antes_error'> & Partial<Pick<Grabacion, 'nota_sistema'>>): string | null {
+  // r2: el robot esperó y nadie entró a la reunión (no es una falla del audio).
+  if (g.estado === 'sin_audio' && g.nota_sistema === NOTA_NADIE_LLEGO) return NOTA_NADIE_LLEGO;
   if (g.estado === 'sin_audio') return 'La grabación quedó sin audio, así que no se generó resumen.';
   if (g.estado !== 'error') return null;
   switch (g.estado_antes_error) {

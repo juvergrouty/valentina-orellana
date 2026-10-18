@@ -1,15 +1,18 @@
 // Bot "Notas Ps. Valentina Orellana": entra al Meet como invitado (o, en modo 'cuenta', con la
 // cuenta de Google del robot: invitado del calendario, entra sin pedir permiso; ver
-// docs/transcriptor/85-robot-meet.md), espera que Vale lo admita (hasta 20 min), graba el
-// audio mezclado de la reunión en segmentos de 15 min que sube directo a R2 (URL prefirmada que pide al sitio), registra quién habla por el tile
-// iluminado y sale cuando Vale sale, cuando quedan solo bots, si entra alguien de más, si lo
-// expulsan o al llegar a HORA_FIN + 30 min. Al terminar, el proceso sale y la máquina de Fly
-// se autodestruye (config.auto_destroy = true, restart.policy = "no").
+// docs/transcriptor/85-robot-meet.md), espera que Vale lo admita (hasta 20 min), y EMPIEZA A GRABAR
+// recién cuando hay alguien en la llamada (r2: no graba silencio; si nadie llega en 30 min sale sin
+// subir nada). Graba el audio mezclado de la reunión en segmentos de 15 min que sube directo a R2
+// (URL prefirmada que pide al sitio), registra quién habla por el tile iluminado y sale según
+// vigia.ts (Vale salió, quedó solo, alguien de más, expulsado, sin consentimiento, HORA_FIN + 30 min).
+// Al terminar, el proceso sale y la máquina de Fly se autodestruye (config.auto_destroy = true,
+// restart.policy = "no"). Si se cae antes de la hora, el sitio manda un robot de reemplazo con
+// SEQ_INICIAL / ORIGEN_MS para seguir la misma grabación (src/lib/transcriptor/botReconexion.ts).
 //
 // Privacidad: nada se escribe en disco, no se toman capturas de pantalla, no se registran en
 // los logs el enlace, el token ni nombres de participantes.
 import { leerConfig, type ConfigBot } from './config.js';
-import { LineaHablantes } from './linea.js';
+import { desfaseOrigen, LineaHablantes, lineaConDesfase, type LineaHablante } from './linea.js';
 import { cargarPlaywright, type Navegador, type Pagina } from './navegador.js';
 import { esperarAdmision } from './meet/admision.js';
 import { argumentosChromium, IDIOMA_UI } from './meet/argumentos.js';
@@ -22,7 +25,7 @@ import { instalarGrabadorEnPagina } from './captura/audio-pagina.js';
 import { capturarPistasRTC } from './captura/rtc-pagina.js';
 import { instalarHablantesEnPagina, participantesEnPagina } from './captura/hablantes-pagina.js';
 import { Segmentos } from './segmentos.js';
-import { Sitio, TokenRechazadoError } from './sitio.js';
+import { horaFinDeRespuesta, SinConsentimientoError, Sitio, TokenRechazadoError } from './sitio.js';
 import { sanearError } from './saneo.js';
 import { estadoSesionValido, soloGoogle, type EstadoSesion } from './sesion.js';
 import { Vigia, type MotivoFin } from './vigia.js';
@@ -31,6 +34,8 @@ const log = (m: string) => console.log(`[bot ${new Date().toISOString()}] ${m}`)
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const TROZO_MS = 10_000;
 const SONDEO_VIGIA_MS = 2_000;
+/** Tope duro tras HORA_FIN + MAX_EXTRA_MS: pase lo que pase, el proceso termina. */
+const MARGEN_TOPE_DURO_MS = 10 * 60_000;
 
 interface GrabPagina {
   iniciar(seq: number): void;
@@ -41,14 +46,25 @@ interface GrabPagina {
   apagar(): void;
 }
 
-async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio): Promise<{ motivo: MotivoFin; linea: ReturnType<LineaHablantes['cerrar']>; fallidos: number[] }> {
+interface ResultadoGrabar { motivo: MotivoFin; linea: LineaHablante[]; fallidos: number[] }
+
+/**
+ * `alCambiarHora` lo llama main cuando el sitio informa otra HORA_FIN (Vale movió el evento).
+ * `admitidoPorPersona`: en modo invitado alguien tuvo que admitirlo, así que "nadie visible" en
+ * 30 min es más bien el DOM de Meet que cambió (se avisa); en modo cuenta entra solo.
+ */
+async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
+  admitidoPorPersona: boolean;
+  registrarCambioHora: (f: (limiteMs: number) => void) => void;
+}): Promise<ResultadoGrabar> {
   const linea = new LineaHablantes(cfg.botNombre);
   const segs = new Segmentos({ sitio, log });
   const finSegmento = new Map<number, () => void>();
+  let desfase = 0;
 
   await p.exposeFunction('__voTrozo', (seq: number, b64: string) => { segs.agregarTrozo(seq, Buffer.from(b64, 'base64')); return true; });
   await p.exposeFunction('__voSegFin', (seq: number, offset: number, dur: number) => {
-    void segs.cerrar(seq, offset, dur);
+    void segs.cerrar(seq, offset + desfase, dur);
     finSegmento.get(seq)?.();
     return true;
   });
@@ -73,12 +89,14 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio): Promise<{ motivo
     finSegmento.delete(seq);
   };
 
-  const inicio = Date.now();
-  const limiteMs = cfg.horaFin.getTime() + cfg.maxExtraMs;
-  const vigia = new Vigia({ botNombre: cfg.botNombre, valeNombres: cfg.valeNombres, soloMs: cfg.soloMs, maxHumanos: cfg.maxHumanos, limiteMs });
-  let seq = 0;
-  await iniciar(seq);
-  let proximoCorte = inicio + cfg.segmentoMs;
+  const vigia = new Vigia({
+    botNombre: cfg.botNombre, valeNombres: cfg.valeNombres, soloMs: cfg.soloMs, maxHumanos: cfg.maxHumanos,
+    limiteMs: cfg.horaFin.getTime() + cfg.maxExtraMs, esperaLlegadaMs: cfg.esperaLlegadaMs, graciaValeMs: cfg.graciaValeMs,
+  });
+  op.registrarCambioHora((limiteMs) => vigia.fijarLimite(limiteMs));
+  let seq = cfg.seqInicial;
+  let inicio: number | null = null; // inicio de la grabación (null = todavía no hay nadie: no se graba)
+  let proximoCorte = 0;
   let siguienteAbierto = false;
   let vioHumanos = false;
   let avisoSinPistas = false;
@@ -92,12 +110,30 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio): Promise<{ motivo
 
       const exp = await revisarExpulsion(p);
       if (exp) { motivo = exp === 'expulsado' ? 'expulsado' : 'vale_salio'; break; }
+      if (segs.sinConsentimiento) { motivo = 'sin_consentimiento'; break; }
 
       let nombres: string[] = [];
       try { nombres = await p.evaluate(participantesEnPagina); } catch { /* página ocupada: se reintenta */ }
-      if (nombres.length) vioHumanos = true;
+      const humanos = vigia.humanos(nombres);
+      if (humanos.length) vioHumanos = true;
       motivo = vigia.observar(ahora, nombres);
       if (motivo) break;
+
+      // r2 (punto 3): se empieza a grabar recién cuando hay al menos una persona. `activo` le dice al
+      // sitio que empezó (pasa a 'grabando'); si no hay consentimiento, el sitio responde 403 y se sale.
+      if (inicio == null) {
+        if (!humanos.length) continue;
+        try { await sitio.enviar({ tipo: 'activo' }); } catch (e) {
+          if (e instanceof SinConsentimientoError) { motivo = 'sin_consentimiento'; break; }
+          throw e;
+        }
+        inicio = Date.now();
+        desfase = desfaseOrigen(inicio, cfg.origenMs);
+        await iniciar(seq);
+        proximoCorte = inicio + cfg.segmentoMs;
+        log(`empieza la grabación (seq ${seq}${desfase ? `, desfase ${desfase} ms` : ''})`);
+        continue;
+      }
 
       if (ahora - ultimoNivel >= 60_000) {
         ultimoNivel = ahora;
@@ -133,39 +169,69 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio): Promise<{ motivo
   } catch (e) {
     // La página dejó de responder (se cayó o se recargó): se termina como error, pero lo que ya
     // está en memoria se sube igual (antes se perdía el segmento abierto y la fila de subidas).
+    if (e instanceof TokenRechazadoError) throw e;
     log(`error durante la grabación: ${sanearError(e instanceof Error ? e.message : e, 160)}`);
     motivo = 'error';
   }
 
-  if (!vioHumanos) await sitio.enviar({ tipo: 'error', detalle: 'El bot no pudo leer los participantes de Meet (¿cambió el DOM?)' }).catch(() => {});
+  if (!vioHumanos && op.admitidoPorPersona && motivo === 'nadie_llego') {
+    await sitio.enviar({ tipo: 'error', detalle: 'El bot no pudo leer los participantes de Meet (¿cambió el DOM?)' }).catch(() => {});
+  }
   log(`fin de la grabación: ${motivo}`);
+  if (inicio == null) return { motivo, linea: [], fallidos: [] }; // nunca grabó: nada que subir
+
+  if (motivo === 'sin_consentimiento') {
+    // Sin consentimiento no se sube nada más: se cortan las grabadoras y se descarta lo que hay en memoria.
+    await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.apagar()).catch(() => {});
+    segs.descartar();
+    return { motivo, linea: [], fallidos: [] };
+  }
+
   const tFin = Date.now() - inicio;
   await Promise.all([...cortes]); // primero los cortes en curso (si no, detener() pisa su aviso de fin)
   const abiertas = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.activas()).catch(() => [seq]);
   await Promise.all(abiertas.map((s) => detener(s)));
-  const t0 = inicioSeg.get(0) ?? inicio;
+  const t0 = inicioSeg.get(cfg.seqInicial) ?? inicio;
   segs.cerrarHuerfanos((s) => {
     const desde = inicioSeg.get(s) ?? t0;
-    return { offsetMs: desde - t0, duracionMs: Date.now() - desde };
+    return { offsetMs: desde - t0 + desfase, duracionMs: Date.now() - desde };
   });
   const fallidos = await segs.vaciar();
-  return { motivo, linea: linea.cerrar(tFin), fallidos };
+  if (segs.sinConsentimiento) return { motivo: 'sin_consentimiento', linea: [], fallidos: [] };
+  return { motivo, linea: lineaConDesfase(linea.cerrar(tFin), desfase), fallidos };
 }
 
 async function main(): Promise<number> {
   let cfg: ConfigBot;
   try { cfg = leerConfig(); } catch (e) { log(`configuración inválida: ${e instanceof Error ? e.message : e}`); return 2; }
-  const sitio = new Sitio({ eventoUrl: cfg.eventoUrl, token: cfg.token, log });
 
-  // Tope duro: pase lo que pase, el proceso termina (la máquina se destruye al salir).
-  const topeDuro = cfg.horaFin.getTime() + cfg.maxExtraMs + 10 * 60_000 - Date.now();
-  const guardia = setTimeout(() => { log('tope duro de duración alcanzado: salida forzada'); process.exit(3); }, Math.max(topeDuro, 60_000));
-  guardia.unref();
+  // Tope duro: pase lo que pase, el proceso termina (la máquina se destruye al salir). Se reprograma
+  // si el sitio informa otra HORA_FIN (Vale movió el evento, r2 punto 7).
+  let guardia: ReturnType<typeof setTimeout> | null = null;
+  const programarGuardia = () => {
+    if (guardia) clearTimeout(guardia);
+    const topeDuro = cfg.horaFin.getTime() + cfg.maxExtraMs + MARGEN_TOPE_DURO_MS - Date.now();
+    guardia = setTimeout(() => { log('tope duro de duración alcanzado: salida forzada'); process.exit(3); }, Math.max(topeDuro, 60_000));
+    guardia.unref();
+  };
+  programarGuardia();
+  let alCambiarLimite: ((limiteMs: number) => void) | null = null;
+  const sitio = new Sitio({
+    eventoUrl: cfg.eventoUrl, token: cfg.token, log,
+    alResponder: (r) => {
+      const nueva = horaFinDeRespuesta(r, cfg.horaFin);
+      if (!nueva) return;
+      log('el sitio informó otra hora de término de la sesión');
+      cfg.horaFin = nueva;
+      programarGuardia();
+      alCambiarLimite?.(nueva.getTime() + cfg.maxExtraMs);
+    },
+  });
 
   let navegador: Navegador | null = null;
   let finEnviado = false;
   let devolverSesion: (() => Promise<void>) | null = null;
-  const enviarFin = async (motivo: MotivoFin, linea: ReturnType<LineaHablantes['cerrar']> = []) => {
+  const enviarFin = async (motivo: MotivoFin, linea: LineaHablante[] = []) => {
     if (finEnviado) return;
     finEnviado = true;
     // Antes de `fin` (fin revoca el token): la sesión renovada del robot vuelve al sitio.
@@ -247,9 +313,13 @@ async function main(): Promise<number> {
       return 0;
     }
 
-    log('admitido');
-    await sitio.enviar({ tipo: 'activo' });
-    const r = await grabar(p, cfg, sitio);
+    // r2: `activo` se manda al EMPEZAR A GRABAR (cuando hay alguien), dentro de grabar().
+    log('admitido: espera a que haya alguien para grabar');
+    const r = await grabar(p, cfg, sitio, {
+      admitidoPorPersona: !sesion,
+      registrarCambioHora: (f) => { alCambiarLimite = f; },
+    });
+    if (r.motivo === 'sin_consentimiento') log('el sitio no autoriza grabar (consentimiento): sale de la reunión');
     if (r.fallidos.length) await sitio.enviar({ tipo: 'error', detalle: `No se pudieron subir los segmentos ${r.fallidos.join(', ')}` }).catch(() => {});
     await salirDeMeet(p, log);
     await enviarFin(r.motivo, r.linea);

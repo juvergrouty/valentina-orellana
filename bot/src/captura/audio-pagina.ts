@@ -34,7 +34,23 @@ export function instalarGrabadorEnPagina(o: OpcionesGrabadorPagina): boolean {
   silencio.connect(cero).connect(destino);
   silencio.start();
 
-  const pistas = new Set<string>();
+  // Pistas enlazadas a la mezcla y lo que se creó para cada una. Cuando una pista termina (alguien sale,
+  // Meet reemplaza la pista) se desconecta su fuente y se suelta su <audio> (r2, punto 4): en una sesión
+  // larga con reconexiones no se acumulan nodos ni elementos muertos.
+  const pistas = new Map<string, { pista: MediaStreamTrack; fuente: MediaStreamAudioSourceNode; sumidero: HTMLAudioElement | null }>();
+  const soltar = (id: string) => {
+    const e = pistas.get(id);
+    if (!e) return;
+    pistas.delete(id);
+    try { e.fuente.disconnect(); } catch { /* ya desconectada */ }
+    if (e.sumidero) { try { e.sumidero.pause(); e.sumidero.srcObject = null; } catch { /* */ } }
+  };
+  type VentanaRtc = { __voPistasRTC?: MediaStreamTrack[] };
+  const podar = () => {
+    for (const [id, e] of [...pistas]) if (e.pista.readyState === 'ended') soltar(id);
+    const rtc = (window as unknown as VentanaRtc).__voPistasRTC;
+    if (rtc) for (let i = rtc.length - 1; i >= 0; i--) if (rtc[i].readyState === 'ended') rtc.splice(i, 1);
+  };
   // Medidor de nivel (diagnóstico): pico de volumen de la mezcla desde la última lectura.
   const analizador = ctx.createAnalyser();
   analizador.fftSize = 2048;
@@ -57,13 +73,14 @@ export function instalarGrabadorEnPagina(o: OpcionesGrabadorPagina): boolean {
       const fuente = ctx.createMediaStreamSource(flujo);
       fuente.connect(destino);
       fuente.connect(analizador);
-      pistas.add(pista.id);
-      pista.addEventListener('ended', () => pistas.delete(pista.id));
+      pistas.set(pista.id, { pista, fuente, sumidero });
+      pista.addEventListener('ended', () => soltar(pista.id));
     } catch { /* pista no utilizable */ }
   };
   const conectar = () => {
+    podar();
     // Pistas remotas de WebRTC (rtc-pagina.ts): la fuente principal y más estable.
-    for (const pista of (window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []) enlazar(pista);
+    for (const pista of (window as unknown as VentanaRtc).__voPistasRTC ?? []) enlazar(pista);
     document.querySelectorAll('audio, video').forEach((n) => {
       const el = n as HTMLMediaElement;
       const s = el.srcObject;
@@ -72,9 +89,10 @@ export function instalarGrabadorEnPagina(o: OpcionesGrabadorPagina): boolean {
         if (pistas.has(pista.id) || pista.readyState !== 'live') continue;
         try {
           // Una fuente por PISTA (Meet reemplaza pistas dentro del mismo stream).
-          ctx.createMediaStreamSource(new MediaStream([pista])).connect(destino);
-          pistas.add(pista.id);
-          pista.addEventListener('ended', () => pistas.delete(pista.id));
+          const fuente = ctx.createMediaStreamSource(new MediaStream([pista]));
+          fuente.connect(destino);
+          pistas.set(pista.id, { pista, fuente, sumidero: null });
+          pista.addEventListener('ended', () => soltar(pista.id));
         } catch { /* pista no utilizable */ }
       }
     });
@@ -131,6 +149,7 @@ export function instalarGrabadorEnPagina(o: OpcionesGrabadorPagina): boolean {
       clearInterval(intervalo);
       clearInterval(medir);
       for (const rec of grabadoras.values()) if (rec.state !== 'inactive') rec.stop();
+      for (const id of [...pistas.keys()]) soltar(id);
     },
   };
   return true;

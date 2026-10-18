@@ -35,6 +35,14 @@ export interface ConfigBot {
   solapamientoMs: number;
   /** Bitrate de MediaRecorder. */
   bitsPorSegundo: number;
+  /** Espera máxima a que haya alguien antes de salir sin grabar (30 min; robot de reemplazo: 5 min). */
+  esperaLlegadaMs: number;
+  /** Ausencia de Vale tolerada con el paciente en la llamada (3 min). */
+  graciaValeMs: number;
+  /** Robot de reemplazo (r2): primer seq de sus segmentos (sigue la numeración del anterior). */
+  seqInicial: number;
+  /** Robot de reemplazo (r2): origen común de los tiempos (ms epoch = inicio_at); null = el propio. */
+  origenMs: number | null;
 }
 
 export const MEET_URL_RE = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/;
@@ -96,7 +104,19 @@ export function leerConfig(env: Record<string, string | undefined> = process.env
     segmentoMs: entero(env, 'SEGMENTO_MS', 15 * 60_000, 30_000, 60 * 60_000),
     solapamientoMs: entero(env, 'SOLAPAMIENTO_MS', 3_000, 0, 30_000),
     bitsPorSegundo: entero(env, 'BITS_POR_SEGUNDO', 32_000, 16_000, 128_000),
+    esperaLlegadaMs: entero(env, 'ESPERA_LLEGADA_MS', 30 * 60_000, 60_000, 60 * 60_000),
+    graciaValeMs: entero(env, 'GRACIA_VALE_MS', 3 * 60_000, 5_000, 10 * 60_000),
+    seqInicial: entero(env, 'SEQ_INICIAL', 0, 0, 190),
+    origenMs: origen(env.ORIGEN_MS),
   };
+}
+
+/** ORIGEN_MS: un instante en ms (2023–2100) o nada. */
+function origen(crudo: string | undefined): number | null {
+  if (crudo === undefined || crudo === '') return null;
+  const n = Number(crudo);
+  if (!Number.isInteger(n) || n < 1_700_000_000_000 || n > 4_102_444_800_000) throw new Error('ORIGEN_MS inválido: debe ser un instante en ms');
+  return n;
 }
 
 const CORREO_RE = /^[a-z0-9](?:[a-z0-9._+-]{0,62})@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;

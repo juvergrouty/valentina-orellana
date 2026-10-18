@@ -4,9 +4,10 @@ import assert from 'node:assert/strict';
 import { esNombreDeBot, esVale, leerConfig, normalizarNombre, NOMBRE_ROBOT } from './config.js';
 import { estadoSesionValido, muestraCorreo, soloGoogle } from './sesion.js';
 import { LineaHablantes } from './linea.js';
-import { Vigia } from './vigia.js';
+import { nombreVisible, Vigia } from './vigia.js';
 import { Segmentos } from './segmentos.js';
-import { Sitio, TokenRechazadoError, type EventoBot } from './sitio.js';
+import { horaFinDeRespuesta, SinConsentimientoError, Sitio, TokenRechazadoError, type EventoBot } from './sitio.js';
+import { desfaseOrigen, lineaConDesfase } from './linea.js';
 import { trayectoria } from './meet/humano.js';
 import { argumentosChromium, conIdiomaFijo } from './meet/argumentos.js';
 import { sanearError } from './saneo.js';
@@ -53,12 +54,50 @@ test('nombres: normaliza tildes y reconoce bots y a Vale', () => {
 
 const VIGIA = { botNombre: 'Notas Ps. Valentina Orellana', valeNombres: ['Valentina Orellana'], soloMs: 60_000, maxHumanos: 2, limiteMs: 10_000_000 };
 
-test('vigía: sale cuando Vale se va (tras la gracia) y no antes', () => {
+test('vigía: Vale se va con el paciente en la llamada → a lo más 3 min más (reconexión) y vale_salio', () => {
   const v = new Vigia(VIGIA);
   assert.equal(v.observar(0, ['Valentina Orellana', 'Camila']), null);
   assert.equal(v.observar(1000, ['Camila']), null);
-  assert.equal(v.observar(15_000, ['Camila']), null);
-  assert.equal(v.observar(21_000, ['Camila']), 'vale_salio');
+  assert.equal(v.observar(21_000, ['Camila']), null, 'ya no corta a los 20 s: tolera la reconexión de Vale');
+  assert.equal(v.observar(2 * 60_000, ['Camila']), null);
+  assert.equal(v.observar(1000 + 3 * 60_000, ['Camila']), 'vale_salio', 'tope de 3 min grabando al paciente solo');
+});
+
+test('vigía r2: Vale reconecta dentro de 3 min → sigue; Vale era la última y cuelga → vale_salio en 60 s', () => {
+  const v = new Vigia(VIGIA);
+  v.observar(0, ['Valentina Orellana', 'Camila']);
+  v.observar(10_000, ['Camila']);
+  assert.equal(v.observar(150_000, ['Valentina Orellana', 'Camila']), null);
+  assert.equal(v.observar(400_000, ['Valentina Orellana', 'Camila']), null);
+  // Fin normal: el paciente sale, Vale queda sola y cuelga.
+  assert.equal(v.observar(410_000, ['Valentina Orellana']), null);
+  assert.equal(v.observar(420_000, []), null);
+  assert.equal(v.observar(480_000, []), 'vale_salio');
+  // Desaparecen todos a la vez (falla de la página o de la red del robot) → 'solo' (el sitio relanza).
+  const w = new Vigia(VIGIA);
+  w.observar(0, ['Valentina Orellana', 'Camila']);
+  assert.equal(w.observar(2_000, []), null);
+  assert.equal(w.observar(62_000, []), 'solo');
+});
+
+test('vigía r2 (punto 8): el recuadro de pantalla compartida no cuenta como otra persona', () => {
+  assert.equal(nombreVisible('Valentina Orellana (Presentation)'), 'Valentina Orellana');
+  assert.equal(nombreVisible('Valentina Orellana (presentación)'), 'Valentina Orellana');
+  assert.equal(nombreVisible('Presentation from Camila Rojas'), 'Camila Rojas');
+  assert.equal(nombreVisible('Camila Rojas is presenting'), 'Camila Rojas');
+  assert.equal(nombreVisible('You are presenting'), '');
+  assert.equal(nombreVisible('Camila Rojas'), 'Camila Rojas');
+  const v = new Vigia(VIGIA);
+  const tiles = ['Valentina Orellana', 'Camila Rojas', 'Valentina Orellana (Presentation)', 'You are presenting'];
+  assert.deepEqual(v.humanos(tiles), ['Valentina Orellana', 'Camila Rojas']);
+  for (let t = 0; t <= 60_000; t += 2_000) assert.equal(v.observar(t, tiles), null, 'no sale por participantes_extra');
+});
+
+test('vigía r2: el sitio puede mover la hora límite (evento movido)', () => {
+  const v = new Vigia({ ...VIGIA, limiteMs: 1000 });
+  v.fijarLimite(5000);
+  assert.equal(v.observar(1000, ['Valentina Orellana', 'Camila']), null);
+  assert.equal(v.observar(5000, ['Valentina Orellana', 'Camila']), 'hora_fin');
 });
 
 test('vigía: si Vale vuelve dentro de la gracia, sigue', () => {
@@ -82,7 +121,10 @@ test('vigía: antes de que llegue alguien espera esperaLlegadaMs (el robot entra
   assert.equal(v.observar(0, []), null);
   assert.equal(v.observar(5 * 60_000, []), null);
   assert.equal(v.observar(29 * 60_000, ['Otter Notetaker']), null);
-  assert.equal(v.observar(30 * 60_000, []), 'solo');
+  assert.equal(v.observar(30 * 60_000, []), 'nadie_llego', 'r2: nadie llegó (no se grabó nada)');
+  const r = new Vigia({ ...VIGIA, esperaLlegadaMs: 5 * 60_000 }); // robot de reemplazo
+  assert.equal(r.observar(0, []), null);
+  assert.equal(r.observar(5 * 60_000, []), 'nadie_llego');
   const w = new Vigia(VIGIA);
   assert.equal(w.observar(0, []), null);
   assert.equal(w.observar(10 * 60_000, ['Valentina Orellana']), null);

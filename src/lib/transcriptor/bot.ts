@@ -25,6 +25,10 @@ import {
   cuentaRobotVigente, guardarSesionRenovada, leerModoBot, liberarSesion, marcarSesionVencida, tomarSesion, type ModoBot,
 } from './botCuenta';
 import { alertaDeAvisoRobot, alertaDeErrorBot, esMotivoSinSesion } from './avisosRobot';
+import {
+  cerrarConLoGrabado, debeRelanzarBot, ESPERA_LLEGADA_RELANZADO_MS, lanzamientosDe, maquinaMuerta, NOTA_NADIE_LLEGO,
+  NOTA_SIN_CONSENTIMIENTO_BOT, prepararRelanzamiento,
+} from './botReconexion';
 import type { NuevaAlerta } from './alertas';
 import {
   BOT_NOMBRE, PREFIJO_AUDIO, RUTAS, TIEMPOS,
@@ -127,11 +131,19 @@ export type EventoBotCuenta =
   | { tipo: 'pide_sesion' }
   | { tipo: 'sesion_actualizada'; sesion: unknown }
   | { tipo: 'sesion_invalida'; motivo: string };
-export type EventoBotSitio = EventoBot | EventoBotCuenta;
+/**
+ * Motivos de `fin` (r2, 18 oct): además de los de tipos.ts, 'nadie_llego' (nadie entró a la reunión en
+ * el plazo: no se grabó nada) y 'sin_consentimiento' (el sitio negó la grabación: el robot salió al tiro).
+ */
+export type MotivoFinBot = Extract<EventoBot, { tipo: 'fin' }>['motivo'] | 'nadie_llego' | 'sin_consentimiento';
+export type EventoFinBot = { tipo: 'fin'; motivo: MotivoFinBot; linea_hablantes: LineaHablante[] };
+export type EventoBotSitio = Exclude<EventoBot, { tipo: 'fin' }> | EventoFinBot | EventoBotCuenta;
+/** Código de la respuesta 403 cuando falta el consentimiento (el robot sale de la reunión al verlo). */
+export const CODIGO_SIN_CONSENTIMIENTO = 'sin_consentimiento';
 
 export type ResultadoParseo = { ok: true; evento: EventoBotSitio } | { ok: false; error: string };
 
-const MOTIVOS = new Set(['vale_salio', 'solo', 'hora_fin', 'no_admitido', 'expulsado', 'participantes_extra', 'error']);
+const MOTIVOS = new Set(['vale_salio', 'solo', 'hora_fin', 'no_admitido', 'expulsado', 'participantes_extra', 'error', 'nadie_llego', 'sin_consentimiento']);
 const esEntero = (x: unknown, min: number, max: number): x is number =>
   typeof x === 'number' && Number.isInteger(x) && x >= min && x <= max;
 
@@ -169,7 +181,7 @@ export function parsearEventoBot(cuerpo: unknown): ResultadoParseo {
       if (typeof c.motivo !== 'string' || !MOTIVOS.has(c.motivo)) return { ok: false, error: 'motivo inválido' };
       const linea = lineaValida(c.linea_hablantes ?? []);
       if (!linea) return { ok: false, error: 'linea_hablantes inválida' };
-      return { ok: true, evento: { tipo: 'fin', motivo: c.motivo as Extract<EventoBot, { tipo: 'fin' }>['motivo'], linea_hablantes: linea } };
+      return { ok: true, evento: { tipo: 'fin', motivo: c.motivo as MotivoFinBot, linea_hablantes: linea } };
     }
     case 'error':
       if (typeof c.detalle !== 'string') return { ok: false, error: 'detalle inválido' };
@@ -189,14 +201,17 @@ export function parsearEventoBot(cuerpo: unknown): ResultadoParseo {
 /**
  * evento_id para transcriptor_webhooks (idempotencia): '<grabacion_id>:<tipo>:<seq>'.
  * pide_url no se deduplica (es idempotente por sí mismo y el bot lo repite al reintentar).
+ * `lanzamiento` (r2): distingue a cada robot de la MISMA grabación (reemplazo tras una caída); sin
+ * esto el `fin` del segundo robot se tomaría por repetido del primero. Los segmentos no lo necesitan
+ * (el robot nuevo sigue la numeración).
  */
-export function idEventoBot(grabacionId: string, e: EventoBotSitio): string | null {
+export function idEventoBot(grabacionId: string, e: EventoBotSitio, lanzamiento = ''): string | null {
   switch (e.tipo) {
     case 'pide_url': return null;
     case 'pide_sesion': return null; // el candado de la sesión ya lo hace idempotente
     case 'segmento_subido': return `${grabacionId}:segmento_subido:${e.seq}`;
     case 'error': return `${grabacionId}:error:${createHash('sha256').update(e.detalle).digest('hex').slice(0, 12)}`;
-    default: return `${grabacionId}:${e.tipo}:`;
+    default: return `${grabacionId}:${e.tipo}:${lanzamiento}`;
   }
 }
 
@@ -215,8 +230,9 @@ export function payloadSeguro(e: EventoBotSitio): Record<string, unknown> {
 }
 
 /** Texto de nota_sistema según cómo terminó el bot (visible en el panel). */
-export function notaFinBot(motivo: Extract<EventoBot, { tipo: 'fin' }>['motivo'], minutos: number): string | null {
+export function notaFinBot(motivo: MotivoFinBot, minutos: number): string | null {
   switch (motivo) {
+    case 'sin_consentimiento': return NOTA_SIN_CONSENTIMIENTO_BOT;
     case 'error': return `Grabación incompleta (el asistente de notas se cayó a los ${minutos} min)`;
     case 'participantes_extra': return 'El asistente de notas salió porque había más participantes de los esperados (no graba a terceros sin consentimiento)';
     case 'expulsado': return 'El asistente de notas fue retirado de la reunión; se conserva lo grabado hasta ese momento';
@@ -315,6 +331,11 @@ export interface ParamsMaquina {
   modo?: ModoBot;
   /** Correo de la cuenta del robot (el bot comprueba que la sesión sea de esa cuenta). */
   cuentaEmail?: string | null;
+  /**
+   * Robot de REEMPLAZO de una grabación en curso (r2): sigue la numeración de segmentos (seqInicial),
+   * mide sus tiempos desde el mismo origen (origenMs = inicio_at) y espera menos a que haya alguien.
+   */
+  relanzamiento?: { seqInicial: number; origenMs: number } | null;
 }
 
 /** Cuerpo de POST /v1/apps/{app}/machines (docs.fly.io/machines/api/machines-resource). */
@@ -347,6 +368,11 @@ export function cuerpoMaquina(p: ParamsMaquina): Record<string, unknown> {
         VALE_NOMBRES: p.nombresVale,
         BOT_MODO: p.modo === 'cuenta' && p.cuentaEmail ? 'cuenta' : 'invitado',
         ...(p.modo === 'cuenta' && p.cuentaEmail ? { BOT_CUENTA_EMAIL: p.cuentaEmail } : {}),
+        ...(p.relanzamiento ? {
+          SEQ_INICIAL: String(p.relanzamiento.seqInicial),
+          ORIGEN_MS: String(Math.round(p.relanzamiento.origenMs)),
+          ESPERA_LLEGADA_MS: String(ESPERA_LLEGADA_RELANZADO_MS),
+        } : {}),
       },
       guest: { cpu_kind: 'shared', cpus: 2, memory_mb: 2048 },
       // "If true, the Machine destroys itself once it's complete." (Machines API)
@@ -427,7 +453,10 @@ function nombreAppValido(app: string | undefined): string {
   return app;
 }
 
-export function crearBot(deps: DepsBot = {}): Bot {
+/** Bot de tipos.ts + estado de la máquina (r2: detectar un robot que se cayó sin mandar `fin`). */
+export type BotSitio = Bot & { estadoMaquina(machineId: string): Promise<'viva' | 'muerta' | null> };
+
+export function crearBot(deps: DepsBot = {}): BotSitio {
   const f = deps.fetch ?? fetch;
   const db = async () => deps.db ?? (await clientePorDefecto());
 
@@ -563,10 +592,25 @@ export function crearBot(deps: DepsBot = {}): Bot {
     // 0) Modo 'cuenta': solo si hay una sesión vigente del robot; si no, invitado (y queda en la bitácora).
     const { modo, cuentaEmail } = await prepararCuenta(grabacion, c);
 
-    // 1) Token nuevo: se guarda SOLO su HMAC, y únicamente si la grabación sigue en bot_lanzando.
+    // Reemplazo de un robot que se cayó en plena sesión (r2, botReconexion.ts): misma grabación, sigue
+    // la numeración de segmentos y el origen de tiempo del primero.
+    let relanzamiento: ParamsMaquina['relanzamiento'] = null;
+    if (grabacion.estado === 'grabando') {
+      const origenMs = grabacion.inicio_at ? Date.parse(grabacion.inicio_at) : NaN;
+      if (Number.isNaN(origenMs)) throw new Error('La grabación en curso no tiene inicio_at; no se puede relanzar el bot');
+      const { data: ult, error: eS } = await c.from('grabacion_segmentos').select('seq')
+        .eq('grabacion_id', grabacion.id).not('subido_at', 'is', null).order('seq', { ascending: false }).limit(1).maybeSingle();
+      if (eS) throw new Error(`segmentos: ${eS.message}`);
+      const seqInicial = ult ? Number((ult as { seq: number }).seq) + 1 : 0;
+      if (seqInicial > MAX_SEQ_BOT - 10) throw new Error('La grabación ya tiene demasiados segmentos para relanzar el bot');
+      relanzamiento = { seqInicial, origenMs };
+    }
+
+    // 1) Token nuevo: se guarda SOLO su HMAC, y únicamente si la grabación sigue en bot_lanzando (o en
+    //    grabando, para un reemplazo) y SIN máquina: nunca dos robots a la vez en la misma grabación.
     const token = generarTokenBot();
     const cuerpo = cuerpoMaquina({
-      grabacion, token, imagen: env.FLY_IMAGEN, nombresVale, modo, cuentaEmail,
+      grabacion, token, imagen: env.FLY_IMAGEN, nombresVale, modo, cuentaEmail, relanzamiento,
       eventoUrl: new URL(RUTAS.botEvento, env.PUBLIC_SITE_URL).toString(),
     });
     const { data: fila, error } = await c.from('grabaciones')
@@ -574,10 +618,14 @@ export function crearBot(deps: DepsBot = {}): Bot {
         bot_token_sha256: hmacTokenBot(token, env.BOT_TOKEN_SECRET ?? ''),
         bot_token_vence_at: venceTokenBot(grabacion.hora_fin_prevista).toISOString(),
       })
-      .eq('id', grabacion.id).eq('estado', 'bot_lanzando')
+      .eq('id', grabacion.id).eq('estado', relanzamiento ? 'grabando' : 'bot_lanzando').is('bot_machine_id', null)
       .select('id').maybeSingle();
     if (error) throw new Error(`No se pudo guardar el token del bot: ${error.message}`);
-    if (!fila) throw new Error('La grabación ya no está en bot_lanzando; no se lanza el bot');
+    if (!fila) {
+      throw new Error(relanzamiento
+        ? 'La grabación ya tiene otro asistente o terminó; no se relanza el bot'
+        : 'La grabación ya no está en bot_lanzando (o ya tiene máquina); no se lanza el bot');
+    }
 
     // 2) Máquina efímera.
     const res = await f(`${FLY_API}/apps/${app}/machines`, {
@@ -596,8 +644,27 @@ export function crearBot(deps: DepsBot = {}): Bot {
     if (!maquina.id) throw new Error('Fly no devolvió el id de la máquina');
     await c.from('grabaciones').update({ bot_machine_id: maquina.id }).eq('id', grabacion.id);
     const { auditar } = await import('./auditoria');
-    await auditar('cron', 'bot_lanzar', { grabacionId: grabacion.id, patientId: grabacion.patient_id, detalle: { machine_id: maquina.id, region: FLY_REGION }, cliente: c });
+    await auditar('cron', 'bot_lanzar', { grabacionId: grabacion.id, patientId: grabacion.patient_id, detalle: { machine_id: maquina.id, region: FLY_REGION, ...(relanzamiento ? { relanzamiento: true, seq_inicial: relanzamiento.seqInicial } : {}) }, cliente: c });
     return { machineId: maquina.id };
+  }
+
+  /**
+   * ¿Sigue corriendo la máquina? GET /v1/apps/{app}/machines/{id} (docs.fly.io machines-resource; estados
+   * en docs.fly.io/machines/machine-states). 'muerta' si paró, falló, se destruye o ya no existe (404);
+   * null si no se sabe (red, 5xx, sin token): en ese caso no se toca nada.
+   */
+  async function estadoMaquina(machineId: string): Promise<'viva' | 'muerta' | null> {
+    const env = envBot(deps);
+    if (!env.FLY_API_TOKEN || !/^[a-z0-9]{6,40}$/i.test(machineId)) return null;
+    try {
+      const app = nombreAppValido(env.FLY_APP_BOT);
+      const res = await f(`${FLY_API}/apps/${app}/machines/${machineId}`, {
+        headers: { Authorization: `Bearer ${env.FLY_API_TOKEN}` }, signal: AbortSignal.timeout(10_000),
+      });
+      const cuerpo = res.ok ? ((await res.json().catch(() => null)) as { state?: unknown } | null) : null;
+      const m = maquinaMuerta(res.status, cuerpo?.state);
+      return m === null ? null : m ? 'muerta' : 'viva';
+    } catch { return null; }
   }
 
   async function matarBot(machineId: string): Promise<void> {
@@ -612,12 +679,15 @@ export function crearBot(deps: DepsBot = {}): Bot {
     });
     // 404 = ya no existe (se autodestruyó): es el resultado buscado.
     if (!res.ok && res.status !== 404) throw new Error(`Fly no pudo destruir la máquina (${res.status})`);
-    // Revoca el token de esa grabación (el bot ya no debe poder subir nada).
+    // Revoca el token de esa grabación (el bot ya no debe poder subir nada) y suelta el candado de la
+    // sesión de Google del robot (r2, punto 6): si no, el robot siguiente entraría como invitado.
     const c = await db();
     await c.from('grabaciones').update({ bot_token_vence_at: new Date().toISOString() }).eq('bot_machine_id', machineId);
+    const { data: filas } = await c.from('grabaciones').select('id').eq('bot_machine_id', machineId);
+    for (const g of ((filas ?? []) as { id: string }[])) await liberarSesion(c, g.id).catch(() => {});
   }
 
-  return { sesionesOnlineProximas, lanzarBot, matarBot };
+  return { sesionesOnlineProximas, lanzarBot, matarBot, estadoMaquina };
 }
 
 // ─── Eventos del bot (con base) ──────────────────────────────────────────────
@@ -648,7 +718,8 @@ export interface RespuestaEvento { status: number; cuerpo: Record<string, unknow
 const NO_ENCONTRADO: RespuestaEvento = { status: 404, cuerpo: { error: 'No encontrado' } };
 const ok = (extra: Record<string, unknown> = {}): RespuestaEvento => ({ status: 200, cuerpo: { ok: true, ...extra } });
 
-type FilaBot = Pick<Grabacion, 'id' | 'patient_id' | 'estado' | 'inicio_at' | 'bot_token_vence_at' | 'bot_machine_id' | 'hora_fin_prevista'> & { tipo?: TipoSesion | null };
+type FilaBot = Pick<Grabacion, 'id' | 'patient_id' | 'estado' | 'inicio_at' | 'bot_token_vence_at' | 'bot_machine_id' | 'hora_fin_prevista'>
+  & Partial<Pick<Grabacion, 'linea_hablantes' | 'nota_sistema'>> & { tipo?: TipoSesion | null };
 
 /**
  * Lógica completa de POST /api/transcriptor/bot-evento. Nunca devuelve datos de pacientes:
@@ -677,7 +748,7 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
 
   const hmac = hmacTokenBot(token, secretoBot);
   const { data: g, error: eG } = await c.from('grabaciones')
-    .select('id, patient_id, estado, inicio_at, bot_token_vence_at, bot_machine_id, hora_fin_prevista, tipo')
+    .select('id, patient_id, estado, inicio_at, bot_token_vence_at, bot_machine_id, hora_fin_prevista, tipo, linea_hablantes, nota_sistema')
     .eq('bot_token_sha256', hmac).maybeSingle();
   if (eG) return { status: 503, cuerpo: { error: 'Intenta de nuevo' } };
   if (!g || !tokenVigente((g as FilaBot).bot_token_vence_at, ahora)) {
@@ -693,8 +764,23 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
   const ev = p.evento;
   const auditoria = { grabacionId: grab.id, patientId: grab.patient_id, request: entrada.request, clientAddress: entrada.clientAddress, cliente: c };
 
-  // Idempotencia: si este evento ya se procesó, responder igual sin repetir efectos.
-  const eventoId = idEventoBot(grab.id, ev);
+  // Idempotencia: si este evento ya se procesó, responder igual sin repetir efectos. El HMAC del token
+  // (ya guardado en la fila) distingue a cada robot de la misma grabación (reemplazo tras una caída).
+  const eventoId = idEventoBot(grab.id, ev, hmac.slice(0, 12));
+  /** Hora de término vigente (r2, punto 7): si Vale movió el evento, el robot ajusta su salida. */
+  const horaFin = grab.hora_fin_prevista ? { hora_fin: new Date(grab.hora_fin_prevista).toISOString() } : {};
+  /** Consentimiento con grabación autorizada (auditoría 17 oct; r2: también al empezar a grabar). */
+  const sinConsentimiento = async (fase: string): Promise<RespuestaEvento | null> => {
+    let permiso: { puede: boolean; motivo?: string };
+    try {
+      const verificar = deps.puedeGrabar
+        ?? (async (pid: string | null, t: TipoSesion) => (await import('./consentimiento')).evaluarEnBase(pid, t, c));
+      permiso = await verificar(grab.patient_id, (grab.tipo ?? 'sin_tipo') as TipoSesion);
+    } catch { return { status: 503, cuerpo: { error: 'Intenta de nuevo' } }; }
+    if (permiso.puede) return null;
+    await auditar('bot', 'consentimiento_faltante', { ...auditoria, resultado: 'denegado', detalle: { fase, motivo: permiso.motivo ?? null } });
+    return { status: 403, cuerpo: { error: 'Sin consentimiento de grabación vigente', codigo: CODIGO_SIN_CONSENTIMIENTO } };
+  };
   if (eventoId) {
     const { data: previo } = await c.from('transcriptor_webhooks').select('procesado_at')
       .eq('proveedor', 'bot').eq('evento_id', eventoId).maybeSingle();
@@ -708,7 +794,7 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
     );
   };
 
-  const { transicionar, marcarError } = await import('./estados');
+  const { transicionar, marcarError, reintentar } = await import('./estados');
 
   switch (ev.tipo) {
     case 'lobby': {
@@ -718,26 +804,24 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
       return ok();
     }
     case 'activo': {
+      // r2 (punto 3): el robot manda `activo` cuando EMPIEZA A GRABAR (hay alguien en la llamada), no al
+      // ser admitido. Antes de grabar se revisa el consentimiento: sin él, 403 y el robot sale al tiro.
+      const negado = await sinConsentimiento('bot_inicio');
+      if (negado) return negado;
       if (grab.estado === 'bot_lanzando') await transicionar(grab.id, ['bot_lanzando'], 'bot_en_lobby', {}, c);
+      // Un robot de reemplazo llega con la grabación ya en 'grabando': no se toca inicio_at (origen común).
       await transicionar(grab.id, ['bot_en_lobby'], 'grabando', { inicio_at: ahora.toISOString() }, c);
       await auditar('bot', 'bot_admitido', auditoria);
       await marcar();
-      return ok();
+      return ok(horaFin);
     }
     case 'pide_url': {
       if (grab.estado !== 'grabando') return { status: 409, cuerpo: { error: 'La grabación no está activa' } };
       // Auditoría de seguridad (17 oct): igual que subida-url en presencial, el consentimiento se revisa antes
       // de entregar cada URL de subida (el retiro corta lo que sigue). Falla cerrado si no se puede leer.
-      let permiso: { puede: boolean; motivo?: string };
-      try {
-        const verificar = deps.puedeGrabar
-          ?? (async (pid: string | null, t: TipoSesion) => (await import('./consentimiento')).evaluarEnBase(pid, t, c));
-        permiso = await verificar(grab.patient_id, (grab.tipo ?? 'sin_tipo') as TipoSesion);
-      } catch { return { status: 503, cuerpo: { error: 'Intenta de nuevo' } }; }
-      if (!permiso.puede) {
-        await auditar('bot', 'consentimiento_faltante', { ...auditoria, resultado: 'denegado', detalle: { fase: 'bot_subida', motivo: permiso.motivo ?? null } });
-        return { status: 403, cuerpo: { error: 'Sin consentimiento de grabación vigente' } };
-      }
+      // r2 (punto 2): el 403 trae codigo 'sin_consentimiento' y el robot sale de la reunión al verlo.
+      const negado = await sinConsentimiento('bot_subida');
+      if (negado) return negado;
       const alm = await deps.almacenamiento?.();
       if (!alm) return { status: 503, cuerpo: { error: 'Almacenamiento no disponible' } };
       const { data: seg } = await c.from('grabacion_segmentos').select('r2_key, subido_at')
@@ -780,21 +864,38 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
           .eq('id', seg.id).is('subido_at', null);
       }
       await marcar();
-      return ok();
+      return ok(horaFin);
     }
     case 'fin': {
       await liberarSesion(c, grab.id).catch(() => {}); // por si el bot no alcanzó a devolverla
       const finAt = ahora.toISOString();
       const revocar = { bot_token_vence_at: finAt };
       if (grab.estado === 'bot_lanzando' || grab.estado === 'bot_en_lobby') {
+        const aLobby = async () => { if (grab.estado === 'bot_lanzando') await transicionar(grab.id, ['bot_lanzando'], 'bot_en_lobby', {}, c); };
         if (ev.motivo === 'no_admitido') {
-          if (grab.estado === 'bot_lanzando') await transicionar(grab.id, ['bot_lanzando'], 'bot_en_lobby', {}, c);
+          await aLobby();
           await transicionar(grab.id, ['bot_en_lobby'], 'bot_no_admitido', { ...revocar, fin_at: finAt }, c);
           await auditar('bot', 'bot_no_admitido', auditoria);
+        } else if (ev.motivo === 'nadie_llego') {
+          // r2 (punto 3): nadie entró a la reunión. No se grabó nada: sin_audio con nota clara (no es la
+          // alerta de "transcripción vacía": esa sale solo si hubo audio y no se reconoció voz).
+          await aLobby();
+          await transicionar(grab.id, ['bot_en_lobby'], 'sin_audio', { ...revocar, fin_at: finAt, nota_sistema: NOTA_NADIE_LLEGO }, c);
+          await auditar('bot', 'bot_salio', { ...auditoria, detalle: { motivo: ev.motivo } });
+        } else if (ev.motivo === 'sin_consentimiento') {
+          await transicionar(grab.id, [grab.estado], 'cancelada', {
+            ...revocar, fin_at: finAt, nota_sistema: 'No se grabó: falta el consentimiento de grabación (se retiró o cambió).',
+          }, c);
+          await auditar('bot', 'bot_salio', { ...auditoria, resultado: 'denegado', detalle: { motivo: ev.motivo } });
         } else {
           await c.from('grabaciones').update(revocar).eq('id', grab.id);
-          await marcarError(grab.id, grab.estado, `El asistente de notas terminó antes de grabar (${ev.motivo})`, c);
+          const e2 = await marcarError(grab.id, grab.estado, `El asistente de notas terminó antes de grabar (${ev.motivo})`, c);
           await auditar('bot', 'bot_salio', { ...auditoria, resultado: 'error', detalle: { motivo: ev.motivo } });
+          // r2 (punto 1b): si se cayó antes de grabar y la sesión sigue en su ventana, se relanza solo
+          // (lo mismo que "Reintentar": vuelve a bot_lanzando sin máquina y el orquestador lanza otro).
+          if (e2 && debeRelanzarBot({ motivo: ev.motivo, horaFinPrevista: grab.hora_fin_prevista, ahora, lanzamientos: await lanzamientosDe(c, grab.id) })) {
+            await reintentar(grab.id, c);
+          }
         }
         await marcar();
         return ok();
@@ -802,18 +903,13 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
       if (grab.estado === 'grabando') {
         const inicio = grab.inicio_at ? Date.parse(grab.inicio_at) : ahora.getTime();
         const duracionSeg = Math.max(0, Math.round((ahora.getTime() - inicio) / 1000));
-        const movida = await transicionar(grab.id, ['grabando'], 'subiendo', {
-          ...revocar, fin_at: finAt, duracion_seg: duracionSeg, linea_hablantes: ev.linea_hablantes,
-          nota_sistema: notaFinBot(ev.motivo, Math.round(duracionSeg / 60)),
-        }, c);
-        if (movida) {
-          // Segmentos pedidos pero nunca confirmados: fuera (el ciclo de vida de R2 borra el objeto).
-          await c.from('grabacion_segmentos').delete().eq('grabacion_id', grab.id).is('subido_at', null);
-          const { count } = await c.from('grabacion_segmentos').select('id', { count: 'exact', head: true })
-            .eq('grabacion_id', grab.id).not('subido_at', 'is', null);
-          await transicionar(grab.id, ['subiendo'], (count ?? 0) > 0 ? 'subida' : 'sin_audio', {}, c);
+        // r2 (punto 1b): se cayó o quedó 'solo' antes de la hora → robot de reemplazo a la misma grabación.
+        const relanzar = debeRelanzarBot({ motivo: ev.motivo, horaFinPrevista: grab.hora_fin_prevista, ahora, lanzamientos: await lanzamientosDe(c, grab.id) })
+          && await prepararRelanzamiento(c, grab, { ahora, linea: ev.linea_hablantes });
+        if (!relanzar) {
+          await cerrarConLoGrabado(c, grab, { ahora, linea: ev.linea_hablantes, notaFin: notaFinBot(ev.motivo, Math.round(duracionSeg / 60)) });
         }
-        await auditar('bot', 'bot_salio', { ...auditoria, detalle: { motivo: ev.motivo, duracion_seg: duracionSeg } });
+        await auditar('bot', 'bot_salio', { ...auditoria, detalle: { motivo: ev.motivo, duracion_seg: duracionSeg, ...(relanzar ? { relanzar: true } : {}) } });
         await marcar();
         return ok();
       }
@@ -831,7 +927,9 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
     }
     // ── Modo 'cuenta' (botCuenta.ts). La sesión es del ROBOT (sin datos de pacientes). ──
     case 'pide_sesion': {
-      if (grab.estado !== 'bot_lanzando') return { status: 409, cuerpo: { error: 'La sesión solo se entrega antes de entrar' } };
+      // r2: un robot de reemplazo la pide con la grabación ya en 'grabando' (su token es nuevo; el
+      // candado sigue siendo uno a la vez y el robot que se cayó ya lo soltó).
+      if (grab.estado !== 'bot_lanzando' && grab.estado !== 'grabando') return { status: 409, cuerpo: { error: 'La sesión solo se entrega antes de entrar' } };
       const r = await tomarSesion(c, grab.id, ahora, secretoBot, grab.hora_fin_prevista);
       if (!r.ok) {
         await auditar('bot', 'alerta', { ...auditoria, resultado: 'error', detalle: { aviso: 'robot_sin_sesion', motivo: r.motivo } });

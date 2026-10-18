@@ -10,7 +10,7 @@ export const TRANSICIONES: Readonly<Record<EstadoGrabacion, readonly EstadoGraba
   creada:             ['sin_consentimiento', 'grabando', 'bot_lanzando', 'cancelada', 'error'],
   sin_consentimiento: ['creada', 'cancelada'],                      // Vale asigna ficha / firma → vuelve a creada
   bot_lanzando:       ['bot_en_lobby', 'cancelada', 'error'],
-  bot_en_lobby:       ['grabando', 'bot_no_admitido', 'cancelada', 'error'],
+  bot_en_lobby:       ['grabando', 'bot_no_admitido', 'sin_audio', 'cancelada', 'error'], // sin_audio: nadie llegó a la sesión (robot r2)
   bot_no_admitido:    [],
   grabando:           ['pausada', 'subiendo', 'cancelada', 'error'],
   pausada:            ['grabando', 'subiendo', 'cancelada', 'error'],

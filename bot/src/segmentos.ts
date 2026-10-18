@@ -34,7 +34,20 @@ export class Segmentos {
     this.log = o.log ?? (() => {});
   }
 
+  /**
+   * r2 (punto 2): el sitio negó una URL por falta de consentimiento. Desde ahí no se sube NADA más:
+   * lo que está en memoria se descarta y el bot sale de la reunión (index.ts lo revisa cada 2 s).
+   */
+  sinConsentimiento = false;
+
+  /** Descarta todo lo que está en memoria (abiertos y fallidos). */
+  descartar(): void {
+    this.abiertos.clear();
+    this.fallidos.splice(0);
+  }
+
   agregarTrozo(seq: number, datos: Buffer): void {
+    if (this.sinConsentimiento) return;
     const s = this.abiertos.get(seq) ?? { trozos: [], bytes: 0 };
     if (s.bytes + datos.length > (this.o.maxBytesSegmento ?? 64 * 1024 * 1024)) {
       this.log(`segmento ${seq}: se superó el tope de memoria; se descarta un trozo`);
@@ -49,6 +62,7 @@ export class Segmentos {
   cerrar(seq: number, offsetMs: number, duracionMs: number): Promise<void> {
     const s = this.abiertos.get(seq);
     this.abiertos.delete(seq);
+    if (this.sinConsentimiento) return this.cola;
     if (!s || s.bytes === 0) { this.log(`segmento ${seq}: vacío, no se sube`); return this.cola; }
     const seg: SegmentoCerrado = { seq, datos: Buffer.concat(s.trozos), offset_ms: Math.round(offsetMs), duracion_ms: Math.round(duracionMs) };
     this.cola = this.cola.then(() => this.subir(seg)).catch(() => {});
@@ -59,6 +73,7 @@ export class Segmentos {
     const intentos = this.o.intentosPut ?? 4;
     const base = this.o.esperaBaseMs ?? 2000;
     for (let i = 0; i < intentos; i++) {
+      if (this.sinConsentimiento) return;
       try {
         // URL nueva en cada intento (vence en 15 min).
         const url = await this.o.sitio.pedirUrl(seg.seq);
@@ -77,6 +92,12 @@ export class Segmentos {
         return;
       } catch (e) {
         if (e instanceof Error && e.name === 'TokenRechazadoError') throw e;
+        if (e instanceof Error && e.name === 'SinConsentimientoError') {
+          this.sinConsentimiento = true;
+          this.log(`segmento ${seg.seq}: el sitio no autoriza grabar (consentimiento); se descarta`);
+          this.descartar();
+          return;
+        }
         this.log(`segmento ${seg.seq}: intento ${i + 1} falló (${e instanceof Error ? e.message : e})`);
         await dormir(base * 2 ** i);
       }

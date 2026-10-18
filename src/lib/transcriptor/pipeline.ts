@@ -20,7 +20,12 @@ import {
   type AccionAuditoria, type AssemblyAI, type Bot, type DecisionModelo, type EstadoGrabacion, type Grabacion,
   type Pipeline, type PuedeGrabar, type ResultadoTranscripcion, type ResumenIA, type Segmento, type SesionOnline, type TipoSesion,
 } from './tipos';
-import { leaseVencido, marcarError, soltar, tomar, transicionar } from './estados';
+import { leaseVencido, marcarError, reintentar, soltar, tomar, transicionar } from './estados';
+import {
+  cerrarConLoGrabado, debeRelanzarBot, eventIdLiberado, GRACIA_REVISAR_MAQUINA_MS, lanzamientosDe, MAX_LANZAMIENTOS_BOT,
+  NOTA_SIN_CONSENTIMIENTO_BOT, prepararRelanzamiento, previaLiberable, RESTANTE_MIN_ERROR_MS, type PreviaEvento,
+} from './botReconexion';
+import { extenderUsoSesion, liberarSesion } from './botCuenta';
 import { elegirModelo } from './reglas';
 import { repararMojibake } from './texto';
 import { borrarTranscriptTrasGuardar, decisionTrasErrorAAI, ErrorAssemblyAI, sanearMensaje } from './assemblyai';
@@ -52,9 +57,18 @@ export const PRESUPUESTO_RESUMEN_MS = 285_000;
 export const MIN_RESUMEN_MS = 30_000;
 /** Mínimo para empezar a guardar una transcripción (descargar, unir, cifrar, borrar). */
 export const MIN_GUARDAR_MS = 12_000;
-/** Ventana del despacho de bots (50-arquitectura §1.3). */
-export const VENTANA_BOT_ANTES_MS = 5 * 60_000;
+/**
+ * Ventana del despacho de bots (50-arquitectura §1.3): sesiones que empiezan en [ahora−20, ahora+4] min.
+ * r2 (punto 5): antes era −5 min; si el cron o Calendar fallaban esos minutos la sesión quedaba sin robot.
+ * Con 20 min se cubre una caída corta; no duplica porque solo se despacha si el evento no tiene grabación.
+ */
+export const VENTANA_BOT_ANTES_MS = 20 * 60_000;
 export const VENTANA_BOT_DESPUES_MS = 4 * 60_000;
+/** r2 (punto 7): eventos empezados hasta hace 3 h se leen igual, solo para seguir su hora si Vale los mueve. */
+export const VENTANA_SINCRONIZAR_MS = 3 * 60 * 60_000;
+/** Vigencia del token tras el fin (igual que VIGENCIA_TOKEN_TRAS_FIN_MS de bot.ts; no se importa para no cargarlo). */
+const VIGENCIA_TOKEN_BOT_MS = 2 * 60 * 60_000;
+const ESTADOS_BOT_ACTIVO: readonly EstadoGrabacion[] = ['bot_lanzando', 'bot_en_lobby', 'grabando'];
 /** Vigilante: máquina del bot viva después de HORA_FIN + 40 min (el bot se corta solo a +30). */
 export const VIGILANTE_TRAS_FIN_MS = 40 * 60_000;
 /** Sondeo cuando el webhook de AssemblyAI no llegó. */
@@ -79,6 +93,8 @@ const ACC = {
   enviarAAI: 'enviar_assemblyai' as AccionAuditoria,
   resumen: 'resumen_generado' as AccionAuditoria,
   cancelarHuerfana: 'cancelar_huerfana' as AccionAuditoria,
+  eventoMovido: 'bot_evento_movido' as AccionAuditoria,
+  horaMovida: 'bot_hora_movida' as AccionAuditoria,
 };
 
 const ACTIVOS_AAI = ['enviado', 'queued', 'processing'] as const;
@@ -98,7 +114,8 @@ export interface DepsPipeline {
   db: SupabaseClient;
   almacenamiento: Pick<AlmacenamientoTranscriptor, 'urlLectura' | 'guardarTranscripcion' | 'leerTranscripcion' | 'borrarAudio' | 'copiarAB2'>;
   aai: AssemblyAI;
-  bot: Bot;
+  /** estadoMaquina (bot.ts, r2): si está, el vigilante detecta robots caídos sin `fin`. */
+  bot: Bot & { estadoMaquina?: (machineId: string) => Promise<'viva' | 'muerta' | null> };
   puedeGrabar: PuedeGrabar;
   /** Cliente de mensajes de Anthropic (pruebas). Sin esto, resumirSesion usa el SDK real. */
   claude?: ClienteMensajes;
@@ -338,6 +355,55 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         n++;
       });
     }
+    return n + (await revisarMaquinas(ahora, corte));
+  }
+
+  /**
+   * r2 (punto 1b): robots que se cayeron SIN mandar `fin` (la máquina perdió la red, el proceso murió).
+   * Solo dentro de la ventana de la sesión (lo de después lo cierra el vigilante). Si Fly no responde,
+   * no se toca nada. En plena grabación → robot de reemplazo (o se cierra con lo grabado); antes de
+   * grabar → error + relanzamiento automático (igual que "Reintentar") mientras haya tiempo.
+   */
+  async function revisarMaquinas(ahora: Date, corte: string): Promise<number> {
+    const estadoMaquina = deps.bot.estadoMaquina;
+    if (!estadoMaquina) return 0;
+    const lista = await grabacionesEn([...ESTADOS_BOT_ACTIVO], ahora,
+      (q) => q.eq('origen', 'online').not('bot_machine_id', 'is', null).gte('hora_fin_prevista', corte));
+    let n = 0;
+    for (const g0 of lista) {
+      if (queda() < 5_000) break;
+      if (!g0.bot_machine_id || ahora.getTime() - Date.parse(g0.updated_at) < GRACIA_REVISAR_MAQUINA_MS) continue;
+      if ((await estadoMaquina(g0.bot_machine_id)) !== 'muerta') continue;
+      await conToma(g0, ahora, async (g) => {
+        if (g.bot_machine_id !== g0.bot_machine_id || !ESTADOS_BOT_ACTIVO.includes(g.estado)) return; // cambió mientras tanto
+        await liberarSesion(db, g.id).catch(() => {});
+        await auditar('cron', 'bot_salio', { grabacionId: g.id, patientId: g.patient_id, resultado: 'error', detalle: { motivo: 'caida', estado: g.estado }, cliente: db });
+        const relanzar = debeRelanzarBot({ motivo: 'caida', horaFinPrevista: g.hora_fin_prevista, ahora, lanzamientos: await lanzamientosDe(db, g.id) });
+        if (g.estado === 'grabando') {
+          if (relanzar && await prepararRelanzamiento(db, g, { ahora })) { n++; return; }
+          const r = await cerrarConLoGrabado(db, g, { ahora, notaFin: 'Grabación incompleta: el asistente de notas se cayó y no pudo volver a entrar. Se transcribe lo que alcanzó a subir.' });
+          if (r) {
+            n++;
+            await alerta({
+              tipo: 'bot', grabacionId: g.id, clave: `bot-caido:${g.id}`, accion: 'ninguna',
+              titulo: `El asistente de notas se cayó durante la ${etiquetaSesion(g)}`,
+              detalle: r.conAudio ? 'No se pudo volver a conectar. Lo grabado hasta ese momento se está transcribiendo.' : 'No se pudo volver a conectar y no alcanzó a subir audio.',
+            });
+          }
+          return;
+        }
+        await actualizarGrabacion(g.id, { bot_token_vence_at: ahora.toISOString() });
+        const e = await marcarError(g.id, g.estado, 'El asistente de notas se cayó antes de empezar a grabar', db);
+        if (!e) return;
+        n++;
+        if (relanzar && await reintentar(g.id, db)) return; // el despacho lanza otro robot en esta misma corrida o la siguiente
+        await alerta({
+          tipo: 'bot', grabacionId: g.id, clave: `bot:${g.id}`, accion: 'reintentar',
+          titulo: `El asistente de notas se cayó antes de entrar a la ${etiquetaSesion(g)}`,
+          detalle: 'La máquina del asistente se detuvo sin avisar. Puedes reintentar mientras la sesión no haya terminado.',
+        });
+      });
+    }
     return n;
   }
 
@@ -363,7 +429,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     if (!aj.activo || !aj.botActivo) return 0;
     let sesiones: SesionOnline[];
     try {
-      sesiones = await deps.bot.sesionesOnlineProximas(new Date(ahora.getTime() - VENTANA_BOT_ANTES_MS), new Date(ahora.getTime() + VENTANA_BOT_DESPUES_MS));
+      sesiones = await deps.bot.sesionesOnlineProximas(new Date(ahora.getTime() - VENTANA_SINCRONIZAR_MS), new Date(ahora.getTime() + VENTANA_BOT_DESPUES_MS));
     } catch (e) {
       await alerta({
         tipo: 'bot', clave: 'bot:calendario', accion: 'revisar',
@@ -373,12 +439,27 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       throw e;
     }
     let n = 0;
+    const desdeDespacho = ahora.getTime() - VENTANA_BOT_ANTES_MS;
     for (const s of sesiones) {
       if (queda() < 5_000) break;
-      const { data: previa, error: e0 } = await db.from('grabaciones').select('id')
+      const { data: previa, error: e0 } = await db.from('grabaciones')
+        .select('id, patient_id, estado, estado_antes_error, hora_fin_prevista, fin_at, updated_at, bot_token_vence_at')
         .eq('google_event_id', s.googleEventId).eq('origen', 'online').maybeSingle();
       if (e0) throw new Error(`grabaciones: ${e0.message}`);
-      if (previa) continue;
+      const enVentana = Date.parse(s.inicio) >= desdeDespacho && Date.parse(s.fin) > ahora.getTime();
+      if (previa) {
+        const p = previa as PreviaEvento & Pick<Grabacion, 'hora_fin_prevista' | 'bot_token_vence_at' | 'patient_id'>;
+        // r2 (punto 7): Vale movió o alargó el evento con el robot ya lanzado → se sigue la hora nueva.
+        if (ESTADOS_BOT_ACTIVO.includes(p.estado)) { await seguirHora(p, s, ahora); continue; }
+        // Evento movido a otra hora después de que el robot fue (y volvió sin audio) → se libera el
+        // google_event_id de la fila vieja para despachar a la hora nueva (índice único grabaciones_evento_unq).
+        if (!enVentana || !previaLiberable(p, s.inicio)) continue;
+        const { data: liberada } = await db.from('grabaciones').update({ google_event_id: eventIdLiberado(s.googleEventId, p.id) })
+          .eq('id', p.id).eq('google_event_id', s.googleEventId).select('id').maybeSingle();
+        if (!liberada) continue;
+        await auditar('cron', ACC.eventoMovido, { grabacionId: p.id, patientId: p.patient_id, detalle: { estado: p.estado }, cliente: db });
+      }
+      if (!enVentana) continue;
       const v = await deps.puedeGrabar(s.patientId, s.tipo);
       // H2: si la ficha es de pareja (deducido en el servidor), la grabación es de pareja aunque el
       // evento no diga el tipo: exige ambas firmas (ya lo hizo puedeGrabar) y deja MAX_HUMANOS = 3.
@@ -411,9 +492,14 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     // Reintentos de lanzamiento (Fly falló en un minuto anterior, o Vale tocó Reintentar: M3).
     // Sin `intentos > 0`: tras Reintentar los intentos vuelven a 0. Un lanzamiento en curso no se
     // repite porque está tomado (tomada_en) y uno exitoso ya tiene bot_machine_id.
-    const pendientes = await grabacionesEn(['bot_lanzando'], ahora, (q) => q.eq('origen', 'online').is('bot_machine_id', null));
+    // r2: también los robots de REEMPLAZO ('grabando' sin máquina: el anterior se cayó o quedó solo).
+    const pendientes = await grabacionesEn(['bot_lanzando', 'grabando'], ahora, (q) => q.eq('origen', 'online').is('bot_machine_id', null));
     for (const g0 of pendientes) {
       if (queda() < 5_000) break;
+      if (g0.estado === 'grabando') {
+        await conToma(g0, ahora, async (g) => { if (await relanzarEnCurso(g, ahora)) n++; });
+        continue;
+      }
       if (!g0.hora_fin_prevista || Date.parse(g0.hora_fin_prevista) <= ahora.getTime()) continue; // lo cierra el vigilante
       await conToma(g0, ahora, async (g) => {
         // Auditoría de seguridad (17 oct): el consentimiento se vuelve a revisar antes de cada relanzamiento
@@ -429,6 +515,62 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       });
     }
     return n;
+  }
+
+  /**
+   * r2 (punto 1b): robot de reemplazo para una grabación en curso cuyo robot se cayó. Mismos resguardos
+   * que el relanzamiento normal (consentimiento vigente, toma, sin máquina); si ya no hay tiempo, se
+   * agotaron los lanzamientos o Fly falla 3 veces, se cierra con lo grabado (se transcribe ya).
+   */
+  async function relanzarEnCurso(g: GrabacionP6, ahora: Date): Promise<boolean> {
+    if (g.estado !== 'grabando' || g.bot_machine_id) return false;
+    const fin = g.hora_fin_prevista ? Date.parse(g.hora_fin_prevista) : NaN;
+    const conTiempo = !Number.isNaN(fin) && fin - ahora.getTime() > RESTANTE_MIN_ERROR_MS;
+    if (!conTiempo || (await lanzamientosDe(db, g.id)) >= MAX_LANZAMIENTOS_BOT) {
+      await cerrarConLoGrabado(db, g, { ahora, notaFin: 'Grabación incompleta: el asistente de notas se desconectó y no alcanzó a volver a entrar. Se transcribe lo que alcanzó a subir.' });
+      return false;
+    }
+    if (!(await consentimientoVigente(g, 'bot_relanzar'))) {
+      await cerrarConLoGrabado(db, g, { ahora, notaFin: NOTA_SIN_CONSENTIMIENTO_BOT });
+      return false;
+    }
+    try {
+      await deps.bot.lanzarBot(g);
+      await actualizarGrabacion(g.id, { intentos: 0, proximo_intento_at: null, ultimo_error: null });
+      return true;
+    } catch (e) {
+      const intentos = (g.intentos ?? 0) + 1;
+      if (intentos < MAX_LANZAR_BOT) {
+        await actualizarGrabacion(g.id, { intentos, ultimo_error: msg(e).slice(0, 2000), proximo_intento_at: new Date(ahora.getTime() + 60_000).toISOString() });
+        return false;
+      }
+      const r = await cerrarConLoGrabado(db, g, { ahora, notaFin: 'Grabación incompleta: el asistente de notas se desconectó y no se pudo volver a enviar. Se transcribe lo que alcanzó a subir.' });
+      if (r) {
+        await alerta({
+          tipo: 'bot', grabacionId: g.id, clave: `bot-caido:${g.id}`, accion: 'ninguna',
+          titulo: `El asistente de notas no pudo volver a entrar a la ${etiquetaSesion(g)}`,
+          detalle: `Se intentó ${MAX_LANZAR_BOT} veces. ${r.conAudio ? 'Lo grabado hasta la desconexión se está transcribiendo.' : 'No alcanzó a subir audio.'}`,
+        });
+      }
+      return false;
+    }
+  }
+
+  /**
+   * r2 (punto 7): el evento cambió de término con el robot ya lanzado. Se guarda la hora nueva (el
+   * vigilante y el relanzamiento la usan; el robot la recibe en la respuesta de `activo` y de cada
+   * segmento), se alarga el token si sigue vigente y el candado de la sesión de Google del robot.
+   */
+  async function seguirHora(p: Pick<Grabacion, 'id' | 'patient_id' | 'hora_fin_prevista' | 'bot_token_vence_at'>, s: SesionOnline, ahora: Date): Promise<void> {
+    const nueva = Date.parse(s.fin);
+    if (Number.isNaN(nueva) || (p.hora_fin_prevista && Date.parse(p.hora_fin_prevista) === nueva)) return;
+    const cambios: Record<string, unknown> = { hora_fin_prevista: new Date(nueva).toISOString() };
+    const vigente = !!p.bot_token_vence_at && Date.parse(p.bot_token_vence_at) > ahora.getTime();
+    if (vigente) cambios.bot_token_vence_at = new Date(nueva + VIGENCIA_TOKEN_BOT_MS).toISOString();
+    const { data } = await db.from('grabaciones').update(cambios).eq('id', p.id).in('estado', [...ESTADOS_BOT_ACTIVO]).select('id').maybeSingle();
+    if (!data) return;
+    await extenderUsoSesion(db, p.id, ahora, new Date(nueva).toISOString()).catch(() => {});
+    await auditar('cron', ACC.horaMovida, { grabacionId: p.id, patientId: p.patient_id, detalle: { antes: p.hora_fin_prevista, ahora: cambios.hora_fin_prevista }, cliente: db });
   }
 
   /**

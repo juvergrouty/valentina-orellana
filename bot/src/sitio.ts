@@ -23,6 +23,15 @@ export class TokenRechazadoError extends Error {
   constructor() { super('El sitio rechazó el token del bot'); this.name = 'TokenRechazadoError'; }
 }
 
+/**
+ * El sitio respondió 403 con codigo 'sin_consentimiento' (a `activo` o `pide_url`): no hay
+ * consentimiento de grabación vigente. El bot deja de grabar, descarta lo que tiene en memoria y sale
+ * de la reunión al tiro (r2, punto 2). No se reintenta.
+ */
+export class SinConsentimientoError extends Error {
+  constructor() { super('El sitio no autoriza grabar: falta el consentimiento'); this.name = 'SinConsentimientoError'; }
+}
+
 export interface OpcionesSitio {
   eventoUrl: string;
   token: string;
@@ -30,6 +39,19 @@ export interface OpcionesSitio {
   intentos?: number;
   esperaBaseMs?: number;
   log?: (m: string) => void;
+  /** Cada respuesta OK del sitio (r2: trae `hora_fin` si Vale movió el evento). */
+  alResponder?: (r: Record<string, unknown>) => void;
+}
+
+/**
+ * `hora_fin` de una respuesta del sitio, si es una fecha válida y distinta de la actual (r2, punto 7).
+ * Acotada a ±12 h de la actual: una respuesta rara no puede dejar al robot dentro para siempre.
+ */
+export function horaFinDeRespuesta(r: Record<string, unknown>, actual: Date): Date | null {
+  if (typeof r.hora_fin !== 'string') return null;
+  const t = Date.parse(r.hora_fin);
+  if (Number.isNaN(t) || t === actual.getTime() || Math.abs(t - actual.getTime()) > 12 * 60 * 60_000) return null;
+  return new Date(t);
 }
 
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -61,14 +83,22 @@ export class Sitio {
           signal: AbortSignal.timeout(15_000),
         });
         if (res.status === 404 || res.status === 401) throw new TokenRechazadoError();
-        if (res.ok) return (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        if (res.ok) {
+          const r = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+          try { this.o.alResponder?.(r); } catch { /* un aviso mal formado no rompe el evento */ }
+          return r;
+        }
+        if (res.status === 403) {
+          const r = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+          if (r?.codigo === 'sin_consentimiento') throw new SinConsentimientoError();
+        }
         ultimo = `HTTP ${res.status}`;
         if (res.status >= 400 && res.status < 500 && res.status !== 429) {
           // Error del pedido (no se arregla reintentando).
           throw new Error(`El sitio rechazó el evento ${evento.tipo}: ${ultimo}`);
         }
       } catch (e) {
-        if (e instanceof TokenRechazadoError) throw e;
+        if (e instanceof TokenRechazadoError || e instanceof SinConsentimientoError) throw e;
         if (e instanceof Error && e.message.startsWith('El sitio rechazó')) throw e;
         ultimo = e instanceof Error ? e.message : String(e);
       }

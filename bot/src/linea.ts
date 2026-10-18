@@ -8,6 +8,20 @@ import { esNombreDeBot } from './config.js';
 export interface LineaHablante { t_ms: number; nombre: string; on: boolean }
 
 export const MAX_ENTRADAS = 20_000;
+
+/**
+ * Robot de reemplazo (r2): ms entre el origen común de la grabación (ORIGEN_MS = inicio_at del sitio)
+ * y el momento en que ESTE robot empezó a grabar. Se suma a offset_ms de sus segmentos y a t_ms de
+ * su línea de hablantes, así quedan en el mismo eje que los del robot anterior. Sin origen: 0.
+ */
+export function desfaseOrigen(inicioGrabacionMs: number, origenMs: number | null): number {
+  return origenMs == null ? 0 : Math.max(0, Math.round(inicioGrabacionMs - origenMs));
+}
+
+/** Línea de hablantes llevada al origen común. */
+export function lineaConDesfase(linea: LineaHablante[], desfaseMs: number): LineaHablante[] {
+  return desfaseMs ? linea.map((e) => ({ ...e, t_ms: e.t_ms + desfaseMs })) : linea;
+}
 const MAX_NOMBRE = 60;
 
 export class LineaHablantes {

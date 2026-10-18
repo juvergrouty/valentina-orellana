@@ -9,8 +9,16 @@ export function capturarPistasRTC(): void {
   w.__voRtcHook = true;
   w.__voPistasRTC = [];
   const Original = w.RTCPeerConnection;
+  // r2 (punto 4): una pista que termina sale de la lista (no se acumulan pistas muertas en sesiones
+  // largas); el grabador además poda las que encuentre terminadas.
   const guardar = (t: MediaStreamTrack | null | undefined) => {
-    if (t && t.kind === 'audio' && !w.__voPistasRTC!.includes(t)) w.__voPistasRTC!.push(t);
+    if (!t || t.kind !== 'audio' || t.readyState === 'ended' || w.__voPistasRTC!.includes(t)) return;
+    w.__voPistasRTC!.push(t);
+    t.addEventListener('ended', () => {
+      const lista = w.__voPistasRTC!;
+      const i = lista.indexOf(t);
+      if (i >= 0) lista.splice(i, 1);
+    });
   };
   function Envuelto(this: RTCPeerConnection, ...args: ConstructorParameters<typeof RTCPeerConnection>) {
     const pc = new Original(...args);
