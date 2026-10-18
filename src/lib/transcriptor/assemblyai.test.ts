@@ -64,6 +64,20 @@ test('decisionTrasErrorAAI: mismo modelo, luego U3.5 Pro, luego null', () => {
   assert.equal(decisionTrasErrorAAI(d, 3), null);
 });
 
+test('ronda 2: el aviso dice los intentos reales (pareja y ruido: 2; resto: 3)', async () => {
+  const { intentosAAI, textoErrorDefinitivoAAI } = await import('./assemblyai');
+  const ind = elegirModelo({ tipo: 'individual', origen: 'presencial', lugarConRuido: false });
+  const par = elegirModelo({ tipo: 'pareja', origen: 'presencial', lugarConRuido: false });
+  const ruido = elegirModelo({ tipo: 'individual', origen: 'presencial', lugarConRuido: true });
+  assert.equal(intentosAAI(ind), 3);
+  assert.equal(intentosAAI(par), 2);
+  assert.equal(decisionTrasErrorAAI(par, 2), null, 'pareja: el ciclo real termina al 2.º error');
+  assert.equal(intentosAAI(ruido), ruido.modelo === 'universal-3-5-pro' ? 2 : 3);
+  assert.match(textoErrorDefinitivoAAI(par).detalle, /los 2 intentos/);
+  assert.match(textoErrorDefinitivoAAI(par).mensaje, /2 intentos/);
+  assert.match(textoErrorDefinitivoAAI(ind).detalle, /los 3 intentos \(el último con universal-3-5-pro\)/);
+});
+
 test('sanearMensaje quita URLs firmadas', () => {
   assert.equal(sanearMensaje(`Download error, unable to download ${AUDIO}`), 'Download error, unable to download [url]');
 });

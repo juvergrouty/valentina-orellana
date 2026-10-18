@@ -97,6 +97,22 @@ test('proveedores: cada uno que falla da su alerta con su clave; uno colgado cae
   assert.ok(r.resultados.find((x) => x.chequeo === 'anthropic')!.revisado === false);
 });
 
+test('ronda 2: la preparación que sobró en el otro dispositivo (misma ficha y día ya grabada) no avisa', async () => {
+  const pedidos: unknown[] = [];
+  const f = fuentesSanas({
+    async grabacionesNoTerminales() {
+      return [
+        { id: 'g-sobra', estado: 'creada', estado_antes_error: null, origen: 'presencial', updated_at: hace(13), hora_fin_prevista: null, patient_id: 'p1', session_date: '2026-10-18' },
+        { id: 'g-otra', estado: 'creada', estado_antes_error: null, origen: 'presencial', updated_at: hace(13), hora_fin_prevista: null, patient_id: 'p2', session_date: '2026-10-18' },
+      ];
+    },
+    async sesionesConGrabacionAvanzada(pares: unknown) { pedidos.push(pares); return new Set(['p1|2026-10-18']); },
+  } as never);
+  const { alertas } = await correr(f);
+  assert.deepEqual(alertas.filter((a) => a.grabacionId).map((a) => a.grabacionId), ['g-otra']);
+  assert.equal(pedidos.length, 1);
+});
+
 test('atascadas: >2 h en estado intermedio; error sin aviso; respeta avisos ya abiertos y teléfono a las 12 h', async () => {
   const f = fuentesSanas({
     async grabacionesNoTerminales() {
@@ -186,8 +202,12 @@ test('regla del micrófono: la de vercel.json actual pasa; se detecta si se romp
   grabar.headers.find((h) => h.key === 'Permissions-Policy')!.value = 'camera=(), microphone=(), geolocation=()';
   assert.equal(revisarReglaMicrofono(copia).ok, false);
   const copia2 = structuredClone(vercelJson) as typeof copia;
-  copia2.headers.find((h) => h.source === '/((?!admin/grabar$).*)')!.headers.find((h) => h.key === 'Permissions-Policy')!.value = 'camera=(), microphone=*';
+  copia2.headers.find((h) => h.source === '/((?!admin/grabar$|grabar-sin-internet$).*)')!.headers.find((h) => h.key === 'Permissions-Policy')!.value = 'camera=(), microphone=*';
   assert.equal(revisarReglaMicrofono(copia2).ok, false);
+  // Ronda 2: el grabador sin internet (/grabar-sin-internet) también necesita el micrófono.
+  const copia3 = structuredClone(vercelJson) as typeof copia;
+  copia3.headers.find((h) => h.source === '/grabar-sin-internet')!.headers.find((h) => h.key === 'Permissions-Policy')!.value = 'microphone=()';
+  assert.match(revisarReglaMicrofono(copia3).problema ?? '', /grabar-sin-internet/);
   const { alertas } = await correr(fuentesSanas({ vercel: () => copia }));
   assert.equal(alertas.find((a) => a.clave === 'salud:permisos_microfono')!.tipo, 'config');
 });

@@ -1,0 +1,30 @@
+---
+// Grabador sin internet (ronda 2, 18 oct 2026). Página ESTÁTICA (se genera al compilar): no lleva ningún
+// dato de pacientes ni de la sesión del panel, así que el service worker (public/grabar-sw.js) puede
+// guardarla en el teléfono. Si /admin/grabar no carga por falta de red (modo avión, o iOS descartó la
+// pestaña de Safari en plena sesión), el service worker muestra ESTA página en su lugar y desde aquí se
+// puede SEGUIR la grabación que se cortó (misma grabación ya autorizada con internet; los trozos siguen en
+// IndexedDB). No se puede empezar una grabación nueva: eso exige verificar el consentimiento en el servidor.
+// Al volver internet vuelve sola a /admin/grabar, que sube todo.
+export const prerender = true;
+import Grabador from '../components/admin/Grabador.astro';
+import { DATOS_SIN_INTERNET } from '../lib/transcriptor/grabadorDatos';
+---
+<!doctype html>
+<html lang="es-CL">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Grabador sin internet · Valentina Orellana</title>
+  <link rel="icon" href="/favicon.svg" />
+  <style is:global>
+    body { margin: 0; background: #F4F0EC; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
+  </style>
+</head>
+<body>
+  <main>
+    <Grabador datos={DATOS_SIN_INTERNET} />
+  </main>
+</body>
+</html>

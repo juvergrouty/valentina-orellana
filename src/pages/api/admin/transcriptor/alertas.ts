@@ -8,8 +8,10 @@
 //   guardiaPanel (POST, Origin/Referer propio obligatorio, cabecera X-Panel: 1, sesión no
 //   revocada). Todo queda en transcriptor_auditoria. NO existe "resolver": el aviso se cierra solo
 //   cuando el problema está arreglado.
-// GET ?id=<uuid> — ¿sigue abierto? (el aviso lo consulta tras Reintentar). Sin efectos, salvo
-//   cerrar el aviso si su paso ya salió bien (mismo cierre automático que al listar).
+// GET ?id=<uuid> — ¿sigue abierto? (el aviso lo consulta tras Reintentar). SOLO LEE (ronda 2, 18 oct): si su
+//   paso ya salió bien responde `superada: true` y es el aviso el que lo cierra con un POST explícito
+//   (accion 'revisar', que audita y cierra). Este GET no cambia el estado. (Al renderizar el panel,
+//   listarAlertasAbiertas aún cierra los avisos cuyo paso ya salió bien: cierre automático de lectura.)
 import type { APIRoute } from 'astro';
 import { guardiaPanel, json, leerJson, esUuid, safeAddr } from '../../../../lib/transcriptor/peticion';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
@@ -57,11 +59,8 @@ export const GET: APIRoute = async ({ url }) => {
     const a = await ops.obtenerAlerta(id);
     if (!a) return json({ ok: true, abierta: false });
     if (a.resuelta_at) return json({ ok: true, abierta: false });
-    if (a.grabacion_id && esDeGrabacion(claseDe(a)) && alertaSuperada(a, await ops.leerSesion(a.grabacion_id))) {
-      await ops.cerrarAlerta(a.id);
-      return json({ ok: true, abierta: false });
-    }
-    return json({ ok: true, abierta: true });
+    const superada = !!a.grabacion_id && esDeGrabacion(claseDe(a)) && alertaSuperada(a, await ops.leerSesion(a.grabacion_id));
+    return json({ ok: true, abierta: true, superada });
   } catch (e) {
     console.error('[api/admin/transcriptor/alertas GET]', e instanceof Error ? e.message : e);
     return json({ ok: false, error: 'No se pudo revisar.' }, 500);

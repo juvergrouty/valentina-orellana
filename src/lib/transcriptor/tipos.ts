@@ -410,7 +410,8 @@ export interface ClienteClaude {
 /** P4 — consentimiento.ts. */
 export interface ResultadoPuedeGrabar {
   puede: boolean;
-  motivo?: 'sin_consentimiento' | 'revocado' | 'version_antigua' | 'falta_segunda_firma' | 'menor_de_edad' | 'sin_ficha';
+  // 'sin_fecha_nacimiento' añadido en la ronda 2 (18 oct): sin fecha de nacimiento en la ficha no se graba.
+  motivo?: 'sin_consentimiento' | 'revocado' | 'version_antigua' | 'falta_segunda_firma' | 'menor_de_edad' | 'sin_ficha' | 'sin_fecha_nacimiento';
   consentIds: string[];
 }
 export type PuedeGrabar = (patientId: string | null, tipo: TipoSesion) => Promise<ResultadoPuedeGrabar>;

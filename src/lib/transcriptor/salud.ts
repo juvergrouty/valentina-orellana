@@ -35,6 +35,9 @@ export interface AjustesSalud { activo: boolean; botActivo: boolean; presupuesto
 
 export interface GrabacionSalud {
   id: string;
+  /** Ronda 2: para reconocer la preparación sobrante de un segundo dispositivo (misma ficha y día). */
+  patient_id?: string | null;
+  session_date?: string | null;
   estado: EstadoGrabacion;
   estado_antes_error: EstadoGrabacion | null;
   origen: Origen;
@@ -74,6 +77,13 @@ export interface FuentesSalud {
    *  para no duplicar las que abrió el orquestador. Las del chequeo se vuelven a registrar (suman
    *  `veces`) y así no se cierran solas mientras la sesión siga mal. */
   grabacionesConAlertaAbierta(): Promise<Set<string>>;
+  /**
+   * Ronda 2 (dos dispositivos): claves "patient_id|session_date" que ya tienen OTRA grabación presencial
+   * que avanzó (no 'creada' ni 'cancelada'). Una 'creada' de esa misma ficha y día es la preparación que
+   * sobró en el otro dispositivo: no se avisa "lleva X h sin subirse" (el cron la cancela a las 72 h).
+   * Opcional: sin ella se avisa como antes.
+   */
+  sesionesConGrabacionAvanzada?(pares: { patient_id: string; session_date: string }[]): Promise<Set<string>>;
   probarR2(): Promise<void>;
   probarB2(): Promise<void>;
   probarAssemblyAI(): Promise<void>;
@@ -230,6 +240,10 @@ async function chequeoProveedor(
 
 async function chequeoAtascadas({ f, ahora }: Ctx): Promise<ResultadoP8> {
   const [gs, conAlerta] = await Promise.all([f.grabacionesNoTerminales(), f.grabacionesConAlertaAbierta()]);
+  const creadas = gs.filter((g) => g.estado === 'creada' && g.origen === 'presencial' && g.patient_id && g.session_date)
+    .map((g) => ({ patient_id: g.patient_id!, session_date: g.session_date! }));
+  const avanzadas = creadas.length && f.sesionesConGrabacionAvanzada
+    ? await f.sesionesConGrabacionAvanzada(creadas).catch(() => new Set<string>()) : new Set<string>();
   const alertas: NuevaAlerta[] = [];
   let atascadas = 0, enError = 0;
   for (const g of gs) {
@@ -257,6 +271,7 @@ async function chequeoAtascadas({ f, ahora }: Ctx): Promise<ResultadoP8> {
     const edad = ahora.getTime() - referencia;
     if (!Number.isFinite(referencia) || edad < (presencialEnTelefono ? UMBRAL_TELEFONO_MS : UMBRAL_ATASCADA_MS)) continue;
     if (presencialEnTelefono && g.estado === 'creada' && edad > ABANDONADA_MS) continue;
+    if (g.estado === 'creada' && avanzadas.has(`${g.patient_id}|${g.session_date}`)) continue; // sobró en otro dispositivo
     atascadas++;
     if (conAlerta.has(g.id)) continue;
     const horas = Math.floor((ahora.getTime() - referencia) / H);
@@ -472,16 +487,23 @@ async function chequeoGasto({ f, ahora, ajustes }: Ctx): Promise<ResultadoP8> {
   return { chequeo: 'gasto', ok: true, detalle, alertas: [] };
 }
 
-/** La regla de vercel.json: micrófono SOLO en /admin/grabar; el resto del sitio, microphone=(). */
+/**
+ * La regla de vercel.json: micrófono SOLO en /admin/grabar y en /grabar-sin-internet (el mismo grabador en
+ * versión estática, para retomar sin red; ronda 2, 18 oct); el resto del sitio, microphone=().
+ */
+export const RUTAS_MICROFONO = ['/admin/grabar', '/grabar-sin-internet'] as const;
+export const REGLA_RESTO_MICROFONO = '/((?!admin/grabar$|grabar-sin-internet$).*)';
 export function revisarReglaMicrofono(config: unknown): { ok: boolean; problema?: string } {
   const headers = (config as { headers?: { source?: string; headers?: { key?: string; value?: string }[] }[] })?.headers;
   if (!Array.isArray(headers)) return { ok: false, problema: 'vercel.json no tiene la sección headers' };
   const pp = (src: string) => headers.find((h) => h.source === src)?.headers?.find((x) => x.key?.toLowerCase() === 'permissions-policy')?.value ?? null;
-  const grabar = pp('/admin/grabar');
-  const resto = pp('/((?!admin/grabar$).*)');
-  if (!grabar || !/(^|[,\s])microphone=\(self\)/.test(grabar)) return { ok: false, problema: '/admin/grabar ya no tiene microphone=(self)' };
+  for (const ruta of RUTAS_MICROFONO) {
+    const v = pp(ruta);
+    if (!v || !/(^|[,\s])microphone=\(self\)/.test(v)) return { ok: false, problema: `${ruta} ya no tiene microphone=(self)` };
+  }
+  const resto = pp(REGLA_RESTO_MICROFONO);
   if (!resto || !/(^|[,\s])microphone=\(\)/.test(resto)) return { ok: false, problema: 'el resto del sitio ya no bloquea el micrófono (microphone=())' };
-  const otros = headers.filter((h) => h.source !== '/admin/grabar')
+  const otros = headers.filter((h) => !(RUTAS_MICROFONO as readonly string[]).includes(h.source ?? ''))
     .flatMap((h) => h.headers ?? []).filter((x) => x.key?.toLowerCase() === 'permissions-policy' && /microphone=\((?!\))/.test(x.value ?? ''));
   if (otros.length) return { ok: false, problema: 'otra ruta habilita el micrófono' };
   return { ok: true };
@@ -684,8 +706,15 @@ export async function fuentesReales(): Promise<FuentesSalud> {
     },
     env: envReal,
     grabacionesNoTerminales: () => lista<GrabacionSalud>(
-      db.from('grabaciones').select('id, estado, estado_antes_error, origen, updated_at, hora_fin_prevista')
+      db.from('grabaciones').select('id, estado, estado_antes_error, origen, updated_at, hora_fin_prevista, patient_id, session_date')
         .not('estado', 'in', TERMINALES_SQL).limit(500), 'grabaciones'),
+    async sesionesConGrabacionAvanzada(pares) {
+      const ids = [...new Set(pares.map((p) => p.patient_id))].slice(0, 200);
+      const filas = await lista<{ patient_id: string; session_date: string }>(
+        db.from('grabaciones').select('patient_id, session_date').eq('origen', 'presencial').in('patient_id', ids)
+          .not('estado', 'in', '(creada,cancelada)').limit(1000), 'grabaciones');
+      return new Set(filas.map((x) => `${x.patient_id}|${x.session_date}`));
+    },
     async segmentosPendientesDeBorrar() {
       type Fila = { grabacion_id: string; audio_borrado_at: string | null; aai_transcript_id: string | null; aai_estado: string | null;
         aai_borrado_at: string | null; aai_completado_at: string | null; aai_enviado_at: string | null; subido_at: string | null; created_at: string;

@@ -151,6 +151,26 @@ export function decisionTrasErrorAAI(decision: DecisionModelo, erroresPrevios: n
   return null;
 }
 
+/**
+ * Cuántos intentos hace en total el ciclo de decisionTrasErrorAAI para esta decisión (ronda 2, 18 oct):
+ * 3 si el modelo base no es U3.5 Pro (mismo, mismo, Pro); 2 si ya lo es (pareja o "lugar con ruido").
+ */
+export function intentosAAI(decision: DecisionModelo): number {
+  let n = 1;
+  while (n < 10 && decisionTrasErrorAAI(decision, n)) n++;
+  return n;
+}
+
+/** Texto del aviso cuando se agotan los intentos: dice cuántos fueron de verdad (antes decía siempre 3). */
+export function textoErrorDefinitivoAAI(decision: DecisionModelo): { mensaje: string; detalle: string } {
+  const n = intentosAAI(decision);
+  const conPro = decision.modelo === MODELO_U35_PRO ? `todos con ${MODELO_U35_PRO}` : `el último con ${MODELO_U35_PRO}`;
+  return {
+    mensaje: `AssemblyAI no pudo transcribir el audio (${n} intentos, ${decision.modelo === MODELO_U35_PRO ? 'con' : 'incluido'} Universal-3.5 Pro)`,
+    detalle: `AssemblyAI devolvió error en los ${n} intentos (${conPro}). El audio se borra solo a las 24 h: reintenta antes.`,
+  };
+}
+
 // ─── Normalización de la respuesta ───────────────────────────────────────────
 
 const ESTADOS_AAI = ['queued', 'processing', 'completed', 'error'] as const;

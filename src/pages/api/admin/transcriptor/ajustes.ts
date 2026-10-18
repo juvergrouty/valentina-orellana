@@ -5,11 +5,12 @@
 // resumen, alerta de riesgo, presupuesto) los fijan las decisiones de Vale y no se editan aquí.
 // Cuerpo: { clave, valor }. Auth del panel + Origin/Referer propio + X-Panel + bitácora.
 // Encender transcriptor/bot exige passkey obligatoria (decisión 3; panel.ts motivoBloqueoActivacion).
+// Ronda 2 (18 oct): todo cambio exige además sesión con passkey (exigirAccesoClinico), salvo APAGAR.
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
 import {
-  AJUSTE_BOT_MODO, estadoSesionRobot, exigePasskeyObligatoria, motivoBloqueoActivacion, validarAjuste, validarModoBot,
+  AJUSTE_BOT_MODO, ajustePermitidoSinPasskey, estadoSesionRobot, exigePasskeyObligatoria, motivoBloqueoActivacion, validarAjuste, validarModoBot,
   type EstadoPasskeyActivacion, type EstadoSesionRobot,
 } from '../../../../lib/transcriptor/panel';
 import { CLAVE_ROBOT_SESION } from '../../../../lib/transcriptor/avisosRobot';
@@ -17,6 +18,7 @@ import { resolverAlertasPorPrefijo } from '../../../../lib/transcriptor/alertas'
 import { COOKIE_ADMIN, nivelTokenAdmin } from '../../../../lib/adminSession';
 import { estadoPasskeys, invalidarEstadoPasskeys } from '../../../../lib/passkey/servidor';
 import { guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
+import { exigirAccesoClinico } from '../../../../lib/transcriptor/acceso';
 
 export const prerender = false;
 
@@ -27,6 +29,12 @@ export const POST: APIRoute = async (ctx) => {
   const clientAddress = safeAddr(ctx);
   const body = await leerJson(request);
   if (!body) return json({ ok: false, error: 'Solicitud inválida.' }, 400);
+  // Apagar no exige passkey; cualquier otro cambio sí (se decide con lo pedido, antes de leer nada más).
+  const apagar = typeof body.clave === 'string' && (body.valor === false || body.valor === 'false') && ajustePermitidoSinPasskey(body.clave, 'false');
+  if (!apagar) {
+    const sinPasskey = await exigirAccesoClinico(ctx, 'cambiar_ajuste');
+    if (sinPasskey) return sinPasskey;
+  }
   let clave: string;
   let valor: string;
   if (body.clave === AJUSTE_BOT_MODO) {

@@ -101,7 +101,7 @@ test('M2: ficha, sesión y preguntas usan consultarResumenes; la ficha avisa en 
 test('B1: ficha "Ana y Luis" sin reserva de pareja → pide 2 firmas Y tiene link de la pareja (misma fuente)', async () => {
   const db = new SupabaseMemoria();
   const p = randomUUID();
-  db.tabla('patients').push({ id: p, name: 'Ana Pérez y Luis Soto', email: 'ana@ejemplo.cl', birthdate: null, rut: '11.111.111-1' });
+  db.tabla('patients').push({ id: p, name: 'Ana Pérez y Luis Soto', email: 'ana@ejemplo.cl', birthdate: '1990-05-05', rut: '11.111.111-1' });
   db.tabla('bookings').push({ id: randomUUID(), patient_email: 'ana@ejemplo.cl', session_type: 'presencial', service_id: null });
   db.tabla('consents').push({ id: randomUUID(), patient_id: p, version: '2026-10-v3', signed_at: '2026-10-10T12:00:00Z', signer_name: 'Ana Pérez', signer_rut: '11.111.111-1', signer_email: null, accept_recording: true, revoked_at: null, recording_revoked_at: null });
   const ev = await evaluarEnBase(p, 'individual', db.cliente);
@@ -110,7 +110,7 @@ test('B1: ficha "Ana y Luis" sin reserva de pareja → pide 2 firmas Y tiene lin
 
   const db2 = new SupabaseMemoria();
   const q = randomUUID();
-  db2.tabla('patients').push({ id: q, name: 'Clara Ríos', email: 'clara@ejemplo.cl', birthdate: null, rut: '11.111.111-1' });
+  db2.tabla('patients').push({ id: q, name: 'Clara Ríos', email: 'clara@ejemplo.cl', birthdate: '1990-05-05', rut: '11.111.111-1' });
   assert.equal(await fichaEsParejaEnBase(q, db2.cliente), false);
   assert.equal((await evaluarEnBase(q, 'individual', db2.cliente)).requeridas, 1);
 });

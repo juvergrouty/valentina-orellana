@@ -33,7 +33,7 @@ export type ResultadoAcceso =
 
 export const MENSAJES_ACCESO: Record<MotivoAcceso, string> = {
   sesion: 'Tu sesión del panel venció. Vuelve a entrar.',
-  passkey: 'Para ver transcripciones y resúmenes, o preguntar a la IA, confirma esta sesión con tu passkey (Face ID o huella) en Seguridad.',
+  passkey: 'Para ver transcripciones y resúmenes, preguntar a la IA o cambiar el transcriptor (ajustes, instrucciones, asignar fichas), confirma esta sesión con tu passkey (Face ID o huella) en Seguridad.',
   no_disponible: 'No se pudo verificar tu sesión en este momento. Por seguridad no se muestra contenido clínico. Intenta de nuevo en unos minutos.',
 };
 

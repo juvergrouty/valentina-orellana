@@ -13,11 +13,13 @@ import { verificarGrabacion } from '../../../../lib/transcriptor/consentimiento'
 import { reasignarEvolucion } from '../../../../lib/transcriptor/evolucionAuto';
 import type { TipoSesion } from '../../../../lib/transcriptor/tipos';
 import { esUuid, guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
+import { exigirAccesoClinico } from '../../../../lib/transcriptor/acceso';
 
 export const prerender = false;
 
 export const POST: APIRoute = async (ctx) => {
-  const rechazo = await guardiaPanel(ctx, 'asignar_paciente');
+  // Ronda 2 (18 oct): mueve un resumen clínico de ficha → exige sesión con passkey, como las demás rutas sensibles.
+  const rechazo = (await guardiaPanel(ctx, 'asignar_paciente')) ?? (await exigirAccesoClinico(ctx, 'asignar_paciente'));
   if (rechazo) return rechazo;
   const { request } = ctx;
   const clientAddress = safeAddr(ctx);

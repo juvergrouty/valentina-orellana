@@ -45,7 +45,13 @@ export const POST: APIRoute = async (ctx) => {
       .select('id, estado, patient_id, tipo, origen').eq('id', grabacionId).maybeSingle();
     if (error) throw new Error(error.message);
     if (!g || g.origen !== 'presencial') return json({ ok: false, error: 'No encontré esa grabación.' }, 404);
-    if (!SUBIBLES.includes(g.estado as EstadoGrabacion)) return json({ ok: true, ya_finalizada: true, estado: g.estado });
+    if (!SUBIBLES.includes(g.estado as EstadoGrabacion)) {
+      // Ronda 2 (dos dispositivos): se dice QUÉ quedó subido (seq, tamaño, huella; nada de contenido) para que el
+      // teléfono borre su copia solo si es la misma. Si otro dispositivo subió otra cosa, la conserva y avisa.
+      const { data: subidos } = await supabase.from('grabacion_segmentos')
+        .select('seq, bytes, sha256').eq('grabacion_id', grabacionId).not('subido_at', 'is', null);
+      return json({ ok: true, ya_finalizada: true, estado: g.estado, segmentos: subidos ?? [] });
+    }
 
     // El consentimiento se vuelve a verificar antes de aceptar audio (pudo revocarse).
     const v = await verificarGrabacion(g.patient_id, g.tipo as TipoSesion);
@@ -56,7 +62,7 @@ export const POST: APIRoute = async (ctx) => {
 
     // Segmento: se crea una vez (unique grabacion_id+seq); la llave la pone el servidor.
     let { data: seg, error: e2 } = await supabase.from('grabacion_segmentos')
-      .select('id, r2_key, mime, subido_at').eq('grabacion_id', grabacionId).eq('seq', seq).maybeSingle();
+      .select('id, r2_key, mime, subido_at, bytes, sha256').eq('grabacion_id', grabacionId).eq('seq', seq).maybeSingle();
     if (e2) throw new Error(e2.message);
     let nuevo = false;
     if (!seg) {
@@ -64,18 +70,20 @@ export const POST: APIRoute = async (ctx) => {
         grabacion_id: grabacionId, seq, r2_key: nuevaLlaveAudio(mime), mime, bytes,
         offset_ms: entero(body.offset_ms, 0, 24 * 3600_000) ?? 0,
         duracion_ms: entero(body.duracion_ms, 0, 24 * 3600_000),
-      }).select('id, r2_key, mime, subido_at').maybeSingle();
+      }).select('id, r2_key, mime, subido_at, bytes, sha256').maybeSingle();
       if (e3 && !/duplicate|unique/i.test(e3.message)) throw new Error(e3.message);
       if (data) { seg = data; nuevo = true; }
       else {
-        const r = await supabase.from('grabacion_segmentos').select('id, r2_key, mime, subido_at').eq('grabacion_id', grabacionId).eq('seq', seq).single();
+        const r = await supabase.from('grabacion_segmentos').select('id, r2_key, mime, subido_at, bytes, sha256').eq('grabacion_id', grabacionId).eq('seq', seq).single();
         if (r.error) throw new Error(r.error.message);
         seg = r.data;
       }
     }
     if (!seg) throw new Error('segmento sin fila');
-    if (seg.subido_at) return json({ ok: true, ya_subido: true });
-    if (seg.mime !== mime) return json({ ok: false, error: 'El tipo de audio no coincide con el del segmento.' }, 409);
+    if (seg.subido_at) return json({ ok: true, ya_subido: true, bytes: seg.bytes ?? null, sha256: seg.sha256 ?? null });
+    if (seg.mime !== mime) {
+      return json({ ok: false, motivo: 'otro_dispositivo', error: 'Esta parte de la sesión ya se empezó a subir desde otro dispositivo (con otro formato de audio). Lo de este teléfono no se borró.' }, 409);
+    }
 
     // creada → grabando → subiendo (la grabación se hizo sin conexión; se registra al subir).
     if (g.estado === 'creada') {

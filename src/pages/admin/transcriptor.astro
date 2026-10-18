@@ -24,7 +24,7 @@ import {
 import { normalizarModoBot } from '../../lib/transcriptor/botCuenta';
 
 
-type GrabLista = Pick<Grabacion, 'id' | 'patient_id' | 'origen' | 'tipo' | 'estado' | 'estado_antes_error' | 'session_date' | 'inicio_at' | 'duracion_seg' | 'created_at'>;
+type GrabLista = Pick<Grabacion, 'id' | 'patient_id' | 'origen' | 'tipo' | 'estado' | 'estado_antes_error' | 'session_date' | 'inicio_at' | 'duracion_seg' | 'created_at'> & { nota_sistema?: string | null };
 type Version = { id: string; texto: string; activa: boolean; created_at: string };
 
 let ajustes: Record<string, string> = {};
@@ -69,7 +69,7 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'ia') {
   try {
     const [rAj, rGr, rPa, rIn, rGm, rRe, rPr] = await Promise.all([
       supabase.from('settings').select('key, value').in('key', [...Object.values(AJUSTES), AJUSTE_NOMBRES_VALE, AJUSTE_BOT_MODO]),
-      supabase.from('grabaciones').select('id, patient_id, origen, tipo, estado, estado_antes_error, session_date, inicio_at, duracion_seg, created_at')
+      supabase.from('grabaciones').select('id, patient_id, origen, tipo, estado, estado_antes_error, session_date, inicio_at, duracion_seg, created_at, nota_sistema')
         .not('estado', 'in', '(creada,cancelada)').order('created_at', { ascending: false }).limit(40),
       supabase.from('patients').select('id, name, active').order('name').limit(2000),
       supabase.from('instrucciones_ia').select('id, uso, texto, activa, created_at').order('created_at', { ascending: false }).limit(40),
@@ -146,6 +146,11 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
     </header>
 
     {errorLectura && <div class="alert-error">✕ No se pudieron leer todos los datos del transcriptor. Recarga la página en un momento.</div>}
+    {nivelSesion !== 'passkey' && (
+      <div class="alert-error" role="note" id="tx-sin-passkey" style="margin-bottom:1rem;">
+        🔒 Para cambiar ajustes o instrucciones, o asignar una grabación a una ficha, confirma esta sesión con tu passkey (Face ID o huella). Apagar el transcriptor o el robot sí se puede sin ella. <a href="/admin/seguridad" style="text-decoration:underline;">Ir a Seguridad →</a>
+      </div>
+    )}
 
     <!-- ── Ajustes ─────────────────────────────────────────────────────── -->
     <section class="card tx-card" aria-labelledby="tx-aj">
@@ -266,6 +271,7 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
                   </p>
                   <p class="tx-sub">{fechaCorta(g.session_date)}{g.inicio_at ? ` · ${fmtHora(g.inicio_at)}` : ''} · {tipoTexto(g)}{g.duracion_seg ? ` · ${duracionTexto(g.duracion_seg)}` : ''}</p>
                   {prob && <p class="tx-nota">{prob}</p>}
+                  {g.estado === 'sin_consentimiento' && g.nota_sistema && <p class="tx-nota">{g.nota_sistema}</p>}
                 </div>
                 <div class="tx-fila-acciones">
                   <span class={`tx-estado tx-estado-${e.tono}`}>{e.texto}</span>
@@ -410,6 +416,20 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
     if (el instanceof HTMLElement) { el.textContent = texto; el.style.color = color; }
   };
   const errorDe = (e: unknown) => '✕ ' + (e instanceof Error ? e.message : 'Error de conexión');
+  // Ronda 2: si el servidor pide la passkey (motivo 'passkey', exigirAccesoClinico), el mensaje lleva a Seguridad,
+  // igual que en la ficha y la sesión. Se arma con nodos (sin innerHTML).
+  class ErrorPasskey extends Error { constructor(msg: string, public confirmar: string) { super(msg); } }
+  const fallo = (d: { error?: string; motivo?: unknown; confirmar?: unknown }, porDefecto: string) =>
+    d.motivo === 'passkey' ? new ErrorPasskey(d.error ?? 'Confirma esta sesión con tu passkey.', typeof d.confirmar === 'string' ? d.confirmar : '/admin/seguridad')
+      : new Error(d.error ?? porDefecto);
+  const pintaError = (el: Element | null | undefined, e: unknown) => {
+    pinta(el, errorDe(e), '#dc2626');
+    if (e instanceof ErrorPasskey && el instanceof HTMLElement) {
+      const a = document.createElement('a');
+      a.href = e.confirmar; a.textContent = ' Ir a Seguridad →'; a.style.textDecoration = 'underline'; a.style.color = 'inherit';
+      el.append(a);
+    }
+  };
 
   // Interruptores: se guardan al instante; si falla, vuelven a su posición.
   document.querySelectorAll<HTMLInputElement>('.tx-ajuste').forEach((sw) => {
@@ -420,11 +440,11 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
       pinta(msg, 'Guardando…', '#6b7280');
       try {
         const d = await postPanel('/api/admin/transcriptor/ajustes', { clave: sw.dataset.clave, valor });
-        if (!d.ok) throw new Error(d.error ?? 'No se pudo guardar.');
+        if (!d.ok) throw fallo(d, 'No se pudo guardar.');
         pinta(msg, '✓ Guardado.', '#15803d');
       } catch (e) {
         sw.checked = !valor;
-        pinta(msg, errorDe(e), '#dc2626');
+        pintaError(msg, e);
       } finally {
         sw.disabled = false;
       }
@@ -442,12 +462,12 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
       pinta(msg, 'Guardando…', '#6b7280');
       try {
         const d = await postPanel('/api/admin/transcriptor/ajustes', { clave: 'transcriptor_bot_modo', valor: r.value });
-        if (!d.ok) throw new Error(d.error ?? 'No se pudo guardar.');
+        if (!d.ok) throw fallo(d, 'No se pudo guardar.');
         pinta(msg, '✓ Guardado.', '#15803d');
         setTimeout(() => location.reload(), 700);
       } catch (e) {
         anterior.checked = true;
-        pinta(msg, errorDe(e), '#dc2626');
+        pintaError(msg, e);
         radios.forEach((x) => { x.disabled = false; });
       }
     });
@@ -460,9 +480,9 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
     pinta(msg, 'Guardando…', '#6b7280');
     try {
       const d = await postPanel('/api/admin/transcriptor/ajustes', { clave: 'transcriptor_bot_nombres_vale', valor });
-      if (!d.ok) throw new Error(d.error ?? 'No se pudo guardar.');
+      if (!d.ok) throw fallo(d, 'No se pudo guardar.');
       pinta(msg, '✓ Guardado.', '#15803d');
-    } catch (err) { pinta(msg, errorDe(err), '#dc2626'); }
+    } catch (err) { pintaError(msg, err); }
   });
 
   // Contadores de caracteres de las instrucciones.
@@ -482,10 +502,10 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
       pinta(msg, 'Guardando…', '#6b7280');
       try {
         const d = await postPanel('/api/admin/transcriptor/instrucciones', { uso: f.dataset.uso, accion: 'guardar', texto });
-        if (!d.ok) throw new Error(d.error ?? 'No se pudo guardar.');
+        if (!d.ok) throw fallo(d, 'No se pudo guardar.');
         pinta(msg, d.sin_cambios ? 'Sin cambios.' : '✓ Guardado. Vale para los resúmenes nuevos.', '#15803d');
         if (!d.sin_cambios) setTimeout(() => location.reload(), 1200);
-      } catch (err) { pinta(msg, errorDe(err), '#dc2626'); }
+      } catch (err) { pintaError(msg, err); }
     });
   });
   document.querySelectorAll<HTMLButtonElement>('.tx-restaurar').forEach((b) => {
@@ -496,10 +516,10 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
       pinta(msg, 'Restaurando…', '#6b7280');
       try {
         const d = await postPanel('/api/admin/transcriptor/instrucciones', { uso: b.dataset.uso, accion: 'restaurar' });
-        if (!d.ok) throw new Error(d.error ?? 'No se pudo restaurar.');
+        if (!d.ok) throw fallo(d, 'No se pudo restaurar.');
         pinta(msg, d.sin_cambios ? 'Ya estabas usando el texto original.' : '✓ Restaurado.', '#15803d');
         if (!d.sin_cambios) setTimeout(() => location.reload(), 900);
-      } catch (err) { pinta(msg, errorDe(err), '#dc2626'); }
+      } catch (err) { pintaError(msg, err); }
       finally { b.disabled = false; }
     });
   });
@@ -526,11 +546,11 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
     pinta(msg, as ? 'Asignando…' : 'Reintentando…', '#6b7280');
     try {
       const d = await postPanel(url, body);
-      if (!d.ok) throw new Error(d.error ?? 'No se pudo completar.');
+      if (!d.ok) throw fallo(d, 'No se pudo completar.');
       pinta(msg, '✓ Listo.', '#15803d');
       setTimeout(() => location.reload(), 900);
     } catch (err) {
-      pinta(msg, errorDe(err), '#dc2626');
+      pintaError(msg, err);
       b.disabled = false;
     }
   });

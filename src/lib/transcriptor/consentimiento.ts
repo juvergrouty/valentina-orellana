@@ -117,8 +117,11 @@ export function evaluarConsentimientos(e: EntradaEvaluacion): EvaluacionConsenti
   const base = { consentIds: [] as string[], firmantes: [] as string[], requeridas, tipoEfectivo, parejaDeducida };
   if (!e.patientId) return { ...base, puede: false, motivo: 'sin_ficha' };
 
+  // Ronda 2 (18 oct): sin fecha de nacimiento (o ilegible) NO se graba. Antes se dejaba pasar y el chequeo
+  // de menores quedaba sin efecto. El texto (textoMotivo) dice qué hacer: completarla en la ficha.
   const edad = edadEn(e.fechaNacimiento, e.hoy);
-  if (edad !== null && edad < EDAD_MINIMA_GRABACION) return { ...base, puede: false, motivo: 'menor_de_edad' };
+  if (edad === null) return { ...base, puede: false, motivo: 'sin_fecha_nacimiento' };
+  if (edad < EDAD_MINIMA_GRABACION) return { ...base, puede: false, motivo: 'menor_de_edad' };
 
   // Última firma de cada persona.
   const ultimas = new Map<string, FilaConsentimiento>();
@@ -152,12 +155,28 @@ export function evaluarConsentimientos(e: EntradaEvaluacion): EvaluacionConsenti
   return { ...base, consentIds, firmantes, puede: false, motivo: 'falta_segunda_firma' };
 }
 
+/** Dónde se arregla cada bloqueo (enlace del aviso). null = no hay nada que completar en la ficha. */
+export function enlaceArreglo(motivo: string | undefined, patientId: string | null | undefined): { href: string; etiqueta: string } | null {
+  if (!patientId) return null;
+  if (motivo === 'sin_fecha_nacimiento') return { href: `/admin/pacientes/${patientId}?tab=info#pf-nacimiento`, etiqueta: 'Completar la ficha' };
+  if (motivo === 'menor_de_edad' || motivo === 'transcriptor_apagado' || motivo === 'sin_ficha') return null;
+  return { href: `/admin/pacientes/${patientId}`, etiqueta: 'Enviar consentimiento' };
+}
+
+/** Nota del robot de Meet cuando no se envía (grabaciones.nota_sistema). */
+export function notaRobotSinPermiso(motivo: string | undefined): string {
+  if (motivo === 'sin_fecha_nacimiento') return 'No se envió el asistente de notas: falta la fecha de nacimiento en la ficha (sin ella no se graba). Complétala en la ficha del paciente.';
+  if (motivo === 'menor_de_edad') return 'No se envió el asistente de notas: no se graba a menores de 18 años.';
+  return 'No se envió el asistente de notas: falta el consentimiento de grabación o la ficha.';
+}
+
 /** Texto para Vale (español de Chile, sin términos técnicos). 40-ux-diseno §7. */
 export function textoMotivo(motivo: string | undefined, nombre?: string | null): string {
   const quien = (nombre ?? '').trim() || 'la paciente o el paciente';
   switch (motivo) {
     case 'sin_ficha': return 'Esta sesión no está asociada a una ficha. Elige al paciente para poder grabar.';
     case 'menor_de_edad': return 'No se graba a menores de 18 años.';
+    case 'sin_fecha_nacimiento': return `Falta la fecha de nacimiento en la ficha de ${quien}. Sin ella no se puede comprobar que sea mayor de 18 años, así que no se graba. Complétala en la ficha (Información → Fecha de nacimiento).`;
     case 'revocado': return `Se retiró la autorización de grabación en la ficha de ${quien}. Sin ella no se puede grabar.`;
     case 'version_antigua': return `Falta el consentimiento de grabación de ${quien}. La versión que firmó no incluye la autorización de grabación; envíale el consentimiento actual.`;
     case 'falta_segunda_firma': return 'Falta el consentimiento de grabación de la otra persona de la pareja. Sin él no se puede grabar.';

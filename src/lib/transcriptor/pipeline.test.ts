@@ -172,7 +172,7 @@ function escenario(planClaude: (string | number)[] = [RESUMEN]) {
     { key: 'transcriptor_activo', value: 'true' }, { key: 'transcriptor_bot_activo', value: 'true' },
     { key: 'transcriptor_resumen_modo', value: 'directo' }, { key: 'transcriptor_bot_nombres_vale', value: 'Valentina Orellana' },
   );
-  const paciente = (name: string, email: string) => { const id = randomUUID(); db.tabla('patients').push({ id, name, email, active: true, birthdate: null }); return id; };
+  const paciente = (name: string, email: string) => { const id = randomUUID(); db.tabla('patients').push({ id, name, email, active: true, birthdate: '1990-05-05' }); return id; };
   const firma = (patient_id: string, signer_name: string, signer_rut: string, version = '2026-11-v3') =>
     db.tabla('consents').push({ id: randomUUID(), patient_id, version, signed_at: '2026-10-10T12:00:00Z', signer_name, signer_rut, signer_email: null, accept_recording: true, revoked_at: null });
 

@@ -28,7 +28,8 @@ import {
 import { extenderUsoSesion, liberarSesion } from './botCuenta';
 import { elegirModelo } from './reglas';
 import { repararMojibake } from './texto';
-import { borrarTranscriptTrasGuardar, decisionTrasErrorAAI, ErrorAssemblyAI, sanearMensaje } from './assemblyai';
+import { borrarTranscriptTrasGuardar, decisionTrasErrorAAI, ErrorAssemblyAI, sanearMensaje, textoErrorDefinitivoAAI } from './assemblyai';
+import { notaRobotSinPermiso } from './consentimiento';
 import { armarTranscripcionClara, esTramoHueco } from './hablantes';
 import {
   cargarInstrucciones, contextoSesionAnterior, nombreDePila, plantillaDesdeTipo, resumirSesion,
@@ -471,7 +472,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         consent_ids: v.consentIds, origen: 'online', tipo, modelo: d.modelo, diarizacion: d.diarizacion,
         session_date: fechaChile(s.inicio), hora_fin_prevista: s.fin, meet_url: s.meetUrl, creada_por: 'cron',
         estado: v.puede ? 'bot_lanzando' : 'sin_consentimiento',
-        nota_sistema: v.puede ? null : 'No se envió el asistente de notas: falta el consentimiento de grabación o la ficha.',
+        nota_sistema: v.puede ? null : notaRobotSinPermiso(v.motivo),
         tomada_en: v.puede ? ahora.toISOString() : null,
       };
       const { data: g, error } = await db.from('grabaciones').insert(fila).select('*').maybeSingle();
@@ -638,9 +639,9 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
   async function errorDefinitivoAAI(g: GrabacionP6, ahora: Date, segs: SegmentoP6[]): Promise<void> {
     // "Reintentar" desde el panel vuelve a empezar el ciclo (mismo modelo → Pro): se reinicia el conteo.
     for (const s of segs) if ((s.aai_errores ?? 0) > 0) await actualizarSegmento(s.id, { aai_errores: 0 });
-    await fallo(g, ahora, g.estado, new Error('AssemblyAI no pudo transcribir el audio (3 intentos, incluido Universal-3.5 Pro)'), {
-      max: 1, definitivo: true, tipo: 'transcripcion', titulo: 'No se pudo transcribir la',
-      detalle: `AssemblyAI devolvió error en los 3 intentos (el último con ${MODELO_U35_PRO}). El audio se borra solo a las 24 h: reintenta antes.`,
+    const t = textoErrorDefinitivoAAI(decisionBase(g)); // pareja/ruido: 2 intentos (ya parten en U3.5 Pro), resto 3
+    await fallo(g, ahora, g.estado, new Error(t.mensaje), {
+      max: 1, definitivo: true, tipo: 'transcripcion', titulo: 'No se pudo transcribir la', detalle: t.detalle,
     });
   }
 
