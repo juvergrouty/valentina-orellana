@@ -19,6 +19,7 @@ import { EntradaX11, InteraccionHumana } from './meet/humano.js';
 import { salirDeMeet } from './meet/salir.js';
 import { clasesHablando } from './meet/selectores.js';
 import { instalarGrabadorEnPagina } from './captura/audio-pagina.js';
+import { capturarPistasRTC } from './captura/rtc-pagina.js';
 import { instalarHablantesEnPagina, participantesEnPagina } from './captura/hablantes-pagina.js';
 import { Segmentos } from './segmentos.js';
 import { Sitio, TokenRechazadoError } from './sitio.js';
@@ -90,6 +91,13 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio): Promise<{ motivo
 
     if (!avisoSinPistas && ahora - inicio > 60_000) {
       const n = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.pistas()).catch(() => 0);
+      if (n === 0) {
+        const diag = await p.evaluate(() => ({
+          rtc: ((window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []).length,
+          elementos: document.querySelectorAll('audio, video').length,
+        })).catch(() => null);
+        log(`sin pistas de audio: ${diag ? `rtc=${diag.rtc} elementos=${diag.elementos}` : 'sin diagnóstico'}`);
+      }
       if (n === 0) { avisoSinPistas = true; await sitio.enviar({ tipo: 'error', detalle: 'El bot no encuentra pistas de audio en la reunión (¿cambió Meet?)' }).catch(() => {}); }
     }
 
@@ -166,7 +174,12 @@ async function main(): Promise<number> {
       });
       log(sesion ? 'modo cuenta: sesión del robot recibida' : 'modo cuenta sin sesión disponible: entra como invitado');
     }
-    let contexto = await nav.newContext(sesion ? { ...opcionesContexto, storageState: sesion } : opcionesContexto);
+    const nuevoContexto = async (o: Record<string, unknown>) => {
+      const c = await nav.newContext(o);
+      await c.addInitScript(capturarPistasRTC);
+      return c;
+    };
+    let contexto = await nuevoContexto(sesion ? { ...opcionesContexto, storageState: sesion } : opcionesContexto);
     let p = await contexto.newPage();
     if (sesion && cfg.cuentaEmail) {
       const r = await entrarConCuenta(p, cfg.meetUrl, cfg.cuentaEmail, { humano, log });
@@ -175,7 +188,7 @@ async function main(): Promise<number> {
         await sitio.enviar({ tipo: 'sesion_invalida', motivo: 'Meet pidió iniciar sesión de nuevo' }).catch(() => {});
         sesion = null;
         await contexto.close().catch(() => {});
-        contexto = await nav.newContext(opcionesContexto);
+        contexto = await nuevoContexto(opcionesContexto);
         p = await contexto.newPage();
         await entrarComoInvitado(p, cfg.meetUrl, cfg.botNombre, { humano, log });
       }

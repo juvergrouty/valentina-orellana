@@ -35,7 +35,17 @@ export function instalarGrabadorEnPagina(o: OpcionesGrabadorPagina): boolean {
   silencio.start();
 
   const pistas = new Set<string>();
+  const enlazar = (pista: MediaStreamTrack) => {
+    if (pistas.has(pista.id) || pista.readyState !== 'live') return;
+    try {
+      ctx.createMediaStreamSource(new MediaStream([pista])).connect(destino);
+      pistas.add(pista.id);
+      pista.addEventListener('ended', () => pistas.delete(pista.id));
+    } catch { /* pista no utilizable */ }
+  };
   const conectar = () => {
+    // Pistas remotas de WebRTC (rtc-pagina.ts): la fuente principal y más estable.
+    for (const pista of (window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []) enlazar(pista);
     document.querySelectorAll('audio, video').forEach((n) => {
       const el = n as HTMLMediaElement;
       const s = el.srcObject;

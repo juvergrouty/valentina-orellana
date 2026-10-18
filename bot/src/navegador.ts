@@ -32,6 +32,8 @@ export interface Pagina {
 
 export interface Contexto {
   newPage(): Promise<Pagina>;
+  /** Script que corre en cada página antes de su propio código (Playwright). */
+  addInitScript(script: () => void): Promise<void>;
   /** storageState de Playwright (cookies + localStorage). Modo 'cuenta': se devuelve al sitio. */
   storageState(): Promise<unknown>;
   close(): Promise<void>;
