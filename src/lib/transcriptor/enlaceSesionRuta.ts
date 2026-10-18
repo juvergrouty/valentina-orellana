@@ -14,11 +14,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { destinoMeet, esVisitaAutomatica, meetDeNotas, normalizarMeet, reservaDesdeCodigo } from '../enlaceSesion';
 import { reservaVaAOcurrir } from './bot';
 import type { AccionAuditoria } from './tipos';
+import { despuesDeResponder } from './despuesDeResponder';
 
 export const ACCION_ENLACE = 'enlace_sesion' as AccionAuditoria;
 /** Códigos inválidos por IP antes de dejar de auditarlos (siempre responden 404). */
 export const MAX_INVALIDOS_IP = 20;
 export const VENTANA_INVALIDOS_MS = 15 * 60_000;
+/** Tope GLOBAL de códigos inválidos auditados en la ventana (muchas IP / IPv6 no llenan la bitácora). */
+export const MAX_INVALIDOS_TOTAL = 200;
 /** Despachos del robot por enlace (reserva) en la ventana; el resto solo redirige. */
 export const MAX_DESPACHOS_ENLACE = 6;
 /** Visitas auditadas por enlace en la ventana (más allá no se escribe la bitácora; se redirige igual). */
@@ -59,7 +62,8 @@ export interface DepsEnlace {
   meetDeCalendario?: (googleEventId: string) => Promise<string | null>;
   /** Trabajo después de responder (por defecto waitUntil de Vercel; fuera de Vercel, sin esperar). */
   enSegundoPlano?: (trabajo: () => Promise<unknown>) => void;
-  auditar?: (accion: AccionAuditoria, op: { resultado: 'ok' | 'denegado' | 'error'; detalle: Record<string, unknown>; request: Request; clientAddress?: string | null }) => Promise<unknown>;
+  /** true si quedó escrita (como auditoria.auditar). */
+  auditar?: (accion: AccionAuditoria, op: { resultado: 'ok' | 'denegado' | 'error'; detalle: Record<string, unknown>; request: Request; clientAddress?: string | null }) => Promise<boolean>;
 }
 
 async function clientePorDefecto(): Promise<SupabaseClient> {
@@ -105,10 +109,9 @@ async function despacharPorDefecto(ref: { bookingId: string; googleEventId: stri
 }
 
 function segundoPlanoPorDefecto(trabajo: () => Promise<unknown>): void {
-  void import('./despuesDeResponder').then(({ despuesDeResponder }) => {
-    // Fuera de Vercel no hay waitUntil: se corre sin esperar (el cron del minuto cubre si se corta).
-    if (!despuesDeResponder(trabajo)) void trabajo().catch(() => undefined);
-  }).catch(() => undefined);
+  // waitUntil se registra en esta misma llamada (antes de devolver la respuesta). Fuera de Vercel no hay
+  // waitUntil: se corre sin esperar (el cron del minuto cubre si se corta).
+  if (!despuesDeResponder(trabajo)) void trabajo().catch(() => undefined);
 }
 
 /**
@@ -129,13 +132,17 @@ export async function abrirEnlaceSesion(entrada: EntradaEnlace, deps: DepsEnlace
   if (!bookingId) {
     segundoPlano(async () => {
       const ip = await ipDe();
+      if (!ip) return; // sin IP no se puede limitar: no se audita
       const c = await db();
-      if (ip) {
-        const { count, error } = await c.from('transcriptor_auditoria').select('id', { count: 'exact', head: true })
-          .eq('accion', ACCION_ENLACE).eq('resultado', 'denegado').eq('ip', ip)
-          .gte('at', new Date(ahora.getTime() - VENTANA_INVALIDOS_MS).toISOString());
-        if (error || (count ?? 0) >= MAX_INVALIDOS_IP) return; // límite por IP: ya no se audita más
-      }
+      const desdeInv = new Date(ahora.getTime() - VENTANA_INVALIDOS_MS).toISOString();
+      const [porIp, total] = await Promise.all([
+        c.from('transcriptor_auditoria').select('id', { count: 'exact', head: true })
+          .eq('accion', ACCION_ENLACE).eq('resultado', 'denegado').eq('ip', ip).gte('at', desdeInv),
+        c.from('transcriptor_auditoria').select('id', { count: 'exact', head: true })
+          .eq('accion', ACCION_ENLACE).eq('resultado', 'denegado').gte('at', desdeInv),
+      ]);
+      // Límites por IP y global: pasado cualquiera ya no se audita más (siempre responde 404).
+      if (porIp.error || total.error || (porIp.count ?? 0) >= MAX_INVALIDOS_IP || (total.count ?? 0) >= MAX_INVALIDOS_TOTAL) return;
       await auditar(ACCION_ENLACE, { resultado: 'denegado', detalle: { motivo: 'codigo_invalido' }, request: entrada.request, clientAddress: entrada.clientAddress });
     });
     return { tipo: 'no_encontrado' };
@@ -179,8 +186,12 @@ export async function abrirEnlaceSesion(entrada: EntradaEnlace, deps: DepsEnlace
       const { count: despachos, error: eD } = await c.from('transcriptor_auditoria').select('id', { count: 'exact', head: true })
         .eq('accion', ACCION_ENLACE).eq('detalle->>reserva', reserva.id).eq('detalle->>intento', 'si').gte('at', desde);
       if (eD || (despachos ?? 0) >= MAX_DESPACHOS_ENLACE) detalle.despacho = 'limite';
-      else {
-        detalle.intento = 'si';
+      // El cupo se reserva ANTES de despachar (una fila intento='si'): aperturas simultáneas no pasan
+      // todas el conteo, y si la bitácora no se puede escribir no se despacha (falla cerrado; se entra igual).
+      else if (!(await auditar(ACCION_ENLACE, { resultado: 'ok', detalle: { reserva: reserva.id, intento: 'si' }, request: entrada.request, clientAddress: entrada.clientAddress }))) {
+        detalle.despacho = 'sin_bitacora';
+      } else {
+        detalle.cupo = 'si';
         try {
           detalle.despacho = await (deps.despachar ?? despacharPorDefecto)({ bookingId: reserva.id, googleEventId: reserva.google_event_id }, ahora);
         } catch (e) {
@@ -191,7 +202,8 @@ export async function abrirEnlaceSesion(entrada: EntradaEnlace, deps: DepsEnlace
         }
       }
     }
-    if ((auditadas ?? 0) >= MAX_AUDITADAS_ENLACE && detalle.intento !== 'si') return;
+    if ((auditadas ?? 0) >= MAX_AUDITADAS_ENLACE && detalle.cupo !== 'si') return;
+    delete detalle.cupo;
     await auditar(ACCION_ENLACE, { resultado, detalle, request: entrada.request, clientAddress: entrada.clientAddress });
   });
 

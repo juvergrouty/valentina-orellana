@@ -93,9 +93,13 @@ export function enVentanaEnlace(inicio: string, fin: string, ahora: Date): boole
  *  - 'reintentar'         : falló antes de entrar a la reunión (igual que "Reintentar" del panel).
  *  - 'sin_consentimiento' : no se envió por falta de consentimiento (se reintenta solo si ahora lo hay).
  */
-export function previaReintentablePorEnlace(p: Pick<Grabacion, 'estado' | 'estado_antes_error'> & Partial<Pick<Grabacion, 'nota_sistema'>>): 'liberar' | 'reintentar' | 'sin_consentimiento' | null {
+export function previaReintentablePorEnlace(p: Pick<Grabacion, 'estado' | 'estado_antes_error'> & Partial<Pick<Grabacion, 'nota_sistema' | 'ultimo_error'>>): 'liberar' | 'reintentar' | 'sin_consentimiento' | null {
   if (p.estado === 'sin_audio' && p.nota_sistema === NOTA_NADIE_LLEGO) return 'liberar';
-  if (p.estado === 'error' && p.estado_antes_error === 'bot_lanzando') return 'reintentar';
+  // Solo fallas técnicas (Fly, caída, nunca llegó, `fin` con motivo 'error'). Un `fin` antes de grabar por
+  // otro motivo (expulsado = Vale lo sacó, participantes_extra, vale_salio, solo, hora_fin) queda en
+  // "terminó antes de grabar (<motivo>)" (bot.ts) y NO se repite: es una decisión o un resguardo.
+  if (p.estado === 'error' && p.estado_antes_error === 'bot_lanzando'
+    && !/terminó antes de grabar \((?!error\))/.test(String(p.ultimo_error ?? ''))) return 'reintentar';
   if (p.estado === 'sin_consentimiento') return 'sin_consentimiento';
   return null;
 }
@@ -470,7 +474,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
    */
   async function despacharUna(s: SesionOnline, ahora: Date, enVentana: boolean, porEnlace = false): Promise<ResultadoDespacho> {
     const { data: previa, error: e0 } = await db.from('grabaciones')
-      .select('id, patient_id, estado, estado_antes_error, hora_fin_prevista, fin_at, updated_at, bot_token_vence_at, nota_sistema')
+      .select('id, patient_id, estado, estado_antes_error, hora_fin_prevista, fin_at, updated_at, bot_token_vence_at, nota_sistema, ultimo_error')
       .eq('google_event_id', s.googleEventId).eq('origen', 'online').maybeSingle();
     if (e0) throw new Error(`grabaciones: ${e0.message}`);
     let v: Awaited<ReturnType<PuedeGrabar>> | null = null;
@@ -482,8 +486,12 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       const porEnlaceTipo = porEnlace ? previaReintentablePorEnlace(p) : null;
       // Falló antes de entrar (Fly, Meet): lo mismo que "Reintentar" del panel, y se lanza ya.
       if (porEnlaceTipo === 'reintentar') {
+        // Mismo tope de robots por grabación que la reconexión automática (botReconexion).
+        if ((await lanzamientosDe(db, p.id)) >= MAX_LANZAMIENTOS_BOT) return 'existe';
         const r = await reintentar(p.id, db);
         if (!r || r.estado !== 'bot_lanzando' || r.bot_machine_id) return 'existe';
+        // Si Vale movió o alargó el evento, el robot nuevo usa la hora vigente de Calendar.
+        if (r.hora_fin_prevista !== s.fin) { await actualizarGrabacion(r.id, { hora_fin_prevista: s.fin }); r.hora_fin_prevista = s.fin; }
         await auditar('sistema', 'bot_lanzar', { grabacionId: p.id, patientId: p.patient_id, detalle: { via: 'enlace_sesion', reintento: true }, cliente: db });
         return (await lanzarPendiente(r as GrabacionP6, ahora)) ? 'lanzado' : 'fallo';
       }

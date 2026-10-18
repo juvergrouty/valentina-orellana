@@ -154,10 +154,10 @@ test('código válido en la ventana: redirige YA al Meet y despacha el robot una
   assert.deepEqual(r, { tipo: 'redirigir', url: MEET });
   assert.deepEqual(e.despachos, [{ bookingId: e.id, googleEventId: e.id.replace(/-/g, '') }]);
   const b = e.bitacora();
-  assert.equal(b.length, 1);
-  assert.equal(b[0].actor, 'sistema');
-  assert.equal(b[0].resultado, 'ok');
-  assert.deepEqual(b[0].detalle, { reserva: e.id, con_meet: true, intento: 'si', despacho: 'lanzado' });
+  assert.equal(b.length, 2); // cupo reservado antes de despachar + resultado
+  assert.ok(b.every((f) => f.actor === 'sistema' && f.resultado === 'ok'));
+  assert.deepEqual(b[0].detalle, { reserva: e.id, intento: 'si' });
+  assert.deepEqual(b[1].detalle, { reserva: e.id, con_meet: true, despacho: 'lanzado' });
   // Nada del Meet ni del código en la bitácora.
   assert.ok(!JSON.stringify(b).includes('meet.google.com') && !JSON.stringify(b).includes(e.codigo));
   // El panel de Vale: misma redirección, con la cuenta del negocio.
@@ -177,7 +177,7 @@ test('siempre redirige: fuera de hora, vista previa, reserva vencida, HEAD, desp
   }
   const conError = ruta({ despacho: new Error('Google Calendar no está conectado') });
   assert.deepEqual(await conError.pedir(conError.codigo), { tipo: 'redirigir', url: MEET });
-  assert.equal(conError.bitacora()[0].resultado, 'error');
+  assert.equal(conError.bitacora().at(-1)!.resultado, 'error');
 });
 
 test('sin Meet en las notas: lo busca en Calendar; si no hay, página de espera (sin robot)', async () => {
@@ -197,6 +197,11 @@ test('código inválido o reserva borrada: 404 sin datos; límite por IP en la b
   assert.equal(e.bitacora()[0].ip, '200.1.1.1');
   for (let i = 0; i < MAX_INVALIDOS_IP + 10; i++) assert.equal((await e.pedir(`x${i}`)).tipo, 'no_encontrado');
   assert.equal(e.bitacora().length, MAX_INVALIDOS_IP); // pasado el límite ya no se escribe más
+  // Tope global: muchas IP distintas tampoco llenan la bitácora.
+  const g = ruta();
+  g.db.tabla('transcriptor_auditoria').push(...Array.from({ length: 200 }, (_, i) => ({ id: i + 1, at: '2026-10-20T12:45:00Z', accion: ACCION_ENLACE, resultado: 'denegado', ip: `10.0.${i >> 8}.${i & 255}` })));
+  await g.pedir('codigo-falso', { ip: '201.2.2.2' });
+  assert.equal(g.bitacora().length, 200);
   // Un código bueno desde esa misma IP igual entra (nunca se bloquea la sesión).
   assert.equal((await e.pedir(e.codigo)).tipo, 'redirigir');
   assert.equal(e.despachos.length, 1);
@@ -291,6 +296,25 @@ test('despacho por enlace: si el robot salió porque nadie llegó, un clic lo vu
   Object.assign(g2, { estado: 'bot_no_admitido' });
   assert.equal(await e.pipeline.despacharPorEnlace(e.ref, e.ahora()), 'existe');
   assert.equal(e.maquinas.length, 2);
+});
+
+test('despacho por enlace: falla técnica antes de entrar se reintenta; si Vale lo sacó o había un tercero, no', async () => {
+  for (const [motivo, esperado, maquinas] of [['error', 'lanzado', 2], ['expulsado', 'existe', 1], ['participantes_extra', 'existe', 1], ['vale_salio', 'existe', 1]] as const) {
+    const e = despacho();
+    await e.pipeline.despacharPorEnlace(e.ref, e.ahora());
+    const g = e.grabs()[0];
+    Object.assign(g, { estado: 'error', estado_antes_error: 'bot_lanzando', bot_machine_id: null, ultimo_error: `El asistente de notas terminó antes de grabar (${motivo})` });
+    e.avanzar(5);
+    assert.equal(await e.pipeline.despacharPorEnlace(e.ref, e.ahora()), esperado, motivo);
+    assert.equal(e.maquinas.length, maquinas, motivo);
+  }
+  // Fly falló al crear la máquina: se reintenta, pero con el mismo tope de robots por grabación.
+  const f = despacho();
+  await f.pipeline.despacharPorEnlace(f.ref, f.ahora());
+  const g = f.grabs()[0];
+  for (let i = 0; i < 4; i++) f.db.tabla('transcriptor_auditoria').push({ id: 900 + i, at: f.ahora().toISOString(), accion: 'bot_lanzar', grabacion_id: g.id, resultado: 'ok' });
+  Object.assign(g, { estado: 'error', estado_antes_error: 'bot_lanzando', bot_machine_id: null, ultimo_error: 'Fly respondió 500' });
+  assert.equal(await f.pipeline.despacharPorEnlace(f.ref, f.ahora()), 'existe');
 });
 
 test('despacho por enlace: sin consentimiento no lanza ni repite filas; al firmar, el clic sí lo manda', async () => {

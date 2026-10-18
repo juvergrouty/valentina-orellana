@@ -134,14 +134,15 @@ const enAgenda = ruta === '/agenda';
 // El WhatsApp prellenado según canal solo aplica a visitas que todavía no son
 // pacientes: no en páginas de pago, reagendar, confirmación ni pasos a seguir.
 const waSegunCanal = !['/reagendar', '/confirmacion', '/recuperar', '/condiciones'].includes(ruta)
-  && !/^\/(pagar|consentimiento|pasos-a-seguir|admin)(\/|$)/.test(ruta);
+  && !/^\/(pagar|consentimiento|pasos-a-seguir|sesion|admin)(\/|$)/.test(ruta);
 const mostrarAgendarFlotante = !['/agenda', '/reagendar', '/confirmacion', '/recuperar'].includes(ruta)
-  && !/^\/(pagar|consentimiento|pasos-a-seguir)\//.test(ruta) && !noindex;
+  && !/^\/(pagar|consentimiento|pasos-a-seguir|sesion)\//.test(ruta) && !noindex;
 // Google Tag Manager (Analytics/Meta) NO se carga en páginas con datos de una
 // paciente o con claves en el link: pago, consentimiento (nombre y RUT), pasos
-// a seguir, reagendar (clave firmada) y recuperar (token). Re-auditoría 4 oct 2026.
+// a seguir, reagendar (clave firmada), recuperar (token) y el enlace propio de la sesión
+// (/sesion/<código>, 18 oct 2026). Re-auditoría 4 oct 2026.
 const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
-  && !/^\/(pagar|consentimiento|pasos-a-seguir)(\/|$)/.test(ruta);
+  && !/^\/(pagar|consentimiento|pasos-a-seguir|sesion)(\/|$)/.test(ruta);
 ---
 
 <!doctype html>
