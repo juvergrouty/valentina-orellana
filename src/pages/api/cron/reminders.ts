@@ -139,6 +139,7 @@ export const GET: APIRoute = async ({ request }) => {
         amount:         b.amount ?? 0,
         payment_method: b.payment_method ?? 'manual',
         service_name:   serviceName,
+        sesion_id:      b.id, // enlace propio de la sesión online
       }, { idempotencyKey: `${b.id}:${tareaCorreo}` });
       await terminarEnvioUnico(b.id, tareaCorreo, res.sent, res.reason);
 

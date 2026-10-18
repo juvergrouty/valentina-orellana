@@ -1,0 +1,52 @@
+---
+export const prerender = false;
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { abrirEnlaceSesion } from '../../lib/transcriptor/enlaceSesionRuta';
+
+// Enlace propio de cada sesión online (pedido de Vale, 18 oct 2026): /sesion/<código>.
+// Redirige al Meet de la reserva y, si es la hora de la sesión, manda el robot de notas en segundo plano
+// (lógica y reglas en src/lib/transcriptor/enlaceSesionRuta.ts). Nunca bloquea la entrada a la sesión.
+// Privada: noindex, fuera del sitemap y de robots; sin datos de la reserva en la página.
+const cabeceras = {
+  'Cache-Control': 'no-store, private',
+  'X-Robots-Tag': 'noindex, nofollow',
+  // El código no debe viajar a Google como "referer" al saltar a Meet.
+  'Referrer-Policy': 'no-referrer',
+};
+
+const r = await abrirEnlaceSesion({
+  codigo: Astro.params.codigo,
+  metodo: Astro.request.method,
+  request: Astro.request,
+  clientAddress: (() => { try { return Astro.clientAddress; } catch { return null; } })(),
+  authuser: Astro.url.searchParams.get('authuser'),
+});
+
+if (r.tipo === 'redirigir') {
+  return new Response(null, { status: 302, headers: { ...cabeceras, Location: r.url } });
+}
+if (r.tipo === 'no_encontrado') {
+  return Astro.rewrite('/404');
+}
+for (const [k, v] of Object.entries(cabeceras)) Astro.response.headers.set(k, v);
+if (r.tipo === 'error') Astro.response.status = 503;
+const titulo = r.tipo === 'error' ? 'No pudimos abrir tu sesión' : 'Tu videollamada aún no está lista';
+const texto = r.tipo === 'error'
+  ? 'Hubo un problema momentáneo. Vuelve a intentarlo en unos segundos; si sigue igual, escríbeme por WhatsApp y te mando el enlace directo.'
+  : 'El enlace de Google Meet de esta sesión todavía no está disponible. Escríbeme por WhatsApp y te lo mando al tiro.';
+---
+
+<BaseLayout title={titulo} description="Entrada a tu sesión online con Ps. Valentina Orellana." noindex>
+  <section class="pt-40 pb-24 md:pt-48 md:pb-32 bg-white">
+    <div class="container-site text-center max-w-xl mx-auto">
+      <p class="label text-stone mb-4">Sesión online</p>
+      <div class="divider mb-6 mx-auto"></div>
+      <h1 class="section-title mb-6">{titulo}</h1>
+      <p class="body-text mb-10">{texto}</p>
+      <div class="flex flex-wrap gap-3 justify-center">
+        {r.tipo === 'error' && <a href={Astro.url.pathname} class="btn-dark text-[10px] py-3 px-6">Intentar de nuevo</a>}
+        <a href="https://wa.me/56972735696" target="_blank" rel="noopener noreferrer" class="btn-dark text-[10px] py-3 px-6">Escribir por WhatsApp</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

@@ -138,6 +138,7 @@ export const POST: APIRoute = async ({ request }) => {
       session_time,
       amount:        booking.amount,
       service_name:  serviceName,
+      sesion_id:     booking.id,
     }).catch(console.error),
     sendRescheduleAdminAlert({
       patient_name:  booking.patient_name,

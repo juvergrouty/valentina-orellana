@@ -7,6 +7,8 @@
 //   1. vigilar        bots vivos después de HORA_FIN + 40 min → se apaga la máquina y se cierra la grabación.
 //   2. despacharBots  sesiones online que empiezan en [ahora−5, ahora+4] min (si transcriptor_bot_activo):
 //                     INSERT en bot_lanzando (google_event_id único: solo quien inserta lanza) → lanzarBot.
+//                     despacharPorEnlace (18 oct): el mismo despacho para UNA sesión cuando alguien abre su
+//                     enlace propio /sesion/<código>, en [inicio − 30 min, fin) (enlaceSesionRuta.ts).
 //   3. resumir        transcrita → resumiendo → lista (resumen.resumirSesion, modo 'directo', guarda prompt_version).
 //   4. reintentarEnvios  segmentos subidos sin transcript en AssemblyAI → enviar (backoff 1/5/15/60 min, máx. 6).
 //   5. procesarTranscripciones  sondeo sin webhook (> 30 min), errores de AssemblyAI (decisionTrasErrorAAI),
@@ -23,7 +25,7 @@ import {
 import { leaseVencido, marcarError, reintentar, soltar, tomar, transicionar } from './estados';
 import {
   cerrarConLoGrabado, debeRelanzarBot, eventIdLiberado, GRACIA_REVISAR_MAQUINA_MS, lanzamientosDe, MAX_LANZAMIENTOS_BOT,
-  NOTA_SIN_CONSENTIMIENTO_BOT, prepararRelanzamiento, previaLiberable, RESTANTE_MIN_ERROR_MS, type PreviaEvento,
+  NOTA_NADIE_LLEGO, NOTA_SIN_CONSENTIMIENTO_BOT, prepararRelanzamiento, previaLiberable, RESTANTE_MIN_ERROR_MS, type PreviaEvento,
 } from './botReconexion';
 import { extenderUsoSesion, liberarSesion } from './botCuenta';
 import { elegirModelo } from './reglas';
@@ -67,6 +69,36 @@ export const VENTANA_BOT_ANTES_MS = 20 * 60_000;
 export const VENTANA_BOT_DESPUES_MS = 4 * 60_000;
 /** r2 (punto 7): eventos empezados hasta hace 3 h se leen igual, solo para seguir su hora si Vale los mueve. */
 export const VENTANA_SINCRONIZAR_MS = 3 * 60 * 60_000;
+/**
+ * Enlace propio de la sesión (/sesion/<código>, pedido de Vale 18 oct): abrirlo despacha el robot desde
+ * 30 min antes del inicio hasta el término. El robot espera hasta 30 min a que llegue alguien
+ * (bot/src/vigia.ts); si sale por "nadie llegó", un clic posterior lo vuelve a mandar.
+ */
+export const VENTANA_ENLACE_ANTES_MS = 30 * 60_000;
+
+/** Resultado del despacho de una sesión (sin datos de pacientes: va a la bitácora del enlace). */
+export type ResultadoDespacho = 'lanzado' | 'activo' | 'existe' | 'fuera' | 'sin_consentimiento' | 'fallo';
+
+/** ¿Abrir el enlace ahora despacha el robot? [inicio − 30 min, fin). */
+export function enVentanaEnlace(inicio: string, fin: string, ahora: Date): boolean {
+  const i = Date.parse(inicio), f = Date.parse(fin), t = ahora.getTime();
+  if (Number.isNaN(i) || Number.isNaN(f)) return false;
+  return t >= i - VENTANA_ENLACE_ANTES_MS && t < f;
+}
+
+/**
+ * Intento anterior del MISMO evento que se puede repetir al abrir el enlace (nunca uno con audio, uno
+ * activo, ni una decisión de Vale o del paciente: no admitido, retirado, cancelado):
+ *  - 'liberar'            : el robot salió porque nadie llegó (no grabó nada).
+ *  - 'reintentar'         : falló antes de entrar a la reunión (igual que "Reintentar" del panel).
+ *  - 'sin_consentimiento' : no se envió por falta de consentimiento (se reintenta solo si ahora lo hay).
+ */
+export function previaReintentablePorEnlace(p: Pick<Grabacion, 'estado' | 'estado_antes_error'> & Partial<Pick<Grabacion, 'nota_sistema'>>): 'liberar' | 'reintentar' | 'sin_consentimiento' | null {
+  if (p.estado === 'sin_audio' && p.nota_sistema === NOTA_NADIE_LLEGO) return 'liberar';
+  if (p.estado === 'error' && p.estado_antes_error === 'bot_lanzando') return 'reintentar';
+  if (p.estado === 'sin_consentimiento') return 'sin_consentimiento';
+  return null;
+}
 /** Vigencia del token tras el fin (igual que VIGENCIA_TOKEN_TRAS_FIN_MS de bot.ts; no se importa para no cargarlo). */
 const VIGENCIA_TOKEN_BOT_MS = 2 * 60 * 60_000;
 const ESTADOS_BOT_ACTIVO: readonly EstadoGrabacion[] = ['bot_lanzando', 'bot_en_lobby', 'grabando'];
@@ -147,6 +179,8 @@ export interface ResultadoCorrida {
 }
 
 export interface PipelineP6 extends Pipeline {
+  /** Enlace propio de la sesión (/sesion/<código>): despacho inmediato de esa sesión. */
+  despacharPorEnlace(ref: { bookingId: string; googleEventId?: string | null }, ahora?: Date): Promise<ResultadoDespacho | 'apagado' | 'sin_sesion'>;
   resumir(ahora: Date): Promise<number>;
   limpiar(ahora: Date): Promise<number>;
   correr(ahora?: Date): Promise<ResultadoCorrida>;
@@ -426,6 +460,97 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     }
   }
 
+  /**
+   * Despacho de UNA sesión (el cuerpo del bucle de despacharBots; el enlace propio /sesion/<código>
+   * usa exactamente este mismo camino: índice único google_event_id, consentimiento, toma, lanzarBot).
+   * `porEnlace` (pedido de Vale, 18 oct): alguien abrió el enlace de la sesión; además de lo normal se
+   * vuelve a mandar el robot si el intento anterior de ESTE evento no grabó nada y no fue decisión de
+   * nadie (ver previaReintentablePorEnlace): "nadie llegó", falló al entrar, o faltaba el consentimiento
+   * y ahora está. Nunca si hay un robot activo o si ya hay audio.
+   */
+  async function despacharUna(s: SesionOnline, ahora: Date, enVentana: boolean, porEnlace = false): Promise<ResultadoDespacho> {
+    const { data: previa, error: e0 } = await db.from('grabaciones')
+      .select('id, patient_id, estado, estado_antes_error, hora_fin_prevista, fin_at, updated_at, bot_token_vence_at, nota_sistema')
+      .eq('google_event_id', s.googleEventId).eq('origen', 'online').maybeSingle();
+    if (e0) throw new Error(`grabaciones: ${e0.message}`);
+    let v: Awaited<ReturnType<PuedeGrabar>> | null = null;
+    if (previa) {
+      const p = previa as PreviaEvento & Pick<Grabacion, 'hora_fin_prevista' | 'bot_token_vence_at' | 'patient_id'>;
+      // r2 (punto 7): Vale movió o alargó el evento con el robot ya lanzado → se sigue la hora nueva.
+      if (ESTADOS_BOT_ACTIVO.includes(p.estado)) { await seguirHora(p, s, ahora); return 'activo'; }
+      if (!enVentana) return 'existe';
+      const porEnlaceTipo = porEnlace ? previaReintentablePorEnlace(p) : null;
+      // Falló antes de entrar (Fly, Meet): lo mismo que "Reintentar" del panel, y se lanza ya.
+      if (porEnlaceTipo === 'reintentar') {
+        const r = await reintentar(p.id, db);
+        if (!r || r.estado !== 'bot_lanzando' || r.bot_machine_id) return 'existe';
+        await auditar('sistema', 'bot_lanzar', { grabacionId: p.id, patientId: p.patient_id, detalle: { via: 'enlace_sesion', reintento: true }, cliente: db });
+        return (await lanzarPendiente(r as GrabacionP6, ahora)) ? 'lanzado' : 'fallo';
+      }
+      if (porEnlaceTipo === 'sin_consentimiento') {
+        // Solo se libera si AHORA sí hay consentimiento (si no, cada clic crearía otra fila igual).
+        v = await deps.puedeGrabar(s.patientId, s.tipo);
+        if (!v.puede) return 'sin_consentimiento';
+      }
+      // Evento movido a otra hora después de que el robot fue (y volvió sin audio) → se libera el
+      // google_event_id de la fila vieja para despachar a la hora nueva (índice único grabaciones_evento_unq).
+      if (!porEnlaceTipo && !previaLiberable(p, s.inicio, s.fin)) return 'existe';
+      const { data: liberada } = await db.from('grabaciones').update({ google_event_id: eventIdLiberado(s.googleEventId, p.id) })
+        .eq('id', p.id).eq('google_event_id', s.googleEventId).select('id').maybeSingle();
+      if (!liberada) return 'existe';
+      await auditar('cron', ACC.eventoMovido, { grabacionId: p.id, patientId: p.patient_id, detalle: { estado: p.estado, ...(porEnlaceTipo ? { via: 'enlace_sesion' } : {}) }, cliente: db });
+    }
+    if (!enVentana) return 'fuera';
+    v ??= await deps.puedeGrabar(s.patientId, s.tipo);
+    // H2: si la ficha es de pareja (deducido en el servidor), la grabación es de pareja aunque el
+    // evento no diga el tipo: exige ambas firmas (ya lo hizo puedeGrabar) y deja MAX_HUMANOS = 3.
+    const tipo = (v as { tipoEfectivo?: typeof s.tipo }).tipoEfectivo ?? s.tipo;
+    const d = elegirModelo({ tipo, origen: 'online', lugarConRuido: false });
+    const fila = {
+      patient_id: s.patientId, booking_id: s.bookingId, google_event_id: s.googleEventId,
+      consent_ids: v.consentIds, origen: 'online', tipo, modelo: d.modelo, diarizacion: d.diarizacion,
+      session_date: fechaChile(s.inicio), hora_fin_prevista: s.fin, meet_url: s.meetUrl, creada_por: 'cron',
+      estado: v.puede ? 'bot_lanzando' : 'sin_consentimiento',
+      nota_sistema: v.puede ? null : notaRobotSinPermiso(v.motivo),
+      tomada_en: v.puede ? ahora.toISOString() : null,
+    };
+    const { data: g, error } = await db.from('grabaciones').insert(fila).select('*').maybeSingle();
+    if (error) {
+      if (error.code === '23505') return 'activo'; // otro proceso la insertó: solo ese lanza
+      throw new Error(`grabaciones insert: ${error.message}`);
+    }
+    if (!g) return 'existe';
+    if (!v.puede) {
+      await auditar('cron', 'consentimiento_faltante', { grabacionId: g.id, patientId: s.patientId, resultado: 'denegado', detalle: { fase: 'bot', motivo: v.motivo, ...(porEnlace ? { via: 'enlace_sesion' } : {}) }, cliente: db });
+      return 'sin_consentimiento';
+    }
+    try {
+      return (await lanzar(g as GrabacionP6, ahora)) ? 'lanzado' : 'fallo';
+    } finally {
+      await soltar(g.id, db);
+    }
+  }
+
+  /** Lanzamiento de una fila en bot_lanzando sin máquina (con toma y consentimiento revisado). */
+  async function lanzarPendiente(g0: GrabacionP6, ahora: Date): Promise<boolean> {
+    if (!g0.hora_fin_prevista || Date.parse(g0.hora_fin_prevista) <= ahora.getTime()) return false; // lo cierra el vigilante
+    let lanzado = false;
+    await conToma(g0, ahora, async (g) => {
+      if (g.estado !== 'bot_lanzando' || g.bot_machine_id) return; // cambió mientras tanto
+      // Auditoría de seguridad (17 oct): el consentimiento se vuelve a revisar antes de cada relanzamiento
+      // (pudo retirarse después de crear la fila). Falla cerrado: si no se puede leer, no se lanza.
+      if (!(await consentimientoVigente(g, 'bot_relanzar'))) {
+        await transicionar(g.id, ['bot_lanzando'], 'cancelada', {
+          bot_token_vence_at: ahora.toISOString(),
+          nota_sistema: 'No se envió el asistente de notas: falta el consentimiento de grabación (se retiró o cambió).',
+        } as Partial<Grabacion>, db);
+        return;
+      }
+      lanzado = await lanzar(g, ahora);
+    });
+    return lanzado;
+  }
+
   async function despacharBots(ahora: Date): Promise<number> {
     const aj = await ajustes();
     if (!aj.activo || !aj.botActivo) return 0;
@@ -444,52 +569,8 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     const desdeDespacho = ahora.getTime() - VENTANA_BOT_ANTES_MS;
     for (const s of sesiones) {
       if (queda() < 5_000) break;
-      const { data: previa, error: e0 } = await db.from('grabaciones')
-        .select('id, patient_id, estado, estado_antes_error, hora_fin_prevista, fin_at, updated_at, bot_token_vence_at, nota_sistema')
-        .eq('google_event_id', s.googleEventId).eq('origen', 'online').maybeSingle();
-      if (e0) throw new Error(`grabaciones: ${e0.message}`);
       const enVentana = Date.parse(s.inicio) >= desdeDespacho && Date.parse(s.fin) > ahora.getTime();
-      if (previa) {
-        const p = previa as PreviaEvento & Pick<Grabacion, 'hora_fin_prevista' | 'bot_token_vence_at' | 'patient_id'>;
-        // r2 (punto 7): Vale movió o alargó el evento con el robot ya lanzado → se sigue la hora nueva.
-        if (ESTADOS_BOT_ACTIVO.includes(p.estado)) { await seguirHora(p, s, ahora); continue; }
-        // Evento movido a otra hora después de que el robot fue (y volvió sin audio) → se libera el
-        // google_event_id de la fila vieja para despachar a la hora nueva (índice único grabaciones_evento_unq).
-        if (!enVentana || !previaLiberable(p, s.inicio, s.fin)) continue;
-        const { data: liberada } = await db.from('grabaciones').update({ google_event_id: eventIdLiberado(s.googleEventId, p.id) })
-          .eq('id', p.id).eq('google_event_id', s.googleEventId).select('id').maybeSingle();
-        if (!liberada) continue;
-        await auditar('cron', ACC.eventoMovido, { grabacionId: p.id, patientId: p.patient_id, detalle: { estado: p.estado }, cliente: db });
-      }
-      if (!enVentana) continue;
-      const v = await deps.puedeGrabar(s.patientId, s.tipo);
-      // H2: si la ficha es de pareja (deducido en el servidor), la grabación es de pareja aunque el
-      // evento no diga el tipo: exige ambas firmas (ya lo hizo puedeGrabar) y deja MAX_HUMANOS = 3.
-      const tipo = (v as { tipoEfectivo?: typeof s.tipo }).tipoEfectivo ?? s.tipo;
-      const d = elegirModelo({ tipo, origen: 'online', lugarConRuido: false });
-      const fila = {
-        patient_id: s.patientId, booking_id: s.bookingId, google_event_id: s.googleEventId,
-        consent_ids: v.consentIds, origen: 'online', tipo, modelo: d.modelo, diarizacion: d.diarizacion,
-        session_date: fechaChile(s.inicio), hora_fin_prevista: s.fin, meet_url: s.meetUrl, creada_por: 'cron',
-        estado: v.puede ? 'bot_lanzando' : 'sin_consentimiento',
-        nota_sistema: v.puede ? null : notaRobotSinPermiso(v.motivo),
-        tomada_en: v.puede ? ahora.toISOString() : null,
-      };
-      const { data: g, error } = await db.from('grabaciones').insert(fila).select('*').maybeSingle();
-      if (error) {
-        if (error.code === '23505') continue; // otro proceso la insertó: solo ese lanza
-        throw new Error(`grabaciones insert: ${error.message}`);
-      }
-      if (!g) continue;
-      if (!v.puede) {
-        await auditar('cron', 'consentimiento_faltante', { grabacionId: g.id, patientId: s.patientId, resultado: 'denegado', detalle: { fase: 'bot', motivo: v.motivo }, cliente: db });
-        continue;
-      }
-      try {
-        if (await lanzar(g as GrabacionP6, ahora)) n++;
-      } finally {
-        await soltar(g.id, db);
-      }
+      if ((await despacharUna(s, ahora, enVentana)) === 'lanzado') n++;
     }
     // Reintentos de lanzamiento (Fly falló en un minuto anterior, o Vale tocó Reintentar: M3).
     // Sin `intentos > 0`: tras Reintentar los intentos vuelven a 0. Un lanzamiento en curso no se
@@ -502,21 +583,26 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         await conToma(g0, ahora, async (g) => { if (await relanzarEnCurso(g, ahora)) n++; });
         continue;
       }
-      if (!g0.hora_fin_prevista || Date.parse(g0.hora_fin_prevista) <= ahora.getTime()) continue; // lo cierra el vigilante
-      await conToma(g0, ahora, async (g) => {
-        // Auditoría de seguridad (17 oct): el consentimiento se vuelve a revisar antes de cada relanzamiento
-        // (pudo retirarse después de crear la fila). Falla cerrado: si no se puede leer, no se lanza.
-        if (!(await consentimientoVigente(g, 'bot_relanzar'))) {
-          await transicionar(g.id, ['bot_lanzando'], 'cancelada', {
-            bot_token_vence_at: ahora.toISOString(),
-            nota_sistema: 'No se envió el asistente de notas: falta el consentimiento de grabación (se retiró o cambió).',
-          } as Partial<Grabacion>, db);
-          return;
-        }
-        if (await lanzar(g, ahora)) n++;
-      });
+      if (await lanzarPendiente(g0, ahora)) n++;
     }
     return n;
+  }
+
+  /**
+   * Enlace propio de la sesión (/sesion/<código>, pedido de Vale 18 oct): alguien lo abrió. Si la sesión
+   * es online, tiene Meet y está en [inicio − 30 min, fin), se despacha el robot YA por el mismo camino
+   * del cron. Busca la sesión en Calendar igual que el cron (misma hora real, mismo Meet, mismo cruce con
+   * la reserva y la ficha). Nunca lanza por la reserva sola: sin evento en Calendar no hay robot.
+   */
+  async function despacharPorEnlace(ref: { bookingId: string; googleEventId?: string | null }, ahora: Date = new Date()): Promise<ResultadoDespacho | 'apagado' | 'sin_sesion'> {
+    ajustesCache = null;
+    const aj = await ajustes();
+    if (!aj.activo || !aj.botActivo) return 'apagado';
+    const sesiones = await deps.bot.sesionesOnlineProximas(new Date(ahora.getTime() - VENTANA_SINCRONIZAR_MS), new Date(ahora.getTime() + VENTANA_ENLACE_ANTES_MS));
+    const s = sesiones.find((x) => x.bookingId === ref.bookingId)
+      ?? (ref.googleEventId ? sesiones.find((x) => x.googleEventId === ref.googleEventId && (!x.bookingId || x.bookingId === ref.bookingId)) : undefined);
+    if (!s) return 'sin_sesion';
+    return despacharUna(s, ahora, enVentanaEnlace(s.inicio, s.fin, ahora), true);
   }
 
   /**
@@ -1111,6 +1197,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
 
   return {
     despacharBots,
+    despacharPorEnlace,
     reintentarEnvios,
     procesarTranscripciones,
     /** Contrato de tipos.ts: con modo 'directo' (decisión 1) "crear batch" = resumir directo. */

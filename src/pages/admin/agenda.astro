@@ -10,6 +10,7 @@ import { pacienteDeTitulo } from '../../lib/boxCala';
 import { mismaPersona } from '../../lib/mismaPersona';
 import { reviewRequestUrl } from '../../lib/googleReviews';
 import { nowCL } from '../../lib/dateUtils';
+import { urlSesion } from '../../lib/enlaceSesion';
 import { mensajeLinkPago } from '../../lib/cobrosProximos';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
@@ -676,6 +677,8 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
                   no_show:        b.no_show ?? false,
                   custom_title:   b.custom_title ?? '',
                   service_id:     b.service_id ?? '',
+                  // Enlace propio de la sesión online (/sesion/<código>): abre su Meet y manda el robot de notas.
+                  enlace_sesion:  String(b.session_type ?? '').includes('online') ? urlSesion(b.id) : null,
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}`}
               >
@@ -2731,6 +2734,7 @@ function openSessionDetail(b) {
     meetDiv.style.display = 'block';
     window.__currentMeetBookingId = b.id;
     window.__currentMeetUrl = meetMatch ? meetMatch[1] : null;
+    window.__currentEnlaceSesion = b.enlace_sesion || null;
     const waDigits2 = (b.patient_phone || '').replace(/\D/g, '');
     const waPhone2  = waDigits2.length === 9 ? '56' + waDigits2 : waDigits2;
     window.__currentMeetWaPhone = waPhone2.length >= 10 ? waPhone2 : null;
@@ -3204,6 +3208,13 @@ document.getElementById('sp-btn-edit-amount')?.addEventListener('click', () => {
 // toma los datos de SU sesión antes de esperar.
 const meetPorReserva = {};
 const meetEnCurso = {};
+// Enlace propio de la sesión (/sesion/<código>, 18 oct 2026): es lo que se abre, copia y manda por
+// WhatsApp (abre el mismo Meet y manda el robot de notas). Sin él (no se pudo generar), el Meet tal cual.
+const enlacePorReserva = {};
+function enlaceDe(id, meet) {
+  if (id === window.__currentMeetBookingId && window.__currentEnlaceSesion) return window.__currentEnlaceSesion;
+  return enlacePorReserva[id] || meet;
+}
 async function ensureMeetLink(id = window.__currentMeetBookingId) {
   if (!id) return null;
   if (id === window.__currentMeetBookingId && window.__currentMeetUrl) return window.__currentMeetUrl;
@@ -3215,7 +3226,11 @@ async function ensureMeetLink(id = window.__currentMeetBookingId) {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
         });
         const data = await res.json().catch(() => ({}));
-        if (data.ok && data.meetLink) { meetPorReserva[id] = data.meetLink; return data.meetLink; }
+        if (data.ok && data.meetLink) {
+          meetPorReserva[id] = data.meetLink;
+          if (data.enlace) enlacePorReserva[id] = data.enlace;
+          return data.meetLink;
+        }
       } catch {}
       return null;
     })().finally(() => { delete meetEnCurso[id]; });
@@ -3239,9 +3254,12 @@ document.getElementById('sp-meet-href')?.addEventListener('click', async (e) => 
   const label = document.getElementById('sp-meet-href-label');
   const original = label.textContent;
   label.textContent = 'Generando…';
-  const link = await ensureMeetLink(window.__currentMeetBookingId);
+  const id = window.__currentMeetBookingId;
+  const meet = await ensureMeetLink(id);
   label.textContent = original;
-  if (!link) { alert('No se pudo generar el link de Meet. Intenta de nuevo.'); return; }
+  if (!meet) { alert('No se pudo generar el link de Meet. Intenta de nuevo.'); return; }
+  // Por el enlace propio: el sitio manda el robot de notas y redirige a este Meet con la cuenta del negocio.
+  const link = enlaceDe(id, meet);
   const business = `${link}${link.includes('?') ? '&' : '?'}authuser=vinculosquesostienen@gmail.com`;
   window.open(business, '_blank');
 });
@@ -3260,9 +3278,10 @@ document.getElementById('sp-meet-copy')?.addEventListener('click', async () => {
   const btn = document.getElementById('sp-meet-copy');
   const original = btn.textContent;
   btn.textContent = 'Generando…';
-  const link = await ensureMeetLink(window.__currentMeetBookingId);
-  if (!link) { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = original; }, 1500); return; }
-  navigator.clipboard.writeText(link).then(() => {
+  const id = window.__currentMeetBookingId;
+  const meet = await ensureMeetLink(id);
+  if (!meet) { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = original; }, 1500); return; }
+  navigator.clipboard.writeText(enlaceDe(id, meet)).then(() => {
     btn.textContent = '✓ Copiado';
     setTimeout(() => { btn.textContent = original; }, 1500);
   });
@@ -3275,9 +3294,9 @@ document.getElementById('sp-meet-wa')?.addEventListener('click', async (e) => {
   const phone = window.__currentMeetWaPhone;
   const nombre = window.__currentMeetPatientFirstName;
   if (!phone) { alert('El paciente no tiene un teléfono válido guardado.'); return; }
-  const link = await ensureMeetLink(id);
-  if (!link) { alert('No se pudo generar el link de Meet. Intenta de nuevo.'); return; }
-  const msg = `Hola ${nombre} 👋 Te comparto el link de Google Meet para tu sesión: ${link}`;
+  const meet = await ensureMeetLink(id);
+  if (!meet) { alert('No se pudo generar el link de Meet. Intenta de nuevo.'); return; }
+  const msg = `Hola ${nombre} 👋 Te comparto el link para entrar a tu sesión por Google Meet: ${enlaceDe(id, meet)}`;
   window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
 });
 

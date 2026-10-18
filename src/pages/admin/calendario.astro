@@ -4,6 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { getValidAccessToken } from '../../lib/syncCalendar';
 import { todayCL } from '../../lib/dateUtils';
+import { reservaDeEventId, urlSesion } from '../../lib/enlaceSesion';
 
 // Leer settings de Google
 const { data: rows } = await supabase.from('settings').select('key, value');
@@ -123,7 +124,7 @@ const embedUrl = googleConnected
                     </span>
                   )}
                   {ev.hangoutLink && (
-                    <a href={ev.hangoutLink} target="_blank"
+                    <a href={(isFromSystem(ev) && urlSesion(reservaDeEventId(ev.id))) || ev.hangoutLink} target="_blank"
                        style="font-size:0.72rem;color:var(--forest);display:block;margin-top:0.25rem;text-decoration:none;">
                       📹 Unirse al Meet
                     </a>

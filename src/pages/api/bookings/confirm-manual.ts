@@ -80,6 +80,7 @@ export const POST: APIRoute = async ({ request }) => {
     payment_method: paymentMethod,
     is_new_patient: isNewPatient,
     service_name:   undefined,
+    sesion_id:      bookingId, // enlace propio de la sesión online
   };
   Promise.all([
     sendConfirmationToClient(emailData).catch(console.error),

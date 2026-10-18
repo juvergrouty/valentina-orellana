@@ -122,6 +122,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
           amount:         booking.amount,
           payment_method: booking.payment_method ?? 'manual',
           service_name:   svcName,
+          sesion_id:      booking.id ?? id, // enlace propio de la sesión online (no activa el de reagendar)
         };
         try { await sendConfirmationToClient(emailData); } catch (e) { console.error('[confirm] email cliente:', e); }
         try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[confirm] email admin:', e); }
@@ -364,6 +365,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
           patient_name: booking.patient_name, patient_email: booking.patient_email,
           reason: 'Tu sesión fue reagendada', session_type: booking.session_type,
           session_date, session_time, amount: booking.amount, service_name: svcName,
+          sesion_id: booking.id ?? undefined,
         });
       } catch (e) { console.error('[reschedule] email:', e); }
     }
@@ -478,6 +480,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
           reason: 'Se actualizó el servicio de tu sesión', session_type: sessionType,
           session_date: booking.session_date, session_time: booking.session_time,
           amount, service_name: svc.name,
+          sesion_id: booking.id ?? undefined,
         });
       } catch (e) { console.error('[change_service] email:', e); }
     }
@@ -924,6 +927,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
             amount:         totalCobrado,
             payment_method: 'link',
             service_name:   svc.name,
+            sesion_id:      bookingIds[0], // la primera sesión (la de primeraFecha)
           };
           try { await sendNotificationToAdmin(emailData, notifEmail, true); } catch (e) { console.error('[create-admin] notif (link):', e); }
         }
@@ -968,6 +972,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         amount:         totalCobrado,
         payment_method: payment_mode === 'free' ? 'sin_costo' : 'manual',
         service_name:   svc.name,
+        sesion_id:      bookingIds[0], // la primera sesión (la de primeraFecha)
       };
       try { await sendConfirmationToClient(emailData); } catch (e) { console.error('[create-admin] email:', e); }
       try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[create-admin] notif:', e); }

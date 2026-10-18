@@ -446,6 +446,7 @@ async function handleBooking(request: Request) {
         payment_method: 'flow',
         is_new_patient: isNewPatient,
         service_name:   svc.name,
+        sesion_id:      booking.id, // enlace propio de la sesión online
   };
 
   // ── Pago en consulta (manual) ─────────────────────────────────────────────────

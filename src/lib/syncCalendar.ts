@@ -9,6 +9,7 @@ import { quitarPrefijoSiHayInvitados, refreshAccessToken, createCalendarEvent, d
 import { logError } from './logger';
 import { cambiarNotas } from './apigateway';
 import { ESTACIONAMIENTO } from '../data/consulta';
+import { lineaEntrarCalendario, urlSesion } from './enlaceSesion';
 
 const SESSION_LABELS: Record<string, string> = {
   'online':            'Sesión Individual Online',
@@ -85,7 +86,8 @@ export async function rescheduleBookingInCalendar(bookingId: string, date: strin
     if (!auth) return;
     // Presencial: la invitación lleva la dirección (también corrige eventos
     // antiguos que se crearon sin ella).
-    const location = (booking.session_type ?? '').includes('online') ? undefined : await direccionConsulta();
+    // Online: el enlace propio de la sesión (también lo deja en eventos antiguos al reagendarlos).
+    const location = (booking.session_type ?? '').includes('online') ? (urlSesion(bookingId) ?? undefined) : await direccionConsulta();
     await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin, location, notify);
   } catch (e) {
     await logError('calendar/reagendar', 'No se pudo actualizar el evento de Google Calendar', { bookingId, date, time, error: e instanceof Error ? e.message : String(e) });
@@ -181,11 +183,14 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
 
     const sessionLabel = SESSION_LABELS[booking.session_type] ?? booking.session_type;
     // Presencial: la invitación de Google lleva la dirección de la consulta.
-    const location = isOnline ? undefined : await direccionConsulta();
+    // Online (18 oct 2026): el enlace propio de la sesión (/sesion/<código>) va en la ubicación y la
+    // descripción; al abrirlo se manda el robot de notas y se entra al mismo Meet de este evento.
+    const enlaceSesion = isOnline ? urlSesion(booking.id) : null;
+    const location = isOnline ? (enlaceSesion ?? undefined) : await direccionConsulta();
 
     const event = await createCalendarEvent(accessToken, {
       title:         `${sessionLabel} — ${booking.patient_name}`,
-      description:   `Sesión con Ps. Valentina Orellana\nPaciente: ${booking.patient_name}\nTipo: ${sessionLabel}${location ? `\nDirección: ${location}\n${ESTACIONAMIENTO}` : ''}`,
+      description:   `Sesión con Ps. Valentina Orellana\nPaciente: ${booking.patient_name}\nTipo: ${sessionLabel}${!isOnline && location ? `\nDirección: ${location}\n${ESTACIONAMIENTO}` : ''}${lineaEntrarCalendario(enlaceSesion)}`,
       location,
       date:          booking.session_date,
       startTime:     booking.session_time.slice(0, 5),

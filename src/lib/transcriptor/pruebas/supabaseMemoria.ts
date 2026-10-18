@@ -37,7 +37,12 @@ function defaults(t: string, ahora: string): Fila {
   }
 }
 
-const val = (f: Fila, k: string) => (f[k] === undefined ? null : f[k]);
+const val = (f: Fila, k: string) => {
+  // "col->>llave" (jsonb como texto, igual que PostgREST): lo usa la bitácora del enlace de sesión.
+  const j = /^(\w+)->>(\w+)$/.exec(k);
+  if (j) { const o = f[j[1]]; const x = o && typeof o === 'object' ? (o as Record<string, unknown>)[j[2]] : undefined; return x == null ? null : String(x); }
+  return f[k] === undefined ? null : f[k];
+};
 function cmp(a: any, b: any): number {
   if (a == null || b == null) return NaN;
   return typeof a === 'number' && typeof b === 'number' ? a - b : String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0;

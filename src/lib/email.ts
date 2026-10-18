@@ -7,6 +7,7 @@ import { todayCL, hoursUntilSessionCL } from './dateUtils';
 import { frasePlazoPago, AVISO_REAGENDAR } from './cobrosProximos';
 import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
+import { bloqueEntrarSesion, enlaceEntradaSesion } from './enlaceSesion';
 
 // Inicialización perezosa — no falla si la key no está configurada
 let _resend: Resend | null = null;
@@ -76,6 +77,8 @@ export interface BookingEmailData {
   is_new_patient?: boolean;
   service_name?:  string;
   booking_id?:    string; // si viene, el correo de confirmación trae el link para reagendar
+  /** Reserva de la sesión online para el enlace propio /sesion/<código> (si no viene, se usa booking_id). */
+  sesion_id?:     string;
 }
 
 const SESSION_LABELS: Record<string, string> = {
@@ -85,11 +88,15 @@ const SESSION_LABELS: Record<string, string> = {
   'pareja-presencial': 'Sesión de Pareja Presencial',
 };
 
+// Enlace propio de la sesión online (18 oct 2026): enlaceEntradaSesion / bloqueEntrarSesion viven en
+// enlaceSesion.ts (puras, con pruebas). Abren el Meet de la sesión y mandan el robot de notas.
 // ─── Email al cliente: confirmación ──────────────────────────────────────────
 // opts.skipToggle = true → reenvío manual del admin (ignora el interruptor de correos automáticos)
 /** Dónde es la sesión: la dirección de la consulta (presencial) o el aviso del Meet (online). */
-async function lugarSesion(sessionType: string | null | undefined): Promise<string> {
-  if ((sessionType ?? '').includes('online')) return 'Online · el enlace de Google Meet está en la invitación de tu calendario';
+async function lugarSesion(sessionType: string | null | undefined, conEnlace = false): Promise<string> {
+  if ((sessionType ?? '').includes('online')) {
+    return conEnlace ? 'Online · Google Meet (entra con el botón de abajo)' : 'Online · el enlace de Google Meet está en la invitación de tu calendario';
+  }
   const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
   // Con las indicaciones para estacionar (12 oct 2026).
   return addr?.value?.trim() ? `Presencial · ${conEstacionamiento(addr.value)}` : 'Presencial en la consulta';
@@ -111,7 +118,8 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
   }
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
-  const lugar = await lugarSesion(data.session_type);
+  const enlace = enlaceEntradaSesion(data);
+  const lugar = await lugarSesion(data.session_type, !!enlace);
   // Sesión que Valentina no cobra (obra social): "Sin costo" y sin fila de pago.
   // 'Sin costo' llega así desde el reenvío manual (usa el payment_note).
   const sinCosto = data.payment_method === 'sin_costo' || data.payment_method === 'Sin costo';
@@ -171,7 +179,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
             </tr>`}
           </table>
         </div>
-
+${enlace ? bloqueEntrarSesion(enlace) : ''}
         ${data.is_new_patient ? `
         <div style="background:#F4F0EC;padding:1.25rem 1.5rem;margin-bottom:1.5rem;border-left:3px solid #576352;">
           <p style="font-family:'Inter',sans-serif;font-size:0.8rem;font-weight:600;color:#1A1A18;margin-bottom:0.75rem;text-transform:uppercase;letter-spacing:0.06em;">
@@ -255,6 +263,8 @@ export async function sendSessionUpdatedEmail(data: {
   session_time:  string;
   amount:        number;
   service_name?: string;
+  /** Reserva (online): agrega el botón "Entrar a la sesión" con el enlace propio. */
+  sesion_id?:    string;
 }): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
@@ -263,7 +273,8 @@ export async function sendSessionUpdatedEmail(data: {
   const subject = `${data.reason} — Ps. Valentina Orellana`;
   // Dónde: dirección de la consulta (presencial) o aviso del Meet (online).
   const esOnline = (data.session_type ?? '').includes('online');
-  let lugar = 'Online · el enlace de Google Meet está en la invitación de tu calendario';
+  const enlace = enlaceEntradaSesion(data);
+  let lugar = enlace ? 'Online · Google Meet (entra con el botón de abajo)' : 'Online · el enlace de Google Meet está en la invitación de tu calendario';
   if (!esOnline) {
     const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
     lugar = addr?.value?.trim() ? conEstacionamiento(addr.value) : 'Presencial en consulta';
@@ -289,6 +300,7 @@ export async function sendSessionUpdatedEmail(data: {
             <tr><td style="padding:0.4rem 0;color:#6B6860;">Valor</td><td style="padding:0.4rem 0;font-weight:500;">${formatCLP(data.amount)}</td></tr>
           </table>
         </div>
+${enlace ? bloqueEntrarSesion(enlace) : ''}
         <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#6B6860;line-height:1.6;">
           Si tienes dudas, escríbeme directamente.
         </p>
@@ -461,7 +473,8 @@ export async function sendReminderEmail(data: BookingEmailData, opts: { idempote
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
   const isOnline = (data.session_type ?? '').includes('online');
-  const lugar = await lugarSesion(data.session_type);
+  const enlace = enlaceEntradaSesion(data);
+  const lugar = await lugarSesion(data.session_type, !!enlace);
   // "hoy" / "mañana" / la fecha, según el día real de la sesión (hora de Chile).
   // Antes decía siempre "hoy", aunque el recordatorio sale hasta 24 h antes.
   const dia = diaRelativo(data.session_date);
@@ -482,8 +495,9 @@ export async function sendReminderEmail(data: BookingEmailData, opts: { idempote
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.88rem;line-height:1.8;">
           <p style="margin:0;"><strong>${escapeHtml(sessionLabel)}</strong></p>
           <p style="margin:0.3rem 0 0;color:#6B6860;">${formatDate(data.session_date)} · ${String(data.session_time).slice(0, 5)}</p>
-          <p style="margin:0.6rem 0 0;color:#6B6860;">${isOnline ? '🎥 La sesión es online — revisa la invitación con el enlace de Google Meet.' : `📍 ${escapeHtml(lugar)}`}</p>
+          <p style="margin:0.6rem 0 0;color:#6B6860;">${isOnline ? (enlace ? '🎥 La sesión es online, por Google Meet.' : '🎥 La sesión es online — revisa la invitación con el enlace de Google Meet.') : `📍 ${escapeHtml(lugar)}`}</p>
         </div>
+${enlace ? bloqueEntrarSesion(enlace) : ''}
         <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#6B6860;line-height:1.6;margin-bottom:1.5rem;">
           Recuerda que solo puedes reagendar avisando con al menos 24 horas de anticipación.
         </p>
@@ -935,6 +949,8 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
   // (desde el 12 oct 2026; antes se anotaba en Reservo). El panel también lo
   // recuerda con un botón para marcarlo (ver src/lib/boxCala.ts).
   const isPresencial = data.session_type.includes('presencial');
+  // Online: el enlace propio de la sesión (abre el Meet y manda el robot de notas).
+  const enlaceVale = enlaceEntradaSesion(data);
 
   // CORREGIDO: cuando se genera un link de pago desde el panel (agendar +
   // "Enviar link de pago"), este correo se mandaba diciendo "confirmada"
@@ -982,6 +998,8 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
               <td style="padding:0.35rem 0;">${data.payment_method === 'manual' ? '💵 Pago en consulta' : data.payment_method === 'sin_costo' ? '🤝 Sin costo' : '💳 Flow'}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Monto</td>
               <td style="padding:0.35rem 0;font-weight:500;">${formatCLP(data.amount)}</td></tr>
+          ${enlaceVale ? `<tr><td style="padding:0.35rem 0;color:#6B6860;">Entrar a la sesión</td>
+              <td style="padding:0.35rem 0;"><a href="${escapeHtml(enlaceVale)}" style="color:#576352;word-break:break-all;">${escapeHtml(enlaceVale)}</a></td></tr>` : ''}
         </table>
 
         <a href="https://www.valentinaorellana.cl/admin/agenda"

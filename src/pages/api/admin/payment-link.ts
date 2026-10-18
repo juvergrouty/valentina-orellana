@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { syncBookingToCalendar } from '../../../lib/syncCalendar';
+import { enlaceParaSesion, lineaEntrarWhatsApp } from '../../../lib/enlaceSesion';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { chocaConOtraSesion } from '../../../lib/disponibilidad';
 import { tagBookingsWithPaymentToken, totalACobrarPorEmail } from '../../../lib/debt';
@@ -206,7 +207,9 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     const modalityLine = isOnline ? '🎥 Sesión online\n' : '📍 Sesión presencial\n';
-    const meetLine     = meetLink  ? `\n🔗 Google Meet: ${meetLink}` : '';
+    // Enlace propio de la sesión (18 oct 2026): abre el mismo Meet y manda el robot de notas.
+    const enlaceSesion = meetLink ? enlaceParaSesion(bookingId, meetLink) : null;
+    const meetLine     = lineaEntrarWhatsApp(enlaceSesion);
 
     const waMessage = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n${modalityLine}${dateLine}💰 ${incluyeOtras ? `Total a pagar: $${amountFmt} CLP\nIncluye otras sesiones que tienes pendientes de pago.` : `$${amountFmt} CLP`}\n\n💳 Enlace de pago: ${paymentUrl}${meetLine}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
 
@@ -222,7 +225,7 @@ export const POST: APIRoute = async ({ request }) => {
       waPhone,
       waMessage,
       totalAPagar,
-      meetLink:     meetLink ?? null,
+      meetLink:     enlaceSesion ?? null, // el enlace propio (o el Meet si no se pudo generar)
     });
 
   } catch (err: any) {

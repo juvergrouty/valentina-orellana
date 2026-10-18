@@ -4,6 +4,7 @@ import { syncBookingToCalendar, getValidAccessToken } from '../../../lib/syncCal
 import { agregarMeetAEvento } from '../../../lib/googleCalendar';
 import { cambiarNotas } from '../../../lib/apigateway';
 import { logError } from '../../../lib/logger';
+import { enlaceParaSesion } from '../../../lib/enlaceSesion';
 
 export const prerender = false;
 
@@ -53,7 +54,9 @@ export const POST: APIRoute = async ({ request }) => {
       await logError('calendar/meet', 'No se pudo agregar el Meet a un evento existente', { bookingId: id, error: e instanceof Error ? e.message : String(e) });
     }
   }
-  return json({ ok: true, meetLink });
+  // enlace: el enlace propio de la sesión (/sesion/<código>, 18 oct 2026). El panel lo usa para entrar,
+  // copiar y mandar por WhatsApp: abre este mismo Meet y manda el robot de notas.
+  return json({ ok: true, meetLink, enlace: meetLink ? enlaceParaSesion(id, meetLink) : null });
 };
 
 function json(data: unknown, status = 200) {

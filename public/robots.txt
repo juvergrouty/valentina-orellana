@@ -2,5 +2,6 @@ User-agent: *
 Allow: /
 Disallow: /admin
 Disallow: /api
+Disallow: /sesion/
 
 Sitemap: https://www.valentinaorellana.cl/sitemap.xml
