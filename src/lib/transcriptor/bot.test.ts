@@ -244,12 +244,16 @@ function escenario(estado = 'bot_lanzando') {
   };
   const ahora = new Date('2026-10-16T22:00:00.000Z');
   const avisos: NuevaAlerta[] = [];
+  const permiso: { puede: boolean; motivo?: string; lanza?: boolean } = { puede: true };
   const enviar = (cuerpo: unknown, tok: string | null = token) => procesarEventoBot(
     { authorization: tok === null ? null : `Bearer ${tok}`, cuerpoTexto: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo), clientAddress: '1.2.3.4' },
-    { db: db as never, secreto: SECRETO, almacenamiento: async () => alm as never, ahora: () => ahora, alertar: async (a) => { avisos.push(a); } },
+    {
+      db: db as never, secreto: SECRETO, almacenamiento: async () => alm as never, ahora: () => ahora, alertar: async (a) => { avisos.push(a); },
+      puedeGrabar: async () => { if (permiso.lanza) throw new Error('base caída'); return { puede: permiso.puede, motivo: permiso.motivo }; },
+    },
   );
   const g = () => db.tablas.grabaciones[0];
-  return { db, token, objetos, enviar, g, avisos };
+  return { db, token, objetos, enviar, g, avisos, permiso };
 }
 
 test('endpoint: token ausente, falso o vencido → 404 genérico y queda en la bitácora', async () => {
@@ -306,6 +310,19 @@ test('endpoint: flujo completo lobby → activo → segmentos → fin, sin devol
   assert.equal((await s.enviar({ tipo: 'pide_url', seq: 2 })).status, 404);
   // La bitácora de eventos no guarda nombres.
   assert.ok(!JSON.stringify(s.db.tablas.transcriptor_webhooks).includes('Camila'));
+});
+
+test('auditoría seguridad: pide_url revisa el consentimiento; retirado → 403 sin URL y queda en la bitácora; base caída → 503', async () => {
+  const s = escenario('grabando');
+  assert.equal((await s.enviar({ tipo: 'pide_url', seq: 0 })).status, 200);
+  s.permiso.puede = false; s.permiso.motivo = 'revocado';
+  const r = await s.enviar({ tipo: 'pide_url', seq: 1 });
+  assert.equal(r.status, 403);
+  assert.equal(r.cuerpo.url, undefined);
+  assert.equal(s.db.tablas.grabacion_segmentos.length, 1); // no se creó el segmento 1
+  assert.ok(s.db.tablas.transcriptor_auditoria.some((f) => f.accion === 'consentimiento_faltante' && f.resultado === 'denegado'));
+  s.permiso.puede = true; s.permiso.lanza = true;
+  assert.equal((await s.enviar({ tipo: 'pide_url', seq: 1 })).status, 503); // falla cerrado
 });
 
 test('endpoint: fin sin segmentos → sin_audio; no admitido → bot_no_admitido; error antes de grabar → error', async () => {

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  ACCIONES_AVISO, INFO_ACCION, accionesDisponibles, alertaSuperada, claseDe, ejecutarAccionAviso, instruccionDe,
+  ACCIONES_AVISO, INFO_ACCION, accionesDisponibles, audioViejoBorrable, alertaSuperada, claseDe, ejecutarAccionAviso, instruccionDe,
   lanzarMaquinaRespaldo, revisarAvisosSueltos, umbralExito, type AccionAviso, type OpsAcciones, type ResultadoBorrado,
 } from './accionesAlerta';
 import { armarCorreo, crearAlertas, urlAccion, type AlertaAbierta, type AlertaFila, type RepoAlertas, type SesionDeAlerta } from './alertas';
@@ -435,4 +435,14 @@ test('ejecutarSalud({ solo }): corre solo ese chequeo (aunque el transcriptor es
   assert.deepEqual(r.resultados.map((x) => x.chequeo), ['anthropic']);
   assert.deepEqual(resueltas, ['salud:anthropic']);
   assert.deepEqual(guardadas, ['anthropic']);
+});
+
+test('auditoría seguridad: borrar_audio nunca borra (ni por antigüedad) el audio de una sesión sin transcripción guardada', () => {
+  const limite = Date.parse('2026-10-16T00:00:00Z');
+  const viejo = new Date('2026-10-15T00:00:00Z');
+  const protegidas = new Set(['a/sin-transcribir.m4a']);
+  assert.equal(audioViejoBorrable({ key: 'a/huerfano.m4a', modificado: viejo }, limite, protegidas), true);
+  assert.equal(audioViejoBorrable({ key: 'a/sin-transcribir.m4a', modificado: viejo }, limite, protegidas), false);
+  assert.equal(audioViejoBorrable({ key: 'a/nuevo.m4a', modificado: new Date('2026-10-16T10:00:00Z') }, limite, protegidas), false);
+  assert.equal(audioViejoBorrable({ key: 'a/sin-fecha.m4a', modificado: null }, limite, protegidas), false);
 });

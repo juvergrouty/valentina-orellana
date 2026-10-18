@@ -622,6 +622,8 @@ export interface DepsEvento {
   ahora?: () => Date;
   /** Para pruebas: registro de avisos (por defecto alertas.ts con la misma base). */
   alertar?: Alertar;
+  /** Para pruebas: chequeo de consentimiento (por defecto evaluarEnBase de consentimiento.ts con la misma base). */
+  puedeGrabar?: (patientId: string | null, tipo: TipoSesion) => Promise<{ puede: boolean; motivo?: string }>;
 }
 
 export interface RespuestaEvento { status: number; cuerpo: Record<string, unknown> }
@@ -629,7 +631,7 @@ export interface RespuestaEvento { status: number; cuerpo: Record<string, unknow
 const NO_ENCONTRADO: RespuestaEvento = { status: 404, cuerpo: { error: 'No encontrado' } };
 const ok = (extra: Record<string, unknown> = {}): RespuestaEvento => ({ status: 200, cuerpo: { ok: true, ...extra } });
 
-type FilaBot = Pick<Grabacion, 'id' | 'patient_id' | 'estado' | 'inicio_at' | 'bot_token_vence_at' | 'bot_machine_id' | 'hora_fin_prevista'>;
+type FilaBot = Pick<Grabacion, 'id' | 'patient_id' | 'estado' | 'inicio_at' | 'bot_token_vence_at' | 'bot_machine_id' | 'hora_fin_prevista'> & { tipo?: TipoSesion | null };
 
 /**
  * Lógica completa de POST /api/transcriptor/bot-evento. Nunca devuelve datos de pacientes:
@@ -658,7 +660,7 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
 
   const hmac = hmacTokenBot(token, secretoBot);
   const { data: g, error: eG } = await c.from('grabaciones')
-    .select('id, patient_id, estado, inicio_at, bot_token_vence_at, bot_machine_id, hora_fin_prevista')
+    .select('id, patient_id, estado, inicio_at, bot_token_vence_at, bot_machine_id, hora_fin_prevista, tipo')
     .eq('bot_token_sha256', hmac).maybeSingle();
   if (eG) return { status: 503, cuerpo: { error: 'Intenta de nuevo' } };
   if (!g || !tokenVigente((g as FilaBot).bot_token_vence_at, ahora)) {
@@ -707,6 +709,18 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
     }
     case 'pide_url': {
       if (grab.estado !== 'grabando') return { status: 409, cuerpo: { error: 'La grabación no está activa' } };
+      // Auditoría de seguridad (17 oct): igual que subida-url en presencial, el consentimiento se revisa antes
+      // de entregar cada URL de subida (el retiro corta lo que sigue). Falla cerrado si no se puede leer.
+      let permiso: { puede: boolean; motivo?: string };
+      try {
+        const verificar = deps.puedeGrabar
+          ?? (async (pid: string | null, t: TipoSesion) => (await import('./consentimiento')).evaluarEnBase(pid, t, c));
+        permiso = await verificar(grab.patient_id, (grab.tipo ?? 'sin_tipo') as TipoSesion);
+      } catch { return { status: 503, cuerpo: { error: 'Intenta de nuevo' } }; }
+      if (!permiso.puede) {
+        await auditar('bot', 'consentimiento_faltante', { ...auditoria, resultado: 'denegado', detalle: { fase: 'bot_subida', motivo: permiso.motivo ?? null } });
+        return { status: 403, cuerpo: { error: 'Sin consentimiento de grabación vigente' } };
+      }
       const alm = await deps.almacenamiento?.();
       if (!alm) return { status: 503, cuerpo: { error: 'Almacenamiento no disponible' } };
       const { data: seg } = await c.from('grabacion_segmentos').select('r2_key, subido_at')
