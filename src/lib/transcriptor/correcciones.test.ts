@@ -33,12 +33,12 @@ const cif = crearCifrado({ activa: 1, obtener: (v) => (v === 1 ? KEK : undefined
 
 test('H1: retiro SOLO de la grabación de una persona bloquea grabar (revocado) sin revocar su consentimiento', () => {
   const ana = fila({ signer_name: 'Ana Pérez', signer_rut: '11.111.111-1', recording_revoked_at: '2026-10-15T10:00:00Z' });
-  const r = evaluarConsentimientos({ patientId: 'p1', tipo: 'individual', fechaNacimiento: null, filas: [ana], hoy: HOY });
+  const r = evaluarConsentimientos({ patientId: 'p1', tipo: 'individual', fechaNacimiento: '1990-05-05', filas: [ana], hoy: HOY });
   assert.deepEqual([r.puede, r.motivo], [false, 'revocado']);
   assert.equal(ana.revoked_at, null, 'el consentimiento de atención sigue vigente');
   // En pareja, el retiro de UNA persona bloquea la sesión de ambos.
   const luis = fila({ signer_name: 'Luis Soto', signer_rut: '9.876.543-2' });
-  const rp = evaluarConsentimientos({ patientId: 'p1', tipo: 'pareja', fechaNacimiento: null, filas: [ana, luis], hoy: HOY });
+  const rp = evaluarConsentimientos({ patientId: 'p1', tipo: 'pareja', fechaNacimiento: '1990-05-05', filas: [ana, luis], hoy: HOY });
   assert.deepEqual([rp.puede, rp.motivo], [false, 'revocado']);
 });
 
@@ -56,17 +56,17 @@ test('H2: fichaEsPareja con cualquier señal del servidor', () => {
 });
 
 test('H2: "individual" en una ficha de pareja exige 2 firmas y el texto lo explica', () => {
-  const r = evaluarConsentimientos({ patientId: 'p1', tipo: 'individual', fichaPareja: true, fechaNacimiento: null, filas: [fila({})], hoy: HOY });
+  const r = evaluarConsentimientos({ patientId: 'p1', tipo: 'individual', fichaPareja: true, fechaNacimiento: '1990-05-05', filas: [fila({})], hoy: HOY });
   assert.deepEqual([r.puede, r.motivo, r.requeridas, r.tipoEfectivo, r.parejaDeducida], [false, 'falta_segunda_firma', 2, 'pareja', true]);
   assert.equal(textoMotivo(motivoVisible(r)), 'Esta ficha es de pareja. Para grabar se necesita el consentimiento de las dos personas.');
-  const sinTipo = evaluarConsentimientos({ patientId: 'p1', tipo: 'sin_tipo', fichaPareja: true, fechaNacimiento: null, filas: [fila({})], hoy: HOY });
+  const sinTipo = evaluarConsentimientos({ patientId: 'p1', tipo: 'sin_tipo', fichaPareja: true, fechaNacimiento: '1990-05-05', filas: [fila({})], hoy: HOY });
   assert.equal(sinTipo.puede, false, 'online sin tipo (bot) también');
 });
 
 test('H2 en la base: reserva pareja-* de la ficha → individual con 1 firma no puede', async () => {
   const db = new SupabaseMemoria();
   const p = randomUUID();
-  db.tabla('patients').push({ id: p, name: 'Clara Ríos', email: 'clara@ejemplo.cl', birthdate: null });
+  db.tabla('patients').push({ id: p, name: 'Clara Ríos', email: 'clara@ejemplo.cl', birthdate: '1990-05-05' });
   db.tabla('consents').push({ ...fila({ signer_name: 'Clara Ríos' }), patient_id: p });
   assert.equal((await evaluarEnBase(p, 'individual', db.cliente)).puede, true);
   db.tabla('bookings').push({ id: randomUUID(), patient_email: 'Clara@Ejemplo.cl', session_type: 'pareja-presencial' });

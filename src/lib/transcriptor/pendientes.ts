@@ -44,6 +44,8 @@ export interface EntradaPendientes {
   tieneSesiones: boolean;
   faltanDatos: string[];
   hrefInfo: string;
+  /** Ronda 2 (18 oct): sin fecha de nacimiento no se graba (chequeo de menores, consentimiento.ts). */
+  faltaNacimiento?: boolean;
 }
 
 export const ID_PANEL_PROPIO = 'cf-envio-propio';
@@ -76,6 +78,14 @@ export function calcularPendientes(e: EntradaPendientes): Pendiente[] {
   if (e.activo && e.email && e.tieneSesiones && e.pasosEnviadosAt === null) {
     out.push({ clave: 'pasos_a_seguir', texto: 'Falta enviar «Pasos a seguir»', accion: { tipo: 'pasos' } });
   }
+  if (e.faltaNacimiento) {
+    out.push({
+      clave: 'fecha_nacimiento',
+      texto: 'Falta la fecha de nacimiento',
+      detalle: 'sin ella no se graba la sesión',
+      accion: { tipo: 'ir', href: `${e.hrefInfo}#pf-nacimiento`, etiqueta: 'Completar' },
+    });
+  }
   if (e.faltanDatos.length) {
     // La clave incluye qué falta: si después falta otra cosa, vuelve a aparecer.
     out.push({
@@ -100,7 +110,7 @@ export function separarPendientes(todos: Pendiente[], gestionados: Gestionado[])
   return { visibles, gestionadosAbiertos };
 }
 
-const CLAVE_VALIDA = /^(consentimiento_propio|consentimiento_pareja|pasos_a_seguir|datos_ficha:[\p{L}, ]{1,100})$/u;
+const CLAVE_VALIDA = /^(consentimiento_propio|consentimiento_pareja|pasos_a_seguir|fecha_nacimiento|datos_ficha:[\p{L}, ]{1,100})$/u;
 export function claveValida(c: unknown): c is string {
   return typeof c === 'string' && c.length <= 120 && CLAVE_VALIDA.test(c);
 }

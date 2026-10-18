@@ -15,8 +15,11 @@ export const prerender = false;
 // edad y deja la grabación en estado 'creada' con su modelo (regla fija reglas.ts).
 // Sin esta respuesta el botón Grabar no se habilita, y subida-url/finalizar vuelven a
 // verificar todo antes de aceptar audio. Idempotente: si ya hay una 'creada' de la misma
-// sesión (últimas 12 h) se reutiliza.
+// sesión (últimas 12 h) PREPARADA POR ESTE MISMO DISPOSITIVO se reutiliza (ronda 2, 18 oct: el navegador
+// manda `reutilizar` = el id que guardó; sin él se crea una nueva). Así, si Vale prepara la misma sesión en
+// el iPhone y en el Mac, cada uno graba en su propia grabación y ninguno pisa ni borra lo del otro.
 // Cuerpo: { booking_id? , patient_id?, google_event_id?, tipo?: 'individual'|'pareja', lugar_con_ruido?: boolean,
+//          reutilizar?: uuid (preparación anterior de este dispositivo),
 //          nueva?: true (no reutilizar: el teléfono ya tiene audio guardado con la preparación anterior) }
 
 export const POST: APIRoute = async (ctx) => {
@@ -99,14 +102,16 @@ export const POST: APIRoute = async (ctx) => {
       creada_por: 'vale' as const,
     };
 
-    // Reutiliza una preparación anterior de la misma sesión (sin audio aún).
+    // Reutiliza la preparación anterior de ESTE dispositivo para la misma sesión (sin audio aún).
+    const reutilizar = esUuid(body.reutilizar) ? body.reutilizar : null;
     const hace12h = new Date(Date.now() - 12 * 3600_000).toISOString();
     let q = supabase.from('grabaciones').select('id')
+      .eq('id', reutilizar ?? '00000000-0000-0000-0000-000000000000')
       .eq('patient_id', patientId!).eq('origen', 'presencial').eq('estado', 'creada')
       .eq('session_date', sessionDate).gte('created_at', hace12h)
       .order('created_at', { ascending: false }).limit(1);
     q = bookingId ? q.eq('booking_id', bookingId) : q.is('booking_id', null);
-    const { data: previaDb, error: e1 } = body.nueva === true ? { data: null, error: null } : await q.maybeSingle();
+    const { data: previaDb, error: e1 } = body.nueva === true || !reutilizar ? { data: null, error: null } : await q.maybeSingle();
     if (e1) throw new Error(e1.message);
     const previa = previaDb as { id: string } | null;
 

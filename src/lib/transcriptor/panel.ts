@@ -306,6 +306,15 @@ export function exigePasskeyObligatoria(clave: string, valor: string): boolean {
   return valor === 'true' && (AJUSTES_QUE_EXIGEN_PASSKEY as readonly string[]).includes(clave);
 }
 
+/**
+ * Ronda 2 (18 oct): toda escritura de /api/admin/transcriptor/ajustes exige sesión con passkey
+ * (exigirAccesoClinico), como las demás rutas sensibles, SALVO apagar el transcriptor o el robot:
+ * apagar reduce el riesgo y debe poder hacerse siempre (p. ej. desde un teléfono sin la passkey).
+ */
+export function ajustePermitidoSinPasskey(clave: string, valor: string): boolean {
+  return valor === 'false' && (AJUSTES_QUE_EXIGEN_PASSKEY as readonly string[]).includes(clave);
+}
+
 /** Estado de passkeys (de passkey/servidor.ts estadoPasskeys) o 'error' si no se pudo leer. */
 export type EstadoPasskeyActivacion = { cantidad: number; obligatoria: boolean; migracionPendiente: boolean } | 'error';
 

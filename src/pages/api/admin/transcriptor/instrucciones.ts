@@ -8,6 +8,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { auditar } from '../../../../lib/transcriptor/auditoria';
 import { guardiaPanel, json, leerJson, safeAddr } from '../../../../lib/transcriptor/peticion';
+import { exigirAccesoClinico } from '../../../../lib/transcriptor/acceso';
 import {
   INSTRUCCIONES_PREGUNTAS_POR_DEFECTO, INSTRUCCIONES_RESUMEN_POR_DEFECTO, MAX_INSTRUCCIONES,
 } from '../../../../lib/transcriptor/resumen';
@@ -15,7 +16,8 @@ import {
 export const prerender = false;
 
 export const POST: APIRoute = async (ctx) => {
-  const rechazo = await guardiaPanel(ctx, 'cambiar_instrucciones');
+  // Ronda 2 (18 oct): las instrucciones deciden qué escribe la IA en la ficha → exige sesión con passkey.
+  const rechazo = (await guardiaPanel(ctx, 'cambiar_instrucciones')) ?? (await exigirAccesoClinico(ctx, 'cambiar_instrucciones'));
   if (rechazo) return rechazo;
   const { request } = ctx;
   const clientAddress = safeAddr(ctx);

@@ -472,16 +472,23 @@ async function chequeoGasto({ f, ahora, ajustes }: Ctx): Promise<ResultadoP8> {
   return { chequeo: 'gasto', ok: true, detalle, alertas: [] };
 }
 
-/** La regla de vercel.json: micrófono SOLO en /admin/grabar; el resto del sitio, microphone=(). */
+/**
+ * La regla de vercel.json: micrófono SOLO en /admin/grabar y en /grabar-sin-internet (el mismo grabador en
+ * versión estática, para retomar sin red; ronda 2, 18 oct); el resto del sitio, microphone=().
+ */
+export const RUTAS_MICROFONO = ['/admin/grabar', '/grabar-sin-internet'] as const;
+export const REGLA_RESTO_MICROFONO = '/((?!admin/grabar$|grabar-sin-internet$).*)';
 export function revisarReglaMicrofono(config: unknown): { ok: boolean; problema?: string } {
   const headers = (config as { headers?: { source?: string; headers?: { key?: string; value?: string }[] }[] })?.headers;
   if (!Array.isArray(headers)) return { ok: false, problema: 'vercel.json no tiene la sección headers' };
   const pp = (src: string) => headers.find((h) => h.source === src)?.headers?.find((x) => x.key?.toLowerCase() === 'permissions-policy')?.value ?? null;
-  const grabar = pp('/admin/grabar');
-  const resto = pp('/((?!admin/grabar$).*)');
-  if (!grabar || !/(^|[,\s])microphone=\(self\)/.test(grabar)) return { ok: false, problema: '/admin/grabar ya no tiene microphone=(self)' };
+  for (const ruta of RUTAS_MICROFONO) {
+    const v = pp(ruta);
+    if (!v || !/(^|[,\s])microphone=\(self\)/.test(v)) return { ok: false, problema: `${ruta} ya no tiene microphone=(self)` };
+  }
+  const resto = pp(REGLA_RESTO_MICROFONO);
   if (!resto || !/(^|[,\s])microphone=\(\)/.test(resto)) return { ok: false, problema: 'el resto del sitio ya no bloquea el micrófono (microphone=())' };
-  const otros = headers.filter((h) => h.source !== '/admin/grabar')
+  const otros = headers.filter((h) => !(RUTAS_MICROFONO as readonly string[]).includes(h.source ?? ''))
     .flatMap((h) => h.headers ?? []).filter((x) => x.key?.toLowerCase() === 'permissions-policy' && /microphone=\((?!\))/.test(x.value ?? ''));
   if (otros.length) return { ok: false, problema: 'otra ruta habilita el micrófono' };
   return { ok: true };

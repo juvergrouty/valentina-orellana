@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { cuentaComoSilencio, finGrabacionMs, UMBRAL_SILENCIO_RMS } from './grabador';
 
-const PAGINA = readFileSync(new URL('../../pages/admin/grabar.astro', import.meta.url), 'utf8');
+const PAGINA = readFileSync(new URL('../../components/admin/Grabador.astro', import.meta.url), 'utf8');
 
 test('silencio: solo cuenta con medidor midiendo de verdad (AudioContext running)', () => {
   assert.equal(cuentaComoSilencio(0, true, 'running'), true);

@@ -65,7 +65,14 @@ export const GET: APIRoute = async ({ url }) => {
   const { data, error } = await supabase.from('grabaciones').select('id, estado, patient_id').eq('id', id).maybeSingle();
   if (error) return json({ ok: false, error: 'No se pudo leer el estado.' }, 503);
   if (!data) return json({ ok: false, error: 'No encontré esa grabación.' }, 404);
-  return json({ ok: true, estado: data.estado, patient_id: data.patient_id });
+  // Ronda 2 (18 oct): 'lista' sin resumen = no se reconoció voz (pipeline: resumen en error 'sin_voz'). El
+  // grabador no debe decir "El resumen está en la ficha" si no lo hay. Solo un sí/no, sin contenido.
+  let resumen: boolean | null = null;
+  if (data.estado === 'lista') {
+    const r = await supabase.from('resumenes_ia').select('id').eq('grabacion_id', id).eq('estado', 'listo').limit(1);
+    resumen = r.error ? null : (r.data ?? []).length > 0;
+  }
+  return json({ ok: true, estado: data.estado, patient_id: data.patient_id, resumen });
 };
 
 export const POST: APIRoute = async (ctx) => {

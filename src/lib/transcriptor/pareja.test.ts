@@ -48,7 +48,7 @@ test('D (17 oct): el NOMBRE de la sesión o del servicio con "pareja" (sin mayú
 test('D (17 oct) en la base: servicio llamado "Terapia de Pareja" (tipo individual) → la regla única pide 2 firmas', async () => {
   const db = new SupabaseMemoria();
   const p = randomUUID(), s = randomUUID();
-  db.tabla('patients').push({ id: p, name: 'Clara Ríos', email: 'clara@ejemplo.cl', birthdate: null, rut: '11.111.111-1' });
+  db.tabla('patients').push({ id: p, name: 'Clara Ríos', email: 'clara@ejemplo.cl', birthdate: '1990-05-05', rut: '11.111.111-1' });
   db.tabla('services_catalog').push({ id: s, type: 'individual', name: 'Terapia de Pareja' });
   db.tabla('bookings').push({ id: randomUUID(), patient_email: 'clara@ejemplo.cl', session_type: 'presencial', service_id: s });
   db.tabla('consents').push({ ...fila({ signer_name: 'Clara Ríos', signer_rut: '11.111.111-1' }), patient_id: p });
@@ -58,7 +58,7 @@ test('D (17 oct) en la base: servicio llamado "Terapia de Pareja" (tipo individu
   // Por el nombre de la sesión (custom_title), sin servicio.
   const db2 = new SupabaseMemoria();
   const p2 = randomUUID();
-  db2.tabla('patients').push({ id: p2, name: 'Ana Pérez', email: 'ana@ejemplo.cl', birthdate: null, rut: null });
+  db2.tabla('patients').push({ id: p2, name: 'Ana Pérez', email: 'ana@ejemplo.cl', birthdate: '1990-05-05', rut: null });
   db2.tabla('bookings').push({ id: randomUUID(), patient_email: 'ana@ejemplo.cl', session_type: 'online', service_id: null, custom_title: 'Sesión PAREJA' });
   assert.equal(await fichaEsParejaPorReserva(db2.cliente, 'ana@ejemplo.cl'), true);
 });
@@ -66,7 +66,7 @@ test('D (17 oct) en la base: servicio llamado "Terapia de Pareja" (tipo individu
 function fichaBase(sessionType = 'presencial', tipoServicio: string | null = null) {
   const db = new SupabaseMemoria();
   const p = randomUUID(), s = randomUUID();
-  db.tabla('patients').push({ id: p, name: 'Clara Ríos', email: 'clara@ejemplo.cl', birthdate: null, rut: '11.111.111-1' });
+  db.tabla('patients').push({ id: p, name: 'Clara Ríos', email: 'clara@ejemplo.cl', birthdate: '1990-05-05', rut: '11.111.111-1' });
   if (tipoServicio) db.tabla('services_catalog').push({ id: s, type: tipoServicio });
   db.tabla('bookings').push({ id: randomUUID(), patient_email: 'clara@ejemplo.cl', session_type: sessionType, service_id: tipoServicio ? s : null });
   return { db, p };
@@ -94,21 +94,21 @@ test('D en la base: dos firmas de dos personas distintas (la segunda por su link
 
 test('D: dos consentimientos de la MISMA persona (mismo RUT, aunque uno sea persona 2) no son dos firmas', () => {
   const filas = [fila({ signer_rut: '11.111.111-1' }), fila({ signer_rut: '11111111-1', persona: 2, signed_at: '2026-10-11T12:00:00Z' })];
-  const r = evaluarConsentimientos({ patientId: 'p', tipo: 'pareja', fichaPareja: true, fechaNacimiento: null, filas, hoy: HOY });
+  const r = evaluarConsentimientos({ patientId: 'p', tipo: 'pareja', fichaPareja: true, fechaNacimiento: '1990-05-05', filas, hoy: HOY });
   assert.deepEqual([r.puede, r.motivo], [false, 'falta_segunda_firma']);
 });
 
 test('D: link de la pareja pendiente (sin firmar) no cuenta como firma; su retiro bloquea', () => {
   const base = fila({ signer_rut: '11.111.111-1' });
   const pend = fila({ signed_at: null, signer_name: null, signer_rut: null, persona: 2 });
-  assert.equal(evaluarConsentimientos({ patientId: 'p', tipo: 'pareja', fechaNacimiento: null, filas: [base, pend], hoy: HOY }).motivo, 'falta_segunda_firma');
+  assert.equal(evaluarConsentimientos({ patientId: 'p', tipo: 'pareja', fechaNacimiento: '1990-05-05', filas: [base, pend], hoy: HOY }).motivo, 'falta_segunda_firma');
   const retirada = fila({ signer_rut: '9.876.543-2', persona: 2, revoked_at: '2026-10-15T00:00:00Z' });
-  assert.equal(evaluarConsentimientos({ patientId: 'p', tipo: 'pareja', fechaNacimiento: null, filas: [base, retirada], hoy: HOY }).motivo, 'revocado');
+  assert.equal(evaluarConsentimientos({ patientId: 'p', tipo: 'pareja', fechaNacimiento: '1990-05-05', filas: [base, retirada], hoy: HOY }).motivo, 'revocado');
 });
 
 test('D: parejas que ya firmaron (dos firmas persona 1, v2) siguen pudiendo grabar igual que antes', () => {
   const filas = [fila({ version: '2026-10-v2' }), fila({ version: '2026-10-v2', signer_rut: '9.876.543-2', signer_name: 'Diego Pérez' })];
-  assert.equal(evaluarConsentimientos({ patientId: 'p', tipo: 'pareja', fichaPareja: true, fechaNacimiento: null, filas, hoy: HOY }).puede, true);
+  assert.equal(evaluarConsentimientos({ patientId: 'p', tipo: 'pareja', fichaPareja: true, fechaNacimiento: '1990-05-05', filas, hoy: HOY }).puede, true);
 });
 
 // ─── D: link de la segunda persona ───────────────────────────────────────────
@@ -189,7 +189,7 @@ function fichaV2() {
   const db = new SupabaseMemoria();
   const p = randomUUID();
   db.tabla('settings').push({ key: 'transcriptor_activo', value: 'true' });
-  db.tabla('patients').push({ id: p, name: 'Diego Soto', email: 'diego@ejemplo.cl', rut: '9.876.543-2' });
+  db.tabla('patients').push({ id: p, name: 'Diego Soto', email: 'diego@ejemplo.cl', rut: '9.876.543-2', birthdate: '1990-05-05' });
   const c = { ...fila({ version: '2026-10-v2', signer_name: 'Diego Soto', signer_rut: '9.876.543-2', signer_email: 'diego@ejemplo.cl' }), patient_id: p, text_snapshot: 'texto v2', text_sha256: 'h' };
   db.tabla('consents').push(c);
   return { db, p, c };

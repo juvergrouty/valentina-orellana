@@ -1219,6 +1219,12 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>
           La graba el asistente de Meet
         </div>
+        <!-- Ronda 2: reserva online sin link de Meet. El grabador presencial no la acepta (grabacion-iniciar
+             responde que es online): en vez de un "Grabar" que falla, se explica qué hacer. -->
+        <div id="sp-grabar-sin-meet" class="sp-grabar-meet" style="display:none;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>
+          Sesión online sin link de Meet: créalo con «Ingresar a Google Meet» y la grabará el asistente de Meet.
+        </div>
         <a href="#" id="sp-btn-ficha" class="sp-action-row">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
           Ver ficha del paciente
@@ -2738,17 +2744,21 @@ function openSessionDetail(b) {
   document.getElementById('sp-no-show-action').value = isNoShow ? 'unmark_no_show' : 'mark_no_show';
   document.getElementById('sp-btn-no-show-label').textContent = isNoShow ? 'Quitar marca de inasistencia' : 'Marcar inasistencia';
 
-  // Grabar (transcriptor): toda sesión de HOY (fecha de Chile) no cancelada. Si es online y
-  // ya tiene link de Meet, la graba el asistente de Meet (texto, no botón).
+  // Grabar (transcriptor): sesión PRESENCIAL de HOY (fecha de Chile) no cancelada. Si es online, la graba
+  // el asistente de Meet: con link, el texto "La graba el asistente de Meet"; sin link (ronda 2, 18 oct),
+  // un texto que dice cómo crearlo (antes salía "Grabar" y el grabador la rechazaba por ser online).
   const grabarBtn = document.getElementById('sp-btn-grabar');
   const grabarMeet = document.getElementById('sp-grabar-meet');
+  const grabarSinMeet = document.getElementById('sp-grabar-sin-meet');
   if (grabarBtn) {
     const hoyCL = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
     const esHoy = b.session_date === hoyCL && b.status !== 'cancelled' && b.status !== 'expired';
     const porMeet = esHoy && isOnlineSession && !!meetMatch;
-    grabarBtn.style.display = esHoy && !porMeet ? '' : 'none';
+    const onlineSinMeet = esHoy && isOnlineSession && !meetMatch;
+    grabarBtn.style.display = esHoy && !isOnlineSession ? '' : 'none';
     grabarBtn.href = `/admin/grabar?sesion=${encodeURIComponent(b.id)}`;
     if (grabarMeet) grabarMeet.style.display = porMeet ? '' : 'none';
+    if (grabarSinMeet) grabarSinMeet.style.display = onlineSinMeet ? '' : 'none';
   }
 
   // Ver ficha link
@@ -3211,7 +3221,16 @@ async function ensureMeetLink(id = window.__currentMeetBookingId) {
     })().finally(() => { delete meetEnCurso[id]; });
   }
   const link = await meetEnCurso[id];
-  if (link && id === window.__currentMeetBookingId) window.__currentMeetUrl = link;
+  if (link && id === window.__currentMeetBookingId) {
+    window.__currentMeetUrl = link;
+    // Ya tiene link: el aviso "sin link de Meet" pasa a "La graba el asistente de Meet".
+    const sinMeet = document.getElementById('sp-grabar-sin-meet');
+    if (sinMeet && sinMeet.style.display !== 'none') {
+      sinMeet.style.display = 'none';
+      const conMeet = document.getElementById('sp-grabar-meet');
+      if (conMeet) conMeet.style.display = '';
+    }
+  }
   return link;
 }
 

@@ -96,7 +96,7 @@ Límites de confianza: navegador ↔ Vercel; Vercel ↔ cada proveedor; bot (Fly
 | T1 | Tampering | Alteración de una transcripción en R2/B2. | AES-256-GCM con AAD que incluye la clave del objeto y la versión: un objeto movido o modificado falla al descifrar. SHA-256 del cifrado guardado en Supabase. |
 | T2 | Tampering | Subida de un archivo no-audio o enorme vía URL prefirmada. | URL ligada a `Content-Type` y a una clave de objeto generada por el servidor; partes de tamaño fijo; validar tamaño total antes de mandar a AssemblyAI; tope de duración. |
 | T3 | Tampering / Elevation | Inyección de instrucciones en la transcripción ("ignora lo anterior…") que altera el resumen o el Q&A. | El modelo no tiene herramientas ni acceso a otros datos: el impacto queda en el texto que lee Vale. Prompt con la transcripción delimitada como dato; salida renderizada como texto (nunca HTML). Etiqueta "Resumen automático (IA)". |
-| T4 | Tampering | CSRF: otra página hace que el navegador de Vale borre transcripciones o lance el bot. | Rutas mutantes del transcriptor exigen `Origin` presente y propio (fallar cerrado, a diferencia del middleware actual) + cabecera `X-Panel: 1` (fuerza preflight CORS) + cookie `SameSite=lax`. |
+| T4 | Tampering | CSRF: otra página hace que el navegador de Vale ejecute acciones del transcriptor (lanzar el bot, cambiar ajustes, cerrar avisos). Las transcripciones no se pueden borrar (§7.2). | Rutas mutantes del transcriptor exigen `Origin` presente y propio (fallar cerrado, a diferencia del middleware actual) + cabecera `X-Panel: 1` (fuerza preflight CORS) + cookie `SameSite=lax`. |
 | R1 | Repudiation | No poder demostrar quién vio o borró una sesión (Ley 20.584 / 21.719). | Bitácora de accesos solo-agregar (§7). |
 | I1 | Info disclosure | Filtración del bucket R2/B2 o de la llave de R2. | Cifrado de aplicación (§3): sin la llave maestra de Vercel, los objetos son ruido. Claves de objeto opacas (UUID), sin nombres ni fechas. Acceso público (r2.dev) desactivado. |
 | I2 | Info disclosure | Audio en claro en tránsito/temporal (R2 audio-temporal, AssemblyAI). | URLs cortas; borrado activo apenas llega el webhook (R2 `DeleteObject` + AssemblyAI `DELETE`); regla de ciclo de vida 1 día en el bucket temporal; TTL 1 día + BAA en AssemblyAI; autochequeo diario. |
@@ -253,23 +253,23 @@ Tabla nueva `transcriptor_accesos` (RLS, sin políticas anon). **Excepción a la
 
 Campos: `id`, `created_at`, `actor` (`panel` + firma corta de la sesión | `bot:<machine_id>` | `sistema:<cron>` | `assemblyai-webhook`), `accion`, `transcripcion_id`, `patient_id`, `resultado` (`ok`|`denegado`|`error`), `ip`, `user_agent`, `detalle` (jsonb **sin contenido clínico**).
 
-Acciones a registrar: iniciar grabación, completar subida, lanzar/sacar bot, admitido/salió (estado del bot), webhook recibido, transcripción guardada, borrado en AssemblyAI/R2 audio/batch, **ver transcripción**, **preguntar a la IA** (solo id y largo de la pregunta, nunca el texto), descargar/exportar, borrar transcripción, rotación de llave, login ok/fallido (ya existe en `admin_logs`).
+Acciones a registrar: iniciar grabación, completar subida, lanzar/sacar bot, admitido/salió (estado del bot), webhook recibido, transcripción guardada, borrado en AssemblyAI/R2 audio/batch, **ver transcripción**, **preguntar a la IA** (solo id y largo de la pregunta, nunca el texto), descargar/exportar, excluir una sesión de las preguntas a la IA, rotación de llave, login ok/fallido (ya existe en `admin_logs`). (No existe "borrar transcripción": ver §7.2.)
 
 Retención de la bitácora: mientras exista la ficha (15 años) + 1 año. Revisión mensual (Claude) incluye: accesos fuera del horario habitual, más de N vistas por hora, accesos desde IP nueva, denegados repetidos.
 
 ### 7.2 Borrado
-- **Audio**: siempre, automático, tras transcribir (§4.3). Objetivo: < 1 h en R2 y en AssemblyAI (más el tiempo de proceso de TTL que AssemblyAI declara).
-- **Plazo normal (15 años)**: cron mensual que detecta fichas con última atención > 15 años y borra sus transcripciones (R2 + B2 todas las versiones + DEK) y registra el borrado. El resumen sigue la suerte de la ficha.
-- **Derecho de supresión (Ley 21.719)**: la obligación de conservar la ficha clínica 15 años limita la supresión de lo que sea ficha. **Pendiente del abogado**: si la transcripción completa es ficha. El sistema debe soportar ambas respuestas:
-  - Botón "Borrar transcripción" por sesión (y "Borrar todas las de este paciente"), con confirmación, motivo obligatorio y registro.
-  - Si se revoca el consentimiento de grabación (`consents.revoked_at`): no se pueden iniciar nuevas grabaciones ni bots para ese paciente (validado en servidor).
-- **Cómo se borra de verdad**:
+> **Regla de Vale (02-decisiones-16oct-noche.md, manda; alineado en la ronda 2, 18 oct):** las transcripciones y los resúmenes son **ficha clínica** y **no se suprimen** (la ley exige conservar la ficha 15 años). **Solo el audio se borra**, y ya se borra siempre tras transcribir. La función "Borrar transcripción" se eliminó; lo que hay es **"No usar en preguntas a la IA"** por sesión (`excluir-ia`, no borra nada).
+- **Audio**: siempre, automático, tras transcribir (§4.3). Objetivo: < 1 h en R2 y en AssemblyAI (más el tiempo de proceso de TTL que AssemblyAI declara). Si el paciente pide borrar el audio, ya está borrado (o lo estará al terminar de transcribir).
+- **Plazo legal (15 años)**: recién cumplido el plazo de conservación de la ficha (última atención > 15 años) se borran sus transcripciones (R2 + B2 todas las versiones + DEK) y se registra el borrado. El resumen sigue la suerte de la ficha.
+- **Derecho de supresión (Ley 21.719)**: la obligación de conservar la ficha clínica 15 años prevalece sobre la supresión de lo que es ficha; las transcripciones y resúmenes **no** se suprimen a pedido. Se responde a la persona explicando esto; lo que sí se puede atender: borrar el audio (ya ocurre siempre) y excluir sesiones de las preguntas a la IA.
+  - Si se revoca el consentimiento de grabación (`consents.revoked_at` o `recording_revoked_at`): no se pueden iniciar nuevas grabaciones ni bots para ese paciente (validado en servidor). Lo ya transcrito se conserva como parte de la ficha.
+- **Cómo se borra de verdad** (audio siempre; transcripciones solo al cumplirse el plazo legal):
   - R2: `DeleteObject` (sin versionado, el borrado es definitivo) [verificado].
-  - B2: borrar **todas las versiones** (`ListObjectVersions` + `DeleteObject` con `versionId`, o `b2_delete_file_version`); además, regla de ciclo de vida del bucket `daysFromHidingToDeleting = 1` para que nada oculto sobreviva. **No usar Object Lock en modo compliance** en el bucket de transcripciones (impediría cumplir una supresión); si se quiere protección contra borrado malicioso, governance corto (≤ 7 días) solo en el prefijo de respaldos de Supabase.
+  - B2: borrar **todas las versiones** (`ListObjectVersions` + `DeleteObject` con `versionId`, o `b2_delete_file_version`); además, regla de ciclo de vida del bucket `daysFromHidingToDeleting = 1` para que nada oculto sobreviva. **No usar Object Lock en modo compliance** en el bucket de transcripciones (impediría el borrado al cumplirse el plazo legal de 15 años); si se quiere protección contra borrado malicioso, governance corto (≤ 7 días) solo en el prefijo de respaldos de Supabase.
   - Supabase: `dek_envuelta = null`, `estado='borrada'`, `deleted_at`, se conserva la fila mínima (sin contenido) como prueba del borrado.
   - Respaldos semanales de Supabase en B2: rotación de 8 semanas; lo borrado desaparece de los respaldos a más tardar en ese plazo (declararlo en la política de privacidad).
   - Anthropic: `DELETE` del batch; Q&A (Messages API) sin forma de borrado manual → 30 días por política estándar (declararlo en el consentimiento).
-- Respuesta a la persona: plazo legal; el sistema debe poder borrar en minutos.
+- Respuesta a la persona: plazo legal. El audio se borra en minutos; las transcripciones se conservan como ficha (ver la regla arriba).
 
 ---
 

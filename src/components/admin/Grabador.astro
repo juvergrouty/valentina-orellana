@@ -1,0 +1,1313 @@
+---
+// Grabador presencial (P4) como componente (ronda 2, 18 oct): lo usan /admin/grabar (con los datos del
+// día, detrás del login) y /grabar-sin-internet (página ESTÁTICA, sin datos de pacientes, que el service
+// worker guarda en el teléfono para poder RETOMAR sin internet una grabación ya autorizada). Mismo código,
+// mismo script y mismos estilos en las dos: así nunca se desalinean.
+import type { DatosGrabador } from '../../lib/transcriptor/grabadorDatos';
+interface Props { datos: DatosGrabador }
+const { datos } = Astro.props;
+---
+
+<div id="grabador" class="gr" data-vista="cargando">
+  <div class="gr-col">
+    {!datos.activo && (
+      <div class="gr-alerta gr-alerta-ambar" role="status">
+        <b>El grabador está apagado.</b> Se activa en la configuración del transcriptor cuando todo esté listo (consentimientos, almacenamiento y pruebas).
+      </div>
+    )}
+    {datos.errorLectura && <div class="gr-alerta gr-alerta-roja" role="alert">No se pudieron leer las sesiones de hoy. Puedes buscar al paciente abajo.</div>}
+    <div id="gr-pendientes" hidden></div>
+    <div id="gr-espacio" class="gr-alerta gr-alerta-ambar" hidden>
+      <b>Hay poco espacio en el iPhone.</b> Una sesión ocupa unos 25 MB. Libera espacio antes de grabar.
+    </div>
+
+    <!-- Cargando -->
+    <section data-v="cargando"><p class="gr-grande">Preparando el grabador…</p></section>
+
+    <!-- Sin internet (ronda 2): la página estática que sirve el service worker. Solo deja SEGUIR una
+         grabación ya autorizada que se cortó (Safari descartó la pestaña) y ver lo pendiente. -->
+    <section data-v="sin-internet" class="gr-pila">
+      <h1 class="gr-h1">Estás sin internet</h1>
+      <div id="gr-retomar" class="gr-pila"></div>
+      <p class="gr-sub">Para empezar una sesión nueva el grabador necesita internet: antes de grabar se verifica el consentimiento. <b>Abre la página con internet y recién después activa el modo avión.</b></p>
+      <div class="gr-card"><p id="gr-si-pendientes">Revisando las grabaciones guardadas en este teléfono…</p></div>
+      <p class="gr-sub">Cuando vuelva internet, esta página vuelve sola al grabador y sube lo pendiente.</p>
+      <button type="button" class="gr-btn gr-btn-out" id="gr-si-reintentar">Reintentar ahora</button>
+    </section>
+
+    <!-- Elegir sesión -->
+    <section data-v="elegir" class="gr-pila">
+      <h1 class="gr-h1">¿Qué sesión vas a grabar?</h1>
+      <p class="gr-sub">Abre esta página con internet; recién después activa el modo avión.</p>
+      <div id="gr-lista-ventana" class="gr-pila"></div>
+      <details id="gr-otras-wrap" class="gr-card" hidden>
+        <summary class="gr-summary">Otras sesiones presenciales de hoy</summary>
+        <div id="gr-lista-otras" class="gr-pila" style="margin-top:12px"></div>
+      </details>
+      <div class="gr-card gr-pila">
+        <label for="gr-buscar" class="gr-label">Busca al paciente</label>
+        <input id="gr-buscar" class="gr-input" type="search" autocomplete="off" placeholder="Nombre del paciente" />
+        <p id="gr-buscar-ayuda" class="gr-sub">Atendidos recientemente:</p>
+        <div id="gr-lista-pacientes" class="gr-pila"></div>
+      </div>
+    </section>
+
+    <!-- Listo -->
+    <section data-v="listo" class="gr-pila">
+      <div class="gr-card">
+        <div class="gr-fila">
+          <p class="gr-label" id="gr-sel-cuando">Sesión</p>
+          <button type="button" class="gr-link" id="gr-cambiar">Cambiar</button>
+        </div>
+        <p class="gr-paciente" id="gr-sel-nombre"></p>
+        <p class="gr-sub" id="gr-sel-tipo"></p>
+        <p class="gr-consent" id="gr-sel-consent" hidden></p>
+      </div>
+
+      <div class="gr-card gr-pila" id="gr-tipo" hidden>
+        <p class="gr-label">¿Es individual o de pareja?</p>
+        <p class="gr-sub">Define cómo se transcribe y quiénes deben haber firmado.</p>
+        <div class="gr-dos">
+          <button type="button" class="gr-btn gr-btn-out" data-tipo="individual">Individual</button>
+          <button type="button" class="gr-btn gr-btn-out" data-tipo="pareja">Pareja</button>
+        </div>
+      </div>
+
+      <div id="gr-bloqueo" class="gr-alerta gr-alerta-roja" role="alert" hidden>
+        <p class="gr-alerta-titulo" id="gr-bloqueo-titulo"></p>
+        <p id="gr-bloqueo-texto"></p>
+        <div class="gr-dos" style="margin-top:10px">
+          <a id="gr-bloqueo-ficha" class="gr-btn gr-btn-out" href="/admin/pacientes" hidden>Enviar consentimiento</a>
+          <button type="button" id="gr-bloqueo-reintentar" class="gr-btn gr-btn-out" hidden>Reintentar</button>
+        </div>
+      </div>
+
+      <div class="gr-card">
+        <p class="gr-label" style="margin-bottom:4px">Antes de grabar</p>
+        <p class="gr-sub" id="gr-orden-avion"><b>Abre esta página con internet</b>; recién después activa el modo avión. Si la abres ya en modo avión, el iPhone no puede cargarla ni verificar el consentimiento.</p>
+        <ul class="gr-check">
+          <li><span class="gr-tick" id="gr-ck-avion" aria-hidden="true">!</span><span id="gr-ck-avion-t">Modo avión</span></li>
+          <li><span class="gr-tick" id="gr-ck-wifi" aria-hidden="true">!</span><span>Wi-Fi apagado</span></li>
+          <li>
+            <span class="gr-tick" id="gr-ck-mic" aria-hidden="true">?</span>
+            <span style="flex:1">Micrófono funcionando</span>
+            <span class="gr-medidor" id="gr-medidor-prueba" aria-label="Nivel del micrófono"><i></i><i></i><i></i><i></i><i></i></span>
+          </li>
+          <li class="gr-li-boton"><button type="button" class="gr-btn gr-btn-out gr-btn-chico" id="gr-probar-mic">Probar micrófono</button></li>
+          <li>
+            <label class="gr-ck-label">
+              <input type="checkbox" id="gr-ck-bateria" />
+              <span>Modo de bajo consumo apagado</span>
+            </label>
+          </li>
+        </ul>
+        <div class="gr-toggle">
+          <div>
+            <b id="gr-ruido-label">Lugar con ruido</b>
+            <p class="gr-sub" style="font-size:14px">Actívalo si hay ruido de calle u obras</p>
+          </div>
+          <button type="button" class="gr-switch" id="gr-ruido" role="switch" aria-checked="false" aria-labelledby="gr-ruido-label"></button>
+        </div>
+      </div>
+
+      <p id="gr-estado-prep" class="gr-sub" aria-live="polite"></p>
+      <button type="button" class="gr-btn gr-btn-rec" id="gr-grabar" disabled><span class="gr-dot" aria-hidden="true"></span>Grabar</button>
+      <p class="gr-hint">Deja el teléfono sobre la mesa, pantalla hacia arriba. Usa esta página en una pestaña de Safari (no como ícono en la pantalla de inicio).</p>
+    </section>
+
+    <!-- Después de grabar: guardada / subiendo / procesando / listo -->
+    <section data-v="subir" class="gr-pila">
+      <div class="gr-card">
+        <p class="gr-ok-grande" id="gr-guardada-t">Sesión guardada en este teléfono ✓</p>
+        <p class="gr-sub" id="gr-guardada-sub"></p>
+      </div>
+      <div class="gr-card" id="gr-progreso" aria-live="polite">
+        <p class="gr-progreso-t" id="gr-progreso-t">Desactiva el modo avión para subirla.</p>
+        <div class="gr-barra" id="gr-barra" hidden><i id="gr-barra-i"></i></div>
+        <p class="gr-sub" id="gr-progreso-sub">Puedes dejar esta página abierta y seguir con tu día.</p>
+        <button type="button" class="gr-btn gr-btn-out" id="gr-reintentar-subida" hidden style="margin-top:12px">Reintentar ahora</button>
+        <button type="button" class="gr-btn gr-btn-out" id="gr-descartar" hidden style="margin-top:12px">Descartar del teléfono</button>
+      </div>
+      <div class="gr-card" id="gr-pasos" hidden>
+        <ul class="gr-pasos">
+          <li id="gr-paso-subida"><span class="gr-tick ok">✓</span>Subida</li>
+          <li id="gr-paso-trans"><span class="gr-spin" aria-hidden="true"></span><b>Transcribiendo…</b></li>
+          <li id="gr-paso-res"><span class="gr-tick gr-tick-no" aria-hidden="true"></span>Resumen automático (IA)</li>
+        </ul>
+        <p class="gr-sub" id="gr-pasos-nota" style="margin-top:12px">Listo: ya puedes cerrar esta página y seguir con tu día (agendar, cobrar, atender). El resumen se hace en nuestros servidores, no en tu teléfono, y aparece solo en la ficha en unos minutos.</p>
+      </div>
+      <div class="gr-card gr-card-ok" id="gr-listo" hidden>
+        <p class="gr-ok-grande">Listo ✓</p>
+        <p style="margin:4px 0 12px">El resumen está en la ficha de <b id="gr-listo-nombre"></b>.</p>
+        <a class="gr-btn gr-btn-rec gr-btn-medio" id="gr-ver-ficha" href="/admin/pacientes">Ver ficha</a>
+      </div>
+      <div class="gr-card" id="gr-sin-voz" hidden style="border-left:4px solid var(--gr-amber);">
+      <p class="gr-ok-grande">No se reconoció voz</p>
+      <p style="margin:4px 0 12px">La grabación llegó, pero no se reconoció voz, así que no hay resumen. Revisa el aviso en el panel.</p>
+      <a class="gr-btn gr-btn-out gr-btn-medio" href="/admin">Ir al panel</a>
+    </div>
+    <div class="gr-alerta gr-alerta-ambar" id="gr-aviso-cerrar">Si cierras Safari ahora no se pierde nada: se sube la próxima vez que abras esta página con internet.</div>
+      <button type="button" class="gr-btn gr-btn-out" id="gr-otra">Grabar otra sesión</button>
+    </section>
+  </div>
+
+  <!-- Hoja: todavía hay conexión -->
+  <div class="gr-velo" id="gr-hoja" hidden>
+    <div class="gr-hoja" role="dialog" aria-modal="true" aria-labelledby="gr-hoja-t">
+      <h2 id="gr-hoja-t">Todavía tienes conexión</h2>
+      <p>Si entra una llamada, el iPhone corta el micrófono aunque no contestes. Activa <b>Modo avión</b> y deja el <b>Wi-Fi apagado</b>.</p>
+      <button type="button" class="gr-btn gr-btn-rec gr-btn-medio" id="gr-hoja-avion">Primero activo modo avión</button>
+      <button type="button" class="gr-btn gr-btn-out" id="gr-hoja-igual">Grabar igual</button>
+    </div>
+  </div>
+
+  <!-- Grabando (pantalla oscura) -->
+  <div class="gr-pantalla gr-oscura" id="gr-rec" hidden>
+    <div class="gr-banda" id="gr-banda-silencio" role="alert" hidden>No se escucha nada hace 1 minuto. Revisa que nada tape el micrófono.</div>
+    <div class="gr-banda" id="gr-banda-pantalla" role="status" hidden>La pantalla podría apagarse. Tócala de vez en cuando o enchufa el cargador.</div>
+    <div class="gr-rec-centro">
+      <div class="gr-rec-estado"><span class="gr-pulso" aria-hidden="true"></span><span id="gr-rec-titulo">Grabando</span></div>
+      <div class="gr-crono" id="gr-crono" role="timer" aria-label="Tiempo grabado">00:00:00</div>
+      <span class="gr-medidor gr-medidor-grande" id="gr-medidor-rec" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <p class="gr-quien" id="gr-rec-quien"></p>
+      <div class="gr-stat">
+        <span id="gr-stat-pantalla">☀︎ Pantalla encendida</span>
+        <span>✓ Guardando en este teléfono</span>
+        <span id="gr-stat-ruido" hidden>Lugar con ruido activado</span>
+      </div>
+    </div>
+    <div class="gr-rec-acciones">
+      <button type="button" class="gr-btn gr-btn-fantasma" id="gr-pausar">❙❙ Pausar</button>
+      <button type="button" class="gr-btn gr-hold" data-hold><span class="gr-hold-relleno" aria-hidden="true"></span><span class="gr-hold-t">■ Mantén para terminar</span></button>
+    </div>
+  </div>
+
+  <!-- En pausa por ella (ámbar) -->
+  <div class="gr-pantalla gr-ambar" id="gr-pausa" hidden>
+    <div class="gr-rojo-top" role="status" aria-live="assertive">
+      <h2>❙❙ En pausa</h2>
+      <p id="gr-pausa-texto">Pausaste la grabación. Lo que se diga ahora no se graba.</p>
+    </div>
+    <button type="button" class="gr-tocar gr-tocar-ambar" id="gr-pausa-seguir"><span class="gr-tocar-circulo"><i></i></span>Tocar para seguir grabando</button>
+    <div class="gr-rec-acciones">
+      <button type="button" class="gr-btn gr-hold gr-hold-claro" data-hold><span class="gr-hold-relleno" aria-hidden="true"></span><span class="gr-hold-t">■ Mantén para terminar</span></button>
+    </div>
+  </div>
+
+  <!-- Pausada por interrupción (rojo pantalla completa) -->
+  <div class="gr-pantalla gr-roja" id="gr-int" hidden>
+    <div class="gr-rojo-top" role="alert" aria-live="assertive">
+      <h2>⚠ La grabación se pausó</h2>
+      <p id="gr-int-causa"></p>
+      <p id="gr-int-hasta" class="gr-rojo-chico"></p>
+    </div>
+    <button type="button" class="gr-tocar" id="gr-int-seguir"><span class="gr-tocar-circulo"><i></i></span>Tocar para seguir grabando</button>
+    <div class="gr-rec-acciones">
+      <button type="button" class="gr-btn gr-btn-rojo-out" id="gr-int-terminar">Terminar aquí</button>
+    </div>
+  </div>
+
+  <!-- Guardando -->
+  <div class="gr-pantalla gr-oscura" id="gr-guardando" hidden>
+    <div class="gr-rec-centro"><p class="gr-rec-estado">Guardando…</p><p class="gr-quien">No cierres esta página.</p></div>
+  </div>
+  <p class="gr-sr" id="gr-anuncio" aria-live="assertive"></p>
+</div>
+
+<script type="application/json" id="gr-datos" set:html={JSON.stringify(datos).replace(/</g, '\\u003c')}></script>
+
+<style is:global>
+  .gr { --gr-forest:#576352; --gr-forest-d:#46503f; --gr-ink:#1A1A18; --gr-stone:#6B6860; --gr-dust:#DDD8CF; --gr-warm:#F4F0EC;
+        --gr-gold:#A8906C; --gr-red:#b91c1c; --gr-amber:#92400e; --gr-amber-soft:#fffbeb; --gr-ok:#15803d; --gr-rec:#f87171; --gr-muted:#B5B0A6;
+        font-size:16px; color:var(--gr-ink); }
+  .gr [hidden] { display:none !important; }
+  .gr-col { max-width:560px; margin:0 auto; padding:16px; display:flex; flex-direction:column; gap:14px; }
+  .gr section { display:none; }
+  .gr[data-vista="cargando"] section[data-v="cargando"], .gr[data-vista="elegir"] section[data-v="elegir"],
+  .gr[data-vista="listo"] section[data-v="listo"], .gr[data-vista="subir"] section[data-v="subir"],
+  .gr[data-vista="sin-internet"] section[data-v="sin-internet"] { display:flex; }
+  .gr-pila { flex-direction:column; gap:12px; display:flex; }
+  .gr-card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:16px; box-shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06); }
+  .gr-card-ok { border-left:4px solid var(--gr-ok); }
+  .gr-h1 { font-size:22px; line-height:1.25; font-weight:700; }
+  .gr-grande { font-size:20px; font-weight:600; padding:24px 0; text-align:center; color:var(--gr-stone); }
+  .gr-label { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:#6b7280; font-weight:600; }
+  .gr-paciente { font-family:'Cormorant Garamond','Inter',serif; font-size:28px; line-height:1.15; font-weight:600; }
+  .gr-sub { color:var(--gr-stone); font-size:15px; }
+  .gr-consent { margin-top:8px; font-size:15px; font-weight:600; color:var(--gr-ok); }
+  .gr-consent.no { color:var(--gr-red); }
+  .gr-hint { font-size:14px; color:var(--gr-stone); text-align:center; }
+  .gr-fila { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .gr-link { color:var(--gr-forest); font-weight:600; text-decoration:underline; background:none; border:none; font:inherit; min-height:48px; min-width:48px; padding:0 4px; cursor:pointer; }
+  .gr-btn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; border:none; border-radius:10px; font:inherit; font-weight:700; cursor:pointer; min-height:56px; font-size:17px; text-decoration:none; text-align:center; padding:8px 16px; -webkit-tap-highlight-color:transparent; }
+  .gr-btn:disabled { opacity:.45; cursor:not-allowed; }
+  .gr-btn-chico { min-height:48px; font-size:15px; font-weight:600; }
+  .gr-btn-medio { min-height:60px; font-size:18px; }
+  .gr-btn-rec { background:var(--gr-forest); color:#fff; min-height:96px; font-size:24px; border-radius:14px; }
+  .gr-btn-rec.gr-btn-medio { min-height:60px; font-size:18px; }
+  .gr-btn-rec:not(:disabled):active { background:var(--gr-forest-d); }
+  .gr-dot { width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 0 0 4px rgba(255,255,255,.35); }
+  .gr-btn-out { background:#fff; color:var(--gr-ink); border:1px solid #d1d5db; }
+  .gr-btn-out[aria-pressed="true"] { border:2px solid var(--gr-forest); background:#f3f5f1; }
+  .gr-dos { display:flex; gap:10px; } .gr-dos > * { flex:1; }
+  .gr-check { list-style:none; display:flex; flex-direction:column; }
+  .gr-check li { display:flex; align-items:center; gap:10px; min-height:48px; font-size:16px; border-bottom:1px solid #f3f4f6; }
+  .gr-check li:last-child { border-bottom:none; }
+  .gr-li-boton { padding:4px 0 8px; }
+  .gr-ck-label { display:flex; align-items:center; gap:10px; min-height:48px; width:100%; cursor:pointer; }
+  .gr-ck-label input { width:24px; height:24px; accent-color:var(--gr-forest); flex-shrink:0; }
+  .gr-tick { width:24px; height:24px; border-radius:50%; background:#fff; border:2px solid var(--gr-dust); color:var(--gr-stone); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; flex-shrink:0; }
+  .gr-tick.ok { background:var(--gr-ok); border-color:var(--gr-ok); color:#fff; }
+  .gr-tick.warn { background:var(--gr-amber); border-color:var(--gr-amber); color:#fff; }
+  .gr-medidor { display:inline-flex; gap:4px; align-items:flex-end; height:28px; }
+  .gr-medidor i { display:block; width:8px; border-radius:2px; background:var(--gr-dust); }
+  .gr-medidor i:nth-child(1){height:30%} .gr-medidor i:nth-child(2){height:50%} .gr-medidor i:nth-child(3){height:70%} .gr-medidor i:nth-child(4){height:85%} .gr-medidor i:nth-child(5){height:100%}
+  .gr-medidor i.on { background:var(--gr-forest); }
+  .gr-toggle { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:64px; border-top:1px solid #f3f4f6; margin-top:4px; padding-top:8px; }
+  .gr-switch { width:60px; height:48px; border:none; background:none; position:relative; cursor:pointer; flex-shrink:0; }
+  .gr-switch::before { content:""; position:absolute; left:4px; top:8px; width:52px; height:32px; border-radius:16px; background:var(--gr-dust); transition:background .15s; }
+  .gr-switch::after { content:""; position:absolute; left:7px; top:11px; width:26px; height:26px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:transform .15s; }
+  .gr-switch[aria-checked="true"]::before { background:var(--gr-forest); }
+  .gr-switch[aria-checked="true"]::after { transform:translateX(20px); }
+  .gr-switch:disabled { opacity:.5; }
+  .gr-input { width:100%; border:1px solid #d1d5db; border-radius:8px; padding:12px; font:inherit; font-size:16px; min-height:52px; background:#fff; color:var(--gr-ink); }
+  .gr-summary { min-height:48px; display:flex; align-items:center; font-weight:600; cursor:pointer; }
+  .gr-opcion { display:flex; flex-direction:column; align-items:flex-start; gap:2px; width:100%; text-align:left; background:#fff; border:1px solid #d1d5db; border-radius:10px; padding:12px 14px; min-height:64px; font:inherit; cursor:pointer; color:var(--gr-ink); }
+  .gr-opcion b { font-size:18px; } .gr-opcion span { font-size:14px; color:var(--gr-stone); }
+  .gr-opcion .no { color:var(--gr-red); font-weight:600; }
+  .gr-alerta { border-radius:8px; padding:12px 14px; font-size:15px; }
+  .gr-alerta-ambar { background:var(--gr-amber-soft); border:1px solid #fcd34d; color:var(--gr-amber); }
+  .gr-alerta-roja { background:#fef2f2; border:1px solid #fca5a5; color:var(--gr-red); }
+  .gr-alerta-roja p:not(.gr-alerta-titulo) { color:var(--gr-ink); }
+  .gr-alerta-titulo { font-weight:700; font-size:17px; margin-bottom:4px; }
+  .gr-pendiente { display:flex; flex-direction:column; gap:10px; }
+  .gr-ok-grande { font-size:22px; font-weight:700; line-height:1.25; }
+  .gr-progreso-t { font-weight:700; font-size:18px; }
+  .gr-barra { height:10px; background:var(--gr-warm); border-radius:6px; overflow:hidden; margin:10px 0 8px; }
+  .gr-barra i { display:block; height:100%; width:0; background:var(--gr-forest); transition:width .3s; }
+  .gr-pasos { list-style:none; display:flex; flex-direction:column; gap:10px; font-size:16px; }
+  .gr-pasos li { display:flex; gap:10px; align-items:center; }
+  .gr-spin { width:24px; height:24px; border-radius:50%; border:3px solid var(--gr-dust); border-top-color:var(--gr-forest); flex-shrink:0; animation:gr-giro 1s linear infinite; }
+  @keyframes gr-giro { to { transform:rotate(360deg); } }
+  /* Hoja inferior */
+  .gr-velo { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1001; display:flex; align-items:flex-end; justify-content:center; }
+  .gr-velo[hidden] { display:none; }
+  .gr-hoja { background:#fff; width:100%; max-width:560px; border-radius:18px 18px 0 0; padding:20px 16px calc(28px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:12px; }
+  .gr-hoja h2 { font-size:21px; line-height:1.25; font-weight:700; }
+  /* Pantallas completas */
+  .gr-pantalla { position:fixed; inset:0; z-index:1000; display:flex; flex-direction:column; overflow:auto; padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+  .gr-pantalla[hidden] { display:none; }
+  .gr-oscura { background:var(--gr-ink); color:#fff; }
+  .gr-roja { background:var(--gr-red); color:#fff; }
+  .gr-ambar { background:var(--gr-amber-soft); color:var(--gr-amber); }
+  .gr-rec-centro { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; padding:16px; text-align:center; }
+  .gr-rec-estado { display:flex; align-items:center; gap:12px; font-size:28px; font-weight:700; }
+  .gr-pulso { width:22px; height:22px; border-radius:50%; background:var(--gr-rec); animation:gr-pulso 1.6s ease-in-out infinite; }
+  @keyframes gr-pulso { 0%,100% { box-shadow:0 0 0 0 rgba(248,113,113,.6); } 50% { box-shadow:0 0 0 12px rgba(248,113,113,0); } }
+  @media (prefers-reduced-motion: reduce) { .gr-pulso, .gr-spin { animation:none; } }
+  .gr-crono { font-size:60px; font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-.02em; line-height:1; }
+  .gr-medidor-grande { height:44px; gap:6px; } .gr-medidor-grande i { width:14px; background:#3a3a36; } .gr-medidor-grande i.on { background:#86efac; }
+  .gr-quien { color:var(--gr-muted); font-size:16px; }
+  .gr-stat { color:var(--gr-muted); font-size:14px; display:flex; flex-direction:column; gap:4px; }
+  .gr-rec-acciones { padding:16px; display:flex; flex-direction:column; gap:16px; max-width:560px; width:100%; margin:0 auto; }
+  .gr-btn-fantasma { background:transparent; color:#fff; border:1px solid #6b6b64; min-height:52px; font-size:16px; width:auto; align-self:center; padding:0 28px; }
+  .gr-hold { background:#2c2c29; color:#fff; border:1px solid #6b6b64; min-height:72px; position:relative; overflow:hidden; touch-action:none; }
+  .gr-hold-claro { background:#fff; color:var(--gr-amber); border:1px solid #fcd34d; }
+  .gr-hold-relleno { position:absolute; left:0; top:0; bottom:0; width:0; background:rgba(248,113,113,.35); }
+  .gr-hold-claro .gr-hold-relleno { background:rgba(146,64,14,.18); }
+  .gr-hold-t { position:relative; }
+  .gr-banda { background:#fbbf24; color:var(--gr-ink); font-weight:600; font-size:16px; padding:12px 16px; text-align:center; }
+  .gr-banda[hidden] { display:none; }
+  .gr-rojo-top { padding:28px 20px 8px; display:flex; flex-direction:column; gap:12px; max-width:560px; width:100%; margin:0 auto; }
+  .gr-rojo-top h2 { font-size:34px; line-height:1.1; font-weight:700; }
+  .gr-rojo-top p { font-size:18px; }
+  .gr-rojo-chico { font-size:16px !important; opacity:.92; }
+  .gr-tocar { flex:1; margin:12px 16px 0; border:3px solid #fff; border-radius:18px; background:rgba(255,255,255,.12); color:#fff; font:inherit; font-size:26px; font-weight:700; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:240px; cursor:pointer; max-width:560px; align-self:center; width:calc(100% - 32px); }
+  .gr-tocar-ambar { border-color:var(--gr-amber); background:#fff; color:var(--gr-amber); }
+  .gr-tocar-circulo { width:72px; height:72px; border-radius:50%; background:#fff; display:flex; align-items:center; justify-content:center; }
+  .gr-tocar-ambar .gr-tocar-circulo { background:var(--gr-amber); }
+  .gr-tocar-circulo i { width:26px; height:26px; border-radius:50%; background:var(--gr-red); display:block; }
+  .gr-tocar-ambar .gr-tocar-circulo i { background:#fff; }
+  .gr-btn-rojo-out { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.75); min-height:52px; font-size:16px; }
+  .gr-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+</style>
+
+<script>
+  import { barrasDesdeDb, dbDesdeRms, dbSuavizado } from '../../lib/transcriptor/medidor';
+  import { cuentaComoSilencio, finGrabacionMs } from '../../lib/transcriptor/grabador';
+  import {
+    arregloBloqueo, cerrarSegmentoCortado, claveReutilizar, esRetomable, etiquetaBloqueo, localYaEnServidor,
+    type CandidataGrabador, type DatosGrabador, type SegServidor,
+  } from '../../lib/transcriptor/grabadorDatos';
+  // Grabador presencial (P4). Ver la cabecera del archivo y docs/transcriptor/40-ux-diseno.md §2 y §6.
+  // Audio: MediaRecorder en trozos de 10 s → IndexedDB (ArrayBuffer: Safari guarda Blobs mal en IDB
+  // en versiones antiguas). Cada pausa o interrupción cierra el segmento y la continuación abre uno nuevo
+  // (seq+1). Al volver la red se sube cada segmento a R2 en partes de 8 MiB con URLs prefirmadas; los
+  // trozos se borran del teléfono SOLO cuando grabacion-finalizar responde ok.
+  type Tipo = 'individual' | 'pareja';
+  type Candidata = CandidataGrabador;
+  type Datos = DatosGrabador;
+  interface SegLocal { seq: number; inicioMs: number; finMs: number | null; mime: string; uploadId?: string | null; partes?: Record<number, string>; reiniciar?: boolean; bytes?: number; sha256?: string | null }
+  interface GrabLocal { gid: string; nombre: string; patientId: string | null; etiqueta: string; ruido: boolean; inicioMs: number; finMs: number | null; estado: 'grabando' | 'terminada'; segmentos: SegLocal[]; pausas: { desde_ms: number; hasta_ms: number }[]; vivoMs?: number }
+  interface Trozo { gid: string; seq: number; i: number; t: number; datos: ArrayBuffer }
+
+  const D: Datos = JSON.parse(document.getElementById('gr-datos')!.textContent || '{}');
+  // Página estática sin internet: el "hoy" no puede venir del servidor (se compiló antes).
+  if (D.sinInternet) D.hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+  const raiz = document.getElementById('grabador')!;
+  const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+  const PARTE = 8 * 1024 * 1024;
+  const TROZO_MS = 10_000;
+  const SILENCIO_MS = 60_000;
+  const MAX_SEGMENTOS = 999;
+
+  // ─── Utilidades ─────────────────────────────────────────────────────────
+  const anunciar = (t: string) => { $('gr-anuncio').textContent = ''; setTimeout(() => { $('gr-anuncio').textContent = t; }, 30); };
+  const dos = (n: number) => String(n).padStart(2, '0');
+  const crono = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${dos(Math.floor(s / 3600))}:${dos(Math.floor(s / 60) % 60)}:${dos(s % 60)}`; };
+  const duracionTxt = (ms: number) => { const s = Math.round(ms / 1000); const m = Math.floor(s / 60); return m ? `${m} min ${s % 60} s` : `${s} s`; };
+  const horaTxt = (ms: number) => new Date(ms).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const tipoTxt = (t: Tipo | null) => t === 'pareja' ? 'Pareja presencial' : t === 'individual' ? 'Individual presencial' : 'Presencial';
+  const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const lsGet = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const lsSet = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento local */ } };
+  function vista(v: 'cargando' | 'elegir' | 'listo' | 'subir' | 'sin-internet') { raiz.dataset.vista = v; }
+  function pantalla(id: 'gr-rec' | 'gr-pausa' | 'gr-int' | 'gr-guardando' | null) {
+    for (const p of ['gr-rec', 'gr-pausa', 'gr-int', 'gr-guardando']) $(p).hidden = p !== id;
+  }
+  async function postJson(url: string, body: unknown): Promise<{ status: number; data: Record<string, any> }> {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Panel': '1' }, body: JSON.stringify(body), credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    return { status: res.status, data };
+  }
+
+  // ─── IndexedDB ──────────────────────────────────────────────────────────
+  let dbP: Promise<IDBDatabase> | null = null;
+  function db(): Promise<IDBDatabase> {
+    dbP ??= new Promise((ok, mal) => {
+      const r = indexedDB.open('vo-grabador', 1);
+      r.onupgradeneeded = () => {
+        const d = r.result;
+        if (!d.objectStoreNames.contains('grabaciones')) d.createObjectStore('grabaciones', { keyPath: 'gid' });
+        if (!d.objectStoreNames.contains('trozos')) d.createObjectStore('trozos', { keyPath: ['gid', 'seq', 'i'] });
+      };
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => mal(r.error);
+    });
+    return dbP;
+  }
+  function req<T>(r: IDBRequest<T>): Promise<T> { return new Promise((ok, mal) => { r.onsuccess = () => ok(r.result); r.onerror = () => mal(r.error); }); }
+  async function tienda(nombre: 'grabaciones' | 'trozos', modo: IDBTransactionMode = 'readonly') { return (await db()).transaction(nombre, modo).objectStore(nombre); }
+  const guardarGrab = async (g: GrabLocal) => { await req((await tienda('grabaciones', 'readwrite')).put(g)); };
+  const listarGrabs = async (): Promise<GrabLocal[]> => req((await tienda('grabaciones')).getAll()) as Promise<GrabLocal[]>;
+  const guardarTrozo = async (t: Trozo) => { await req((await tienda('trozos', 'readwrite')).put(t)); };
+  async function trozosDe(gid: string, seq: number): Promise<Trozo[]> {
+    return req((await tienda('trozos')).getAll(IDBKeyRange.bound([gid, seq, 0], [gid, seq, Number.MAX_SAFE_INTEGER]))) as Promise<Trozo[]>;
+  }
+  async function borrarGrabLocal(gid: string) {
+    await req((await tienda('trozos', 'readwrite')).delete(IDBKeyRange.bound([gid, 0, 0], [gid, MAX_SEGMENTOS + 1, Number.MAX_SAFE_INTEGER])));
+    await req((await tienda('grabaciones', 'readwrite')).delete(gid));
+  }
+
+  // ─── Estado ─────────────────────────────────────────────────────────────
+  let sel: Candidata | null = null;
+  let tipoSel: Tipo | null = null;
+  let gidPreparado: string | null = null;
+  let ruido = false;
+  let grab: GrabLocal | null = null;
+  let modo: 'listo' | 'grabando' | 'pausa' | 'interrumpida' | 'terminando' | 'subir' = 'listo';
+  let stream: MediaStream | null = null;
+  let recorder: MediaRecorder | null = null;
+  let segActual: SegLocal | null = null;
+  let cola: Promise<unknown> = Promise.resolve();
+  let audioCtx: AudioContext | null = null;
+  let analizador: AnalyserNode | null = null;
+  let fuente: MediaStreamAudioSourceNode | null = null;
+  let silencioDesde = 0;
+  let ocultoDesde = 0;
+  let wakeLock: WakeLockSentinel | null = null;
+  let micProbado = false;
+  let errorIdb = false;
+  let liberarLock: (() => void) | null = null;
+  let latido: ReturnType<typeof setInterval> | null = null;
+
+  // ─── Elegir sesión ──────────────────────────────────────────────────────
+  function cuando(c: Candidata) {
+    if (c.faltaMin <= 0) return `En curso · empezó a las ${c.hora}`;
+    return `Empieza a las ${c.hora} (en ${c.faltaMin} min)`;
+  }
+  function botonCandidata(c: Candidata) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'gr-opcion';
+    const n = document.createElement('b'); n.textContent = c.nombre;
+    const s = document.createElement('span'); s.textContent = `${c.hora} · ${tipoTxt(c.tipo)}${c.fuente === 'calendario' ? ' · Google Calendar' : ''}`;
+    b.append(n, s);
+    if (c.consentOk === false) { const x = document.createElement('span'); x.className = 'no'; x.textContent = etiquetaBloqueo(c.consentMotivo); b.append(x); }
+    if (!c.patientId) { const x = document.createElement('span'); x.textContent = 'Sin ficha asociada: elige al paciente abajo'; b.append(x); }
+    b.addEventListener('click', () => elegir(c));
+    return b;
+  }
+  function pintarPacientes(filtro: string) {
+    const caja = $('gr-lista-pacientes'); caja.textContent = '';
+    const norm = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const f = norm(filtro.trim());
+    const lista = f
+      ? D.pacientes.filter((p) => norm(p.name).includes(f)).slice(0, 8)
+      : D.recientes.map((id) => D.pacientes.find((p) => p.id === id)).filter((p): p is { id: string; name: string } => !!p);
+    $('gr-buscar-ayuda').textContent = f ? (lista.length ? 'Resultados:' : 'No encontré a nadie con ese nombre.') : (lista.length ? 'Atendidos recientemente:' : '');
+    for (const p of lista) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'gr-opcion';
+      const n = document.createElement('b'); n.textContent = p.name; b.append(n);
+      b.addEventListener('click', () => elegir(sinReserva(p)));
+      caja.append(b);
+    }
+  }
+  // "Grabar sin reserva" para un paciente (buscador o botón "Grabar sesión" de la ficha).
+  function sinReserva(p: { id: string; name: string }): Candidata {
+    return { clave: `p:${p.id}`, fuente: 'ficha', bookingId: null, googleEventId: null, patientId: p.id, nombre: p.name, fecha: D.hoy, hora: horaTxt(Date.now()), dur: 50, tipo: null, faltaMin: 0, consentOk: null, consentTexto: null, firmantes: [] };
+  }
+  function mostrarElegir() {
+    const v = $('gr-lista-ventana'); v.textContent = '';
+    if (!D.ventana.length) { const p = document.createElement('p'); p.className = 'gr-sub'; p.textContent = 'No hay sesiones presenciales en curso ni en los próximos 20 minutos.'; v.append(p); }
+    D.ventana.forEach((c) => v.append(botonCandidata(c)));
+    const o = $('gr-lista-otras'); o.textContent = '';
+    D.otras.forEach((c) => o.append(botonCandidata(c)));
+    $('gr-otras-wrap').hidden = !D.otras.length;
+    pintarPacientes(($('gr-buscar') as HTMLInputElement).value);
+    vista('elegir');
+  }
+
+  function elegir(c: Candidata) {
+    // Si el paciente buscado tiene una sesión hoy, se usa esa (trae el tipo de la reserva).
+    if (c.fuente === 'ficha') c = [...D.ventana, ...D.otras].find((x) => x.patientId === c.patientId) ?? c;
+    sel = c; tipoSel = c.tipo; gidPreparado = null;
+    $('gr-sel-cuando').textContent = c.fuente === 'ficha' ? 'Sesión de ahora' : `Sesión de las ${c.hora}`;
+    $('gr-sel-nombre').textContent = c.nombre;
+    pintarTipo();
+    vista('listo');
+    preparar();
+  }
+  function pintarTipo() {
+    $('gr-sel-tipo').textContent = `${tipoTxt(tipoSel)}${sel && sel.fuente !== 'ficha' ? ` · ${sel.dur} min` : ''}`;
+    $('gr-tipo').hidden = !!(sel?.tipo);
+    document.querySelectorAll<HTMLButtonElement>('[data-tipo]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tipo === tipoSel)));
+  }
+  document.querySelectorAll<HTMLButtonElement>('[data-tipo]').forEach((b) => b.addEventListener('click', () => {
+    tipoSel = b.dataset.tipo as Tipo; gidPreparado = null; pintarTipo(); preparar();
+  }));
+  $('gr-cambiar').addEventListener('click', () => { if (modo === 'listo') mostrarElegir(); });
+  $('gr-buscar').addEventListener('input', (e) => pintarPacientes((e.target as HTMLInputElement).value));
+
+  // ─── Preparar en el servidor (con internet): consentimiento + modelo ───
+  function bloqueo(titulo: string, texto: string, opciones: { ficha?: string | null; reintentar?: boolean; etiqueta?: string | null } = {}) {
+    $('gr-bloqueo').hidden = !titulo;
+    $('gr-bloqueo-titulo').textContent = titulo;
+    $('gr-bloqueo-texto').textContent = texto;
+    const f = $<HTMLAnchorElement>('gr-bloqueo-ficha');
+    f.hidden = !opciones.ficha; if (opciones.ficha) f.href = opciones.ficha;
+    f.textContent = opciones.etiqueta || 'Enviar consentimiento'; // antes quedaba "Entrar" pegado tras un 401
+    $('gr-bloqueo-reintentar').hidden = !opciones.reintentar;
+  }
+  function pintarConsent(ok: boolean | null, firmantes: string[] = [], motivo?: string | null) {
+    const el = $('gr-sel-consent');
+    el.hidden = ok === null;
+    el.classList.toggle('no', ok === false);
+    if (ok) el.textContent = tipoSel === 'pareja' ? `Pareja · consentimiento de grabación firmado por ambos ✓${firmantes.length === 2 ? ` (${firmantes.join(' y ')})` : ''}` : 'Consentimiento de grabación firmado ✓';
+    else if (ok === false) el.textContent = etiquetaBloqueo(motivo);
+  }
+  let prepN = 0;
+  async function preparar() {
+    actualizarBotonGrabar();
+    bloqueo('', '');
+    pintarConsent(sel?.consentOk ?? null, sel?.firmantes, sel?.consentMotivo);
+    if (!sel) return;
+    if (!sel.patientId) { bloqueo('Esta sesión no tiene ficha asociada.', 'Toca "Cambiar" y busca al paciente para poder grabar.'); return; }
+    if (!tipoSel) { $('gr-estado-prep').textContent = 'Elige si la sesión es individual o de pareja.'; return; }
+    if (D.demo) {
+      gidPreparado = sel.consentOk === false ? null : 'demo';
+      if (sel.consentOk === false) { const a = arregloBloqueo(sel.consentMotivo, sel.patientId); bloqueo(sel.consentTexto || 'Falta el consentimiento de grabación.', a.texto, { ficha: a.href, etiqueta: a.etiqueta, reintentar: a.reintentar }); }
+      $('gr-estado-prep').textContent = ''; actualizarBotonGrabar(); return;
+    }
+    if (!D.activo) { $('gr-estado-prep').textContent = 'El grabador está apagado en la configuración.'; return; }
+    if (!navigator.onLine) {
+      bloqueo('Necesitas internet un momento.', 'Antes de grabar se verifica el consentimiento en el sitio. Conéctate, toca Reintentar y después activa el modo avión.', { reintentar: true });
+      return;
+    }
+    $('gr-estado-prep').textContent = 'Verificando el consentimiento…';
+    const pedido = sel;
+    const n = ++prepN;
+    const vigente = () => sel === pedido && n === prepN; // solo vale la respuesta de la última preparación
+    try {
+      // Dos dispositivos (ronda 2): cada teléfono/computador reutiliza SOLO su propia preparación (guardada aquí).
+      // Antes el servidor devolvía la misma grabación a cualquier dispositivo de la misma sesión, y el segundo
+      // que subía chocaba con el primero (409 sin explicación o, peor, borraba su audio por "ya finalizada").
+      const claveLocal = claveReutilizar(sel.clave, D.hoy);
+      const cuerpo = { booking_id: sel.bookingId, patient_id: sel.patientId, google_event_id: sel.googleEventId, tipo: tipoSel, lugar_con_ruido: ruido, reutilizar: lsGet(claveLocal) };
+      let r = await postJson('/api/admin/transcriptor/grabacion-iniciar', cuerpo);
+      // Si esa preparación ya tiene audio guardado en este teléfono, se pide una nueva.
+      if (r.data.ok && (await listarGrabs().catch(() => [])).some((g) => g.gid === r.data.grabacion_id)) {
+        r = await postJson('/api/admin/transcriptor/grabacion-iniciar', { ...cuerpo, nueva: true });
+      }
+      if (!vigente()) return;
+      $('gr-estado-prep').textContent = '';
+      if (r.status === 401) { bloqueo('Tu sesión del panel venció.', 'Vuelve a entrar para poder grabar.', { ficha: '/admin/login', etiqueta: 'Entrar' }); return; }
+      if (!r.data.ok) {
+        const consent = r.status === 403 && r.data.motivo && r.data.motivo !== 'transcriptor_apagado';
+        pintarConsent(consent ? false : null, [], r.data.motivo);
+        if (consent) {
+          const a = arregloBloqueo(r.data.motivo, sel.patientId); // sin fecha de nacimiento: "Completar la ficha" + Reintentar
+          bloqueo(r.data.error || 'No se puede grabar esta sesión.', a.texto, { ficha: a.href, etiqueta: a.etiqueta, reintentar: a.reintentar });
+        } else bloqueo(r.data.error || 'No se pudo preparar la grabación.', '', { reintentar: true });
+        return;
+      }
+      gidPreparado = r.data.grabacion_id;
+      lsSet(claveLocal, String(gidPreparado));
+      if (r.data.tipo) tipoSel = r.data.tipo;
+      pintarTipo();
+      pintarConsent(true, r.data.firmantes || []);
+    } catch {
+      if (!vigente()) return;
+      $('gr-estado-prep').textContent = '';
+      bloqueo('No se pudo verificar el consentimiento.', 'Revisa tu conexión y toca Reintentar.', { reintentar: true });
+    }
+    actualizarBotonGrabar();
+  }
+  $('gr-bloqueo-reintentar').addEventListener('click', () => preparar());
+
+  // ─── Checklist ──────────────────────────────────────────────────────────
+  function tick(id: string, estado: 'ok' | 'no' | 'warn', txt: string) { const t = $(id); t.className = `gr-tick${estado === 'no' ? '' : ' ' + estado}`; t.textContent = txt; }
+  function pintarRed() {
+    const sinRed = !navigator.onLine;
+    tick('gr-ck-avion', sinRed ? 'ok' : 'no', sinRed ? '✓' : '!');
+    tick('gr-ck-wifi', sinRed ? 'ok' : 'no', sinRed ? '✓' : '!');
+  }
+  const claveBateria = () => `vo-grabar-bateria-${D.hoy}`;
+  ($('gr-ck-bateria') as HTMLInputElement).checked = lsGet(claveBateria()) === '1';
+  $('gr-ck-bateria').addEventListener('change', (e) => lsSet(claveBateria(), (e.target as HTMLInputElement).checked ? '1' : '0'));
+  $('gr-ruido').addEventListener('click', () => {
+    if (modo !== 'listo') return;
+    ruido = !ruido; $('gr-ruido').setAttribute('aria-checked', String(ruido));
+  });
+  function actualizarBotonGrabar() {
+    ($('gr-grabar') as HTMLButtonElement).disabled = !gidPreparado || modo !== 'listo';
+  }
+
+  // ─── Micrófono, medidor y silencio ──────────────────────────────────────
+  function elegirMime(): string | null {
+    if (typeof MediaRecorder === 'undefined') return null;
+    const ok = (m: string) => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } };
+    // Safari (todo navegador de iPhone es WebKit) → MP4/AAC; Chrome → WebM/Opus.
+    const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|Android/.test(navigator.userAgent) || /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const orden = webkit ? ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'] : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+    return orden.find(ok) ?? '';
+  }
+  async function abrirMicrofono(): Promise<MediaStream> {
+    if (stream && stream.getAudioTracks().some((t) => t.readyState === 'live' && !t.muted)) return stream;
+    cerrarMicrofono();
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
+    conectarMedidor(stream);
+    return stream;
+  }
+  function cerrarMicrofono(solo?: MediaStream | null) {
+    // Con `solo`: cierra únicamente ese micrófono (el del segmento que termina), nunca uno nuevo.
+    const s = solo === undefined ? stream : solo;
+    s?.getTracks().forEach((t) => t.stop());
+    if (stream === s) {
+      stream = null;
+      try { fuente?.disconnect(); } catch { /* ya desconectado */ }
+      fuente = null;
+    }
+  }
+  // iOS Safari: el AudioContext solo arranca si se crea/reanuda DENTRO del toque (antes de cualquier await).
+  function despertarAudio() {
+    try {
+      audioCtx ??= new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
+    } catch { /* sin medidor */ }
+  }
+  function conectarMedidor(s: MediaStream) {
+    try {
+      despertarAudio();
+      analizador ??= Object.assign(audioCtx.createAnalyser(), { fftSize: 1024 });
+      fuente = audioCtx.createMediaStreamSource(s);
+      fuente.connect(analizador);
+    } catch { /* sin medidor: la grabación sigue */ }
+  }
+  const muestras = new Float32Array(1024);
+  function nivel(): number {
+    if (!analizador || !fuente) return 0;
+    analizador.getFloatTimeDomainData(muestras);
+    let suma = 0; for (let i = 0; i < muestras.length; i++) suma += muestras[i] * muestras[i];
+    return Math.sqrt(suma / muestras.length);
+  }
+  // Escala del medidor (17 oct): voz normal a ~2 m → 2–3 barras; cercana → 4–5 (src/lib/transcriptor/medidor.ts).
+  // Solo cambia lo que se ve; el aviso de silencio sigue usando RMS < 0,004 en bucle().
+  const dbMostrado: Record<string, { db: number; t: number }> = {};
+  function pintarMedidor(id: string, rms: number) {
+    const ahora = performance.now();
+    const previo = dbMostrado[id] ?? { db: -100, t: ahora };
+    const db = dbSuavizado(previo.db, dbDesdeRms(rms), ahora - previo.t);
+    dbMostrado[id] = { db, t: ahora };
+    const barras = barrasDesdeDb(db);
+    $(id).querySelectorAll('i').forEach((b, i) => b.classList.toggle('on', i < barras));
+  }
+  function bucle() {
+    const rms = nivel();
+    if (modo === 'listo' && fuente) {
+      pintarMedidor('gr-medidor-prueba', rms);
+      if (rms > 0.006 && !micProbado) { micProbado = true; tick('gr-ck-mic', 'ok', '✓'); }
+    }
+    if (modo === 'grabando') {
+      pintarMedidor('gr-medidor-rec', rms);
+      $('gr-crono').textContent = crono(msGrabados());
+      const ahora = Date.now();
+      if (cuentaComoSilencio(rms, !!fuente, audioCtx?.state)) { silencioDesde ||= ahora; } else silencioDesde = 0; // sin medidor (o AudioContext detenido) no se avisa silencio
+      const silencio = !!silencioDesde && ahora - silencioDesde >= SILENCIO_MS;
+      if (silencio && $('gr-banda-silencio').hidden) anunciar('No se escucha nada hace 1 minuto.');
+      $('gr-banda-silencio').hidden = !silencio;
+    }
+    requestAnimationFrame(bucle);
+  }
+  $('gr-probar-mic').addEventListener('click', async () => {
+    despertarAudio();
+    try { await abrirMicrofono(); tick('gr-ck-mic', micProbado ? 'ok' : 'warn', micProbado ? '✓' : '…'); $('gr-probar-mic').textContent = 'Habla para ver el medidor'; setTimeout(() => {
+      if (micProbado || modo !== 'listo') return;
+      // Si el micrófono está entregando audio (pista viva y sin silenciar) no se bloquea: el medidor puede fallar en iOS
+      // aunque la grabación funcione. Solo se bloquea si la pista está muerta o silenciada.
+      const viva = !!stream && stream.getAudioTracks().some((t) => t.readyState === 'live' && !t.muted);
+      if (viva) { tick('gr-ck-mic', 'ok', '✓'); micProbado = true; return; }
+      tick('gr-ck-mic', 'warn', '!'); bloqueo('El micrófono no capta sonido.', 'Cierra WhatsApp u otras apps que lo usen, y si sigue igual, reinicia Safari.');
+    }, 8000); }
+    catch (e) { errorMicrofono(e); }
+  });
+  function errorMicrofono(e: unknown) {
+    const n = (e as { name?: string })?.name;
+    if (n === 'NotAllowedError' || n === 'SecurityError') bloqueo('Safari no tiene permiso para usar el micrófono.', 'Toca aA en la barra de direcciones → Ajustes del sitio web → Micrófono → Permitir. Después vuelve a tocar Grabar.');
+    else if (n === 'NotFoundError' || n === 'NotReadableError') bloqueo('El micrófono no capta sonido.', 'Cierra WhatsApp u otras apps que lo usen, y si sigue igual, reinicia Safari.');
+    else bloqueo('Este navegador no puede grabar.', 'Usa Safari en el iPhone (iOS 16.4 o más nuevo) o Chrome en el Mac.');
+  }
+
+  // ─── Wake Lock ──────────────────────────────────────────────────────────
+  async function pedirWakeLock() {
+    const activa = modo === 'grabando' || modo === 'pausa' || modo === 'interrumpida';
+    if (!activa || document.visibilityState !== 'visible' || wakeLock) return;
+    if (!('wakeLock' in navigator)) { $('gr-banda-pantalla').hidden = false; $('gr-stat-pantalla').textContent = 'Revisa que la pantalla no se apague'; return; }
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      $('gr-banda-pantalla').hidden = true; $('gr-stat-pantalla').textContent = '☀︎ Pantalla encendida';
+      wakeLock.addEventListener('release', () => {
+        wakeLock = null;
+        if (document.visibilityState === 'visible') setTimeout(() => pedirWakeLock().then(() => { if (!wakeLock && modo === 'grabando') $('gr-banda-pantalla').hidden = false; }), 1000);
+      });
+    } catch { if (modo === 'grabando') $('gr-banda-pantalla').hidden = false; }
+  }
+  function soltarWakeLock() { wakeLock?.release().catch(() => {}); wakeLock = null; }
+
+  // ─── Grabación ──────────────────────────────────────────────────────────
+  function msGrabados(): number {
+    if (!grab) return 0;
+    return grab.segmentos.reduce((a, s) => a + ((s.finMs ?? (s === segActual ? Date.now() : s.inicioMs)) - s.inicioMs), 0);
+  }
+  function encolar(fn: () => Promise<unknown>) { cola = cola.then(fn).catch(() => { falloGuardado(); }); return cola; }
+  // Si el teléfono deja de guardar trozos (sin espacio, IndexedDB cerrada), se avisa en rojo: no se sigue "grabando" en falso.
+  function falloGuardado() {
+    if (errorIdb) return;
+    errorIdb = true;
+    if (modo === 'grabando') {
+      interrumpir('guardado');
+    }
+    anunciar('El teléfono no está guardando el audio.');
+  }
+
+  async function empezarSegmento() {
+    if (!grab) return;
+    await cierreEnCurso; // si se tocó "Seguir" mientras se cerraba el segmento anterior
+    if (audioCtx && audioCtx.state !== 'running') audioCtx.resume().catch(() => {}); // iOS: 'interrupted' tras una llamada
+    const mime = elegirMime();
+    if (mime === null) throw Object.assign(new Error('sin MediaRecorder'), { name: 'NoSoportado' });
+    const s = await abrirMicrofono();
+    const pista = s.getAudioTracks()[0];
+    const seq = grab.segmentos.length;
+    if (seq > MAX_SEGMENTOS) throw new Error('demasiados segmentos');
+    const r = mime ? new MediaRecorder(s, { mimeType: mime, audioBitsPerSecond: 64000 }) : new MediaRecorder(s, { audioBitsPerSecond: 64000 });
+    const seg: SegLocal = { seq, inicioMs: Date.now(), finMs: null, mime: (r.mimeType || mime || 'audio/mp4').split(';')[0] };
+    grab.segmentos.push(seg);
+    segActual = seg; recorder = r; silencioDesde = 0;
+    const g = grab;
+    // Índice de trozo PROPIO de este segmento: si el recorder anterior entrega un trozo tarde (su stop llegó
+    // después del plazo de 3 s y ya empezó otro segmento), no toma el contador del nuevo ni pisa el trozo 0
+    // (cabecera del archivo) de su propio segmento.
+    let idx = 0;
+    r.ondataavailable = (e) => {
+      if (!e.data || !e.data.size) return;
+      const i = idx++, t = Date.now();
+      encolar(async () => {
+        const datos = await e.data.arrayBuffer();
+        await guardarTrozo({ gid: g.gid, seq, i, t, datos });
+        g.vivoMs = t;
+        if (seg.finMs === null) await guardarGrab(g); // deja constancia de hasta dónde hay audio (y latido)
+      });
+    };
+    r.onerror = () => { if (recorder === r) interrumpir('ended'); }; // un error tardío del recorder anterior no corta el segmento nuevo
+    pista.onmute = () => interrumpir('mute');
+    pista.onended = () => interrumpir('ended');
+    r.start(TROZO_MS);
+    await guardarGrab(g);
+  }
+
+  let cierreEnCurso: Promise<void> = Promise.resolve();
+  function cerrarSegmento(): Promise<void> {
+    const r = recorder, seg = segActual, micSeg = stream;
+    // Ya cerrado o cerrándose (p. ej. "Terminar aquí" justo tras una interrupción): se espera ESE cierre, que
+    // guarda el último trozo y la hora de fin, en vez de dar el segmento por terminado antes de tiempo.
+    if (!r && !seg) return cierreEnCurso;
+    recorder = null; segActual = null;
+    if (micSeg) micSeg.getAudioTracks().forEach((t) => { t.onmute = null; t.onended = null; });
+    cierreEnCurso = new Promise<void>((ok) => {
+      let hecho = false;
+      const fin = () => {
+        if (hecho) return; // onstop o el plazo de 3 s: lo que llegue primero (no cerrar un micrófono nuevo)
+        hecho = true;
+        if (seg && seg.finMs === null) seg.finMs = Date.now();
+        cerrarMicrofono(micSeg);
+        encolar(async () => { if (grab) await guardarGrab(grab); }).then(() => ok());
+      };
+      if (!r || r.state === 'inactive') return fin();
+      r.onstop = fin;
+      try { r.stop(); } catch { fin(); }
+      setTimeout(fin, 3000); // por si el navegador no dispara stop (pista ya terminada)
+    }).then(() => cola.then(() => undefined));
+    return cierreEnCurso;
+  }
+
+  async function empezarGrabacion() {
+    $('gr-hoja').hidden = true;
+    if (!gidPreparado || !sel || modo !== 'listo') return;
+    if (!('mediaDevices' in navigator) || elegirMime() === null) { errorMicrofono({ name: 'NoSoportado' }); return; }
+    try { await navigator.storage?.persist?.(); } catch { /* opcional */ }
+    if (D.demo) { demoVista('grabando'); return; }
+    grab = { gid: gidPreparado, nombre: sel.nombre, patientId: sel.patientId, etiqueta: `${sel.nombre}, hoy ${horaTxt(Date.now())}`, ruido, inicioMs: Date.now(), finMs: null, estado: 'grabando', segmentos: [], pausas: [] };
+    try {
+      modo = 'grabando';
+      await empezarSegmento();
+    } catch (e) {
+      modo = 'listo'; grab = null; errorMicrofono(e); actualizarBotonGrabar(); return;
+    }
+    activarGrabacion(grab, `${sel.nombre} · ${tipoTxt(tipoSel)}`, ruido);
+    anunciar('Grabando.');
+  }
+  function activarGrabacion(gActiva: GrabLocal, quien: string, conRuido: boolean) {
+    // Otra pestaña no debe "recuperar" (y subir) esta grabación mientras sigue viva: Web Lock + latido.
+    try { navigator.locks?.request(`vo-grab-${gActiva.gid}`, () => new Promise<void>((liberar) => { liberarLock = liberar; })); } catch { /* sin Web Locks */ }
+    latido = setInterval(() => { if (grab === gActiva && gActiva.estado === 'grabando') { gActiva.vivoMs = Date.now(); guardarGrab(gActiva).catch(() => {}); } }, 30_000);
+    ($('gr-ruido') as HTMLButtonElement).disabled = true;
+    $('gr-rec-quien').textContent = quien;
+    $('gr-stat-ruido').hidden = !conRuido;
+    pantalla('gr-rec');
+    pedirWakeLock();
+  }
+
+  // ─── Retomar sin internet (ronda 2) ─────────────────────────────────────
+  // iOS puede descartar la pestaña de Safari en plena sesión. Sin internet, el service worker sirve esta
+  // misma página en versión estática y aquí se SIGUE la misma grabación (mismo gid, seq que continúa,
+  // trozos en IndexedDB). La autorización (gid) se obtuvo con internet; sin internet no se crea ninguna.
+  let retomando = false;
+  async function retomar(g: GrabLocal, msg: HTMLElement) {
+    despertarAudio(); // dentro del toque (iOS)
+    if (retomando || grab || modo !== 'listo') return;
+    retomando = true;
+    msg.textContent = '';
+    try {
+      if (!(await abandonada(g))) { msg.textContent = 'Esta grabación está abierta en otra pestaña de este teléfono: sigue allá.'; return; }
+      if (!('mediaDevices' in navigator) || elegirMime() === null) { msg.textContent = 'Este navegador no puede grabar.'; return; }
+      const ult = g.segmentos[g.segmentos.length - 1];
+      const tiempos = ult && ult.finMs === null ? (await trozosDe(g.gid, ult.seq)).map((t) => t.t) : [];
+      cerrarSegmentoCortado(g, tiempos);
+      g.finMs = null; g.estado = 'grabando';
+      grab = g; modo = 'grabando';
+      try { await empezarSegmento(); }
+      catch (e) {
+        modo = 'listo'; grab = null;
+        const n = (e as { name?: string })?.name;
+        msg.textContent = n === 'NotAllowedError' ? 'Safari no dejó usar el micrófono. Toca aA → Ajustes del sitio web → Micrófono → Permitir, y vuelve a tocar.' : 'El micrófono no respondió. Cierra otras apps que lo usen y vuelve a tocar.';
+        return;
+      }
+      activarGrabacion(g, `${g.nombre} · continuación`, g.ruido);
+      anunciar('Grabando de nuevo.');
+    } finally { retomando = false; }
+  }
+  function tarjetaRetomar(g: GrabLocal): HTMLElement {
+    const a = document.createElement('div'); a.className = 'gr-alerta gr-alerta-roja gr-pendiente'; a.setAttribute('role', 'alert');
+    const t = document.createElement('p'); t.className = 'gr-alerta-titulo'; t.textContent = `La grabación de ${g.nombre} se cortó`;
+    const p = document.createElement('p');
+    p.textContent = `Se grabó hasta las ${horaTxt(g.vivoMs ?? g.inicioMs)}. Toca para seguir: el resto se agrega a la misma sesión, sin internet.`;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'gr-btn gr-btn-rec gr-btn-medio';
+    const dot = document.createElement('span'); dot.className = 'gr-dot'; dot.setAttribute('aria-hidden', 'true');
+    b.append(dot, document.createTextNode('Seguir grabando'));
+    const m = document.createElement('p'); m.setAttribute('aria-live', 'polite');
+    b.addEventListener('click', () => retomar(g, m));
+    a.append(t, p, b, m);
+    return a;
+  }
+  async function pintarSinInternet() {
+    if (modo !== 'listo') return;
+    let todas: GrabLocal[];
+    try { todas = await listarGrabs(); } catch { $('gr-si-pendientes').textContent = 'Lo grabado sigue guardado en este teléfono.'; return; }
+    const ahora = Date.now();
+    const ret: GrabLocal[] = [];
+    for (const g of todas) if (esRetomable(g, await abandonada(g), ahora)) ret.push(g);
+    if (modo !== 'listo') return;
+    const caja = $('gr-retomar'); caja.textContent = '';
+    ret.forEach((g) => caja.append(tarjetaRetomar(g)));
+    const n = todas.length;
+    $('gr-si-pendientes').textContent = n === 0 ? 'No hay grabaciones pendientes en este teléfono.'
+      : `${n === 1 ? 'Hay 1 grabación guardada en este teléfono, segura.' : `Hay ${n} grabaciones guardadas en este teléfono, seguras.`} Se suben cuando vuelva internet.`;
+  }
+  function iniciarSinInternet() {
+    vista('sin-internet');
+    // Vuelve sola al grabador con internet, pero NUNCA en plena grabación (ahí se sube al terminar).
+    const volver = () => { if (modo === 'listo' || modo === 'subir') location.replace('/admin/grabar'); };
+    $('gr-si-reintentar').addEventListener('click', () => location.replace('/admin/grabar'));
+    window.addEventListener('online', volver);
+    pintarSinInternet();
+  }
+  $('gr-grabar').addEventListener('click', () => {
+    despertarAudio();
+    if (!gidPreparado) return;
+    if (navigator.onLine) { $('gr-hoja').hidden = false; ($('gr-hoja-avion') as HTMLButtonElement).focus(); return; }
+    empezarGrabacion();
+  });
+  $('gr-hoja-avion').addEventListener('click', () => { $('gr-hoja').hidden = true; });
+  $('gr-hoja-igual').addEventListener('click', () => { despertarAudio(); empezarGrabacion(); });
+
+  const CAUSAS: Record<string, string> = {
+    mute: 'Otra app o una llamada tomó el micrófono.',
+    oculta: 'Saliste de esta página o se bloqueó la pantalla.',
+    ended: 'El iPhone detuvo el micrófono.',
+    guardado: 'El teléfono no pudo guardar el audio (¿poco espacio?). Libera espacio y toca para seguir.',
+  };
+  async function interrumpir(causa: 'mute' | 'oculta' | 'ended' | 'guardado') {
+    if (modo !== 'grabando') return;
+    modo = 'interrumpida';
+    const hasta = Date.now();
+    $('gr-int-causa').textContent = CAUSAS[causa];
+    $('gr-int-hasta').textContent = `Se grabó hasta las ${horaTxt(hasta)}. Toca para seguir: el resto se agrega a la misma sesión.`;
+    pantalla('gr-int');
+    anunciar('La grabación se pausó. ' + CAUSAS[causa]);
+    await cerrarSegmento();
+  }
+  async function continuar() {
+    despertarAudio();
+    if (!grab || (modo !== 'interrumpida' && modo !== 'pausa')) return;
+    const veniaDePausa = modo === 'pausa';
+    errorIdb = false;
+    try {
+      modo = 'grabando';
+      await empezarSegmento();
+      if (veniaDePausa) { const p = grab.pausas[grab.pausas.length - 1]; if (p && p.hasta_ms === p.desde_ms) p.hasta_ms = Date.now() - grab.inicioMs; await guardarGrab(grab); }
+      pantalla('gr-rec'); anunciar('Grabando de nuevo.'); pedirWakeLock();
+    } catch (e) {
+      modo = veniaDePausa ? 'pausa' : 'interrumpida';
+      const n = (e as { name?: string })?.name;
+      const t = n === 'NotAllowedError' ? 'Safari no dejó usar el micrófono. Toca aA → Ajustes del sitio web → Micrófono → Permitir.' : 'El micrófono no respondió. Cierra otras apps que lo usen y vuelve a tocar.';
+      if (veniaDePausa) $('gr-pausa-texto').textContent = t; else $('gr-int-causa').textContent = t;
+    }
+  }
+  $('gr-int-seguir').addEventListener('click', continuar);
+  $('gr-pausa-seguir').addEventListener('click', continuar);
+  $('gr-pausar').addEventListener('click', async () => {
+    if (modo !== 'grabando' || !grab) return;
+    modo = 'pausa';
+    const t = Date.now() - grab.inicioMs;
+    grab.pausas.push({ desde_ms: t, hasta_ms: t });
+    $('gr-pausa-texto').textContent = `Pausaste la grabación a los ${crono(msGrabados())}. Lo que se diga ahora no se graba.`;
+    pantalla('gr-pausa'); anunciar('En pausa.');
+    await cerrarSegmento();
+  });
+  $('gr-int-terminar').addEventListener('click', () => terminar());
+
+  async function terminar() {
+    if (!grab || !['grabando', 'pausa', 'interrumpida'].includes(modo)) return;
+    const estabaPausa = modo === 'pausa';
+    modo = 'terminando';
+    pantalla('gr-guardando');
+    await cerrarSegmento();
+    if (estabaPausa) { const p = grab.pausas[grab.pausas.length - 1]; if (p && p.hasta_ms === p.desde_ms) p.hasta_ms = Date.now() - grab.inicioMs; }
+    grab.pausas = grab.pausas.filter((p) => p.hasta_ms > p.desde_ms);
+    grab.finMs = Date.now(); grab.estado = 'terminada';
+    if (latido) clearInterval(latido);
+    liberarLock?.(); liberarLock = null;
+    await guardarGrab(grab).catch(() => { errorIdb = true; });
+    soltarWakeLock();
+    pantalla(null);
+    mostrarSubir(grab);
+    anunciar('Sesión guardada en este teléfono.');
+    subirPendientes();
+  }
+
+  // "Mantén para terminar": 1 s presionado (dedo, mouse o Enter/Espacio).
+  document.querySelectorAll<HTMLButtonElement>('[data-hold]').forEach((b) => {
+    const relleno = b.querySelector<HTMLElement>('.gr-hold-relleno')!;
+    let inicio = 0, raf = 0;
+    const cancelar = () => { inicio = 0; cancelAnimationFrame(raf); relleno.style.width = '0'; };
+    const paso = () => {
+      if (!inicio) return;
+      const p = Math.min(1, (performance.now() - inicio) / 1000);
+      relleno.style.width = `${p * 100}%`;
+      if (p >= 1) { cancelar(); terminar(); return; }
+      raf = requestAnimationFrame(paso);
+    };
+    const empezar = () => { if (inicio) return; inicio = performance.now(); raf = requestAnimationFrame(paso); };
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); empezar(); });
+    b.addEventListener('pointerup', cancelar); b.addEventListener('pointercancel', cancelar); b.addEventListener('lostpointercapture', cancelar);
+    b.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); empezar(); } });
+    b.addEventListener('keyup', (e) => { if (e.key === 'Enter' || e.key === ' ') cancelar(); });
+    b.addEventListener('contextmenu', (e) => e.preventDefault());
+    b.setAttribute('aria-description', 'Mantén presionado un segundo para terminar la grabación');
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      if (modo === 'grabando') { ocultoDesde = Date.now(); try { recorder?.requestData(); } catch { /* sin datos pendientes */ } }
+      return;
+    }
+    pedirWakeLock();
+    if (modo === 'grabando' && ocultoDesde) {
+      const pista = stream?.getAudioTracks()[0];
+      const viva = !!pista && pista.readyState === 'live' && !pista.muted && recorder?.state === 'recording';
+      if (!viva || Date.now() - ocultoDesde > 3000) interrumpir(pista?.muted ? 'mute' : 'oculta');
+    }
+    ocultoDesde = 0;
+    if (modo === 'subir' || modo === 'listo') subirPendientes();
+  });
+  window.addEventListener('pagehide', () => { if (modo === 'grabando') { try { recorder?.requestData(); } catch { /* nada */ } } });
+
+  // ─── Subida ─────────────────────────────────────────────────────────────
+  let subiendo = false;
+  let reintento: ReturnType<typeof setTimeout> | null = null;
+  let intentos = 0;
+  const ESPERAS = [3000, 10000, 30000, 60000];
+  function mostrarSubir(g: GrabLocal) {
+    modo = 'subir';
+    vista('subir');
+    $('gr-guardada-sub').textContent = `${g.nombre} · ${duracionTxt(g.segmentos.reduce((a, s) => a + ((s.finMs ?? s.inicioMs) - s.inicioMs), 0))}`;
+    $('gr-listo-nombre').textContent = g.nombre;
+    if (g.patientId) $<HTMLAnchorElement>('gr-ver-ficha').href = `/admin/pacientes/${g.patientId}`;
+    if (D.sinInternet) {
+      progreso('Desactiva el modo avión para subirla.', null, 'Con internet, esta página vuelve sola al grabador y la sube. También puedes tocar "Subir ahora".', true);
+      $('gr-reintentar-subida').textContent = 'Subir ahora';
+      return;
+    }
+    progreso(navigator.onLine ? 'Subiendo…' : 'Desactiva el modo avión para subirla.', null, navigator.onLine ? 'Deja esta página abierta un momento.' : 'Puedes dejar esta página abierta y seguir con tu día.');
+  }
+  function progreso(titulo: string, frac: number | null, sub: string, reintentar = false) {
+    $('gr-progreso').hidden = false;
+    $('gr-progreso-t').textContent = titulo;
+    $('gr-progreso-sub').textContent = sub;
+    $('gr-barra').hidden = frac === null;
+    if (frac !== null) $('gr-barra-i').style.width = `${Math.round(frac * 100)}%`;
+    $('gr-reintentar-subida').hidden = !reintentar;
+  }
+  async function sha256(b: Blob): Promise<string> {
+    const h = await crypto.subtle.digest('SHA-256', await b.arrayBuffer());
+    return [...new Uint8Array(h)].map((x) => x.toString(16).padStart(2, '0')).join('');
+  }
+  class ErrorSubida extends Error { constructor(msg: string, public definitivo = false, public motivo?: string) { super(msg); } }
+
+  // Un segmento a la vez (memoria del iPhone): se arma desde sus trozos (concatenarlos en orden da un archivo válido).
+  async function blobSegmento(g: GrabLocal, s: SegLocal): Promise<Blob> {
+    const tr = (await trozosDe(g.gid, s.seq)).sort((a, b) => a.i - b.i);
+    if (s.finMs === null) s.finMs = tr.length ? tr[tr.length - 1].t : s.inicioMs; // Safari se cerró grabando
+    return new Blob(tr.map((t) => t.datos), { type: s.mime });
+  }
+  const definitivo = (status: number, data: Record<string, any>) => status === 400 || status === 404 || (status === 409 && typeof data.reintentar_seq !== 'number');
+  const errorOtroDispositivo = () => new ErrorSubida('Esta sesión ya se subió desde otro dispositivo y lo grabado en este teléfono no es lo mismo. No se borró nada de este teléfono. Si grabaste la misma sesión en los dos, la otra ya está en la ficha y puedes descartar esta copia.', true, 'otro_dispositivo');
+
+  async function subirUna(g: GrabLocal, alAvanzar: (hechas: number, total: number) => void) {
+    // 1) Tamaños (sin guardar los blobs en memoria).
+    for (const s of g.segmentos) {
+      if (typeof s.bytes !== 'number') { s.bytes = (await blobSegmento(g, s)).size; }
+    }
+    await guardarGrab(g);
+    const conAudio = g.segmentos.filter((s) => (s.bytes ?? 0) > 0);
+    const total = conAudio.reduce((a, s) => a + Math.ceil(s.bytes! / PARTE), 0);
+    let hechas = conAudio.reduce((a, s) => a + Object.keys(s.partes ?? {}).length, 0);
+    alAvanzar(hechas, total);
+    let yaFinalizada = false;
+    // 2) Partes que faltan, segmento por segmento.
+    for (const s of conAudio) {
+      let n = Math.ceil(s.bytes! / PARTE);
+      s.partes ??= {};
+      if (Object.keys(s.partes).length >= n && s.sha256) continue;
+      const blob = await blobSegmento(g, s);
+      if (blob.size !== s.bytes) { s.bytes = blob.size; s.partes = {}; s.uploadId = null; s.reiniciar = true; s.sha256 = null; n = Math.ceil(blob.size / PARTE); }
+      s.sha256 ??= await sha256(blob);
+      for (let vuelta = 0; vuelta < 2; vuelta++) {
+        const faltan = Array.from({ length: n }, (_, i) => i + 1).filter((k) => !s.partes![k]);
+        if (!faltan.length) break;
+        const r = await postJson('/api/admin/transcriptor/subida-url', {
+          grabacion_id: g.gid, seq: s.seq, mime: s.mime, bytes: blob.size, partes: faltan, upload_id: s.uploadId ?? null, reiniciar: !!s.reiniciar,
+          offset_ms: s.inicioMs - g.inicioMs, duracion_ms: (s.finMs ?? s.inicioMs) - s.inicioMs, inicio_at: new Date(g.inicioMs).toISOString(),
+        });
+        if (r.status === 401) throw new ErrorSubida('Tu sesión del panel venció. Vuelve a entrar: la grabación sigue en este teléfono.', true, 'sesion');
+        if (r.status === 403 && r.data.motivo) throw new ErrorSubida(r.data.error || 'Falta el consentimiento de grabación.', true, 'consentimiento');
+        if (definitivo(r.status, r.data)) throw new ErrorSubida(r.data.error || 'El sitio no acepta esta grabación.', true, 'rechazada');
+        if (!r.data.ok) throw new ErrorSubida(r.data.error || 'No se pudo preparar la subida.');
+        // Ronda 2 (dos dispositivos): "ya cerrada" / "ya subido" solo permiten borrar lo de este teléfono si lo
+        // que hay en el servidor es ESTO mismo. Si otro dispositivo subió otra cosa, se avisa y no se borra nada.
+        if (r.data.ya_finalizada) {
+          const locales = conAudio.map((x) => ({ seq: x.seq, bytes: x.bytes, sha256: x.sha256 ?? null }));
+          if (!localYaEnServidor(locales, (r.data.segmentos ?? []) as SegServidor[])) throw errorOtroDispositivo();
+          yaFinalizada = true; break;
+        }
+        if (r.data.ya_subido) {
+          if (typeof r.data.bytes === 'number' && !localYaEnServidor([{ seq: s.seq, bytes: s.bytes, sha256: s.sha256 ?? null }], [{ seq: s.seq, bytes: r.data.bytes, sha256: r.data.sha256 ?? null }])) throw errorOtroDispositivo();
+          break;
+        }
+        if (s.uploadId !== r.data.upload_id && Object.keys(s.partes).length) {
+          // Subida nueva: las partes de la anterior no sirven; se piden todas otra vez.
+          hechas -= Object.keys(s.partes).length; s.partes = {};
+          s.uploadId = r.data.upload_id; s.reiniciar = false; await guardarGrab(g);
+          alAvanzar(hechas, total);
+          continue;
+        }
+        s.uploadId = r.data.upload_id; s.reiniciar = false;
+        await guardarGrab(g);
+        for (const k of faltan) {
+          const url = r.data.urls?.[k];
+          if (!url) throw new ErrorSubida('Faltó una dirección de subida.');
+          const res = await fetch(url, { method: 'PUT', body: blob.slice((k - 1) * PARTE, k * PARTE) });
+          if (res.status === 404) { s.reiniciar = true; s.partes = {}; await guardarGrab(g); throw new ErrorSubida('La subida venció; se vuelve a empezar.'); }
+          if (!res.ok) throw new ErrorSubida('No se pudo subir una parte.');
+          const etag = res.headers.get('ETag');
+          if (!etag) throw new ErrorSubida('El almacenamiento no devolvió la confirmación de la parte (revisar CORS: ExposeHeaders ETag).');
+          s.partes[k] = etag;
+          await guardarGrab(g);
+          alAvanzar(++hechas, total);
+        }
+      }
+      if (yaFinalizada) break;
+    }
+    // 3) Cerrar en el servidor.
+    const segmentos = yaFinalizada ? [] : conAudio.map((s) => ({
+      seq: s.seq, upload_id: s.uploadId, bytes: s.bytes, sha256: s.sha256 ?? null,
+      partes: Object.entries(s.partes ?? {}).map(([n, etag]) => ({ n: Number(n), etag })),
+      offset_ms: s.inicioMs - g.inicioMs, duracion_ms: (s.finMs ?? s.inicioMs) - s.inicioMs,
+    }));
+    const dur = Math.round(g.segmentos.reduce((a, s) => a + ((s.finMs ?? s.inicioMs) - s.inicioMs), 0) / 1000);
+    const f = await postJson('/api/admin/transcriptor/grabacion-finalizar', {
+      grabacion_id: g.gid, lugar_con_ruido: g.ruido, inicio_at: new Date(g.inicioMs).toISOString(),
+      fin_at: new Date(finGrabacionMs(g)).toISOString(), duracion_seg: dur, pausas: g.pausas, segmentos,
+    });
+    if (f.status === 409 && typeof f.data.reintentar_seq === 'number') {
+      const s = g.segmentos.find((x) => x.seq === f.data.reintentar_seq);
+      if (s) { s.partes = {}; s.uploadId = null; s.reiniciar = true; s.sha256 = null; s.bytes = undefined; await guardarGrab(g); }
+      throw new ErrorSubida(f.data.error || 'Una parte no llegó completa. Se vuelve a subir.');
+    }
+    if (f.status === 401) throw new ErrorSubida('Tu sesión del panel venció. Vuelve a entrar: la grabación sigue en este teléfono.', true, 'sesion');
+    if (f.status === 403 && f.data.motivo) throw new ErrorSubida(f.data.error || 'Falta el consentimiento de grabación.', true, 'consentimiento');
+    if (definitivo(f.status, f.data)) throw new ErrorSubida(f.data.error || 'El sitio no acepta esta grabación.', true, 'rechazada');
+    if (!f.data.ok) throw new ErrorSubida(f.data.error || 'No se pudo cerrar la subida.');
+    await borrarGrabLocal(g.gid); // recién ahora: el servidor confirmó que todo está en R2
+    erroresDef.delete(g.gid);
+    return f.data as { estado: string; patient_id: string | null };
+  }
+
+  // ¿Esta grabación 'grabando' quedó abandonada (Safari se cerró) o la está grabando otra pestaña?
+  async function abandonada(g: GrabLocal): Promise<boolean> {
+    if (g.gid === grab?.gid) return false;
+    try {
+      const q = await navigator.locks?.query?.();
+      if (q) return !(q.held ?? []).some((l) => l.name === `vo-grab-${g.gid}`);
+    } catch { /* sin Web Locks: se usa el latido */ }
+    return Date.now() - (g.vivoMs ?? g.inicioMs) > 90_000;
+  }
+
+  // Errores que no se arreglan reintentando (consentimiento retirado, grabación rechazada): por grabación.
+  const erroresDef = new Map<string, string>();
+
+  let otraVuelta = false;
+  let irAOtra = false;
+  async function subirPendientes() {
+    if (D.demo) return;
+    if (D.sinInternet) { pintarSinInternet(); return; } // la subida la hace /admin/grabar al volver internet
+    if (subiendo) { otraVuelta = true; return; } // p. ej. la sesión recién terminada: se sube al acabar la vuelta en curso
+    if (reintento) { clearTimeout(reintento); reintento = null; }
+    let lista: GrabLocal[];
+    try {
+      const todas = await listarGrabs();
+      lista = [];
+      for (const g of todas) if (g.estado === 'terminada' || (g.estado === 'grabando' && await abandonada(g))) lista.push(g);
+    } catch { return; }
+    pintarPendientes(lista);
+    if (!lista.length || !navigator.onLine) return;
+    subiendo = true;
+    let hayReintentable = false;
+    try {
+      for (const g of lista) {
+        if (g.estado === 'grabando') { g.estado = 'terminada'; await guardarGrab(g); }
+        const enPantalla = grab?.gid === g.gid;
+        try {
+          const r = await subirUna(g, (h, t) => { if (enPantalla) progreso(`Subiendo… ${h} de ${t} ${t === 1 ? 'parte' : 'partes'}`, t ? h / t : 0, 'Deja esta página abierta un momento.'); });
+          intentos = 0;
+          if (enPantalla) { progreso('Subida ✓', 1, ''); $('gr-progreso').hidden = true; $('gr-aviso-cerrar').hidden = true; seguirEstado(g.gid, r.estado); }
+        } catch (e) {
+          const err = e instanceof ErrorSubida ? e : new ErrorSubida('No se pudo subir la grabación.');
+          if (enPantalla) {
+            progreso('No se pudo subir la grabación.', null, `${err.message} Está segura en este teléfono${err.definitivo ? '.' : ' y se reintentará sola cuando haya internet.'}`, !err.definitivo);
+            $('gr-descartar').hidden = !(err.definitivo && err.motivo !== 'sesion');
+          }
+          if (err.definitivo) { if (err.motivo !== 'sesion') erroresDef.set(g.gid, err.message); continue; } // sigue con las demás
+          hayReintentable = true;
+        }
+      }
+    } finally { subiendo = false; }
+    if (irAOtra) { location.href = '/admin/grabar'; return; } // lo que no subió sigue en el teléfono y se retoma allá
+    pintarPendientes(await listarGrabs().then((l) => l.filter((x) => x.estado === 'terminada')).catch(() => []));
+    if (otraVuelta) { otraVuelta = false; setTimeout(subirPendientes, 0); return; }
+    if (hayReintentable) {
+      const t = ESPERAS[Math.min(intentos++, ESPERAS.length - 1)];
+      reintento = setTimeout(subirPendientes, t);
+    }
+  }
+  $('gr-reintentar-subida').addEventListener('click', () => { if (D.sinInternet) { location.replace('/admin/grabar'); return; } intentos = 0; subirPendientes(); });
+  window.addEventListener('online', () => { intentos = 0; pintarRed(); if (modo === 'listo' && sel && !gidPreparado) preparar(); subirPendientes(); });
+  window.addEventListener('offline', pintarRed);
+
+  async function descartar(g: GrabLocal) {
+    if (!confirm(`¿Borrar de este teléfono la grabación de ${g.etiqueta}? No se podrá recuperar.`)) return;
+    await borrarGrabLocal(g.gid).catch(() => {});
+    erroresDef.delete(g.gid);
+    if (grab?.gid === g.gid) { $('gr-descartar').hidden = true; progreso('Grabación borrada de este teléfono.', null, ''); }
+    subirPendientes();
+  }
+  $('gr-descartar').addEventListener('click', () => { if (grab) descartar(grab); });
+
+  function pintarPendientes(lista: GrabLocal[]) {
+    const caja = $('gr-pendientes');
+    const otras = lista.filter((g) => g.gid !== grab?.gid);
+    caja.hidden = !otras.length; caja.textContent = '';
+    if (!otras.length) return;
+    const a = document.createElement('div'); a.className = 'gr-alerta gr-alerta-ambar gr-pendiente'; a.setAttribute('role', 'status');
+    const t = document.createElement('p');
+    const b = document.createElement('b'); b.textContent = otras.length === 1 ? 'Tienes 1 grabación sin subir' : `Tienes ${otras.length} grabaciones sin subir`;
+    t.append(b, document.createTextNode(` (${otras.map((g) => g.etiqueta).join('; ')}). ${navigator.onLine ? 'Se está subiendo sola.' : 'Se sube sola cuando vuelva internet.'}`));
+    a.append(t);
+    for (const g of otras) {
+      const msg = erroresDef.get(g.gid);
+      if (!msg) continue;
+      const e = document.createElement('p'); e.style.color = '#1A1A18'; e.textContent = `${g.etiqueta}: ${msg}`; a.append(e);
+      const d = document.createElement('button'); d.type = 'button'; d.className = 'gr-btn gr-btn-out gr-btn-chico'; d.textContent = 'Descartar del teléfono';
+      d.addEventListener('click', () => descartar(g)); a.append(d);
+    }
+    const bt = document.createElement('button'); bt.type = 'button'; bt.className = 'gr-btn gr-btn-out gr-btn-chico'; bt.textContent = 'Subir ahora';
+    bt.addEventListener('click', () => { intentos = 0; subirPendientes(); });
+    a.append(bt);
+    caja.append(a);
+  }
+
+  // Avance en el servidor: subida → transcribiendo → resumiendo → lista.
+  async function seguirEstado(gid: string, estado: string) {
+    $('gr-pasos').hidden = false;
+    const fin = Date.now() + 2 * 3600_000;
+    // resumen === false con 'lista' = no se reconoció voz (no hay resumen): se dice la verdad (ronda 2).
+    const pintar = (e: string, resumen: boolean | null = null) => {
+      const trans = ['transcrita', 'resumiendo', 'lista'].includes(e);
+      const sinVoz = e === 'lista' && resumen === false;
+      $('gr-paso-trans').innerHTML = trans ? '<span class="gr-tick ok">✓</span>Transcrita' : '<span class="gr-spin" aria-hidden="true"></span><b>Transcribiendo…</b>';
+      $('gr-paso-res').innerHTML = sinVoz ? '<span class="gr-tick warn">!</span>Sin resumen: no se reconoció voz'
+        : e === 'lista' ? '<span class="gr-tick ok">✓</span>Resumen listo'
+        : trans ? '<span class="gr-spin" aria-hidden="true"></span><b>Escribiendo el resumen…</b>' : '<span class="gr-tick" aria-hidden="true"></span>Resumen automático (IA)';
+      if (sinVoz) { $('gr-sin-voz').hidden = false; $('gr-listo').hidden = true; $('gr-pasos-nota').hidden = true; anunciar('No se reconoció voz. Revisa el aviso en el panel.'); }
+      else if (e === 'lista') { $('gr-listo').hidden = false; anunciar('Listo. El resumen está en la ficha.'); }
+      // 'error' es definitivo (los reintentos automáticos ya se agotaron): hay que tocar Reintentar en el aviso.
+      if (e === 'error') { $('gr-paso-trans').innerHTML = '<span class="gr-tick warn">!</span>Hubo un problema al procesar. Revisa el aviso del transcriptor en el panel y toca Reintentar.'; }
+      if (e === 'cancelada') { $('gr-paso-trans').innerHTML = '<span class="gr-tick warn">!</span>Esta grabación se canceló.'; }
+      if (e === 'sin_audio') { $('gr-paso-trans').innerHTML = '<span class="gr-tick warn">!</span>La grabación quedó sin audio.'; }
+    };
+    pintar(estado);
+    while (Date.now() < fin && !['lista', 'sin_audio', 'cancelada'].includes(estado)) {
+      await espera(20_000);
+      if (document.visibilityState !== 'visible') continue;
+      try {
+        const r = await fetch(`/api/admin/transcriptor/grabacion-finalizar?id=${encodeURIComponent(gid)}`, { credentials: 'same-origin' });
+        const d = await r.json();
+        if (d.ok && d.estado !== estado) { estado = d.estado; pintar(estado, typeof d.resumen === 'boolean' ? d.resumen : null); }
+      } catch { /* sin red: se reintenta */ }
+    }
+  }
+  $('gr-otra').addEventListener('click', () => {
+    if (!subiendo) { location.href = '/admin/grabar'; return; }
+    // Durante la subida no se recarga (cortaría la parte en curso): se abre sola apenas termine.
+    irAOtra = true;
+    $('gr-otra').textContent = 'Terminando la subida… se abre sola';
+    anunciar('Se abre apenas termine la subida.');
+  });
+
+  // ─── Inicio ─────────────────────────────────────────────────────────────
+  async function revisarEspacio() {
+    try {
+      const e = await navigator.storage?.estimate?.();
+      if (e && e.quota && e.usage !== undefined && e.quota - e.usage < 60 * 1024 * 1024) $('gr-espacio').hidden = false;
+    } catch { /* no se puede saber */ }
+  }
+  function iniciar() {
+    pintarRed();
+    requestAnimationFrame(bucle);
+    revisarEspacio();
+    if (D.demo) { demoVista(D.demo); return; }
+    if (D.sinInternet) { iniciarSinInternet(); return; }
+    if (typeof indexedDB === 'undefined') bloqueo('Este navegador no puede guardar la grabación.', 'Usa Safari en el iPhone (sin modo privado) o Chrome en el Mac.');
+    subirPendientes();
+    const pedida = D.pedida ? D.ventana.find((c) => c.clave === D.pedida) : null;
+    const paciente = D.pacientePedido ? D.pacientes.find((p) => p.id === D.pacientePedido) : null;
+    if (pedida) elegir(pedida);
+    else if (paciente) elegir(sinReserva(paciente));
+    else if (D.ventana.length === 1 && D.ventana[0].patientId) elegir(D.ventana[0]);
+    else mostrarElegir();
+  }
+
+  // ─── Vistas de prueba (solo `astro dev` con ?demo=) ────────────────────
+  function demoVista(v: string) {
+    const c = D.ventana[0];
+    if (v === 'elegir' || !c) { mostrarElegir(); return; }
+    if (sel !== c) elegir(c);
+    const g: GrabLocal = { gid: 'demo', nombre: c.nombre, patientId: c.patientId, etiqueta: `${c.nombre}, hoy 16:00`, ruido: false, inicioMs: Date.now() - 1421000, finMs: null, estado: 'grabando', segmentos: [{ seq: 0, inicioMs: Date.now() - 1421000, finMs: null, mime: 'audio/mp4' }], pausas: [] };
+    if (v === 'conexion') $('gr-hoja').hidden = false;
+    if (v === 'error-mic') errorMicrofono({ name: 'NotAllowedError' });
+    if (['grabando', 'silencio'].includes(v)) {
+      grab = g; segActual = g.segmentos[0]; modo = 'grabando';
+      $('gr-rec-quien').textContent = `${c.nombre} · ${tipoTxt(c.tipo)}`;
+      pantalla('gr-rec');
+      setInterval(() => { $('gr-crono').textContent = crono(msGrabados()); }, 500);
+      $('gr-medidor-rec').querySelectorAll('i').forEach((b, i) => b.classList.toggle('on', v === 'grabando' && i < 3));
+      if (v === 'silencio') { $('gr-banda-silencio').hidden = false; modo = 'pausa'; }
+    }
+    if (v === 'pausa') { modo = 'pausa'; $('gr-pausa-texto').textContent = 'Pausaste la grabación a los 00:23:41. Lo que se diga ahora no se graba.'; pantalla('gr-pausa'); }
+    if (v === 'interrumpida') { modo = 'interrumpida'; $('gr-int-causa').textContent = CAUSAS.oculta; $('gr-int-hasta').textContent = 'Se grabó hasta las 16:23. Toca para seguir: el resto se agrega a la misma sesión.'; pantalla('gr-int'); }
+    if (v === 'sin-voz') {
+      g.segmentos[0].finMs = g.segmentos[0].inicioMs + 3012000; mostrarSubir(g);
+      $('gr-progreso').hidden = true; $('gr-aviso-cerrar').hidden = true; $('gr-pasos').hidden = false;
+      $('gr-paso-trans').innerHTML = '<span class="gr-tick ok">✓</span>Transcrita';
+      $('gr-paso-res').innerHTML = '<span class="gr-tick warn">!</span>Sin resumen: no se reconoció voz';
+      $('gr-sin-voz').hidden = false; $('gr-pasos-nota').hidden = true;
+    }
+    if (v === 'subiendo' || v === 'procesando') {
+      g.segmentos[0].finMs = g.segmentos[0].inicioMs + 3012000; mostrarSubir(g);
+      if (v === 'subiendo') progreso('Subiendo… 2 de 4 partes', 0.5, 'Deja esta página abierta un momento.');
+      else { $('gr-progreso').hidden = true; $('gr-aviso-cerrar').hidden = true; $('gr-pasos').hidden = false; $('gr-paso-trans').innerHTML = '<span class="gr-tick ok">✓</span>Transcrita'; $('gr-paso-res').innerHTML = '<span class="gr-spin" aria-hidden="true"></span><b>Escribiendo el resumen…</b>'; }
+      pintarPendientes([{ ...g, gid: 'otra', etiqueta: 'Tomás Fuentes, ayer 18:00' }]);
+    }
+  }
+
+  // Sin internet (17 oct; ronda 2, 18 oct): un service worker mínimo SOLO para /admin/grabar. Si la página se
+  // abre sin red, muestra /grabar-sin-internet (este mismo componente en una página estática, sin datos de
+  // pacientes) en vez del error de Safari: ahí se puede SEGUIR la grabación que se cortó, y vuelve aquí sola
+  // cuando hay internet, donde subirPendientes() sube lo guardado en el teléfono.
+  // No guarda en caché nada autenticado ni con datos clínicos (ver public/grabar-sw.js).
+  if ('serviceWorker' in navigator && !D.demo && !D.sinInternet) {
+    navigator.serviceWorker.register('/grabar-sw.js', { scope: '/admin/grabar' }).catch(() => { /* sin SW: igual funciona con internet */ });
+  }
+
+  iniciar();
+</script>

@@ -125,11 +125,20 @@ const cuando = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone
       if (++vueltas > 40 || !li.isConnected) { clearInterval(t); return; }
       try {
         const r = await fetch(`/api/admin/transcriptor/alertas?id=${encodeURIComponent(li.dataset.id ?? '')}`, { headers: { 'X-Panel': '1' } });
-        const j = await r.json() as { ok?: boolean; abierta?: boolean };
+        const j = await r.json() as { ok?: boolean; abierta?: boolean; superada?: boolean };
         if (j.ok && j.abierta === false) {
           clearInterval(t);
           estado.textContent = '✓ Arreglado: el paso salió bien.';
           setTimeout(() => quitar(li), 1600);
+        } else if (j.ok && j.superada) {
+          // El GET solo informa (ronda 2); el cierre es un POST explícito ('revisar' cierra si ya está arreglado).
+          clearInterval(t);
+          const c = await fetch('/api/admin/transcriptor/alertas', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+            body: JSON.stringify({ id: li.dataset.id, accion: 'revisar' }),
+          }).then((x) => x.json()).catch(() => ({})) as { cerrada?: boolean };
+          estado.textContent = '✓ Arreglado: el paso salió bien.';
+          if (c.cerrada) setTimeout(() => quitar(li), 1600);
         }
       } catch { /* se vuelve a intentar */ }
     }, 15_000);

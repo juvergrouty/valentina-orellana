@@ -26,6 +26,7 @@ const demo = import.meta.env.DEV && Astro.url.searchParams.get('demo') === 'avis
 type Vista =
   | { k: 'invalido' } | { k: 'no_disponible' } | { k: 'no_existe' } | { k: 'error' }
   | { k: 'resuelta'; cuando: string | null }
+  | { k: 'superada'; id: string }
   | { k: 'abierta'; alerta: AlertaFila; sesion: SesionDeAlerta | null | undefined; accion: AccionAviso | null; disponibles: AccionAviso[] };
 
 let vista: Vista;
@@ -34,6 +35,7 @@ if (!esUuid(idParam)) {
 } else if (demo) {
   const a = alertasDemo().find((x) => x.id === idParam) ?? alertasDemo()[0];
   if (accionParam === 'resuelta') vista = { k: 'resuelta', cuando: new Date().toISOString() };
+  else if (accionParam === 'superada') vista = { k: 'superada', id: a.id };
   else {
     const disponibles = accionesDisponibles(a, a.sesion);
     vista = { k: 'abierta', alerta: a, sesion: a.sesion, accion: esAccionAviso(accionParam) && disponibles.includes(accionParam) ? accionParam : null, disponibles };
@@ -54,8 +56,9 @@ if (!esUuid(idParam)) {
         const deGrabacion = esDeGrabacion(claseDe(a)) && !!a.grabacion_id;
         const sesion = deGrabacion ? await ops.leerSesion(a.grabacion_id!) : undefined;
         if (deGrabacion && alertaSuperada(a, sesion)) {
-          await ops.cerrarAlerta(a.id); // el paso ya salió bien: mismo cierre automático que el panel
-          vista = { k: 'resuelta', cuando: new Date().toISOString() };
+          // El paso ya salió bien. Ronda 2 (18 oct): un GET no cambia nada; se ofrece cerrar el aviso con un
+          // botón (POST 'revisar' con la protección del panel, queda en la bitácora).
+          vista = { k: 'superada', id: a.id };
         } else {
           const disponibles = accionesDisponibles(a, sesion);
           vista = { k: 'abierta', alerta: a, sesion, accion: esAccionAviso(accionParam) && disponibles.includes(accionParam) ? accionParam : null, disponibles };
@@ -98,6 +101,15 @@ const enlace = (acc: string) => `/admin/transcriptor/accion?alerta=${encodeURICo
       <div class="ac-caja ac-ok" id="ac-resuelta">
         <h1 class="ac-h1">✓ Este aviso ya se resolvió</h1>
         <p>El problema quedó arreglado{vista.cuando ? ` (${cuando(vista.cuando)})` : ''}. No hay nada que hacer.</p>
+        <p><a class="ac-link" href="/admin">Ir al panel</a></p>
+      </div>
+    )}
+    {vista.k === 'superada' && (
+      <div class="ac-caja ac-ok" id="ac-caja" data-id={vista.id} data-accion="revisar">
+        <h1 class="ac-h1">✓ El paso ya salió bien</h1>
+        <p class="ac-que">El problema de este aviso ya quedó arreglado. Toca el botón para cerrarlo.</p>
+        <button type="button" id="ac-hacer" class="ac-boton ac-boton-ok">Cerrar el aviso</button>
+        <p id="ac-estado" class="ac-estado" aria-live="polite"></p>
         <p><a class="ac-link" href="/admin">Ir al panel</a></p>
       </div>
     )}
@@ -156,6 +168,8 @@ const enlace = (acc: string) => `/admin/transcriptor/accion?alerta=${encodeURICo
   .ac-boton:hover { background: #991b1b; }
   .ac-boton:focus-visible { outline: 3px solid #fde68a; outline-offset: 2px; }
   .ac-boton:disabled { opacity: .6; cursor: wait; }
+  .ac-boton-ok { background: #15803d; }
+  .ac-boton-ok:hover { background: #166534; }
   .ac-estado { margin: 0.75rem 0 0; font-size: 0.95rem; font-weight: 600; }
   .ac-estado:empty { display: none; }
   .ac-estado.ok { color: #15803d; }

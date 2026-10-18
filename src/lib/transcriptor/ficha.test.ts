@@ -73,7 +73,7 @@ test('ficha (17 oct): Pendientes → Consentimientos → pestañas; en Notas "Pa
 });
 
 test('F: retomar una grabación pausada nunca pide passkey (ni toca el servidor)', () => {
-  const g = leer('src/pages/admin/grabar.astro');
+  const g = leer('src/components/admin/Grabador.astro'); // ronda 2: el grabador vive en el componente
   const ini = g.indexOf('async function continuar()');
   const fin = g.indexOf('\n  }\n', ini);
   const continuar = g.slice(ini, fin);

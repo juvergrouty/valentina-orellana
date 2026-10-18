@@ -10,7 +10,7 @@ const fila = (p: Partial<FilaConsentimiento>): FilaConsentimiento => ({
   id: `c${++n}`, version: '2026-11-v3', signed_at: '2026-10-10T12:00:00Z', signer_name: 'Camila Rojas',
   signer_rut: '12.345.678-5', signer_email: null, accept_recording: true, revoked_at: null, ...p,
 });
-const evaluar = (tipo: 'individual' | 'pareja' | 'sin_tipo', filas: FilaConsentimiento[], fechaNacimiento: string | null = null) =>
+const evaluar = (tipo: 'individual' | 'pareja' | 'sin_tipo', filas: FilaConsentimiento[], fechaNacimiento: string | null = '1990-05-05') =>
   evaluarConsentimientos({ patientId: 'p1', tipo, fechaNacimiento, filas, hoy: HOY });
 
 test('versiones (decisión 9, 16 oct): v1 no sirve para grabar; v2, v3 y posteriores sí', () => {
@@ -114,6 +114,23 @@ test('menores de 18 nunca se graban (aunque tengan firma)', () => {
   assert.equal(evaluar('individual', [fila({})], '2008-10-16').puede, true);            // cumple 18 hoy
   assert.equal(evaluar('individual', [fila({})], '16-10-2012').motivo, 'menor_de_edad');
   assert.equal(edadEn('basura', HOY), null);
+});
+
+test('ronda 2: sin fecha de nacimiento (o ilegible) no se graba, y el aviso dice qué hacer', async () => {
+  const { textoMotivo, enlaceArreglo, notaRobotSinPermiso } = await import('./consentimiento');
+  for (const f of [null, '', 'basura', '31-02']) {
+    const r = evaluar('individual', [fila({})], f);
+    assert.deepEqual([r.puede, r.motivo], [false, 'sin_fecha_nacimiento'], String(f));
+  }
+  // También en pareja (la ficha es una sola) y aunque falten firmas: primero lo que se completa en la ficha.
+  assert.equal(evaluar('pareja', [fila({})], null).motivo, 'sin_fecha_nacimiento');
+  assert.equal(evaluar('individual', [], null).motivo, 'sin_fecha_nacimiento');
+  assert.match(textoMotivo('sin_fecha_nacimiento', 'Ana Soto'), /fecha de nacimiento en la ficha de Ana Soto.*Complétala/);
+  assert.deepEqual(enlaceArreglo('sin_fecha_nacimiento', 'p1'), { href: '/admin/pacientes/p1?tab=info#pf-nacimiento', etiqueta: 'Completar la ficha' });
+  assert.equal(enlaceArreglo('menor_de_edad', 'p1'), null);
+  assert.equal(enlaceArreglo('sin_consentimiento', 'p1')?.etiqueta, 'Enviar consentimiento');
+  assert.match(notaRobotSinPermiso('sin_fecha_nacimiento'), /fecha de nacimiento/);
+  assert.match(notaRobotSinPermiso('sin_consentimiento'), /consentimiento/);
 });
 
 test('identidad del firmante: RUT normalizado, luego correo, luego nombre', () => {
