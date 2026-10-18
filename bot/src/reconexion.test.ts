@@ -3,6 +3,7 @@
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { leerConfig } from './config.js';
+import { Vigia } from './vigia.js';
 import { Segmentos } from './segmentos.js';
 import { horaFinDeRespuesta, SinConsentimientoError, Sitio, type EventoBot } from './sitio.js';
 import { desfaseOrigen, lineaConDesfase } from './linea.js';
@@ -27,6 +28,27 @@ test('config r2: reemplazo con SEQ_INICIAL / ORIGEN_MS / ESPERA_LLEGADA_MS; por 
   assert.throws(() => leerConfig({ ...ENV_OK, ORIGEN_MS: 'ayer' }), /ORIGEN_MS/);
   assert.throws(() => leerConfig({ ...ENV_OK, SEQ_INICIAL: '-1' }), /SEQ_INICIAL/);
   assert.throws(() => leerConfig({ ...ENV_OK, SEQ_INICIAL: '500' }), /SEQ_INICIAL/);
+});
+
+const VIGIA = { botNombre: 'Notas Ps. Valentina Orellana', valeNombres: ['Valentina Orellana'], soloMs: 60_000, maxHumanos: 2, limiteMs: 1e13 };
+
+test('vigía r2 (revisión): el reemplazo con el paciente solo sale a los 3 min aunque nunca haya visto a Vale', () => {
+  assert.equal(leerConfig({ ...ENV_OK, VALE_VISTA: '1' }).valeVista, true);
+  assert.equal(leerConfig(ENV_OK).valeVista, false);
+  const v = new Vigia({ ...VIGIA, valeVistaInicial: true });
+  assert.equal(v.hayVale(['Camila']), false);
+  assert.equal(v.observar(0, ['Camila']), null);
+  assert.equal(v.observar(3 * 60_000, ['Camila']), 'vale_salio');
+  const sinMarca = new Vigia(VIGIA);
+  sinMarca.observar(0, ['Camila']);
+  assert.equal(sinMarca.observar(3 * 60_000, ['Camila']), null, 'robot normal: el paciente llegó primero, espera a Vale');
+});
+
+test('vigía r2 (revisión): Vale esperando sola y se le corta → solo (reemplazo), no vale_salio', () => {
+  const v = new Vigia(VIGIA);
+  v.observar(0, ['Valentina Orellana']);
+  v.observar(2_000, []);
+  assert.equal(v.observar(62_000, []), 'solo');
 });
 
 test('reemplazo r2: offsets y línea de hablantes en el mismo origen que el robot anterior', () => {
@@ -137,7 +159,7 @@ test('audio-pagina r2 (punto 4): una pista terminada se desconecta, suelta su <a
     assert.equal(pg.nodos[1].desconectado, true);
     assert.deepEqual(w.__voPistasRTC, [], 'no se acumulan pistas muertas');
     const c = new PistaFalsa('c');
-    w.__voPistasRTC.push(c);
+    (w.__voPistasRTC as PistaFalsa[]).push(c);
     mock.timers.tick(1000);
     assert.equal(w.__voGrab.pistas(), 1, 'las pistas nuevas se siguen enlazando');
     w.__voGrab.apagar();

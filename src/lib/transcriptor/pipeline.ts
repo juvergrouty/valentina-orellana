@@ -378,7 +378,8 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         if (g.bot_machine_id !== g0.bot_machine_id || !ESTADOS_BOT_ACTIVO.includes(g.estado)) return; // cambió mientras tanto
         await liberarSesion(db, g.id).catch(() => {});
         await auditar('cron', 'bot_salio', { grabacionId: g.id, patientId: g.patient_id, resultado: 'error', detalle: { motivo: 'caida', estado: g.estado }, cliente: db });
-        const relanzar = debeRelanzarBot({ motivo: 'caida', horaFinPrevista: g.hora_fin_prevista, ahora, lanzamientos: await lanzamientosDe(db, g.id) });
+        const lanzados = await lanzamientosDe(db, g.id);
+        const relanzar = debeRelanzarBot({ motivo: 'caida', horaFinPrevista: g.hora_fin_prevista, ahora, lanzamientos: lanzados });
         if (g.estado === 'grabando') {
           if (relanzar && await prepararRelanzamiento(db, g, { ahora })) { n++; return; }
           const r = await cerrarConLoGrabado(db, g, { ahora, notaFin: 'Grabación incompleta: el asistente de notas se cayó y no pudo volver a entrar. Se transcribe lo que alcanzó a subir.' });
@@ -396,7 +397,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         const e = await marcarError(g.id, g.estado, 'El asistente de notas se cayó antes de empezar a grabar', db);
         if (!e) return;
         n++;
-        if (relanzar && await reintentar(g.id, db)) return; // el despacho lanza otro robot en esta misma corrida o la siguiente
+        if (relanzar && lanzados < 2 && await reintentar(g.id, db)) return; // un solo reintento automático antes de grabar // el despacho lanza otro robot en esta misma corrida o la siguiente
         await alerta({
           tipo: 'bot', grabacionId: g.id, clave: `bot:${g.id}`, accion: 'reintentar',
           titulo: `El asistente de notas se cayó antes de entrar a la ${etiquetaSesion(g)}`,
@@ -443,7 +444,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     for (const s of sesiones) {
       if (queda() < 5_000) break;
       const { data: previa, error: e0 } = await db.from('grabaciones')
-        .select('id, patient_id, estado, estado_antes_error, hora_fin_prevista, fin_at, updated_at, bot_token_vence_at')
+        .select('id, patient_id, estado, estado_antes_error, hora_fin_prevista, fin_at, updated_at, bot_token_vence_at, nota_sistema')
         .eq('google_event_id', s.googleEventId).eq('origen', 'online').maybeSingle();
       if (e0) throw new Error(`grabaciones: ${e0.message}`);
       const enVentana = Date.parse(s.inicio) >= desdeDespacho && Date.parse(s.fin) > ahora.getTime();
@@ -453,7 +454,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         if (ESTADOS_BOT_ACTIVO.includes(p.estado)) { await seguirHora(p, s, ahora); continue; }
         // Evento movido a otra hora después de que el robot fue (y volvió sin audio) → se libera el
         // google_event_id de la fila vieja para despachar a la hora nueva (índice único grabaciones_evento_unq).
-        if (!enVentana || !previaLiberable(p, s.inicio)) continue;
+        if (!enVentana || !previaLiberable(p, s.inicio, s.fin)) continue;
         const { data: liberada } = await db.from('grabaciones').update({ google_event_id: eventIdLiberado(s.googleEventId, p.id) })
           .eq('id', p.id).eq('google_event_id', s.googleEventId).select('id').maybeSingle();
         if (!liberada) continue;

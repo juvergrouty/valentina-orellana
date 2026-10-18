@@ -37,6 +37,11 @@ export interface OpcionesVigia {
   graciaExtraMs?: number;
   /** Espera máxima a que llegue el primer humano. Default 30 min. */
   esperaLlegadaMs?: number;
+  /**
+   * Robot de reemplazo: Vale ya estuvo en la sesión. Su ausencia se cuenta desde que este robot
+   * entra (con el paciente presente, a los 3 min sale con vale_salio), sin esperar a "verla" primero.
+   */
+  valeVistaInicial?: boolean;
 }
 
 export const GRACIA_VALE_MS = 3 * 60_000;
@@ -65,6 +70,7 @@ export class Vigia {
   private vaciadaPorVale = false;
   private extraDesde: number | null = null;
   private humanoVisto = false;
+  private otroVisto = false;
   private inicio: number | null = null;
   private previos: { humanos: number; vale: boolean } = { humanos: 0, vale: false };
   private limite: number;
@@ -77,6 +83,12 @@ export class Vigia {
     this.graciaExtra = o.graciaExtraMs ?? 15_000;
     this.esperaLlegada = o.esperaLlegadaMs ?? ESPERA_LLEGADA_MS;
     this.limite = o.limiteMs;
+    this.valeVista = o.valeVistaInicial === true;
+  }
+
+  /** ¿Está Vale entre los nombres visibles? */
+  hayVale(nombres: string[]): boolean {
+    return this.humanos(nombres).some((n) => esVale(n, this.o.valeNombres));
   }
 
   /** El sitio informó otra hora de término (Vale movió el evento). */
@@ -105,13 +117,15 @@ export class Vigia {
 
     this.inicio ??= ahora;
     if (humanos.length > 0) this.humanoVisto = true;
+    if (humanos.some((n) => !esVale(n, this.o.valeNombres))) this.otroVisto = true;
     if (!this.humanoVisto) return ahora - this.inicio >= this.esperaLlegada ? 'nadie_llego' : null;
 
     if (humanos.length === 0) {
       if (this.soloDesde == null) {
         this.soloDesde = ahora;
-        // Vale era la única que quedaba y se fue: fin normal de la sesión.
-        this.vaciadaPorVale = previos.humanos === 1 && previos.vale;
+        // Vale era la única que quedaba y se fue DESPUÉS de que estuvo el paciente: fin normal de la
+        // sesión. (Si Vale esperaba sola y se le cortó, es 'solo': el sitio puede mandar reemplazo.)
+        this.vaciadaPorVale = previos.humanos === 1 && previos.vale && this.otroVisto;
       }
       if (ahora - this.soloDesde >= this.o.soloMs) return this.vaciadaPorVale ? 'vale_salio' : 'solo';
       return null;

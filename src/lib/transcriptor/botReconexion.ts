@@ -81,14 +81,21 @@ export function maquinaMuerta(status: number, estado: unknown): boolean | null {
  * de la nueva hora de inicio (el robot fue a la hora vieja y nadie llegó / nadie lo admitió / se cayó
  * antes de grabar). Entonces se libera el google_event_id para despachar otro robot a la hora nueva.
  */
-export type PreviaEvento = Pick<Grabacion, 'id' | 'estado' | 'estado_antes_error' | 'fin_at' | 'updated_at'>;
-export function previaLiberable(previa: PreviaEvento, inicioNuevo: string): boolean {
-  const sinAudio = previa.estado === 'sin_audio' || previa.estado === 'bot_no_admitido'
-    || (previa.estado === 'error' && previa.estado_antes_error === 'bot_lanzando');
-  if (!sinAudio) return false;
-  const termino = Date.parse(previa.fin_at ?? previa.updated_at ?? '');
+export type PreviaEvento = Pick<Grabacion, 'id' | 'estado' | 'estado_antes_error' | 'fin_at' | 'updated_at' | 'hora_fin_prevista'>
+  & Partial<Pick<Grabacion, 'nota_sistema'>>;
+export function previaLiberable(previa: PreviaEvento, inicioNuevo: string, finNuevo: string): boolean {
+  const termino = Date.parse(previa.fin_at ?? '');
   const inicio = Date.parse(inicioNuevo);
-  return !Number.isNaN(termino) && !Number.isNaN(inicio) && termino < inicio;
+  if (Number.isNaN(termino) || Number.isNaN(inicio) || termino >= inicio) return false;
+  // "Nadie llegó": el robot esperó 30 min desde (a lo más) 4 min antes de la hora vieja; si salió antes
+  // de la hora nueva, la sesión se movió sí o sí.
+  if (previa.estado === 'sin_audio' && previa.nota_sistema === NOTA_NADIE_LLEGO) return true;
+  // No admitido: además el término del evento debe ser otro (si Vale lo rechazó sin mover nada, no se insiste).
+  if (previa.estado === 'bot_no_admitido') {
+    const finPrevio = Date.parse(previa.hora_fin_prevista ?? '');
+    return !Number.isNaN(finPrevio) && finPrevio !== Date.parse(finNuevo);
+  }
+  return false; // error, cancelada, con audio…: nunca
 }
 
 /** google_event_id con que queda la fila vieja (único, trazable, ya no choca con el índice). */

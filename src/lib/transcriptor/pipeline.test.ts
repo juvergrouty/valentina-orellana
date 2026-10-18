@@ -823,6 +823,7 @@ test('r2 punto 1b: el env del robot de reemplazo lleva SEQ_INICIAL, ORIGEN_MS y 
   assert.equal(enviados[0].SEQ_INICIAL, '2');
   assert.equal(enviados[0].ORIGEN_MS, String(Date.parse(inicio)));
   assert.equal(enviados[0].ESPERA_LLEGADA_MS, String(ESPERA_LLEGADA_RELANZADO_MS));
+  assert.equal(enviados[0].VALE_VISTA, '1');
   // Con máquina asignada no se lanza otro (nunca dos robots a la vez).
   await assert.rejects(bot.lanzarBot(e.grab(g.id) as never), /otro asistente/);
   assert.equal(enviados.length, 1);
@@ -1008,10 +1009,14 @@ test('r2 punto 6: el vigilante suelta el candado de la sesión de Google al apag
 });
 
 test('r2 punto 7: previaLiberable solo libera filas sin audio terminadas antes de la hora nueva', () => {
-  const base = { id: 'x', estado_antes_error: null, updated_at: '2026-10-20T13:30:00Z' } as const;
-  assert.equal(previaLiberable({ ...base, estado: 'sin_audio', fin_at: '2026-10-20T13:30:00Z' }, '2026-10-20T15:00:00Z'), true);
-  assert.equal(previaLiberable({ ...base, estado: 'sin_audio', fin_at: '2026-10-20T13:30:00Z' }, '2026-10-20T13:00:00Z'), false, 'mismo horario: no');
-  assert.equal(previaLiberable({ ...base, estado: 'bot_no_admitido', fin_at: '2026-10-20T13:20:00Z' }, '2026-10-20T15:00:00Z'), true);
-  assert.equal(previaLiberable({ ...base, estado: 'lista', fin_at: '2026-10-20T13:20:00Z' }, '2026-10-20T15:00:00Z'), false, 'con audio: nunca');
-  assert.equal(previaLiberable({ ...base, estado: 'cancelada', fin_at: null }, '2026-10-20T15:00:00Z'), false);
+  const base = { id: 'x', estado_antes_error: null, updated_at: '2026-10-20T13:30:00Z', hora_fin_prevista: '2026-10-20T13:50:00Z', nota_sistema: null } as const;
+  const nadie = { ...base, estado: 'sin_audio', fin_at: '2026-10-20T13:30:00Z', nota_sistema: NOTA_NADIE_LLEGO } as const;
+  assert.equal(previaLiberable(nadie, '2026-10-20T15:00:00Z', '2026-10-20T15:50:00Z'), true);
+  assert.equal(previaLiberable(nadie, '2026-10-20T13:00:00Z', '2026-10-20T13:50:00Z'), false, 'mismo horario: no');
+  assert.equal(previaLiberable({ ...nadie, nota_sistema: 'otra' }, '2026-10-20T15:00:00Z', '2026-10-20T15:50:00Z'), false, 'sin_audio por otra causa: no');
+  assert.equal(previaLiberable({ ...base, estado: 'bot_no_admitido', fin_at: '2026-10-20T13:20:00Z' }, '2026-10-20T15:00:00Z', '2026-10-20T15:50:00Z'), true);
+  assert.equal(previaLiberable({ ...base, estado: 'bot_no_admitido', fin_at: '2026-10-20T12:58:00Z' }, '2026-10-20T13:00:00Z', '2026-10-20T13:50:00Z'), false, 'Vale lo rechazó sin mover el evento: no se insiste');
+  assert.equal(previaLiberable({ ...base, estado: 'error', estado_antes_error: 'bot_lanzando', fin_at: null }, '2026-10-20T15:00:00Z', '2026-10-20T15:50:00Z'), false, 'error: nunca (no salta el tope de lanzamientos)');
+  assert.equal(previaLiberable({ ...base, estado: 'lista', fin_at: '2026-10-20T13:20:00Z' }, '2026-10-20T15:00:00Z', '2026-10-20T15:50:00Z'), false, 'con audio: nunca');
+  assert.equal(previaLiberable({ ...base, estado: 'cancelada', fin_at: null }, '2026-10-20T15:00:00Z', '2026-10-20T15:50:00Z'), false);
 });

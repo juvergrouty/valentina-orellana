@@ -43,6 +43,8 @@ export interface ConfigBot {
   seqInicial: number;
   /** Robot de reemplazo (r2): origen común de los tiempos (ms epoch = inicio_at); null = el propio. */
   origenMs: number | null;
+  /** Robot de reemplazo (r2): Vale ya estuvo en la sesión → graba solo con Vale presente. */
+  valeVista: boolean;
 }
 
 export const MEET_URL_RE = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/;
@@ -108,6 +110,7 @@ export function leerConfig(env: Record<string, string | undefined> = process.env
     graciaValeMs: entero(env, 'GRACIA_VALE_MS', 3 * 60_000, 5_000, 10 * 60_000),
     seqInicial: entero(env, 'SEQ_INICIAL', 0, 0, 190),
     origenMs: origen(env.ORIGEN_MS),
+    valeVista: env.VALE_VISTA === '1',
   };
 }
 

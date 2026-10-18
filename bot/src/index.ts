@@ -34,6 +34,8 @@ const log = (m: string) => console.log(`[bot ${new Date().toISOString()}] ${m}`)
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const TROZO_MS = 10_000;
 const SONDEO_VIGIA_MS = 2_000;
+/** Pico de la mezcla remota que cuenta como voz (0–1; el silencio de Meet queda en ~0). */
+const UMBRAL_VOZ = 0.02;
 /** Tope duro tras HORA_FIN + MAX_EXTRA_MS: pase lo que pase, el proceso termina. */
 const MARGEN_TOPE_DURO_MS = 10 * 60_000;
 
@@ -92,6 +94,7 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
   const vigia = new Vigia({
     botNombre: cfg.botNombre, valeNombres: cfg.valeNombres, soloMs: cfg.soloMs, maxHumanos: cfg.maxHumanos,
     limiteMs: cfg.horaFin.getTime() + cfg.maxExtraMs, esperaLlegadaMs: cfg.esperaLlegadaMs, graciaValeMs: cfg.graciaValeMs,
+    valeVistaInicial: cfg.valeVista,
   });
   op.registrarCambioHora((limiteMs) => vigia.fijarLimite(limiteMs));
   let seq = cfg.seqInicial;
@@ -100,6 +103,7 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
   let siguienteAbierto = false;
   let vioHumanos = false;
   let avisoSinPistas = false;
+  let vozSinTiles = 0;
   let ultimoNivel = Date.now();
   let motivo: MotivoFin | null = null;
 
@@ -122,7 +126,22 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
       // r2 (punto 3): se empieza a grabar recién cuando hay al menos una persona. `activo` le dice al
       // sitio que empezó (pasa a 'grabando'); si no hay consentimiento, el sitio responde 403 y se sale.
       if (inicio == null) {
+        if (!humanos.length && !cfg.valeVista && ahora - ultimoNivel >= 10_000) {
+          // Respaldo si Meet cambió el DOM y no se leen los participantes: si llega VOZ por las pistas
+          // remotas (alguien habla) dos veces seguidas, hay gente aunque no se vea → se graba y se avisa.
+          ultimoNivel = ahora;
+          const pico = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.nivel().pico).catch(() => 0);
+          vozSinTiles = pico >= UMBRAL_VOZ ? vozSinTiles + 1 : 0;
+          if (vozSinTiles >= 2) {
+            log('hay voz pero no se ven participantes: se graba igual');
+            await sitio.enviar({ tipo: 'error', detalle: 'El bot no pudo leer los participantes de Meet (¿cambió el DOM?); graba porque hay voz' }).catch(() => {});
+            vioHumanos = true;
+            humanos.push('(voz)');
+          }
+        }
         if (!humanos.length) continue;
+        // Robot de reemplazo: solo con Vale presente (nunca empieza grabando al paciente solo).
+        if (cfg.valeVista && !vigia.hayVale(nombres)) continue;
         try { await sitio.enviar({ tipo: 'activo' }); } catch (e) {
           if (e instanceof SinConsentimientoError) { motivo = 'sin_consentimiento'; break; }
           throw e;

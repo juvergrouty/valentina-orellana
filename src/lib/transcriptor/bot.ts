@@ -372,6 +372,9 @@ export function cuerpoMaquina(p: ParamsMaquina): Record<string, unknown> {
           SEQ_INICIAL: String(p.relanzamiento.seqInicial),
           ORIGEN_MS: String(Math.round(p.relanzamiento.origenMs)),
           ESPERA_LLEGADA_MS: String(ESPERA_LLEGADA_RELANZADO_MS),
+          // Vale ya estuvo en la sesión: el reemplazo graba solo con Vale presente y, si no está, cuenta
+          // su ausencia desde que entra (nunca graba al paciente solo más de 3 min).
+          VALE_VISTA: '1',
         } : {}),
       },
       guest: { cpu_kind: 'shared', cpus: 2, memory_mb: 2048 },
@@ -466,7 +469,7 @@ export function crearBot(deps: DepsBot = {}): BotSitio {
       : await (await import('../syncCalendar')).getValidAccessToken();
     if (!auth) throw new Error('Google Calendar no está conectado');
     const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(auth.calendarId)}/events`
-      + `?singleEvents=true&orderBy=startTime&maxResults=50`
+      + `?singleEvents=true&orderBy=startTime&maxResults=250` // r2: ventana más larga (seguir horas movidas)
       + `&timeMin=${encodeURIComponent(new Date(desde.getTime() - 6 * 60 * 60_000).toISOString())}`
       + `&timeMax=${encodeURIComponent(hasta.toISOString())}`;
     const res = await f(url, { headers: { Authorization: `Bearer ${auth.token}` }, signal: AbortSignal.timeout(8000) });
@@ -642,7 +645,15 @@ export function crearBot(deps: DepsBot = {}): BotSitio {
     }
     const maquina = (await res.json()) as { id?: string };
     if (!maquina.id) throw new Error('Fly no devolvió el id de la máquina');
-    await c.from('grabaciones').update({ bot_machine_id: maquina.id }).eq('id', grabacion.id);
+    const { error: eM } = await c.from('grabaciones').update({ bot_machine_id: maquina.id }).eq('id', grabacion.id);
+    if (eM) {
+      // Sin el id guardado el cron creería que no hay robot y lanzaría otro: se apaga esta máquina.
+      await c.from('grabaciones').update({ bot_token_vence_at: new Date().toISOString() }).eq('id', grabacion.id);
+      await f(`${FLY_API}/apps/${app}/machines/${maquina.id}?force=true`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${env.FLY_API_TOKEN}` }, signal: AbortSignal.timeout(20_000),
+      }).catch(() => null);
+      throw new Error(`No se pudo guardar el id de la máquina del bot: ${eM.message}`);
+    }
     const { auditar } = await import('./auditoria');
     await auditar('cron', 'bot_lanzar', { grabacionId: grabacion.id, patientId: grabacion.patient_id, detalle: { machine_id: maquina.id, region: FLY_REGION, ...(relanzamiento ? { relanzamiento: true, seq_inicial: relanzamiento.seqInicial } : {}) }, cliente: c });
     return { machineId: maquina.id };
@@ -893,7 +904,9 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
           await auditar('bot', 'bot_salio', { ...auditoria, resultado: 'error', detalle: { motivo: ev.motivo } });
           // r2 (punto 1b): si se cayó antes de grabar y la sesión sigue en su ventana, se relanza solo
           // (lo mismo que "Reintentar": vuelve a bot_lanzando sin máquina y el orquestador lanza otro).
-          if (e2 && debeRelanzarBot({ motivo: ev.motivo, horaFinPrevista: grab.hora_fin_prevista, ahora, lanzamientos: await lanzamientosDe(c, grab.id) })) {
+          // Un solo reintento automático antes de grabar (un bloqueo de Meet repetido no se reintenta 4 veces).
+          const lanzados = await lanzamientosDe(c, grab.id);
+          if (e2 && lanzados < 2 && debeRelanzarBot({ motivo: ev.motivo, horaFinPrevista: grab.hora_fin_prevista, ahora, lanzamientos: lanzados })) {
             await reintentar(grab.id, c);
           }
         }
