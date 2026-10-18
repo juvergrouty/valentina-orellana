@@ -475,6 +475,7 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
 
 <script>
   import { barrasDesdeDb, dbDesdeRms, dbSuavizado } from '../../lib/transcriptor/medidor';
+  import { cuentaComoSilencio, finGrabacionMs } from '../../lib/transcriptor/grabador';
   // Grabador presencial (P4). Ver la cabecera del archivo y docs/transcriptor/40-ux-diseno.md §2 y §6.
   // Audio: MediaRecorder en trozos de 10 s → IndexedDB (ArrayBuffer: Safari guarda Blobs mal en IDB
   // en versiones antiguas). Cada pausa o interrupción cierra el segmento y la continuación abre uno nuevo
@@ -553,7 +554,6 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
   let stream: MediaStream | null = null;
   let recorder: MediaRecorder | null = null;
   let segActual: SegLocal | null = null;
-  let trozoIdx = 0;
   let cola: Promise<unknown> = Promise.resolve();
   let audioCtx: AudioContext | null = null;
   let analizador: AnalyserNode | null = null;
@@ -784,7 +784,7 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
       pintarMedidor('gr-medidor-rec', rms);
       $('gr-crono').textContent = crono(msGrabados());
       const ahora = Date.now();
-      if (rms < 0.004 && fuente) { silencioDesde ||= ahora; } else silencioDesde = 0; // sin medidor no se avisa silencio
+      if (cuentaComoSilencio(rms, !!fuente, audioCtx?.state)) { silencioDesde ||= ahora; } else silencioDesde = 0; // sin medidor (o AudioContext detenido) no se avisa silencio
       const silencio = !!silencioDesde && ahora - silencioDesde >= SILENCIO_MS;
       if (silencio && $('gr-banda-silencio').hidden) anunciar('No se escucha nada hace 1 minuto.');
       $('gr-banda-silencio').hidden = !silencio;
@@ -855,11 +855,15 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
     const r = mime ? new MediaRecorder(s, { mimeType: mime, audioBitsPerSecond: 64000 }) : new MediaRecorder(s, { audioBitsPerSecond: 64000 });
     const seg: SegLocal = { seq, inicioMs: Date.now(), finMs: null, mime: (r.mimeType || mime || 'audio/mp4').split(';')[0] };
     grab.segmentos.push(seg);
-    segActual = seg; trozoIdx = 0; recorder = r; silencioDesde = 0;
+    segActual = seg; recorder = r; silencioDesde = 0;
     const g = grab;
+    // Índice de trozo PROPIO de este segmento: si el recorder anterior entrega un trozo tarde (su stop llegó
+    // después del plazo de 3 s y ya empezó otro segmento), no toma el contador del nuevo ni pisa el trozo 0
+    // (cabecera del archivo) de su propio segmento.
+    let idx = 0;
     r.ondataavailable = (e) => {
       if (!e.data || !e.data.size) return;
-      const i = trozoIdx++, t = Date.now();
+      const i = idx++, t = Date.now();
       encolar(async () => {
         const datos = await e.data.arrayBuffer();
         await guardarTrozo({ gid: g.gid, seq, i, t, datos });
@@ -867,7 +871,7 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
         if (seg.finMs === null) await guardarGrab(g); // deja constancia de hasta dónde hay audio (y latido)
       });
     };
-    r.onerror = () => interrumpir('ended');
+    r.onerror = () => { if (recorder === r) interrumpir('ended'); }; // un error tardío del recorder anterior no corta el segmento nuevo
     pista.onmute = () => interrumpir('mute');
     pista.onended = () => interrumpir('ended');
     r.start(TROZO_MS);
@@ -877,6 +881,9 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
   let cierreEnCurso: Promise<void> = Promise.resolve();
   function cerrarSegmento(): Promise<void> {
     const r = recorder, seg = segActual, micSeg = stream;
+    // Ya cerrado o cerrándose (p. ej. "Terminar aquí" justo tras una interrupción): se espera ESE cierre, que
+    // guarda el último trozo y la hora de fin, en vez de dar el segmento por terminado antes de tiempo.
+    if (!r && !seg) return cierreEnCurso;
     recorder = null; segActual = null;
     if (micSeg) micSeg.getAudioTracks().forEach((t) => { t.onmute = null; t.onended = null; });
     cierreEnCurso = new Promise<void>((ok) => {
@@ -1079,11 +1086,11 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
     let yaFinalizada = false;
     // 2) Partes que faltan, segmento por segmento.
     for (const s of conAudio) {
-      const n = Math.ceil(s.bytes! / PARTE);
+      let n = Math.ceil(s.bytes! / PARTE);
       s.partes ??= {};
       if (Object.keys(s.partes).length >= n && s.sha256) continue;
       const blob = await blobSegmento(g, s);
-      if (blob.size !== s.bytes) { s.bytes = blob.size; s.partes = {}; s.uploadId = null; s.reiniciar = true; }
+      if (blob.size !== s.bytes) { s.bytes = blob.size; s.partes = {}; s.uploadId = null; s.reiniciar = true; s.sha256 = null; n = Math.ceil(blob.size / PARTE); }
       s.sha256 ??= await sha256(blob);
       for (let vuelta = 0; vuelta < 2; vuelta++) {
         const faltan = Array.from({ length: n }, (_, i) => i + 1).filter((k) => !s.partes![k]);
@@ -1131,7 +1138,7 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
     const dur = Math.round(g.segmentos.reduce((a, s) => a + ((s.finMs ?? s.inicioMs) - s.inicioMs), 0) / 1000);
     const f = await postJson('/api/admin/transcriptor/grabacion-finalizar', {
       grabacion_id: g.gid, lugar_con_ruido: g.ruido, inicio_at: new Date(g.inicioMs).toISOString(),
-      fin_at: new Date(g.finMs ?? Date.now()).toISOString(), duracion_seg: dur, pausas: g.pausas, segmentos,
+      fin_at: new Date(finGrabacionMs(g)).toISOString(), duracion_seg: dur, pausas: g.pausas, segmentos,
     });
     if (f.status === 409 && typeof f.data.reintentar_seq === 'number') {
       const s = g.segmentos.find((x) => x.seq === f.data.reintentar_seq);
@@ -1160,8 +1167,11 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
   // Errores que no se arreglan reintentando (consentimiento retirado, grabación rechazada): por grabación.
   const erroresDef = new Map<string, string>();
 
+  let otraVuelta = false;
+  let irAOtra = false;
   async function subirPendientes() {
-    if (subiendo || D.demo) return;
+    if (D.demo) return;
+    if (subiendo) { otraVuelta = true; return; } // p. ej. la sesión recién terminada: se sube al acabar la vuelta en curso
     if (reintento) { clearTimeout(reintento); reintento = null; }
     let lista: GrabLocal[];
     try {
@@ -1192,7 +1202,9 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
         }
       }
     } finally { subiendo = false; }
+    if (irAOtra) { location.href = '/admin/grabar'; return; } // lo que no subió sigue en el teléfono y se retoma allá
     pintarPendientes(await listarGrabs().then((l) => l.filter((x) => x.estado === 'terminada')).catch(() => []));
+    if (otraVuelta) { otraVuelta = false; setTimeout(subirPendientes, 0); return; }
     if (hayReintentable) {
       const t = ESPERAS[Math.min(intentos++, ESPERAS.length - 1)];
       reintento = setTimeout(subirPendientes, t);
@@ -1244,7 +1256,9 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
       $('gr-paso-res').innerHTML = e === 'lista' ? '<span class="gr-tick ok">✓</span>Resumen listo'
         : trans ? '<span class="gr-spin" aria-hidden="true"></span><b>Escribiendo el resumen…</b>' : '<span class="gr-tick" aria-hidden="true"></span>Resumen automático (IA)';
       if (e === 'lista') { $('gr-listo').hidden = false; anunciar('Listo. El resumen está en la ficha.'); }
-      if (e === 'error') { $('gr-paso-trans').innerHTML = '<span class="gr-tick warn">!</span>Hubo un problema al procesar. Se reintentará sola.'; }
+      // 'error' es definitivo (los reintentos automáticos ya se agotaron): hay que tocar Reintentar en el aviso.
+      if (e === 'error') { $('gr-paso-trans').innerHTML = '<span class="gr-tick warn">!</span>Hubo un problema al procesar. Revisa el aviso del transcriptor en el panel y toca Reintentar.'; }
+      if (e === 'cancelada') { $('gr-paso-trans').innerHTML = '<span class="gr-tick warn">!</span>Esta grabación se canceló.'; }
       if (e === 'sin_audio') { $('gr-paso-trans').innerHTML = '<span class="gr-tick warn">!</span>La grabación quedó sin audio.'; }
     };
     pintar(estado);
@@ -1258,7 +1272,13 @@ const datos = { activo, errorLectura, hoy, ventana: ahoraVentana, otras: otrasHo
       } catch { /* sin red: se reintenta */ }
     }
   }
-  $('gr-otra').addEventListener('click', () => { if (!subiendo) location.href = '/admin/grabar'; });
+  $('gr-otra').addEventListener('click', () => {
+    if (!subiendo) { location.href = '/admin/grabar'; return; }
+    // Durante la subida no se recarga (cortaría la parte en curso): se abre sola apenas termine.
+    irAOtra = true;
+    $('gr-otra').textContent = 'Terminando la subida… se abre sola';
+    anunciar('Se abre apenas termine la subida.');
+  });
 
   // ─── Inicio ─────────────────────────────────────────────────────────────
   async function revisarEspacio() {
