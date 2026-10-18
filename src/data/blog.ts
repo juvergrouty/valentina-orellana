@@ -46,6 +46,14 @@ export const articulos: Articulo[] = [
     publicado: true,
   },
   {
+    slug: 'nadie-nos-ensena-a-ser-pareja',
+    titulo: 'Nadie nos enseña a ser pareja',
+    bajada: 'Para quienes descubrieron, al terminar una relación importante, que nadie les enseñó a cuidarla.',
+    categoria: 'Vínculos',
+    etiqueta: 'Pareja',
+    publicado: true,
+  },
+  {
     slug: 'el-hombre-que-puede-solo',
     titulo: 'El hombre que puede solo',
     bajada: 'Sobre la desconexión que funciona durante años, hasta que un día deja de funcionar.',
