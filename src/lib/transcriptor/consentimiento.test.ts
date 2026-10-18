@@ -116,15 +116,14 @@ test('menores de 18 nunca se graban (aunque tengan firma)', () => {
   assert.equal(edadEn('basura', HOY), null);
 });
 
-test('ronda 2: sin fecha de nacimiento (o ilegible) no se graba, y el aviso dice qué hacer', async () => {
+test('sin fecha de nacimiento (o ilegible) SÍ se graba si hay consentimiento (decisión de Vale 18 oct)', async () => {
   const { textoMotivo, enlaceArreglo, notaRobotSinPermiso } = await import('./consentimiento');
   for (const f of [null, '', 'basura', '31-02']) {
     const r = evaluar('individual', [fila({})], f);
-    assert.deepEqual([r.puede, r.motivo], [false, 'sin_fecha_nacimiento'], String(f));
+    assert.equal(r.puede, true, String(f));
   }
-  // También en pareja (la ficha es una sola) y aunque falten firmas: primero lo que se completa en la ficha.
-  assert.equal(evaluar('pareja', [fila({})], null).motivo, 'sin_fecha_nacimiento');
-  assert.equal(evaluar('individual', [], null).motivo, 'sin_fecha_nacimiento');
+  // Sin firmas, el motivo es el consentimiento, no la fecha.
+  assert.equal(evaluar('individual', [], null).motivo, 'sin_consentimiento');
   assert.match(textoMotivo('sin_fecha_nacimiento', 'Ana Soto'), /fecha de nacimiento en la ficha de Ana Soto.*Complétala/);
   assert.deepEqual(enlaceArreglo('sin_fecha_nacimiento', 'p1'), { href: '/admin/pacientes/p1?tab=info#pf-nacimiento', etiqueta: 'Completar la ficha' });
   assert.equal(enlaceArreglo('menor_de_edad', 'p1'), null);

@@ -117,11 +117,11 @@ export function evaluarConsentimientos(e: EntradaEvaluacion): EvaluacionConsenti
   const base = { consentIds: [] as string[], firmantes: [] as string[], requeridas, tipoEfectivo, parejaDeducida };
   if (!e.patientId) return { ...base, puede: false, motivo: 'sin_ficha' };
 
-  // Ronda 2 (18 oct): sin fecha de nacimiento (o ilegible) NO se graba. Antes se dejaba pasar y el chequeo
-  // de menores quedaba sin efecto. El texto (textoMotivo) dice qué hacer: completarla en la ficha.
+  // Decisión de Vale (18 oct): la fecha de nacimiento NO es excluyente; la autorización la da el
+  // consentimiento firmado. Sin fecha se graba y la ficha muestra el pendiente "Falta la fecha de
+  // nacimiento". Si la fecha existe y es de un menor de 18, no se graba.
   const edad = edadEn(e.fechaNacimiento, e.hoy);
-  if (edad === null) return { ...base, puede: false, motivo: 'sin_fecha_nacimiento' };
-  if (edad < EDAD_MINIMA_GRABACION) return { ...base, puede: false, motivo: 'menor_de_edad' };
+  if (edad !== null && edad < EDAD_MINIMA_GRABACION) return { ...base, puede: false, motivo: 'menor_de_edad' };
 
   // Última firma de cada persona.
   const ultimas = new Map<string, FilaConsentimiento>();

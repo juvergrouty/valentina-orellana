@@ -53,14 +53,14 @@ test('1: la página estática no lleva datos de pacientes y no puede crear graba
 
 // ─── 2. Menores: fecha de nacimiento obligatoria (presencial y robot) ────────
 
-test('2: en la base, ficha sin fecha de nacimiento → no se graba (sin_fecha_nacimiento); con fecha adulta sí', async () => {
+test('2: en la base, ficha sin fecha de nacimiento → se graba (no excluyente); menor de edad no', async () => {
   const db = new SupabaseMemoria();
   const p = randomUUID();
   db.tabla('settings').push({ key: 'transcriptor_activo', value: 'true' });
   db.tabla('patients').push({ id: p, name: 'Camila Rojas', email: 'camila@ejemplo.cl', birthdate: null, rut: '12.345.678-5' });
   db.tabla('consents').push({ id: randomUUID(), patient_id: p, version: '2026-10-v3', signed_at: '2026-10-10T12:00:00Z', signer_name: 'Camila Rojas', signer_rut: '12.345.678-5', accept_recording: true, revoked_at: null });
   const v = await verificarGrabacion(p, 'individual', db.cliente);
-  assert.deepEqual([v.puede, v.motivo], [false, 'sin_fecha_nacimiento']);
+  assert.equal(v.puede, true);
   db.tabla('patients')[0].birthdate = '1991-03-02';
   assert.equal((await evaluarEnBase(p, 'individual', db.cliente)).puede, true);
   db.tabla('patients')[0].birthdate = '2010-03-02';
