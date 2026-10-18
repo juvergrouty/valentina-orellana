@@ -6,7 +6,7 @@ import {
   correosInvitados, crearBot, cuerpoMaquina, eventoUtil, extraerBearer, generarTokenBot, hmacTokenBot, idEventoBot,
   maxHumanosPorTipo, meetUrlDesdeEvento, meetUrlDesdeNotas, normalizarMeetUrl, notaFinBot, parsearEventoBot,
   payloadSeguro, procesarEventoBot, sanearErrorBot, tokenVigente, uuidDesdeEventId, venceTokenBot, VIGENCIA_TOKEN_TRAS_FIN_MS,
-  MAX_BYTES_SEGMENTO_BOT,
+  MAX_BYTES_SEGMENTO_BOT, reservaVaAOcurrir,
   type EventoCalendario,
 } from './bot';
 import { BOT_NOMBRE, type Grabacion } from './tipos';
@@ -404,6 +404,27 @@ test('sesionesOnlineProximas: cruza reservas y fichas, descarta canceladas y pre
     [EV.id, GID, 'p1', 'pareja', 'https://meet.google.com/abc-defg-hij'],
     ['encuadrado1', null, 'p9', 'sin_tipo', 'https://meet.google.com/eee-eeee-eee'],
   ]);
+});
+
+test('auditoría robot: la sesión agendada por Vale con link de pago (aún sin pagar) también se graba', async () => {
+  assert.equal(reservaVaAOcurrir({ status: 'confirmed' }), true);
+  assert.equal(reservaVaAOcurrir({ status: 'pending_payment', created_by_admin: true }), true);
+  assert.equal(reservaVaAOcurrir({ status: 'pending_payment', created_by_admin: false }), false); // reserva web sin pagar
+  assert.equal(reservaVaAOcurrir({ status: 'pending_payment' }), false);
+  assert.equal(reservaVaAOcurrir({ status: 'cancelled', created_by_admin: true }), false);
+  assert.equal(reservaVaAOcurrir({ status: 'expired', created_by_admin: true }), false);
+
+  const db = new BaseFalsa();
+  db.tablas.bookings.push(
+    { id: GID, google_event_id: EV.id, session_type: 'online', status: 'pending_payment', created_by_admin: true, patient_email: 'camila@correo.cl', notes: null },
+    { id: 'b2', google_event_id: 'ev2', session_type: 'online', status: 'pending_payment', created_by_admin: false, patient_email: 'x@x.cl', notes: null },
+  );
+  db.tablas.patients.push({ id: 'p1', email: 'camila@correo.cl', active: true });
+  const items: EventoCalendario[] = [EV, { ...EV, id: 'ev2', hangoutLink: 'https://meet.google.com/zzz-zzzz-zzz' }];
+  const f = (async () => new Response(JSON.stringify({ items }), { status: 200 })) as unknown as typeof fetch;
+  const bot = crearBot({ db: db as never, fetch: f, calendario: async () => ({ token: 'g', calendarId: 'primary' }) });
+  const r = await bot.sesionesOnlineProximas(new Date('2026-10-16T21:55:00Z'), new Date('2026-10-16T22:05:00Z'));
+  assert.deepEqual(r.map((x) => [x.googleEventId, x.bookingId, x.patientId]), [[EV.id, GID, 'p1']]);
 });
 
 // ─── Revisión de seguridad 16 oct: tope por segmento (B7) y saneo de errores (B8) ───

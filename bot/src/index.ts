@@ -58,7 +58,14 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio): Promise<{ motivo
   if (!ok) throw new Error('MediaRecorder no soporta audio/webm;codecs=opus en este Chromium');
   await p.evaluate(instalarHablantesEnPagina, { clases: clasesHablando, sondeoMs: 250 });
 
-  const iniciar = (seq: number) => p.evaluate((s: number) => (window as unknown as { __voGrab: GrabPagina }).__voGrab.iniciar(s), seq);
+  // Inicio de cada segmento según Node: solo para cerrar segmentos huérfanos (la página no avisó su fin).
+  const inicioSeg = new Map<number, number>();
+  const iniciar = async (seq: number) => {
+    await p.evaluate((s: number) => (window as unknown as { __voGrab: GrabPagina }).__voGrab.iniciar(s), seq);
+    if (!inicioSeg.has(seq)) inicioSeg.set(seq, Date.now());
+  };
+  // Cortes en curso (detener sin await): se esperan antes de cerrar huérfanos y vaciar la fila.
+  const cortes = new Set<Promise<void>>();
   const detener = async (seq: number) => {
     const termino = new Promise<void>((r) => { finSegmento.set(seq, r); setTimeout(r, 20_000); });
     const ok2 = await p.evaluate((s: number) => (window as unknown as { __voGrab: GrabPagina }).__voGrab.detener(s), seq).catch(() => false);
@@ -78,54 +85,69 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio): Promise<{ motivo
   let ultimoNivel = Date.now();
   let motivo: MotivoFin | null = null;
 
-  while (!motivo) {
-    await dormir(SONDEO_VIGIA_MS);
-    const ahora = Date.now();
+  try {
+    while (!motivo) {
+      await dormir(SONDEO_VIGIA_MS);
+      const ahora = Date.now();
 
-    const exp = await revisarExpulsion(p);
-    if (exp) { motivo = exp === 'expulsado' ? 'expulsado' : 'vale_salio'; break; }
+      const exp = await revisarExpulsion(p);
+      if (exp) { motivo = exp === 'expulsado' ? 'expulsado' : 'vale_salio'; break; }
 
-    let nombres: string[] = [];
-    try { nombres = await p.evaluate(participantesEnPagina); } catch { /* página ocupada: se reintenta */ }
-    if (nombres.length) vioHumanos = true;
-    motivo = vigia.observar(ahora, nombres);
-    if (motivo) break;
+      let nombres: string[] = [];
+      try { nombres = await p.evaluate(participantesEnPagina); } catch { /* página ocupada: se reintenta */ }
+      if (nombres.length) vioHumanos = true;
+      motivo = vigia.observar(ahora, nombres);
+      if (motivo) break;
 
-    if (ahora - ultimoNivel >= 60_000) {
-      ultimoNivel = ahora;
-      const nv = await p.evaluate(() => {
-        const g = (window as unknown as { __voGrab: GrabPagina }).__voGrab;
-        return { ...g.nivel(), pistas: g.pistas(), rtc: ((window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []).length };
-      }).catch(() => null);
-      if (nv) log(`audio: contexto=${nv.estado} pistas=${nv.pistas} rtc=${nv.rtc} pico=${nv.pico}`);
-    }
-    if (!avisoSinPistas && ahora - inicio > 60_000) {
-      const n = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.pistas()).catch(() => 0);
-      if (n === 0) {
-        const diag = await p.evaluate(() => ({
-          rtc: ((window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []).length,
-          elementos: document.querySelectorAll('audio, video').length,
-        })).catch(() => null);
-        log(`sin pistas de audio: ${diag ? `rtc=${diag.rtc} elementos=${diag.elementos}` : 'sin diagnóstico'}`);
+      if (ahora - ultimoNivel >= 60_000) {
+        ultimoNivel = ahora;
+        const nv = await p.evaluate(() => {
+          const g = (window as unknown as { __voGrab: GrabPagina }).__voGrab;
+          return { ...g.nivel(), pistas: g.pistas(), rtc: ((window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []).length };
+        }).catch(() => null);
+        if (nv) log(`audio: contexto=${nv.estado} pistas=${nv.pistas} rtc=${nv.rtc} pico=${nv.pico}`);
       }
-      if (n === 0) { avisoSinPistas = true; await sitio.enviar({ tipo: 'error', detalle: 'El bot no encuentra pistas de audio en la reunión (¿cambió Meet?)' }).catch(() => {}); }
-    }
+      if (!avisoSinPistas && ahora - inicio > 60_000) {
+        const n = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.pistas()).catch(() => 0);
+        if (n === 0) {
+          const diag = await p.evaluate(() => ({
+            rtc: ((window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []).length,
+            elementos: document.querySelectorAll('audio, video').length,
+          })).catch(() => null);
+          log(`sin pistas de audio: ${diag ? `rtc=${diag.rtc} elementos=${diag.elementos}` : 'sin diagnóstico'}`);
+        }
+        if (n === 0) { avisoSinPistas = true; await sitio.enviar({ tipo: 'error', detalle: 'El bot no encuentra pistas de audio en la reunión (¿cambió Meet?)' }).catch(() => {}); }
+      }
 
-    // Segmentación: abre el siguiente `solapamientoMs` antes del corte y cierra el actual en el corte.
-    if (!siguienteAbierto && ahora >= proximoCorte - cfg.solapamientoMs) { await iniciar(seq + 1); siguienteAbierto = true; }
-    if (siguienteAbierto && ahora >= proximoCorte) {
-      void detener(seq);
-      seq += 1;
-      siguienteAbierto = false;
-      proximoCorte += cfg.segmentoMs;
+      // Segmentación: abre el siguiente `solapamientoMs` antes del corte y cierra el actual en el corte.
+      if (!siguienteAbierto && ahora >= proximoCorte - cfg.solapamientoMs) { await iniciar(seq + 1); siguienteAbierto = true; }
+      if (siguienteAbierto && ahora >= proximoCorte) {
+        const corte = detener(seq);
+        cortes.add(corte);
+        void corte.finally(() => cortes.delete(corte));
+        seq += 1;
+        siguienteAbierto = false;
+        proximoCorte += cfg.segmentoMs;
+      }
     }
+  } catch (e) {
+    // La página dejó de responder (se cayó o se recargó): se termina como error, pero lo que ya
+    // está en memoria se sube igual (antes se perdía el segmento abierto y la fila de subidas).
+    log(`error durante la grabación: ${sanearError(e instanceof Error ? e.message : e, 160)}`);
+    motivo = 'error';
   }
 
   if (!vioHumanos) await sitio.enviar({ tipo: 'error', detalle: 'El bot no pudo leer los participantes de Meet (¿cambió el DOM?)' }).catch(() => {});
   log(`fin de la grabación: ${motivo}`);
   const tFin = Date.now() - inicio;
+  await Promise.all([...cortes]); // primero los cortes en curso (si no, detener() pisa su aviso de fin)
   const abiertas = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.activas()).catch(() => [seq]);
   await Promise.all(abiertas.map((s) => detener(s)));
+  const t0 = inicioSeg.get(0) ?? inicio;
+  segs.cerrarHuerfanos((s) => {
+    const desde = inicioSeg.get(s) ?? t0;
+    return { offsetMs: desde - t0, duracionMs: Date.now() - desde };
+  });
   const fallidos = await segs.vaciar();
   return { motivo, linea: linea.cerrar(tFin), fallidos };
 }

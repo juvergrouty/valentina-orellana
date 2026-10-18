@@ -84,6 +84,21 @@ export class Segmentos {
     this.fallidos.push(seg);
   }
 
+  /**
+   * Cierra los segmentos que siguen abiertos con trozos (la página nunca avisó su fin: se cayó, se
+   * recargó o tardó más de lo esperado) para no perder audio que ya está en memoria. MediaRecorder
+   * escribe WebM por partes, así que un segmento sin su último trozo se puede transcribir igual.
+   */
+  cerrarHuerfanos(estimar: (seq: number) => { offsetMs: number; duracionMs: number }): number[] {
+    const seqs = [...this.abiertos.entries()].filter(([, s]) => s.bytes > 0).map(([seq]) => seq).sort((a, b) => a - b);
+    for (const seq of seqs) {
+      const e = estimar(seq);
+      this.log(`segmento ${seq}: la página no avisó su fin; se sube lo recibido`);
+      void this.cerrar(seq, Math.max(0, e.offsetMs), Math.max(0, e.duracionMs));
+    }
+    return seqs;
+  }
+
   /** Espera la fila y reintenta una vez los que fallaron. Devuelve los que no se pudieron subir. */
   async vaciar(): Promise<number[]> {
     await this.cola;
