@@ -493,6 +493,14 @@ export async function lanzarMaquinaRespaldo(
 }
 
 const POST_TRANSCRIPCION: readonly EstadoGrabacion[] = ['transcrita', 'resumiendo', 'lista'];
+
+/**
+ * Pasada "audio de más de 1 día" de borrar_audio (auditoría de seguridad 17 oct): solo objetos más viejos que
+ * `limite` y que NO sean audio de una sesión sin transcripción guardada (`protegidas`). Función pura.
+ */
+export function audioViejoBorrable(o: { key: string; modificado?: Date | null }, limite: number, protegidas: ReadonlySet<string>): boolean {
+  return !!o.modificado && o.modificado.getTime() <= limite && !protegidas.has(o.key);
+}
 const SIN_PROCESO: readonly EstadoGrabacion[] = ['cancelada', 'sin_audio'];
 
 export async function opsAccionesReales(): Promise<OpsAcciones> {
@@ -598,10 +606,13 @@ export async function opsAccionesReales(): Promise<OpsAcciones> {
         for (const t of (ts ?? []) as { grabacion_id: string; sha256_cifrado: string | null }[]) if (t.sha256_cifrado) guardadas.add(t.grabacion_id);
       }
       const porGrabacion = new Map<string, number>();
+      // Auditoría de seguridad (17 oct): audio de una sesión aún sin transcripción guardada. Tampoco se
+      // borra en la pasada de "más de 1 día" de abajo (solo el audio se puede borrar, y solo tras transcribir).
+      const sinTranscribir = new Set<string>();
       for (const s of filas) {
         const estado = (Array.isArray(s.grabaciones) ? s.grabaciones[0] : s.grabaciones)?.estado;
         const puede = !!estado && (SIN_PROCESO.includes(estado) || (POST_TRANSCRIPCION.includes(estado) && guardadas.has(s.grabacion_id)));
-        if (!puede) continue; // en curso: el orquestador lo borra después de guardar
+        if (!puede) { sinTranscribir.add(s.r2_key); r.omitidos++; continue; } // en curso: el orquestador lo borra después de guardar
         try {
           await almacenamiento.borrarAudio(s.r2_key);
           await db.from('grabacion_segmentos').update({ audio_borrado_at: ahoraIso() }).eq('id', s.id);
@@ -613,7 +624,7 @@ export async function opsAccionesReales(): Promise<OpsAcciones> {
         const objetos = await almacenamiento.listar('audio', 'a/', 1000);
         const limite = Date.now() - salud.AUDIO_R2_MAX_MS;
         for (const o of objetos) {
-          if (!o.modificado || o.modificado.getTime() > limite) continue;
+          if (!audioViejoBorrable(o, limite, sinTranscribir)) continue;
           try { await almacenamiento.borrarAudio(o.key); r.borrados++; } catch { r.fallidos++; }
         }
       } catch { r.fallidos++; }

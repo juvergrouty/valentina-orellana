@@ -670,3 +670,35 @@ test('H13: hueco entre segmentos sin pausa registrada → tramo "[pausa / interr
   assert.equal(marca!.hablante, '');
   assert.equal(e.db.tabla('transcripciones')[0].palabras, 11, 'la marca no cuenta como voz (5 + 6 palabras)');
 });
+
+// ─── Auditoría de seguridad (17 oct): el retiro del consentimiento corta lo que sigue ─────────────
+
+test('auditoría seguridad: consentimiento retirado antes del envío a AssemblyAI → no se envía (error, en bitácora)', async () => {
+  const e = escenario();
+  const p = e.paciente('Rosa Díaz', 'rosa@ejemplo.cl');
+  e.firma(p, 'Rosa Díaz', '13.131.313-1');
+  const id = await e.grabarPresencial(p, 'individual', [600]);
+  // "Retirar solo la grabación" (0019) después de subir, antes de que el cron la envíe.
+  e.db.tabla('consents').filter((c) => c.patient_id === p).forEach((c) => { c.recording_revoked_at = e.ahora().toISOString(); });
+  await e.correr();
+  assert.equal(e.aai.envios.length, 0, 'nada va a AssemblyAI');
+  assert.equal(e.grab(id).estado, 'error');
+  assert.equal(e.grab(id).estado_antes_error, 'subida');
+  assert.ok(e.db.tabla('transcriptor_auditoria').some((a) => a.accion === 'consentimiento_faltante' && a.grabacion_id === id));
+});
+
+test('auditoría seguridad: relanzar un bot exige consentimiento vigente; retirado → cancelada sin máquina', async () => {
+  const e = escenario();
+  const p = e.paciente('Tomás Ríos', 'tomas@ejemplo.cl');
+  e.firma(p, 'Tomás Ríos', '14.141.414-1');
+  const g = (await e.db.from('grabaciones').insert({
+    patient_id: p, origen: 'online', tipo: 'individual', modelo: 'universal-2', session_date: '2026-10-20', estado: 'error',
+    estado_antes_error: 'bot_lanzando', intentos: 3, bot_machine_id: 'maqvieja2', google_event_id: 'evy',
+    meet_url: 'https://meet.google.com/abc-defg-hij', hora_fin_prevista: new Date(e.ahora().getTime() + 40 * 60_000).toISOString(),
+  }).select('*').single()).data;
+  assert.ok(await reintentar(g.id, e.db.cliente));
+  e.db.tabla('consents').filter((c) => c.patient_id === p).forEach((c) => { c.revoked_at = e.ahora().toISOString(); });
+  await e.correr();
+  assert.equal(e.maquinas.length, 0, 'no se lanzó el bot');
+  assert.equal(e.grab(g.id).estado, 'cancelada');
+});

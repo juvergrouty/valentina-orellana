@@ -18,7 +18,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   AJUSTES, MODELO_RESUMEN, MODELO_U35_PRO, TIEMPOS,
   type AccionAuditoria, type AssemblyAI, type Bot, type DecisionModelo, type EstadoGrabacion, type Grabacion,
-  type Pipeline, type PuedeGrabar, type ResultadoTranscripcion, type ResumenIA, type Segmento, type SesionOnline,
+  type Pipeline, type PuedeGrabar, type ResultadoTranscripcion, type ResumenIA, type Segmento, type SesionOnline, type TipoSesion,
 } from './tipos';
 import { leaseVencido, marcarError, soltar, tomar, transicionar } from './estados';
 import { elegirModelo } from './reglas';
@@ -415,9 +415,34 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     for (const g0 of pendientes) {
       if (queda() < 5_000) break;
       if (!g0.hora_fin_prevista || Date.parse(g0.hora_fin_prevista) <= ahora.getTime()) continue; // lo cierra el vigilante
-      await conToma(g0, ahora, async (g) => { if (await lanzar(g, ahora)) n++; });
+      await conToma(g0, ahora, async (g) => {
+        // Auditoría de seguridad (17 oct): el consentimiento se vuelve a revisar antes de cada relanzamiento
+        // (pudo retirarse después de crear la fila). Falla cerrado: si no se puede leer, no se lanza.
+        if (!(await consentimientoVigente(g, 'bot_relanzar'))) {
+          await transicionar(g.id, ['bot_lanzando'], 'cancelada', {
+            bot_token_vence_at: ahora.toISOString(),
+            nota_sistema: 'No se envió el asistente de notas: falta el consentimiento de grabación (se retiró o cambió).',
+          } as Partial<Grabacion>, db);
+          return;
+        }
+        if (await lanzar(g, ahora)) n++;
+      });
     }
     return n;
+  }
+
+  /**
+   * ¿Sigue vigente el consentimiento con grabación autorizada de esta grabación? (auditoría de seguridad
+   * 17 oct). Presencial ya lo revisa en subida-url y grabacion-finalizar; el robot solo lo revisaba al crear
+   * la fila. Si no hay consentimiento queda en la bitácora (sin contenido). Error de lectura = false.
+   */
+  async function consentimientoVigente(g: GrabacionP6, fase: string): Promise<boolean> {
+    let v: Awaited<ReturnType<PuedeGrabar>>;
+    try { v = await deps.puedeGrabar(g.patient_id, (g.tipo ?? 'sin_tipo') as TipoSesion); }
+    catch { return false; }
+    if (v.puede) return true;
+    await auditar('cron', 'consentimiento_faltante', { grabacionId: g.id, patientId: g.patient_id, resultado: 'denegado', detalle: { fase, motivo: v.motivo }, cliente: db });
+    return false;
   }
 
   // ── 3/4. Envío a AssemblyAI ──────────────────────────────────────────────────
@@ -489,6 +514,12 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       if (queda() < 4_000) break;
       await conToma(g0, ahora, async (g) => {
         if (g.estado !== 'subida' && g.estado !== 'transcribiendo') return;
+        // Auditoría de seguridad (17 oct): nada se manda a transcribir sin consentimiento vigente (el retiro
+        // corta lo que sigue, también en el robot). El audio no se envía; se borra con el ciclo de vida.
+        if (!(await consentimientoVigente(g, 'enviar_aai'))) {
+          await marcarError(g.id, g.estado, 'No se envió a transcribir: falta el consentimiento de grabación (se retiró o cambió).', db);
+          return;
+        }
         const r = await enviarSegmentos(g, ahora);
         if (r !== 'listo') return;
         if (g.estado === 'subida') {
