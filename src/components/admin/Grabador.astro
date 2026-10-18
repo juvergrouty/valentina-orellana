@@ -796,9 +796,12 @@ const { datos } = Astro.props;
     activarGrabacion(grab, `${sel.nombre} · ${tipoTxt(tipoSel)}`, ruido);
     anunciar('Grabando.');
   }
-  function activarGrabacion(gActiva: GrabLocal, quien: string, conRuido: boolean) {
+  function tomarLock(g: GrabLocal) {
+    try { navigator.locks?.request(`vo-grab-${g.gid}`, () => new Promise<void>((liberar) => { liberarLock = liberar; })); } catch { /* sin Web Locks */ }
+  }
+  function activarGrabacion(gActiva: GrabLocal, quien: string, conRuido: boolean, lockTomado = false) {
     // Otra pestaña no debe "recuperar" (y subir) esta grabación mientras sigue viva: Web Lock + latido.
-    try { navigator.locks?.request(`vo-grab-${gActiva.gid}`, () => new Promise<void>((liberar) => { liberarLock = liberar; })); } catch { /* sin Web Locks */ }
+    if (!lockTomado) tomarLock(gActiva);
     latido = setInterval(() => { if (grab === gActiva && gActiva.estado === 'grabando') { gActiva.vivoMs = Date.now(); guardarGrab(gActiva).catch(() => {}); } }, 30_000);
     ($('gr-ruido') as HTMLButtonElement).disabled = true;
     $('gr-rec-quien').textContent = quien;
@@ -823,24 +826,32 @@ const { datos } = Astro.props;
       const ult = g.segmentos[g.segmentos.length - 1];
       const tiempos = ult && ult.finMs === null ? (await trozosDe(g.gid, ult.seq)).map((t) => t.t) : [];
       cerrarSegmentoCortado(g, tiempos);
+      // Si se cortó estando en pausa, la pausa termina ahora (si no, terminar() la descartaría).
+      const pa = g.pausas[g.pausas.length - 1];
+      if (pa && pa.hasta_ms === pa.desde_ms) pa.hasta_ms = Math.max(pa.desde_ms + 1, Date.now() - g.inicioMs);
       g.finMs = null; g.estado = 'grabando';
       grab = g; modo = 'grabando';
+      // Lock y latido ANTES de pedir el micrófono (puede tardar): otra pestaña con internet no debe darla
+      // por abandonada y subirla mientras aquí se sigue grabando.
+      tomarLock(g); g.vivoMs = Date.now(); await guardarGrab(g).catch(() => {});
       try { await empezarSegmento(); }
       catch (e) {
-        modo = 'listo'; grab = null;
+        modo = 'listo'; grab = null; liberarLock?.(); liberarLock = null;
         const n = (e as { name?: string })?.name;
         msg.textContent = n === 'NotAllowedError' ? 'Safari no dejó usar el micrófono. Toca aA → Ajustes del sitio web → Micrófono → Permitir, y vuelve a tocar.' : 'El micrófono no respondió. Cierra otras apps que lo usen y vuelve a tocar.';
         return;
       }
-      activarGrabacion(g, `${g.nombre} · continuación`, g.ruido);
+      activarGrabacion(g, `${etiquetaSesion(g)} · continuación`, g.ruido, true);
       anunciar('Grabando de nuevo.');
     } finally { retomando = false; }
   }
-  function tarjetaRetomar(g: GrabLocal): HTMLElement {
+  // La página sin internet es pública (sin login): no muestra nombres de pacientes, solo la hora de la sesión.
+  const etiquetaSesion = (g: GrabLocal) => D.sinInternet ? `Sesión de las ${horaTxt(g.inicioMs)}` : g.nombre;
+  function tarjetaRetomar(g: GrabLocal, hastaMs: number): HTMLElement {
     const a = document.createElement('div'); a.className = 'gr-alerta gr-alerta-roja gr-pendiente'; a.setAttribute('role', 'alert');
-    const t = document.createElement('p'); t.className = 'gr-alerta-titulo'; t.textContent = `La grabación de ${g.nombre} se cortó`;
+    const t = document.createElement('p'); t.className = 'gr-alerta-titulo'; t.textContent = `La grabación de la sesión de las ${horaTxt(g.inicioMs)} se cortó`;
     const p = document.createElement('p');
-    p.textContent = `Se grabó hasta las ${horaTxt(g.vivoMs ?? g.inicioMs)}. Toca para seguir: el resto se agrega a la misma sesión, sin internet.`;
+    p.textContent = `Hay audio hasta las ${horaTxt(hastaMs)}. Toca para seguir: el resto se agrega a la misma sesión, sin internet.`;
     const b = document.createElement('button'); b.type = 'button'; b.className = 'gr-btn gr-btn-rec gr-btn-medio';
     const dot = document.createElement('span'); dot.className = 'gr-dot'; dot.setAttribute('aria-hidden', 'true');
     b.append(dot, document.createTextNode('Seguir grabando'));
@@ -854,14 +865,20 @@ const { datos } = Astro.props;
     let todas: GrabLocal[];
     try { todas = await listarGrabs(); } catch { $('gr-si-pendientes').textContent = 'Lo grabado sigue guardado en este teléfono.'; return; }
     const ahora = Date.now();
-    const ret: GrabLocal[] = [];
-    for (const g of todas) if (esRetomable(g, await abandonada(g), ahora)) ret.push(g);
+    const ret: { g: GrabLocal; hasta: number }[] = [];
+    for (const g of todas) {
+      if (!esRetomable(g, await abandonada(g), ahora)) continue;
+      // Hasta dónde hay audio de verdad: el último trozo guardado (el latido también corre en pausa).
+      const ult = g.segmentos[g.segmentos.length - 1];
+      const tr = ult ? await trozosDe(g.gid, ult.seq).catch(() => [] as Trozo[]) : [];
+      ret.push({ g, hasta: Math.max(g.inicioMs, ...g.segmentos.map((s) => s.finMs ?? s.inicioMs), ...tr.map((x) => x.t)) });
+    }
     if (modo !== 'listo') return;
     const caja = $('gr-retomar'); caja.textContent = '';
-    ret.forEach((g) => caja.append(tarjetaRetomar(g)));
+    ret.forEach(({ g, hasta }) => caja.append(tarjetaRetomar(g, hasta)));
     const n = todas.length;
-    $('gr-si-pendientes').textContent = n === 0 ? 'No hay grabaciones pendientes en este teléfono.'
-      : `${n === 1 ? 'Hay 1 grabación guardada en este teléfono, segura.' : `Hay ${n} grabaciones guardadas en este teléfono, seguras.`} Se suben cuando vuelva internet.`;
+    $('gr-si-pendientes').textContent = n === 0 ? 'No hay grabaciones pendientes en este dispositivo.'
+      : `${n === 1 ? 'Hay 1 grabación guardada de forma segura en este dispositivo.' : `Hay ${n} grabaciones guardadas de forma segura en este dispositivo.`} Se suben cuando vuelva internet.`;
   }
   function iniciarSinInternet() {
     vista('sin-internet');
@@ -869,6 +886,14 @@ const { datos } = Astro.props;
     const volver = () => { if (modo === 'listo' || modo === 'subir') location.replace('/admin/grabar'); };
     $('gr-si-reintentar').addEventListener('click', () => location.replace('/admin/grabar'));
     window.addEventListener('online', volver);
+    // En iOS 'online' puede llegar antes de que haya red real (y no vuelve a llegar): se comprueba cada 20 s
+    // y al volver a la pestaña con un pedido liviano; solo si responde, se vuelve al grabador.
+    const probar = async () => {
+      if ((modo !== 'listo' && modo !== 'subir') || !navigator.onLine || document.visibilityState !== 'visible') return;
+      try { const r = await fetch('/grabar-sw.js', { method: 'HEAD', cache: 'no-store' }); if (r.ok) volver(); } catch { /* sigue sin red */ }
+    };
+    setInterval(probar, 20_000);
+    document.addEventListener('visibilitychange', probar);
     pintarSinInternet();
   }
   $('gr-grabar').addEventListener('click', () => {
@@ -990,7 +1015,7 @@ const { datos } = Astro.props;
   function mostrarSubir(g: GrabLocal) {
     modo = 'subir';
     vista('subir');
-    $('gr-guardada-sub').textContent = `${g.nombre} · ${duracionTxt(g.segmentos.reduce((a, s) => a + ((s.finMs ?? s.inicioMs) - s.inicioMs), 0))}`;
+    $('gr-guardada-sub').textContent = `${etiquetaSesion(g)} · ${duracionTxt(g.segmentos.reduce((a, s) => a + ((s.finMs ?? s.inicioMs) - s.inicioMs), 0))}`;
     $('gr-listo-nombre').textContent = g.nombre;
     if (g.patientId) $<HTMLAnchorElement>('gr-ver-ficha').href = `/admin/pacientes/${g.patientId}`;
     if (D.sinInternet) {
@@ -1021,7 +1046,12 @@ const { datos } = Astro.props;
     return new Blob(tr.map((t) => t.datos), { type: s.mime });
   }
   const definitivo = (status: number, data: Record<string, any>) => status === 400 || status === 404 || (status === 409 && typeof data.reintentar_seq !== 'number');
-  const errorOtroDispositivo = () => new ErrorSubida('Esta sesión ya se subió desde otro dispositivo y lo grabado en este teléfono no es lo mismo. No se borró nada de este teléfono. Si grabaste la misma sesión en los dos, la otra ya está en la ficha y puedes descartar esta copia.', true, 'otro_dispositivo');
+  // Ya no acepta audio: si el servidor tiene audio subido, fue otro dispositivo; si no, se canceló o se
+  // retiró el consentimiento. En ningún caso se borra lo de este teléfono sin que Vale lo decida.
+  const errorYaCerrada = (estado: unknown, haySubidos: boolean) => haySubidos
+    ? new ErrorSubida('Esta sesión ya se subió desde otro dispositivo y lo grabado aquí no es lo mismo. No se borró nada de este dispositivo. Si grabaste la misma sesión en los dos, la otra ya está en la ficha y puedes descartar esta copia.', true, 'otro_dispositivo')
+    : new ErrorSubida(estado === 'sin_consentimiento' ? 'Esta grabación quedó sin consentimiento de grabación y el sitio ya no acepta su audio. No se borró nada de este dispositivo.'
+      : 'Esta grabación se canceló en el sitio y ya no acepta audio. No se borró nada de este dispositivo; si no la necesitas, puedes descartarla.', true, 'rechazada');
 
   async function subirUna(g: GrabLocal, alAvanzar: (hechas: number, total: number) => void) {
     // 1) Tamaños (sin guardar los blobs en memoria).
@@ -1057,11 +1087,12 @@ const { datos } = Astro.props;
         // que hay en el servidor es ESTO mismo. Si otro dispositivo subió otra cosa, se avisa y no se borra nada.
         if (r.data.ya_finalizada) {
           const locales = conAudio.map((x) => ({ seq: x.seq, bytes: x.bytes, sha256: x.sha256 ?? null }));
-          if (!localYaEnServidor(locales, (r.data.segmentos ?? []) as SegServidor[])) throw errorOtroDispositivo();
+          const subidos = (r.data.segmentos ?? []) as SegServidor[];
+          if (!localYaEnServidor(locales, subidos)) throw errorYaCerrada(r.data.estado, subidos.length > 0);
           yaFinalizada = true; break;
         }
         if (r.data.ya_subido) {
-          if (typeof r.data.bytes === 'number' && !localYaEnServidor([{ seq: s.seq, bytes: s.bytes, sha256: s.sha256 ?? null }], [{ seq: s.seq, bytes: r.data.bytes, sha256: r.data.sha256 ?? null }])) throw errorOtroDispositivo();
+          if (typeof r.data.bytes === 'number' && !localYaEnServidor([{ seq: s.seq, bytes: s.bytes, sha256: s.sha256 ?? null }], [{ seq: s.seq, bytes: r.data.bytes, sha256: r.data.sha256 ?? null }])) throw errorYaCerrada(null, true);
           break;
         }
         if (s.uploadId !== r.data.upload_id && Object.keys(s.partes).length) {

@@ -136,9 +136,9 @@ const cuando = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone
           const c = await fetch('/api/admin/transcriptor/alertas', {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
             body: JSON.stringify({ id: li.dataset.id, accion: 'revisar' }),
-          }).then((x) => x.json()).catch(() => ({})) as { cerrada?: boolean };
-          estado.textContent = '✓ Arreglado: el paso salió bien.';
-          if (c.cerrada) setTimeout(() => quitar(li), 1600);
+          }).then((x) => x.json()).catch(() => ({})) as { cerrada?: boolean; error?: string };
+          if (c.cerrada) { estado.textContent = '✓ Arreglado: el paso salió bien.'; setTimeout(() => quitar(li), 1600); }
+          else { estado.textContent = `⚠ ${c.error ?? 'No se pudo cerrar el aviso. Toca «Volver a revisar».'}`; vigilar(li, estado); }
         }
       } catch { /* se vuelve a intentar */ }
     }, 15_000);

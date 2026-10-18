@@ -10,7 +10,8 @@
 //   cuando el problema está arreglado.
 // GET ?id=<uuid> — ¿sigue abierto? (el aviso lo consulta tras Reintentar). SOLO LEE (ronda 2, 18 oct): si su
 //   paso ya salió bien responde `superada: true` y es el aviso el que lo cierra con un POST explícito
-//   (accion 'revisar', que audita y cierra). Un GET nunca cambia el estado.
+//   (accion 'revisar', que audita y cierra). Este GET no cambia el estado. (Al renderizar el panel,
+//   listarAlertasAbiertas aún cierra los avisos cuyo paso ya salió bien: cierre automático de lectura.)
 import type { APIRoute } from 'astro';
 import { guardiaPanel, json, leerJson, esUuid, safeAddr } from '../../../../lib/transcriptor/peticion';
 import { auditar } from '../../../../lib/transcriptor/auditoria';

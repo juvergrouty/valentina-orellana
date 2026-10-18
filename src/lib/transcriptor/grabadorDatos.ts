@@ -1,5 +1,5 @@
 // Datos y lógica pura del componente Grabador (src/components/admin/Grabador.astro), con pruebas en
-// grabadorDatos.test.ts. Ronda 2 (18 oct 2026): retomar sin internet, fecha de nacimiento, dos dispositivos.
+// ronda2.test.ts. Ronda 2 (18 oct 2026): retomar sin internet, fecha de nacimiento, dos dispositivos.
 // Este archivo lo importan el servidor (páginas) y el navegador (script del componente): sin dependencias.
 
 export type TipoGrabador = 'individual' | 'pareja';
