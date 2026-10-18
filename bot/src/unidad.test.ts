@@ -69,11 +69,24 @@ test('vigía: si Vale vuelve dentro de la gracia, sigue', () => {
   assert.equal(v.observar(40_000, ['Valentina Orellana', 'Camila']), null);
 });
 
-test('vigía: solo bots durante soloMs → solo', () => {
+test('vigía: después de ver a alguien, solo bots durante soloMs → solo', () => {
   const v = new Vigia(VIGIA);
-  assert.equal(v.observar(0, ['Otter Notetaker']), null);
-  assert.equal(v.observar(59_000, []), null);
-  assert.equal(v.observar(60_000, ['Otter Notetaker']), 'solo');
+  assert.equal(v.observar(0, ['Paciente Prueba']), null);
+  assert.equal(v.observar(1_000, ['Otter Notetaker']), null);
+  assert.equal(v.observar(60_000, []), null);
+  assert.equal(v.observar(61_000, ['Otter Notetaker']), 'solo');
+});
+
+test('vigía: antes de que llegue alguien espera esperaLlegadaMs (el robot entra antes de la hora)', () => {
+  const v = new Vigia(VIGIA);
+  assert.equal(v.observar(0, []), null);
+  assert.equal(v.observar(5 * 60_000, []), null);
+  assert.equal(v.observar(29 * 60_000, ['Otter Notetaker']), null);
+  assert.equal(v.observar(30 * 60_000, []), 'solo');
+  const w = new Vigia(VIGIA);
+  assert.equal(w.observar(0, []), null);
+  assert.equal(w.observar(10 * 60_000, ['Valentina Orellana']), null);
+  assert.equal(w.observar(11 * 60_000, []), null);
 });
 
 test('vigía: más humanos de los esperados → participantes_extra; un parpadeo no cuenta', () => {

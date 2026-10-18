@@ -5,7 +5,9 @@
 // Sale con lo primero que ocurra (50-arquitectura §5 + 10-etica-legal §4.1):
 //  - hora_fin            : se pasó HORA_FIN + MAX_EXTRA_MS.
 //  - vale_salio          : Vale estuvo en la llamada y lleva `graciaValeMs` sin aparecer.
-//  - solo                : no queda ningún humano (solo bots) durante `soloMs`.
+//  - solo                : no queda ningún humano (solo bots) durante `soloMs`, DESPUÉS de haber
+//                          visto a alguien. Antes de que llegue el primer humano (el robot con
+//                          cuenta entra minutos antes de la hora) espera hasta `esperaLlegadaMs`.
 //  - participantes_extra : hay más humanos de los esperados durante `graciaExtraMs`
 //                          (el bot se niega a seguir grabando a un tercero sin consentimiento).
 import { esNombreDeBot, esVale } from './config.js';
@@ -23,6 +25,8 @@ export interface OpcionesVigia {
   graciaValeMs?: number;
   /** Exceso de humanos tolerado (alguien que entra por error y sale). Default 15 s. */
   graciaExtraMs?: number;
+  /** Espera máxima a que llegue el primer humano. Default 30 min. */
+  esperaLlegadaMs?: number;
 }
 
 export class Vigia {
@@ -30,12 +34,16 @@ export class Vigia {
   private valeAusenteDesde: number | null = null;
   private soloDesde: number | null = null;
   private extraDesde: number | null = null;
+  private humanoVisto = false;
+  private inicio: number | null = null;
+  private readonly esperaLlegada: number;
   private readonly graciaVale: number;
   private readonly graciaExtra: number;
 
   constructor(private readonly o: OpcionesVigia) {
     this.graciaVale = o.graciaValeMs ?? 20_000;
     this.graciaExtra = o.graciaExtraMs ?? 15_000;
+    this.esperaLlegada = o.esperaLlegadaMs ?? 30 * 60_000;
   }
 
   /** Humanos = nombres visibles que no son bots (el propio tile ya viene excluido). */
@@ -57,9 +65,15 @@ export class Vigia {
       if (ahora - this.valeAusenteDesde >= this.graciaVale) return 'vale_salio';
     }
 
+    this.inicio ??= ahora;
+    if (humanos.length > 0) this.humanoVisto = true;
     if (humanos.length === 0) {
-      this.soloDesde ??= ahora;
-      if (ahora - this.soloDesde >= this.o.soloMs) return 'solo';
+      if (!this.humanoVisto) {
+        if (ahora - this.inicio >= this.esperaLlegada) return 'solo';
+      } else {
+        this.soloDesde ??= ahora;
+        if (ahora - this.soloDesde >= this.o.soloMs) return 'solo';
+      }
     } else this.soloDesde = null;
 
     if (humanos.length > this.o.maxHumanos) {
