@@ -37,6 +37,7 @@ interface GrabPagina {
   detener(seq: number): boolean;
   activas(): number[];
   pistas(): number;
+  nivel(): { pico: number; estado: string };
   apagar(): void;
 }
 
@@ -74,6 +75,7 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio): Promise<{ motivo
   let siguienteAbierto = false;
   let vioHumanos = false;
   let avisoSinPistas = false;
+  let ultimoNivel = Date.now();
   let motivo: MotivoFin | null = null;
 
   while (!motivo) {
@@ -89,6 +91,14 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio): Promise<{ motivo
     motivo = vigia.observar(ahora, nombres);
     if (motivo) break;
 
+    if (ahora - ultimoNivel >= 60_000) {
+      ultimoNivel = ahora;
+      const nv = await p.evaluate(() => {
+        const g = (window as unknown as { __voGrab: GrabPagina }).__voGrab;
+        return { ...g.nivel(), pistas: g.pistas(), rtc: ((window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []).length };
+      }).catch(() => null);
+      if (nv) log(`audio: contexto=${nv.estado} pistas=${nv.pistas} rtc=${nv.rtc} pico=${nv.pico}`);
+    }
     if (!avisoSinPistas && ahora - inicio > 60_000) {
       const n = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.pistas()).catch(() => 0);
       if (n === 0) {

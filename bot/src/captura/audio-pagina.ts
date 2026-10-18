@@ -35,10 +35,28 @@ export function instalarGrabadorEnPagina(o: OpcionesGrabadorPagina): boolean {
   silencio.start();
 
   const pistas = new Set<string>();
+  // Medidor de nivel (diagnóstico): pico de volumen de la mezcla desde la última lectura.
+  const analizador = ctx.createAnalyser();
+  analizador.fftSize = 2048;
+  const muestras = new Float32Array(analizador.fftSize);
+  let pico = 0;
+  const medir = setInterval(() => {
+    analizador.getFloatTimeDomainData(muestras);
+    for (const v of muestras) if (Math.abs(v) > pico) pico = Math.abs(v);
+  }, 250);
   const enlazar = (pista: MediaStreamTrack) => {
     if (pistas.has(pista.id) || pista.readyState !== 'live') return;
     try {
-      ctx.createMediaStreamSource(new MediaStream([pista])).connect(destino);
+      const flujo = new MediaStream([pista]);
+      // Chromium entrega silencio a WebAudio desde una pista WebRTC remota si esa pista no está
+      // además conectada a un elemento de audio que la reproduce: se crea uno silenciado.
+      const sumidero = new Audio();
+      sumidero.muted = true;
+      sumidero.srcObject = flujo;
+      void sumidero.play().catch(() => {});
+      const fuente = ctx.createMediaStreamSource(flujo);
+      fuente.connect(destino);
+      fuente.connect(analizador);
       pistas.add(pista.id);
       pista.addEventListener('ended', () => pistas.delete(pista.id));
     } catch { /* pista no utilizable */ }
@@ -103,8 +121,15 @@ export function instalarGrabadorEnPagina(o: OpcionesGrabadorPagina): boolean {
     },
     activas(): number[] { return [...grabadoras.keys()]; },
     pistas(): number { return pistas.size; },
+    nivel(): { pico: number; estado: string } {
+      const r = { pico: Math.round(pico * 1000) / 1000, estado: ctx.state };
+      pico = 0;
+      if (ctx.state !== 'running') void ctx.resume().catch(() => {});
+      return r;
+    },
     apagar(): void {
       clearInterval(intervalo);
+      clearInterval(medir);
       for (const rec of grabadoras.values()) if (rec.state !== 'inactive') rec.stop();
     },
   };
