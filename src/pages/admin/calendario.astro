@@ -124,7 +124,7 @@ const embedUrl = googleConnected
                     </span>
                   )}
                   {ev.hangoutLink && (
-                    <a href={(isFromSystem(ev) && urlSesion(reservaDeEventId(ev.id))) || ev.hangoutLink} target="_blank"
+                    <a href={(isFromSystem(ev) && urlSesion(reservaDeEventId(ev.id)) && `${urlSesion(reservaDeEventId(ev.id))}?panel=1`) || ev.hangoutLink} target="_blank"
                        data-llamar-asistente={(isFromSystem(ev) && reservaDeEventId(ev.id)) || undefined}
                        style="font-size:0.72rem;color:var(--forest);display:block;margin-top:0.25rem;text-decoration:none;">
                       📹 Unirse al Meet

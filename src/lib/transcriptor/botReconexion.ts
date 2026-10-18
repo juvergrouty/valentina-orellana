@@ -40,6 +40,8 @@ export const NOTA_RECONECTADO = 'El asistente de notas se desconectó y volvió 
 export const NOTA_ESPERANDO_VALE = 'Vale salió de la sesión: si vuelve a entrar en 15 min, el asistente sigue en esta misma grabación.';
 /** Igual, cuando ya hubo una reconexión antes (para que la nota final lo diga). */
 export const NOTA_ESPERANDO_VALE_RECONECTADO = 'Vale salió de la sesión (ya hubo una reconexión): si vuelve a entrar en 15 min, el asistente sigue en esta misma grabación.';
+/** El robot se cayó y no pudo volver solo (sin tiempo o sin lanzamientos): espera que Vale vuelva a abrir la sesión. */
+export const NOTA_ESPERANDO_TRAS_CAIDA = 'El asistente de notas se desconectó y no pudo volver solo: si abres de nuevo la sesión en 15 min, sigue en esta misma grabación.';
 export const NOTA_SIN_CONSENTIMIENTO_BOT = 'El asistente de notas salió: el consentimiento de grabación ya no está vigente. Desde ese momento no se grabó nada.';
 
 export const MAX_LANZAMIENTOS_BOT = 4;
@@ -102,7 +104,8 @@ export function combinarLinea(previa: unknown, nueva: LineaHablante[] | null | u
 
 /** ¿La grabación está esperando a que Vale vuelva? (en 'grabando' sin máquina) */
 export function esperandoVale(g: { estado: string; bot_machine_id?: string | null; nota_sistema?: string | null }): boolean {
-  return g.estado === 'grabando' && !g.bot_machine_id && (g.nota_sistema === NOTA_ESPERANDO_VALE || g.nota_sistema === NOTA_ESPERANDO_VALE_RECONECTADO);
+  return g.estado === 'grabando' && !g.bot_machine_id
+    && (g.nota_sistema === NOTA_ESPERANDO_VALE || g.nota_sistema === NOTA_ESPERANDO_VALE_RECONECTADO || g.nota_sistema === NOTA_ESPERANDO_TRAS_CAIDA);
 }
 
 /** ¿Venció el plazo para que Vale vuelva? (fin_at = cuándo salió el último robot). Sin fin_at: sí. */
@@ -212,12 +215,13 @@ export async function fijarFinPrevisto(c: Cliente, p: Pick<Grabacion, 'id' | 'ho
  * abrir la sesión, el robot nuevo sigue esta misma grabación; si no, el cron la cierra a los 15 min.
  * Condicional a que la máquina siga siendo la que terminó. true si quedó esperando.
  */
-export async function esperarVale(c: Cliente, g: FilaReconexion, op: { ahora: Date; linea?: LineaHablante[] | null }): Promise<boolean> {
+export async function esperarVale(c: Cliente, g: FilaReconexion, op: { ahora: Date; linea?: LineaHablante[] | null; caida?: boolean }): Promise<boolean> {
   const huboReconexion = g.nota_sistema === NOTA_RECONECTANDO || g.nota_sistema === NOTA_ESPERANDO_VALE_RECONECTADO || !!g.nota_sistema?.startsWith(NOTA_RECONECTADO);
   let q = c.from('grabaciones').update({
     bot_machine_id: null, bot_token_vence_at: op.ahora.toISOString(), fin_at: op.ahora.toISOString(),
     linea_hablantes: combinarLinea(g.linea_hablantes, op.linea),
-    nota_sistema: huboReconexion ? NOTA_ESPERANDO_VALE_RECONECTADO : NOTA_ESPERANDO_VALE,
+    // Caída del robot: nota propia (al cerrar dice "grabación incompleta" y avisa en el panel).
+    nota_sistema: op.caida ? NOTA_ESPERANDO_TRAS_CAIDA : huboReconexion ? NOTA_ESPERANDO_VALE_RECONECTADO : NOTA_ESPERANDO_VALE,
     tomada_en: null, intentos: 0, proximo_intento_at: null, ultimo_error: null,
   }).eq('id', g.id).eq('estado', 'grabando');
   q = g.bot_machine_id ? q.eq('bot_machine_id', g.bot_machine_id) : q.is('bot_machine_id', null);

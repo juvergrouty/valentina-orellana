@@ -55,6 +55,8 @@ export interface EntradaEnlace {
   authuser?: string | null;
   /** ¿Quien abre es Vale? (sesión del panel en este navegador: valeConSesionPanel). Sin esto, no despacha. */
   esVale?: () => Promise<boolean>;
+  /** ?panel=1: lo abre un botón del panel, que ya pidió el robot por POST (llamar-asistente): no se repite. */
+  desdePanel?: boolean;
 }
 
 /**
@@ -197,6 +199,7 @@ export async function abrirEnlaceSesion(entrada: EntradaEnlace, deps: DepsEnlace
     if (entrada.metodo !== 'GET') detalle.despacho = 'no_get';
     else if (esVisitaAutomatica(entrada.request.headers.get('user-agent'))) detalle.despacho = 'vista_previa';
     else if (!online || !destino) detalle.despacho = 'sin_meet';
+    else if (entrada.desdePanel) detalle.despacho = 'panel';
     else if (!(await (entrada.esVale?.() ?? Promise.resolve(false)).catch(() => false))) detalle.despacho = 'no_vale';
     else if (!reservaVaAOcurrir({ status: reserva.status, created_by_admin: reserva.created_by_admin ?? null })) detalle.despacho = 'reserva_no_vigente';
     else if (!cercaDeLaHora(reserva, ahora)) detalle.despacho = 'fuera_de_ventana';
@@ -242,6 +245,7 @@ export function textoLlamarAsistente(despacho: string): string {
     case 'apagado': return 'El asistente de notas está apagado en los ajustes del transcriptor.';
     case 'reserva_no_vigente': return 'La reserva no está confirmada: el asistente no va.';
     case 'sin_meet': return 'Esta sesión no es online.';
+    case 'sin_calendario': return 'No pude revisar tu Google Calendar (¿se desconectó?): el asistente no va. Revisa el aviso del panel.';
     case 'limite': return 'Ya lo pediste varias veces en los últimos minutos; espera un poco.';
     default: return 'No se pudo enviar el asistente de notas. Intenta de nuevo.';
   }

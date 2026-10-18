@@ -922,7 +922,7 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
         // Una sesión = una grabación (Vale, 18 oct): si Vale salió o el robot no puede seguir solo, la grabación
         // queda abierta esperando que Vale vuelva (15 min); se transcribe UNA vez al cerrarse (botReconexion.ts).
         const espera = !relanzar && MOTIVOS_ESPERAR_VALE.includes(ev.motivo)
-          && await esperarVale(c, grab, { ahora, linea: ev.linea_hablantes });
+          && await esperarVale(c, grab, { ahora, linea: ev.linea_hablantes, caida: ev.motivo === 'error' });
         if (!relanzar && !espera) {
           await cerrarConLoGrabado(c, grab, { ahora, linea: ev.linea_hablantes, notaFin: notaFinBot(ev.motivo, Math.round(duracionSeg / 60)) });
         }

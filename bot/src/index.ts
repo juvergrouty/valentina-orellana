@@ -38,6 +38,8 @@ const SONDEO_VIGIA_MS = 2_000;
 const UMBRAL_VOZ = 0.02;
 /** Tope duro tras HORA_FIN + MAX_EXTRA_MS: pase lo que pase, el proceso termina. */
 const MARGEN_TOPE_DURO_MS = 10 * 60_000;
+/** Antes de grabar: personas sin Vale durante esto → aviso al panel (¿Vale entró con otro nombre visible?). */
+const AVISO_SIN_VALE_MS = 5 * 60_000;
 
 interface GrabPagina {
   iniciar(seq: number): void;
@@ -104,6 +106,8 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
   let vioHumanos = false;
   let avisoSinPistas = false;
   let vozSinTiles = 0;
+  let sinValeDesde: number | null = null; // hay personas pero ninguna con el nombre de Vale (antes de grabar)
+  let avisoSinVale = false;
   let ultimoNivel = Date.now();
   let motivo: MotivoFin | null = null;
 
@@ -136,7 +140,16 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
           const pico = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.nivel().pico).catch(() => 0);
           vozSinTiles = pico >= UMBRAL_VOZ ? vozSinTiles + 1 : 0;
         } else if (!ilegible) vozSinTiles = 0;
-        const decision = decidirInicio({ hayVale: vigia.hayVale(nombres), ilegible, vozSeguida: vozSinTiles, reemplazo: cfg.valeVista });
+        const hayVale = vigia.hayVale(nombres);
+        const decision = decidirInicio({ hayVale, ilegible, vozSeguida: vozSinTiles, reemplazo: cfg.valeVista });
+        // Personas en la llamada pero ninguna con el nombre de Vale por 5 min: quizás entró con otro nombre
+        // visible. Aviso al panel (solo el conteo, sin nombres) para que revise los nombres de Vale.
+        if (humanos.length && !hayVale) sinValeDesde ??= ahora; else sinValeDesde = null;
+        if (sinValeDesde != null && !avisoSinVale && ahora - sinValeDesde >= AVISO_SIN_VALE_MS) {
+          avisoSinVale = true;
+          log(`hay ${humanos.length} persona(s) en la llamada y ninguna con el nombre de Vale: no graba`);
+          await sitio.enviar({ tipo: 'error', detalle: `Hay ${humanos.length} persona(s) en la reunión pero ninguna con el nombre de Vale configurado: el asistente no graba. Si Vale está dentro, revisa sus nombres en los ajustes del transcriptor.` }).catch(() => {});
+        }
         if (decision === 'esperar') continue;
         if (decision === 'grabar_por_voz') {
           log('hay voz pero no se puede leer la lista de participantes: se graba igual');

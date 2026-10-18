@@ -25,6 +25,7 @@ const r = await abrirEnlaceSesion({
   clientAddress: (() => { try { return Astro.clientAddress; } catch { return null; } })(),
   authuser: Astro.url.searchParams.get('authuser'),
   esVale: () => valeConSesionPanel(tokenPanel),
+  desdePanel: Astro.url.searchParams.get('panel') === '1',
 });
 
 if (r.tipo === 'redirigir') {

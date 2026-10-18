@@ -141,13 +141,13 @@ function ruta(opc: { ahora?: string; reserva?: Record<string, unknown> | null; m
     despachar: async (ref) => { despachos.push(ref); if (opc.despacho instanceof Error) throw opc.despacho; return opc.despacho ?? 'lanzado'; },
     meetDeCalendario: async () => opc.meetCal ?? null,
   };
-  const pedir = async (codigo: unknown, o: { ua?: string; ip?: string; metodo?: string; authuser?: string; vale?: boolean } = {}) => {
+  const pedir = async (codigo: unknown, o: { ua?: string; ip?: string; metodo?: string; authuser?: string; vale?: boolean; panel?: boolean } = {}) => {
     const request = new Request('https://www.valentinaorellana.cl/sesion/x', {
       method: o.metodo ?? 'GET',
       headers: { 'user-agent': o.ua ?? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) Safari/604.1', 'x-forwarded-for': o.ip ?? '200.1.1.1' },
     });
     // Por defecto lo abre Vale (con su sesión del panel); vale: false = el paciente.
-    const r = await abrirEnlaceSesion({ codigo, metodo: o.metodo ?? 'GET', request, authuser: o.authuser ?? null, esVale: async () => o.vale ?? opc.vale ?? true }, deps);
+    const r = await abrirEnlaceSesion({ codigo, metodo: o.metodo ?? 'GET', request, authuser: o.authuser ?? null, esVale: async () => o.vale ?? opc.vale ?? true, desdePanel: o.panel }, deps);
     await Promise.all(pendientes.splice(0));
     return r;
   };
@@ -162,6 +162,10 @@ test('Vale, 18 oct: el robot entra solo cuando entra Vale — el paciente con el
   assert.equal(e.bitacora().at(-1)!.detalle.despacho, 'no_vale');
   assert.deepEqual(await e.pedir(e.codigo), { tipo: 'redirigir', url: MEET });
   assert.equal(e.despachos.length, 1, 'Vale (sesión del panel) sí');
+  // Botón del panel (?panel=1): ya pidió el robot por POST; el enlace no lo pide de nuevo.
+  await e.pedir(e.codigo, { panel: true });
+  assert.equal(e.despachos.length, 1);
+  assert.equal(e.bitacora().at(-1)!.detalle.despacho, 'panel');
   // Sin forma de saber quién abre (sin esVale): no despacha.
   const sin = ruta();
   const request = new Request('https://www.valentinaorellana.cl/sesion/x', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone) Safari/604.1', 'x-forwarded-for': '200.1.1.1' } });

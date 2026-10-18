@@ -3268,7 +3268,7 @@ document.getElementById('sp-meet-href')?.addEventListener('click', async (e) => 
   // se abra en otro navegador sin la cookie), y el enlace propio redirige a este Meet con la cuenta del negocio.
   void llamarAsistente(id);
   const link = enlaceDe(id, meet);
-  const business = `${link}${link.includes('?') ? '&' : '?'}authuser=vinculosquesostienen@gmail.com`;
+  const business = `${link}${link.includes('?') ? '&' : '?'}authuser=vinculosquesostienen@gmail.com${link.includes('/sesion/') ? '&panel=1' : ''}`;
   window.open(business, '_blank');
 });
 

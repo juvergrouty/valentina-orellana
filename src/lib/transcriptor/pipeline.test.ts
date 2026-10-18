@@ -904,7 +904,8 @@ test('r2 punto 1b: sin tiempo o con el tope de lanzamientos no hay reemplazo: se
   assert.equal(e.maquinas.length, 0);
   e.avanzar(15); await e.correr();
   assert.equal(e.grab(g.id).estado, 'transcribiendo', 'Vale no volvió: se cierra con lo grabado y se transcribe');
-  assert.equal(e.grab(g.id).nota_sistema, null);
+  assert.match(String(e.grab(g.id).nota_sistema), /Grabación incompleta: el asistente de notas se cayó/);
+  assert.ok(e.alertas.some((x) => x.clave === `bot-caido:${g.id}` && x.accion === 'ninguna'), 'aviso de caída solo en el panel');
   // Motivos que cierran al tiro (decisión o resguardo): sin espera.
   assert.equal(notaFinBot('participantes_extra', 3)?.includes('más participantes'), true);
 });
@@ -1146,4 +1147,39 @@ test('Vale atrasada: el término efectivo = llegada de Vale + duración (tope fi
   e.avanzar(25 + 40 - 4); await e.correr();
   assert.equal(e.matadas.length, 0);
   assert.equal(e.grab(id).estado, 'grabando');
+});
+
+test('revisión: la vuelta de Vale cuenta un solo lanzamiento; fuera de plazo no manda robot; Calendar caído avisa; antes de grabar el término sigue al evento', async () => {
+  const e = escenario();
+  const s = sesionOnline(e);
+  await abrirVale(e, s);
+  const id = e.db.tabla('grabaciones')[0].id as string;
+  await tramo(e, id, 0, 10);
+  e.avanzar(2);
+  assert.equal(await abrirVale(e, s), 'lanzado');
+  assert.equal(e.db.tabla('transcriptor_auditoria').filter((a) => a.accion === 'bot_lanzar' && a.grabacion_id === id).length, 2, 'dos robots = dos lanzamientos');
+  await tramo(e, id, 1, 10);
+  // Vale vuelve muy tarde (más de 20 min después del término efectivo): no va robot y la grabación se cierra.
+  const g = e.grab(id);
+  g.hora_fin_prevista = new Date(e.ahora().getTime() - 21 * 60_000).toISOString();
+  assert.equal(await abrirVale(e, s), 'fuera');
+  assert.equal(e.maquinas.length, 2);
+  // Calendar caído al abrir la sesión: aviso en el panel, sin robot.
+  const c = escenario();
+  const sc = sesionOnline(c);
+  c.eventos.length = 0;
+  const bot = crearBot({ db: c.db.cliente, calendario: async () => { throw new Error('Google Calendar no está conectado'); }, fetch: (async () => new Response('', { status: 500 })) as typeof fetch });
+  const p2 = crearPipeline({ db: c.db.cliente, almacenamiento: c.almacenamiento, aai: c.aai, bot, puedeGrabar: (pp, t) => evaluarEnBase(pp, t, c.db.cliente),
+    alertas: { registrarAlerta: async (a) => { c.alertas.push(a); }, resolverAlertasDe: async () => {} } });
+  assert.equal(await p2.despacharPorEnlace({ bookingId: sc.bookingId, googleEventId: sc.eventoId }, c.ahora()), 'sin_calendario');
+  assert.ok(c.alertas.some((a) => a.clave === 'bot:calendario'));
+  // Antes de grabar: si Vale acorta el evento, el término previsto baja (no queda el de antes).
+  const m = escenario();
+  const sm = sesionOnline(m);
+  await abrirVale(m, sm);
+  const idm = m.db.tabla('grabaciones')[0].id as string;
+  const finCorto = new Date(Date.parse(sm.fin) - 20 * 60_000).toISOString();
+  sm.ev.end.dateTime = finCorto;
+  m.avanzar(1); await m.correr();
+  assert.equal(m.grab(idm).hora_fin_prevista, finCorto);
 });

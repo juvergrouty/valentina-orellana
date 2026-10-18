@@ -32,8 +32,8 @@ const cuenta = String(calRow?.value ?? '');
 const meetDe = (notes: string | null) => [...String(notes ?? '').matchAll(/(?:^|\n)Meet: (https:\/\/meet\.google\.com\/\S+)/g)].at(-1)?.[1] ?? null;
 
 type Sesion = { id: string; paciente: string; fecha: string; hora: string; meet: string | null; enlace: string; faltaMin: number; dur: number };
-// Ruta del enlace propio de la sesión (18 oct 2026), relativa: se visita en este mismo sitio antes de abrir
-// Meet para que el robot de notas vaya a la sesión (mismo camino que el enlace del paciente).
+// Ruta del enlace propio de la sesión (18 oct 2026). Ya no se visita: al entrar, la sala pide el robot por
+// POST (llamar-asistente, con la sesión del panel) y abre Meet directo. Se deja en data-enlace como referencia.
 const rutaEnlace = (id: string) => { const c = codigoSesion(id); return c ? `${RUTA_ENLACE}${c}` : ''; };
 const sesiones: Sesion[] = (data ?? [])
   .filter((b) => b.session_time)
