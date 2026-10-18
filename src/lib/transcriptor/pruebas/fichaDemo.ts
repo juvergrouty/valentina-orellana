@@ -4,7 +4,10 @@
 //   ?pareja=falta  → la sesión se llama "Sesión de pareja" y falta la firma de la segunda persona.
 //   ?n=40          → agrega sesiones antiguas archivadas (para medir el tamaño de la página).
 //   ?falta=0020    → aviso de la migración 0020 pendiente.
+//   ?evo=auto      → la sesión más reciente tiene la evolución autollenada desde su resumen IA.
+//   ?evo=vacia     → la sesión más reciente no tiene evolución (se ve "Usar como base de mi evolución").
 import type { GrabFicha, ResFicha } from '../fichaNotas';
+import { textoEvolucionDesdeResumen } from '../panel';
 
 const res = (puntos: string, tareas: string, proxima: string) => `## Resumen automático (IA)\n*Sesión individual · presencial · 50 min · Generado automáticamente a partir de la transcripción. No revisado. No constituye la evolución clínica.*\n\n### Puntos más importantes\n${puntos}\n\n### Tareas\n${tareas}\n\n### Para trabajar en la próxima sesión\n${proxima}`;
 /** Formato actual (resumen-2026-10-17.3): riesgo aparte al inicio + relato en prosa. Las demás sesiones quedan
@@ -54,6 +57,10 @@ export function fichaDemo(id: string, params: URLSearchParams): FichaDemo {
   const r4 = res('- Habla de la mudanza y de cómo le afecta el ruido del edificio [12:00].', '- No consta en la transcripción.', '- No consta en la transcripción.');
   const r5 = res('- Entrevista inicial: historia laboral y familiar [03:00].', '- No consta en la transcripción.', '- Profundizar en el trabajo actual.');
   const r6 = res('- Llamada de contacto previa: horarios y valores [01:00].', '- No consta en la transcripción.', '- No consta en la transcripción.');
+  // Evolución de la sesión más reciente: la de Vale (por defecto), autollenada desde el resumen o vacía.
+  const evo = params.get('evo');
+  if (evo === 'auto') notas[0] = { ...notas[0], content: textoEvolucionDesdeResumen(r1) };
+  else if (evo === 'vacia') notas.shift();
   const resumenes = [dr(1, r1), dr(2, r2), dr(3, r3), dr(4, r4), dr(5, r5, true), dr(6, r6, true)];
   const archivados: Record<string, string> = { [dr(5, null, true).id]: r5, [dr(6, null, true).id]: r6 };
   // Sesiones antiguas extra (archivadas, con nota de evolución) para medir cómo crece la página.

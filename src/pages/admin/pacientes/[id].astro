@@ -1446,7 +1446,10 @@ const formatCLP = (n: number) =>
       return;
     }
 
-    // "Usar como base de mi evolución": pega el resumen (texto plano) en el formulario de esa sesión.
+    // "Usar como base de mi evolución": pega el resumen (texto plano, ya con su encabezado
+    // "Basado en el resumen automático (IA)", ver textoEvolucionDesdeResumen) en el formulario de esa sesión.
+    // Desde el 17 oct 2026 el orquestador lo guarda solo cuando la sesión no tenía evolución; el botón
+    // sigue para las sesiones sin evolución (p. ej. resúmenes antiguos).
     const copiar = t.closest<HTMLButtonElement>('.ia-copiar');
     if (copiar) {
       const f = document.getElementById(copiar.dataset.form ?? '') as HTMLFormElement | null;
@@ -1454,7 +1457,7 @@ const formatCLP = (n: number) =>
       if (!f || !area) return;
       f.hidden = false;
       const b = document.querySelector<HTMLButtonElement>(`.hist-evo-abrir[data-form="${copiar.dataset.form}"]`); if (b) b.hidden = true;
-      const texto = `Basado en el resumen automático (IA) — revisar y editar:\n${copiar.dataset.texto ?? ''}`;
+      const texto = copiar.dataset.texto ?? '';
       area.value = area.value.trim() ? `${area.value.trimEnd()}\n\n${texto}` : texto;
       area.scrollIntoView({ behavior: 'smooth', block: 'center' });
       area.focus({ preventScroll: true });

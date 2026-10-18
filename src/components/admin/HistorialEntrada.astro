@@ -3,7 +3,7 @@
 // en su propio bloque, el "Resumen IA" (anexo rotulado). Nunca se mezclan (decisión B/F).
 // La usan la ficha (solo la sesión más reciente) y pacientes/[id]/historial.astro (el resto, bajo demanda).
 // Estilos globales (is:global) porque el historial llega después como HTML parcial.
-import { ETIQUETA_SESION, duracionTexto, fechaLarga, tipoTexto } from '../../lib/transcriptor/panel';
+import { ETIQUETA_SESION, duracionTexto, esEvolucionDesdeResumen, fechaLarga, tipoTexto } from '../../lib/transcriptor/panel';
 import type { EntradaFicha } from '../../lib/transcriptor/fichaNotas';
 
 interface Props { e: EntradaFicha; idx: number; patientId: string; avisoResumenes: string | null }
@@ -30,7 +30,7 @@ const formId = `evo-${idx}`;
         <div class="hist-nota-cab">
           <p class="hist-rotulo">Evolución</p>
           <div class="hist-nota-acc">
-            <button type="button" class="hist-link hist-nota-editar" data-nota={n.id}>Editar</button>
+            <button type="button" class="btn btn-outline btn-sm hist-nota-editar" data-nota={n.id} aria-controls={`nota-editar-${n.id}`}>Editar</button>
             <form method="POST" action="/api/admin/patients" style="margin:0;">
               <input type="hidden" name="action" value="delete_note" />
               <input type="hidden" name="id" value={n.id} />
@@ -39,12 +39,15 @@ const formId = `evo-${idx}`;
             </form>
           </div>
         </div>
+        {esEvolucionDesdeResumen(n.content) && (
+          <p class="hist-nota-auto">Basada en el resumen automático (IA), sin revisar. Revísala y corrígela con <strong>Editar</strong>.</p>
+        )}
         <p class="hist-nota-texto hist-buscable" id={`nota-ver-${n.id}`}>{n.content}</p>
         <form id={`nota-editar-${n.id}`} method="POST" action="/api/admin/patients" class="hist-form" hidden>
           <input type="hidden" name="action" value="update_note" />
           <input type="hidden" name="id" value={n.id} />
           <input type="hidden" name="redirect" value={`${redirectBase}?tab=notas`} />
-          <textarea name="content" rows="6" aria-label="Editar nota de evolución">{n.content}</textarea>
+          <textarea name="content" rows={esEvolucionDesdeResumen(n.content) ? 16 : 6} aria-label="Editar nota de evolución">{n.content}</textarea>
           <div class="ia-acciones" style="margin-top:0;">
             <button type="submit" class="btn btn-dark btn-sm">Guardar</button>
             <button type="button" class="btn btn-outline btn-sm hist-nota-cancelar" data-nota={n.id}>Cancelar</button>
@@ -152,6 +155,7 @@ const formId = `evo-${idx}`;
   .hist-nota { border-top: 1px solid var(--warm); padding-top: 0.6rem; }
   .hist-nota-cab { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
   .hist-nota-acc { display: flex; gap: 0.75rem; align-items: center; }
+  .hist-nota-auto { font-size: 0.78rem; color: #7A6544; background: #f7f1e6; border: 1px solid #e6d9c2; border-radius: 6px; padding: 0.35rem 0.6rem; margin-top: 0.45rem; }
   .hist-nota-texto { font-size: 0.88rem; line-height: 1.65; white-space: pre-wrap; color: var(--ink); margin-top: 0.3rem; overflow-wrap: anywhere; }
   .hist-form { display: flex; flex-direction: column; gap: 0.5rem; border-top: 1px solid var(--warm); padding-top: 0.6rem; }
   .hist-form[hidden], .hist-nota-texto[hidden] { display: none; }
@@ -169,5 +173,6 @@ const formId = `evo-${idx}`;
     .hist-card { padding: 0.9rem; }
     .hist-cab .btn { min-height: 48px; }
     .hist-link { min-height: 48px; padding: 0 0.25rem; }
+    .hist-nota-acc .btn { min-height: 48px; }
   }
 </style>

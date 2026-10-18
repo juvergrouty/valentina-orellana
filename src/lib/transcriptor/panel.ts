@@ -187,8 +187,23 @@ export function resumenATexto(md: string | null | undefined): string {
       .replace(/^#{3,6}\s+(.+)$/, (_, t: string) => `${t.toUpperCase()}`)
       .replace(/^[-*•]\s+/, '• ')
       .replace(/\*\*([^*]+)\*\*/g, '$1')
-      .replace(/^\*([^*].*)\*$/, '$1'))
+      .replace(/^\*([^*].*)\*$/, '$1')
+      .replace(/^_([^_].*)_$/, '$1'))
     .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** Marca breve que encabeza una evolución que viene del resumen IA (trazabilidad clínica). */
+export const ENCABEZADO_EVOLUCION_IA = 'Basado en el resumen automático (IA) — revisar y editar:';
+
+/** Texto de la evolución a partir del resumen (botón "Usar como base" y autollenado). '' si no hay resumen. */
+export function textoEvolucionDesdeResumen(md: string | null | undefined): string {
+  const texto = resumenATexto(md);
+  return texto ? `${ENCABEZADO_EVOLUCION_IA}\n${texto}` : '';
+}
+
+/** La nota todavía lleva la marca del autollenado (Vale puede borrarla al editar). */
+export function esEvolucionDesdeResumen(content: string | null | undefined): boolean {
+  return (content ?? '').trimStart().startsWith(ENCABEZADO_EVOLUCION_IA);
 }
 
 // ─── Hablantes ───────────────────────────────────────────────────────────────

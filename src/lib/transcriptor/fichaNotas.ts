@@ -10,7 +10,7 @@ import type { AstroCookies } from 'astro';
 import { supabase } from '../supabase';
 import { todayCL } from '../dateUtils';
 import {
-  armarHistorial, bloqueParaRevisarHoy, estadoVisible, resumenAHtml, resumenATexto, sePuedeReintentar, textoProblema,
+  armarHistorial, bloqueParaRevisarHoy, estadoVisible, resumenAHtml, sePuedeReintentar, textoEvolucionDesdeResumen, textoProblema,
   type EntradaHistorial,
 } from './panel';
 import { accesoClinicoCookies, type ResultadoAcceso } from './acceso';
@@ -138,7 +138,8 @@ export async function cargarNotasFicha(e: EntradaNotasFicha) {
       reintentable: sePuedeReintentar(g as never),
       transcrita: transcritas.has(g.id),
       html: vigente?.contenido && !archivado ? resumenAHtml(vigente.contenido, (s) => `/admin/pacientes/${id}/sesion/${g.id}?t=${s}`) : '',
-      texto: vigente?.contenido && !archivado ? resumenATexto(vigente.contenido) : '',
+      // Texto para "Usar como base de mi evolución" (con la misma marca que el autollenado).
+      texto: vigente?.contenido && !archivado ? textoEvolucionDesdeResumen(vigente.contenido) : '',
       aviso: vigente ? avisoAnexoResumen(vigente) : '',
       excluida: !!g.excluir_ia_at,
       demoHtml: archivado && vigente ? (demoArchivados[vigente.id] ? resumenAHtml(demoArchivados[vigente.id]) : '') : '',

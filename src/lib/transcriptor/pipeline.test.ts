@@ -492,6 +492,88 @@ test('M1: Regenerar inserta la fila pendiente ANTES de pasar a resumiendo; el cr
   assert.equal(e.db.tabla('resumenes_ia').filter((r) => r.grabacion_id === id).length, 2, 'no se creó otra fila');
 });
 
+// ─── Evolución autollenada desde el resumen (pedido de Vale, 17 oct 2026) ─────
+
+async function hastaLista(e: ReturnType<typeof escenario>, p: string): Promise<string> {
+  const id = await e.grabarPresencial(p, 'individual', [600]);
+  await e.correr();
+  const tr = e.segs(id)[0].aai_transcript_id;
+  e.aai.completar(tr, palabras('hola cómo estás bien gracias'));
+  await webhook(e.db, e.aai, tr, 'completed');
+  e.avanzar(1); await e.correr();
+  assert.equal(e.grab(id).estado, 'lista');
+  return id;
+}
+
+test('evolución automática: al quedar listo el resumen se guarda una vez; regenerar no la duplica ni la pisa', async () => {
+  const e = escenario([RESUMEN, RESUMEN.replace('Registrar momentos de calma.', 'Anotar dos momentos de calma.')]);
+  const p = e.paciente('Rosa Vidal', 'rosa@ejemplo.cl');
+  e.firma(p, 'Rosa Vidal', '18.888.888-8');
+  const id = await hastaLista(e, p);
+  const notas = () => e.db.tabla('session_notes').filter((n) => n.patient_id === p);
+  assert.equal(notas().length, 1);
+  assert.equal(notas()[0].session_date, '2026-10-20');
+  assert.equal(notas()[0].booking_id, null);
+  assert.equal(notas()[0].session_type, 'presencial');
+  assert.match(notas()[0].content, /^Basado en el resumen automático \(IA\) — revisar y editar:\n/);
+  assert.match(notas()[0].content, /Registrar momentos de calma/);
+  assert.ok(!/^#|\*\*/m.test(notas()[0].content), 'texto plano, sin Markdown');
+  // Regenerar (v2): la evolución no cambia ni se duplica.
+  const t = e.db.tabla('transcripciones')[0];
+  await e.db.from('resumenes_ia').insert({ grabacion_id: id, patient_id: p, transcripcion_id: t.id, version: 2, autor: 'ia', plantilla: 'individual', modo: 'directo', estado: 'pendiente' });
+  assert.ok(await transicionar(id, ['lista'], 'resumiendo', {}, e.db.cliente));
+  e.avanzar(1); await e.correr();
+  assert.equal(e.grab(id).estado, 'lista');
+  assert.equal(notas().length, 1);
+  assert.match(notas()[0].content, /Registrar momentos de calma/);
+  assert.equal(e.db.tabla('transcriptor_auditoria').filter((a) => a.accion === 'evolucion_autollenada' && a.resultado === 'ok').length, 1);
+});
+
+test('evolución automática: ruta de recuperación (resumen ya listo, grabación sin cerrar) descifra y autollena una sola vez', async () => {
+  const e = escenario();
+  const p = e.paciente('Rosa Vidal', 'rosa@ejemplo.cl');
+  e.firma(p, 'Rosa Vidal', '18.888.888-8');
+  const id = await hastaLista(e, p);
+  // Como si la corrida se hubiera cortado antes de guardar la evolución.
+  e.db.tablas['session_notes'] = [];
+  assert.ok(await transicionar(id, ['lista'], 'resumiendo', {}, e.db.cliente));
+  e.avanzar(1); await e.correr();
+  assert.equal(e.grab(id).estado, 'lista');
+  const notas = e.db.tabla('session_notes').filter((n) => n.patient_id === p);
+  assert.equal(notas.length, 1);
+  assert.match(notas[0].content, /Registrar momentos de calma/, 'el resumen cifrado se descifró');
+});
+
+test('evolución automática: si Vale ya escribió la evolución, no se toca', async () => {
+  const e = escenario();
+  const p = e.paciente('Rosa Vidal', 'rosa@ejemplo.cl');
+  e.firma(p, 'Rosa Vidal', '18.888.888-8');
+  e.db.tabla('session_notes').push({ id: randomUUID(), patient_id: p, booking_id: null, session_date: '2026-10-20', session_type: 'presencial', content: 'Mi evolución.', historial: [], deleted_at: null });
+  await hastaLista(e, p);
+  const notas = e.db.tabla('session_notes').filter((n) => n.patient_id === p);
+  assert.equal(notas.length, 1);
+  assert.equal(notas[0].content, 'Mi evolución.');
+});
+
+test('evolución automática: un fallo al guardarla no rompe la transcripción ni el resumen', async () => {
+  const e = escenario();
+  const p = e.paciente('Rosa Vidal', 'rosa@ejemplo.cl');
+  e.firma(p, 'Rosa Vidal', '18.888.888-8');
+  const real = e.db.from.bind(e.db);
+  (e.db as unknown as { from: (t: string) => unknown }).from = (t: string) => {
+    if (t === 'session_notes') throw new Error('session_notes caída');
+    return real(t);
+  };
+  const id = await hastaLista(e, p);
+  const r = e.db.tabla('resumenes_ia').find((x) => x.grabacion_id === id)!;
+  assert.equal(r.estado, 'listo');
+  assert.equal(e.alertas.length, 0);
+  assert.equal(e.db.tabla('session_notes').length, 0);
+  const err = e.db.tabla('transcriptor_auditoria').filter((a) => a.accion === 'evolucion_autollenada');
+  assert.equal(err.length, 1);
+  assert.equal(err[0].resultado, 'error');
+});
+
 test('M3: Reintentar un bot caído antes de grabar lo relanza (sin exigir intentos > 0)', async () => {
   const e = escenario();
   const p = e.paciente('Iván Mora', 'ivan@ejemplo.cl');
