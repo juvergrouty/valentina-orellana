@@ -5,10 +5,13 @@
 // Pasos (cada uno acotado por tiempo y con toma atómica por fila — estados.tomar —, así dos
 // ejecuciones solapadas nunca hacen dos veces lo mismo):
 //   1. vigilar        bots vivos después de HORA_FIN + 40 min → se apaga la máquina y se cierra la grabación.
-//   2. despacharBots  sesiones online que empiezan en [ahora−5, ahora+4] min (si transcriptor_bot_activo):
-//                     INSERT en bot_lanzando (google_event_id único: solo quien inserta lanza) → lanzarBot.
-//                     despacharPorEnlace (18 oct): el mismo despacho para UNA sesión cuando alguien abre su
-//                     enlace propio /sesion/<código>, en [inicio − 30 min, fin) (enlaceSesionRuta.ts).
+//   2. despacharBots  (decisión de Vale, 18 oct: "el robot entra solo cuando entro yo") el cron YA NO manda
+//                     robots por la hora del calendario. Solo sigue la hora de los robots activos (evento
+//                     movido / sesión que partió tarde), lanza los pendientes (Reintentar, fallo de Fly) y los
+//                     de REEMPLAZO tras una caída. despacharPorEnlace: el despacho de UNA sesión cuando Vale la
+//                     abre (botones del panel, o el enlace /sesion/<código> con la sesión del panel), en
+//                     [inicio − 30 min, fin agendado + 60 min): INSERT en bot_lanzando (google_event_id único:
+//                     solo quien inserta lanza) → lanzarBot. Atraso de Vale: ver botReconexion.ts.
 //   3. resumir        transcrita → resumiendo → lista (resumen.resumirSesion, modo 'directo', guarda prompt_version).
 //   4. reintentarEnvios  segmentos subidos sin transcript en AssemblyAI → enviar (backoff 1/5/15/60 min, máx. 6).
 //   5. procesarTranscripciones  sondeo sin webhook (> 30 min), errores de AssemblyAI (decisionTrasErrorAAI),
@@ -24,10 +27,10 @@ import {
 } from './tipos';
 import { leaseVencido, marcarError, reintentar, soltar, tomar, transicionar } from './estados';
 import {
-  cerrarConLoGrabado, debeRelanzarBot, eventIdLiberado, GRACIA_REVISAR_MAQUINA_MS, lanzamientosDe, MAX_LANZAMIENTOS_BOT,
-  NOTA_NADIE_LLEGO, NOTA_SIN_CONSENTIMIENTO_BOT, prepararRelanzamiento, previaLiberable, RESTANTE_MIN_ERROR_MS, type PreviaEvento,
+  cerrarConLoGrabado, debeRelanzarBot, eventIdLiberado, finEfectivo, fijarFinPrevisto, GRACIA_REVISAR_MAQUINA_MS, lanzamientosDe,
+  esperandoVale, esperarVale, esperaVencida, MAX_ATRASO_TRAS_FIN_MS, MAX_LANZAMIENTOS_BOT, MAX_LANZAMIENTOS_VALE, NOTA_NADIE_LLEGO, NOTA_RECONECTANDO, NOTA_SIN_CONSENTIMIENTO_BOT, prepararRelanzamiento, previaLiberable, RESTANTE_MIN_ERROR_MS, type PreviaEvento,
 } from './botReconexion';
-import { extenderUsoSesion, liberarSesion } from './botCuenta';
+import { liberarSesion } from './botCuenta';
 import { elegirModelo } from './reglas';
 import { repararMojibake } from './texto';
 import { borrarTranscriptTrasGuardar, decisionTrasErrorAAI, ErrorAssemblyAI, sanearMensaje, textoErrorDefinitivoAAI } from './assemblyai';
@@ -60,30 +63,44 @@ export const PRESUPUESTO_RESUMEN_MS = 285_000;
 export const MIN_RESUMEN_MS = 30_000;
 /** Mínimo para empezar a guardar una transcripción (descargar, unir, cifrar, borrar). */
 export const MIN_GUARDAR_MS = 12_000;
-/**
- * Ventana del despacho de bots (50-arquitectura §1.3): sesiones que empiezan en [ahora−20, ahora+4] min.
- * r2 (punto 5): antes era −5 min; si el cron o Calendar fallaban esos minutos la sesión quedaba sin robot.
- * Con 20 min se cubre una caída corta; no duplica porque solo se despacha si el evento no tiene grabación.
- */
-export const VENTANA_BOT_ANTES_MS = 20 * 60_000;
+/** Lectura de Calendar del cron: hasta 4 min adelante (solo para seguir la hora de robots activos). */
 export const VENTANA_BOT_DESPUES_MS = 4 * 60_000;
 /** r2 (punto 7): eventos empezados hasta hace 3 h se leen igual, solo para seguir su hora si Vale los mueve. */
 export const VENTANA_SINCRONIZAR_MS = 3 * 60 * 60_000;
 /**
- * Enlace propio de la sesión (/sesion/<código>, pedido de Vale 18 oct): abrirlo despacha el robot desde
- * 30 min antes del inicio hasta el término. El robot espera hasta 30 min a que llegue alguien
- * (bot/src/vigia.ts); si sale por "nadie llegó", un clic posterior lo vuelve a mandar.
+ * Vale abre la sesión (panel o enlace propio con su sesión del panel): se despacha el robot desde 30 min antes
+ * del inicio hasta 60 min después del término AGENDADO (atraso de Vale: la sesión que partió tarde termina
+ * después; el robot calcula su salida con el término efectivo, finEfectivo). El robot no graba hasta que Vale
+ * está en la llamada y espera hasta 30 min sin nadie (bot/src/vigia.ts); si sale por "nadie llegó", el
+ * siguiente clic de Vale lo vuelve a mandar.
  */
 export const VENTANA_ENLACE_ANTES_MS = 30 * 60_000;
+export const VENTANA_ENLACE_DESPUES_MS = 60 * 60_000;
+
+/** Mínimo grabado (todos los tramos) para avisar "no se reconoció voz": con menos, no se avisa. */
+export const MIN_GRABADO_AVISO_SIN_VOZ_MS = 5 * 60_000;
+/** ¿Se avisa que la sesión no tuvo voz? Solo si lo grabado en total pasa de 5 min (pura). */
+export function avisarSinVoz(segs: readonly { duracion_ms?: number | null }[]): boolean {
+  return segs.reduce((a, x) => a + Math.max(0, Number(x.duracion_ms) || 0), 0) > MIN_GRABADO_AVISO_SIN_VOZ_MS;
+}
 
 /** Resultado del despacho de una sesión (sin datos de pacientes: va a la bitácora del enlace). */
 export type ResultadoDespacho = 'lanzado' | 'activo' | 'existe' | 'fuera' | 'sin_consentimiento' | 'fallo';
 
-/** ¿Abrir el enlace ahora despacha el robot? [inicio − 30 min, fin). */
+/** ¿Que Vale abra la sesión ahora despacha el robot? [inicio − 30 min, fin agendado + 60 min). */
 export function enVentanaEnlace(inicio: string, fin: string, ahora: Date): boolean {
   const i = Date.parse(inicio), f = Date.parse(fin), t = ahora.getTime();
   if (Number.isNaN(i) || Number.isNaN(f)) return false;
-  return t >= i - VENTANA_ENLACE_ANTES_MS && t < f;
+  return t >= i - VENTANA_ENLACE_ANTES_MS && t < f + VENTANA_ENLACE_DESPUES_MS;
+}
+
+/**
+ * Término previsto con que se lanza un robot AHORA: Vale está entrando (el robot va porque ella abrió la
+ * sesión), así que su llegada es ahora → finEfectivo(inicio, fin, ahora). Lo afina el cron con inicio_at.
+ */
+export function finAlDespachar(s: Pick<SesionOnline, 'inicio' | 'fin'>, ahora: Date): string {
+  const f = finEfectivo(s.inicio, s.fin, ahora);
+  return Number.isNaN(f) ? s.fin : new Date(f).toISOString();
 }
 
 /**
@@ -95,16 +112,15 @@ export function enVentanaEnlace(inicio: string, fin: string, ahora: Date): boole
  */
 export function previaReintentablePorEnlace(p: Pick<Grabacion, 'estado' | 'estado_antes_error'> & Partial<Pick<Grabacion, 'nota_sistema' | 'ultimo_error'>>): 'liberar' | 'reintentar' | 'sin_consentimiento' | null {
   if (p.estado === 'sin_audio' && p.nota_sistema === NOTA_NADIE_LLEGO) return 'liberar';
-  // Solo fallas técnicas (Fly, caída, nunca llegó, `fin` con motivo 'error'). Un `fin` antes de grabar por
-  // otro motivo (expulsado = Vale lo sacó, participantes_extra, vale_salio, solo, hora_fin) queda en
+  // Fallas técnicas (Fly, caída, nunca llegó, `fin` con motivo 'error') y salidas antes de grabar sin decisión
+  // de nadie (atraso de Vale, 18 oct): 'solo' (quien estaba se fue) y 'hora_fin' (esperó hasta su límite).
+  // Un `fin` antes de grabar por expulsado (Vale lo sacó), participantes_extra o vale_salio queda en
   // "terminó antes de grabar (<motivo>)" (bot.ts) y NO se repite: es una decisión o un resguardo.
   if (p.estado === 'error' && p.estado_antes_error === 'bot_lanzando'
-    && !/terminó antes de grabar \((?!error\))/.test(String(p.ultimo_error ?? ''))) return 'reintentar';
+    && !/terminó antes de grabar \((?!(?:error|solo|hora_fin)\))/.test(String(p.ultimo_error ?? ''))) return 'reintentar';
   if (p.estado === 'sin_consentimiento') return 'sin_consentimiento';
   return null;
 }
-/** Vigencia del token tras el fin (igual que VIGENCIA_TOKEN_TRAS_FIN_MS de bot.ts; no se importa para no cargarlo). */
-const VIGENCIA_TOKEN_BOT_MS = 2 * 60 * 60_000;
 const ESTADOS_BOT_ACTIVO: readonly EstadoGrabacion[] = ['bot_lanzando', 'bot_en_lobby', 'grabando'];
 /** Vigilante: máquina del bot viva después de HORA_FIN + 40 min (el bot se corta solo a +30). */
 export const VIGILANTE_TRAS_FIN_MS = 40 * 60_000;
@@ -344,9 +360,10 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     const corte = new Date(ahora.getTime() - VIGILANTE_TRAS_FIN_MS).toISOString();
     const lista = await grabacionesEn(['bot_lanzando', 'bot_en_lobby', 'grabando'], ahora,
       (q) => q.eq('origen', 'online').lt('hora_fin_prevista', corte));
-    let n = 0;
+    let n = await cerrarEsperas(ahora);
     for (const g0 of lista) {
       if (queda() < 3_000) break;
+      if (esperandoVale(g0)) continue; // la cierra cerrarEsperas (sin aviso: no es una falla)
       await conToma(g0, ahora, async (g) => {
         if (g.bot_machine_id) {
           try {
@@ -398,6 +415,26 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
   }
 
   /**
+   * Una sesión = una grabación (Vale, 18 oct): grabaciones que esperaban a que Vale volviera
+   * (botReconexion.esperarVale) y ya pasaron 15 min sin que volviera → se cierran con TODO lo grabado (se
+   * transcribe una sola vez). Duración y fin: cuando salió el último robot. Corre siempre (como el vigilante).
+   */
+  async function cerrarEsperas(ahora: Date): Promise<number> {
+    const lista = await grabacionesEn(['grabando'], ahora, (q) => q.eq('origen', 'online').is('bot_machine_id', null));
+    let n = 0;
+    for (const g0 of lista) {
+      if (queda() < 3_000) break;
+      if (!esperandoVale(g0) || !esperaVencida(g0, ahora)) continue;
+      await conToma(g0, ahora, async (g) => {
+        if (!esperandoVale(g) || !esperaVencida(g, ahora)) return; // Vale volvió mientras tanto
+        const salida = Date.parse(g.fin_at ?? '');
+        if (await cerrarConLoGrabado(db, g, { ahora: Number.isNaN(salida) ? ahora : new Date(salida), notaFin: null })) n++;
+      });
+    }
+    return n;
+  }
+
+  /**
    * r2 (punto 1b): robots que se cayeron SIN mandar `fin` (la máquina perdió la red, el proceso murió).
    * Solo dentro de la ventana de la sesión (lo de después lo cierra el vigilante). Si Fly no responde,
    * no se toca nada. En plena grabación → robot de reemplazo (o se cierra con lo grabado); antes de
@@ -421,6 +458,8 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
         const relanzar = debeRelanzarBot({ motivo: 'caida', horaFinPrevista: g.hora_fin_prevista, ahora, lanzamientos: lanzados });
         if (g.estado === 'grabando') {
           if (relanzar && await prepararRelanzamiento(db, g, { ahora })) { n++; return; }
+          // Sin reemplazo automático: queda esperando que Vale vuelva a abrir la sesión (misma grabación).
+          if (await esperarVale(db, g, { ahora })) { n++; return; }
           const r = await cerrarConLoGrabado(db, g, { ahora, notaFin: 'Grabación incompleta: el asistente de notas se cayó y no pudo volver a entrar. Se transcribe lo que alcanzó a subir.' });
           if (r) {
             n++;
@@ -465,33 +504,36 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
   }
 
   /**
-   * Despacho de UNA sesión (el cuerpo del bucle de despacharBots; el enlace propio /sesion/<código>
-   * usa exactamente este mismo camino: índice único google_event_id, consentimiento, toma, lanzarBot).
-   * `porEnlace` (pedido de Vale, 18 oct): alguien abrió el enlace de la sesión; además de lo normal se
-   * vuelve a mandar el robot si el intento anterior de ESTE evento no grabó nada y no fue decisión de
-   * nadie (ver previaReintentablePorEnlace): "nadie llegó", falló al entrar, o faltaba el consentimiento
-   * y ahora está. Nunca si hay un robot activo o si ya hay audio.
+   * Despacho de UNA sesión porque Vale la abrió (despacharPorEnlace): índice único google_event_id,
+   * consentimiento, toma, lanzarBot. Se vuelve a mandar el robot si el intento anterior de ESTE evento no
+   * grabó nada y no fue decisión de nadie (ver previaReintentablePorEnlace): "nadie llegó", salió antes de
+   * grabar sin decisión, falló al entrar, o faltaba el consentimiento y ahora está. Nunca si hay un robot
+   * activo o si ya hay audio.
    */
-  async function despacharUna(s: SesionOnline, ahora: Date, enVentana: boolean, porEnlace = false): Promise<ResultadoDespacho> {
+  async function despacharUna(s: SesionOnline, ahora: Date, enVentana: boolean): Promise<ResultadoDespacho> {
     const { data: previa, error: e0 } = await db.from('grabaciones')
-      .select('id, patient_id, estado, estado_antes_error, hora_fin_prevista, fin_at, updated_at, bot_token_vence_at, nota_sistema, ultimo_error')
+      .select('id, patient_id, estado, estado_antes_error, hora_fin_prevista, inicio_at, fin_at, updated_at, bot_token_vence_at, bot_machine_id, nota_sistema, ultimo_error')
       .eq('google_event_id', s.googleEventId).eq('origen', 'online').maybeSingle();
     if (e0) throw new Error(`grabaciones: ${e0.message}`);
     let v: Awaited<ReturnType<PuedeGrabar>> | null = null;
     if (previa) {
-      const p = previa as PreviaEvento & Pick<Grabacion, 'hora_fin_prevista' | 'bot_token_vence_at' | 'patient_id'>;
+      const p = previa as PreviaEvento & Pick<Grabacion, 'hora_fin_prevista' | 'bot_token_vence_at' | 'patient_id' | 'inicio_at'>;
+      // Vale vuelve a la MISMA sesión (salió, se le cayó, o el robot se fue): el robot nuevo sigue esta
+      // misma grabación (una sesión = una grabación = una transcripción).
+      if (enVentana && p.estado === 'grabando' && !(p as { bot_machine_id?: string | null }).bot_machine_id) return volverConVale(p.id, ahora);
       // r2 (punto 7): Vale movió o alargó el evento con el robot ya lanzado → se sigue la hora nueva.
       if (ESTADOS_BOT_ACTIVO.includes(p.estado)) { await seguirHora(p, s, ahora); return 'activo'; }
       if (!enVentana) return 'existe';
-      const porEnlaceTipo = porEnlace ? previaReintentablePorEnlace(p) : null;
+      const porEnlaceTipo = previaReintentablePorEnlace(p);
       // Falló antes de entrar (Fly, Meet): lo mismo que "Reintentar" del panel, y se lanza ya.
       if (porEnlaceTipo === 'reintentar') {
         // Mismo tope de robots por grabación que la reconexión automática (botReconexion).
         if ((await lanzamientosDe(db, p.id)) >= MAX_LANZAMIENTOS_BOT) return 'existe';
         const r = await reintentar(p.id, db);
         if (!r || r.estado !== 'bot_lanzando' || r.bot_machine_id) return 'existe';
-        // Si Vale movió o alargó el evento, el robot nuevo usa la hora vigente de Calendar.
-        if (r.hora_fin_prevista !== s.fin) { await actualizarGrabacion(r.id, { hora_fin_prevista: s.fin }); r.hora_fin_prevista = s.fin; }
+        // Hora vigente de Calendar (Vale pudo mover o alargar el evento), corrida si Vale llega tarde.
+        const finNuevo = finAlDespachar(s, ahora);
+        if (r.hora_fin_prevista !== finNuevo) { await actualizarGrabacion(r.id, { hora_fin_prevista: finNuevo }); r.hora_fin_prevista = finNuevo; }
         await auditar('sistema', 'bot_lanzar', { grabacionId: p.id, patientId: p.patient_id, detalle: { via: 'enlace_sesion', reintento: true }, cliente: db });
         return (await lanzarPendiente(r as GrabacionP6, ahora)) ? 'lanzado' : 'fallo';
       }
@@ -517,7 +559,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     const fila = {
       patient_id: s.patientId, booking_id: s.bookingId, google_event_id: s.googleEventId,
       consent_ids: v.consentIds, origen: 'online', tipo, modelo: d.modelo, diarizacion: d.diarizacion,
-      session_date: fechaChile(s.inicio), hora_fin_prevista: s.fin, meet_url: s.meetUrl, creada_por: 'cron',
+      session_date: fechaChile(s.inicio), hora_fin_prevista: finAlDespachar(s, ahora), meet_url: s.meetUrl, creada_por: 'cron',
       estado: v.puede ? 'bot_lanzando' : 'sin_consentimiento',
       nota_sistema: v.puede ? null : notaRobotSinPermiso(v.motivo),
       tomada_en: v.puede ? ahora.toISOString() : null,
@@ -529,7 +571,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     }
     if (!g) return 'existe';
     if (!v.puede) {
-      await auditar('cron', 'consentimiento_faltante', { grabacionId: g.id, patientId: s.patientId, resultado: 'denegado', detalle: { fase: 'bot', motivo: v.motivo, ...(porEnlace ? { via: 'enlace_sesion' } : {}) }, cliente: db });
+      await auditar('cron', 'consentimiento_faltante', { grabacionId: g.id, patientId: s.patientId, resultado: 'denegado', detalle: { fase: 'bot', motivo: v.motivo, via: 'enlace_sesion' }, cliente: db });
       return 'sin_consentimiento';
     }
     try {
@@ -537,6 +579,37 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     } finally {
       await soltar(g.id, db);
     }
+  }
+
+  /**
+   * Vale abrió de nuevo una sesión cuya grabación sigue abierta sin robot (esperaba que volviera, o el
+   * reemplazo automático no alcanzó a ir): robot nuevo a la MISMA grabación (sigue la numeración y el origen
+   * de tiempo; lanzarBot). Mismos resguardos: toma, consentimiento vigente, tope de robots por grabación.
+   * Si Fly falla, queda como reconexión pendiente y el cron reintenta (relanzarEnCurso).
+   */
+  async function volverConVale(id: string, ahora: Date): Promise<ResultadoDespacho> {
+    if ((await lanzamientosDe(db, id)) >= MAX_LANZAMIENTOS_VALE) return 'existe';
+    const { data: g0, error } = await db.from('grabaciones').select('*').eq('id', id).maybeSingle();
+    if (error || !g0) return 'fallo';
+    let r: ResultadoDespacho = 'activo';
+    const tomada = await conToma(g0 as GrabacionP6, ahora, async (g) => {
+      if (g.estado !== 'grabando' || g.bot_machine_id) return; // otro clic ya lo mandó
+      if (!(await consentimientoVigente(g, 'bot_relanzar'))) {
+        await cerrarConLoGrabado(db, g, { ahora, notaFin: NOTA_SIN_CONSENTIMIENTO_BOT });
+        r = 'sin_consentimiento';
+        return;
+      }
+      await actualizarGrabacion(g.id, { nota_sistema: NOTA_RECONECTANDO, fin_at: null, intentos: 0, proximo_intento_at: null });
+      try {
+        await deps.bot.lanzarBot({ ...g, nota_sistema: NOTA_RECONECTANDO, fin_at: null });
+        await auditar('sistema', 'bot_lanzar', { grabacionId: g.id, patientId: g.patient_id, detalle: { via: 'enlace_sesion', vuelve_vale: true }, cliente: db });
+        r = 'lanzado';
+      } catch (e) {
+        await actualizarGrabacion(g.id, { intentos: 1, ultimo_error: msg(e).slice(0, 2000), proximo_intento_at: new Date(ahora.getTime() + 60_000).toISOString() });
+        r = 'fallo';
+      }
+    });
+    return tomada ? r : 'activo';
   }
 
   /** Lanzamiento de una fila en bot_lanzando sin máquina (con toma y consentimiento revisado). */
@@ -562,23 +635,32 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
   async function despacharBots(ahora: Date): Promise<number> {
     const aj = await ajustes();
     if (!aj.activo || !aj.botActivo) return 0;
-    let sesiones: SesionOnline[];
-    try {
-      sesiones = await deps.bot.sesionesOnlineProximas(new Date(ahora.getTime() - VENTANA_SINCRONIZAR_MS), new Date(ahora.getTime() + VENTANA_BOT_DESPUES_MS));
-    } catch (e) {
-      await alerta({
-        tipo: 'bot', clave: 'bot:calendario', accion: 'revisar',
-        titulo: 'No se pudo revisar Google Calendar para enviar el asistente de notas',
-        detalle: `Mientras no se resuelva, las sesiones online no se graban solas. Detalle técnico: ${msg(e)}`,
-      });
-      throw e;
-    }
     let n = 0;
-    const desdeDespacho = ahora.getTime() - VENTANA_BOT_ANTES_MS;
-    for (const s of sesiones) {
-      if (queda() < 5_000) break;
-      const enVentana = Date.parse(s.inicio) >= desdeDespacho && Date.parse(s.fin) > ahora.getTime();
-      if ((await despacharUna(s, ahora, enVentana)) === 'lanzado') n++;
+    // Decisión de Vale (18 oct): "el robot entra solo cuando entro yo". El cron ya no manda robots por la hora
+    // del calendario (los manda Vale al abrir la sesión: despacharPorEnlace). Aquí solo se sigue la hora de los
+    // robots activos (evento movido o alargado; sesión que partió tarde: finEfectivo), si los hay.
+    const { data: activos, error: eAct } = await db.from('grabaciones')
+      .select('id, patient_id, estado, hora_fin_prevista, inicio_at, bot_token_vence_at, google_event_id')
+      .in('estado', [...ESTADOS_BOT_ACTIVO]).eq('origen', 'online').not('google_event_id', 'is', null).limit(LOTE);
+    if (eAct) throw new Error(`grabaciones: ${eAct.message}`);
+    const porEvento = new Map(((activos ?? []) as (Pick<Grabacion, 'id' | 'patient_id' | 'hora_fin_prevista' | 'inicio_at' | 'bot_token_vence_at'> & { google_event_id: string })[]).map((g) => [g.google_event_id, g]));
+    if (porEvento.size) {
+      let sesiones: SesionOnline[];
+      try {
+        sesiones = await deps.bot.sesionesOnlineProximas(new Date(ahora.getTime() - VENTANA_SINCRONIZAR_MS), new Date(ahora.getTime() + VENTANA_BOT_DESPUES_MS));
+      } catch (e) {
+        await alerta({
+          tipo: 'bot', clave: 'bot:calendario', accion: 'revisar',
+          titulo: 'No se pudo revisar Google Calendar para seguir la hora del asistente de notas',
+          detalle: `Si Vale movió una sesión en curso, el asistente sigue con la hora anterior hasta que se resuelva. Detalle técnico: ${msg(e)}`,
+        });
+        throw e;
+      }
+      for (const s of sesiones) {
+        if (queda() < 5_000) break;
+        const g = porEvento.get(s.googleEventId);
+        if (g) await seguirHora(g, s, ahora);
+      }
     }
     // Reintentos de lanzamiento (Fly falló en un minuto anterior, o Vale tocó Reintentar: M3).
     // Sin `intentos > 0`: tras Reintentar los intentos vuelven a 0. Un lanzamiento en curso no se
@@ -588,7 +670,8 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     for (const g0 of pendientes) {
       if (queda() < 5_000) break;
       if (g0.estado === 'grabando') {
-        await conToma(g0, ahora, async (g) => { if (await relanzarEnCurso(g, ahora)) n++; });
+        if (esperandoVale(g0)) continue; // solo vuelve si Vale abre la sesión (volverConVale)
+        await conToma(g0, ahora, async (g) => { if (!esperandoVale(g) && await relanzarEnCurso(g, ahora)) n++; });
         continue;
       }
       if (await lanzarPendiente(g0, ahora)) n++;
@@ -597,10 +680,10 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
   }
 
   /**
-   * Enlace propio de la sesión (/sesion/<código>, pedido de Vale 18 oct): alguien lo abrió. Si la sesión
-   * es online, tiene Meet y está en [inicio − 30 min, fin), se despacha el robot YA por el mismo camino
-   * del cron. Busca la sesión en Calendar igual que el cron (misma hora real, mismo Meet, mismo cruce con
-   * la reserva y la ficha). Nunca lanza por la reserva sola: sin evento en Calendar no hay robot.
+   * Vale abrió la sesión (botón del panel o enlace /sesion/<código> con su sesión del panel; decisión de
+   * Vale 18 oct: el robot entra solo cuando entra ella). Si la sesión es online, tiene Meet y está en
+   * [inicio − 30 min, fin agendado + 60 min), se despacha el robot YA. Busca la sesión en Calendar (hora real,
+   * Meet, cruce con la reserva y la ficha). Nunca lanza por la reserva sola: sin evento en Calendar no hay robot.
    */
   async function despacharPorEnlace(ref: { bookingId: string; googleEventId?: string | null }, ahora: Date = new Date()): Promise<ResultadoDespacho | 'apagado' | 'sin_sesion'> {
     ajustesCache = null;
@@ -610,7 +693,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     const s = sesiones.find((x) => x.bookingId === ref.bookingId)
       ?? (ref.googleEventId ? sesiones.find((x) => x.googleEventId === ref.googleEventId && (!x.bookingId || x.bookingId === ref.bookingId)) : undefined);
     if (!s) return 'sin_sesion';
-    return despacharUna(s, ahora, enVentanaEnlace(s.inicio, s.fin, ahora), true);
+    return despacharUna(s, ahora, enVentanaEnlace(s.inicio, s.fin, ahora));
   }
 
   /**
@@ -623,6 +706,8 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     const fin = g.hora_fin_prevista ? Date.parse(g.hora_fin_prevista) : NaN;
     const conTiempo = !Number.isNaN(fin) && fin - ahora.getTime() > RESTANTE_MIN_ERROR_MS;
     if (!conTiempo || (await lanzamientosDe(db, g.id)) >= MAX_LANZAMIENTOS_BOT) {
+      // Sin reemplazo automático: queda esperando que Vale vuelva a abrir la sesión (15 min).
+      if (await esperarVale(db, g, { ahora })) return false;
       await cerrarConLoGrabado(db, g, { ahora, notaFin: 'Grabación incompleta: el asistente de notas se desconectó y no alcanzó a volver a entrar. Se transcribe lo que alcanzó a subir.' });
       return false;
     }
@@ -656,17 +741,18 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
    * r2 (punto 7): el evento cambió de término con el robot ya lanzado. Se guarda la hora nueva (el
    * vigilante y el relanzamiento la usan; el robot la recibe en la respuesta de `activo` y de cada
    * segmento), se alarga el token si sigue vigente y el candado de la sesión de Google del robot.
+   * Atraso de Vale (18 oct): la hora guardada es el término EFECTIVO, finEfectivo(inicio, fin, llegada de
+   * Vale = inicio_at), así este seguimiento no deshace el corrimiento. Antes de grabar (sin inicio_at) se
+   * respeta el corrimiento con que se lanzó el robot (finAlDespachar), dentro del tope de fin + 2 h.
    */
-  async function seguirHora(p: Pick<Grabacion, 'id' | 'patient_id' | 'hora_fin_prevista' | 'bot_token_vence_at'>, s: SesionOnline, ahora: Date): Promise<void> {
-    const nueva = Date.parse(s.fin);
-    if (Number.isNaN(nueva) || (p.hora_fin_prevista && Date.parse(p.hora_fin_prevista) === nueva)) return;
-    const cambios: Record<string, unknown> = { hora_fin_prevista: new Date(nueva).toISOString() };
-    const vigente = !!p.bot_token_vence_at && Date.parse(p.bot_token_vence_at) > ahora.getTime();
-    if (vigente) cambios.bot_token_vence_at = new Date(nueva + VIGENCIA_TOKEN_BOT_MS).toISOString();
-    const { data } = await db.from('grabaciones').update(cambios).eq('id', p.id).in('estado', [...ESTADOS_BOT_ACTIVO]).select('id').maybeSingle();
-    if (!data) return;
-    await extenderUsoSesion(db, p.id, ahora, new Date(nueva).toISOString()).catch(() => {});
-    await auditar('cron', ACC.horaMovida, { grabacionId: p.id, patientId: p.patient_id, detalle: { antes: p.hora_fin_prevista, ahora: cambios.hora_fin_prevista }, cliente: db });
+  async function seguirHora(p: Pick<Grabacion, 'id' | 'patient_id' | 'hora_fin_prevista' | 'bot_token_vence_at'> & Partial<Pick<Grabacion, 'inicio_at'>>, s: SesionOnline, ahora: Date): Promise<void> {
+    const finAg = Date.parse(s.fin);
+    if (Number.isNaN(finAg)) return;
+    let nueva = finEfectivo(s.inicio, s.fin, p.inicio_at ?? null);
+    const actual = p.hora_fin_prevista ? Date.parse(p.hora_fin_prevista) : NaN;
+    if (!p.inicio_at && actual > nueva && actual <= finAg + MAX_ATRASO_TRAS_FIN_MS) nueva = actual;
+    if (!(await fijarFinPrevisto(db, p, nueva, ahora))) return;
+    await auditar('cron', ACC.horaMovida, { grabacionId: p.id, patientId: p.patient_id, detalle: { antes: p.hora_fin_prevista, ahora: new Date(nueva).toISOString() }, cliente: db });
   }
 
   /**
@@ -851,9 +937,12 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       audio_borrado_at: ahora.toISOString(), intentos: 0, ultimo_error: null, proximo_intento_at: null,
       ...(g.duracion_seg == null && duracionS != null ? { duracion_seg: duracionS } : {}),
     } as Partial<Grabacion>, db);
-    if (!palabras) {
+    // Vale, 18 oct: nada de avisos por tramos vacíos o cortos. Solo si la sesión COMPLETA (todos los tramos,
+    // una sola transcripción) no tiene voz y se grabó más de 5 min (el robot graba solo con Vale dentro), y
+    // solo en el panel: accion 'ninguna' = sin correo (alertas.correoParaAlerta).
+    if (!palabras && (g.origen !== 'online' || avisarSinVoz(segs))) {
       await alerta({
-        tipo: 'transcripcion', grabacionId: g.id, clave: `sin-voz:${g.id}`, accion: 'revisar',
+        tipo: 'transcripcion', grabacionId: g.id, clave: `sin-voz:${g.id}`, accion: 'ninguna',
         titulo: `No se reconoció voz en la ${etiquetaSesion(g)}`,
         detalle: 'La grabación llegó, pero la transcripción quedó vacía (¿micrófono tapado o en silencio?). No se genera resumen.',
       });

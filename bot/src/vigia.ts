@@ -4,9 +4,13 @@
 //
 // Sale con lo primero que ocurra (50-arquitectura §5 + 10-etica-legal §4.1; segunda ronda 18 oct):
 //  - hora_fin            : se pasó HORA_FIN + MAX_EXTRA_MS (el sitio puede mover HORA_FIN: fijarLimite).
-//  - nadie_llego         : el robot entra antes de la hora y NO graba mientras no haya nadie; si en
-//                          `esperaLlegadaMs` (30 min; 5 min para un robot de reemplazo) no aparece
-//                          ningún humano, sale sin haber grabado nada.
+//  - nadie_llego         : ANTES de grabar (empezoGrabacion no llamado) el robot espera a Vale. Si la
+//                          llamada queda sin humanos durante `esperaLlegadaMs` (30 min; 5 min para un
+//                          robot de reemplazo), contados desde que entra o desde que se fue el último,
+//                          sale sin haber grabado nada. Mientras haya alguien (p. ej. el paciente
+//                          esperando a Vale, que viene atrasada) sigue esperando sin grabar.
+//  - Empezar a grabar    : solo con Vale en la llamada (decidirInicio). Respaldo por voz solo si la
+//                          lista de participantes NO se puede leer (Meet cambió el DOM: listaIlegible).
 //  - vale_salio          : Vale estuvo y no está, y SÍ queda el paciente: se tolera `graciaValeMs`
 //                          (3 min) para que una reconexión de Vale no corte la sesión. Es el máximo que
 //                          se graba al paciente solo: aunque Vale haya colgado a propósito, a los 3 min
@@ -44,6 +48,35 @@ export interface OpcionesVigia {
   valeVistaInicial?: boolean;
 }
 
+/**
+ * Lectura de la lista de participantes desde la página (lecturaParticipantes de captura/hablantes-pagina.ts):
+ * `estructura` = hay tiles de Meet (data-participant-id / data-self-name); `otros` = tiles de otras
+ * personas; `nombres` = nombres leídos de esos tiles.
+ */
+export interface LecturaParticipantes { estructura: boolean; otros: number; nombres: string[] }
+
+/**
+ * ¿La lista NO se puede leer? Sin tiles de Meet en la página (ni el propio) o con tiles de otras personas
+ * sin ningún nombre legible: Meet cambió el DOM. Solo entonces vale el respaldo de "voz sin participantes".
+ */
+export function listaIlegible(l: LecturaParticipantes | null): boolean {
+  if (!l) return true;
+  return !l.estructura || (l.otros > 0 && l.nombres.length === 0);
+}
+
+/**
+ * ¿Empieza a grabar? (atraso de Vale, 18 oct: ningún robot graba sin Vale.)
+ *  - 'grabar'          : Vale está en la llamada.
+ *  - 'grabar_por_voz'  : la lista no se puede leer y hubo voz dos sondeos seguidos (solo el primer robot:
+ *                        un robot de reemplazo nunca empieza sin ver a Vale).
+ *  - 'esperar'         : todo lo demás (p. ej. el paciente llegó antes y espera solo: no se le graba).
+ */
+export function decidirInicio(o: { hayVale: boolean; ilegible: boolean; vozSeguida: number; reemplazo: boolean }): 'grabar' | 'grabar_por_voz' | 'esperar' {
+  if (o.hayVale) return 'grabar';
+  if (o.ilegible && !o.reemplazo && o.vozSeguida >= 2) return 'grabar_por_voz';
+  return 'esperar';
+}
+
 export const GRACIA_VALE_MS = 3 * 60_000;
 export const ESPERA_LLEGADA_MS = 30 * 60_000;
 
@@ -72,6 +105,8 @@ export class Vigia {
   private humanoVisto = false;
   private otroVisto = false;
   private inicio: number | null = null;
+  private grabando = false;
+  private vacioDesde: number | null = null;
   private previos: { humanos: number; vale: boolean } = { humanos: 0, vale: false };
   private limite: number;
   private readonly esperaLlegada: number;
@@ -90,6 +125,9 @@ export class Vigia {
   hayVale(nombres: string[]): boolean {
     return this.humanos(nombres).some((n) => esVale(n, this.o.valeNombres));
   }
+
+  /** Empezó la grabación: desde aquí rigen solo / vale_salio (antes, el robot espera a Vale). */
+  empezoGrabacion(): void { this.grabando = true; this.soloDesde = null; }
 
   /** El sitio informó otra hora de término (Vale movió el evento). */
   fijarLimite(ms: number): void { if (Number.isFinite(ms)) this.limite = ms; }
@@ -118,6 +156,14 @@ export class Vigia {
     this.inicio ??= ahora;
     if (humanos.length > 0) this.humanoVisto = true;
     if (humanos.some((n) => !esVale(n, this.o.valeNombres))) this.otroVisto = true;
+    if (!this.grabando) {
+      // Antes de grabar: sin nadie durante esperaLlegada → nadie_llego (el siguiente clic de Vale lo trae).
+      if (humanos.length === 0) {
+        this.vacioDesde ??= ahora;
+        return ahora - this.vacioDesde >= this.esperaLlegada ? 'nadie_llego' : null;
+      }
+      this.vacioDesde = null;
+    }
     if (!this.humanoVisto) return ahora - this.inicio >= this.esperaLlegada ? 'nadie_llego' : null;
 
     if (humanos.length === 0) {

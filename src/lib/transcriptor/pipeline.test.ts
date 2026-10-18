@@ -13,7 +13,7 @@ import { procesarWebhookAssemblyAI, repoWebhookSupabase } from './assemblyai';
 import { crearBot, procesarEventoBot } from './bot';
 import { evaluarEnBase } from './consentimiento';
 import { reintentar, transicionar } from './estados';
-import { crearPipeline, esperaTrasFallos, etiquetaSesion, MAX_GUARDADO, MAX_RESUMEN, type PipelineP6 } from './pipeline';
+import { avisarSinVoz, crearPipeline, esperaTrasFallos, etiquetaSesion, MAX_GUARDADO, MAX_RESUMEN, type PipelineP6 } from './pipeline';
 import { PROMPT_VERSION_RESUMEN } from './resumen';
 import { leerContenidoResumen } from './resumenCifrado';
 import { HABLANTE_SIN_SEPARAR } from './hablantes';
@@ -21,7 +21,7 @@ import type { NuevaAlerta } from './alertas';
 import type { AssemblyAI, PalabraAAI, ResultadoTranscripcion } from './tipos';
 import type { ClienteMensajes } from './claude';
 import {
-  debeRelanzarBot, ESPERA_LLEGADA_RELANZADO_MS, NOTA_NADIE_LLEGO, NOTA_RECONECTADO, NOTA_RECONECTANDO, NOTA_SIN_CONSENTIMIENTO_BOT, previaLiberable,
+  debeRelanzarBot, ESPERA_LLEGADA_RELANZADO_MS, finEfectivo, NOTA_ESPERANDO_VALE, NOTA_ESPERANDO_VALE_RECONECTADO, NOTA_NADIE_LLEGO, NOTA_RECONECTADO, NOTA_RECONECTANDO, NOTA_SIN_CONSENTIMIENTO_BOT, previaLiberable,
 } from './botReconexion';
 import { notaFinBot } from './bot';
 import { TABLA_SESION_BOT } from './botCuenta';
@@ -321,7 +321,9 @@ test('E2E online (consentimiento v2, decisión 9): bot → sondeo sin webhook �
   e.db.tabla('bookings').push({ id: bookingId, google_event_id: eventoId, session_type: 'online', status: 'confirmed', patient_email: 'diego@ejemplo.cl', notes: 'Meet: https://meet.google.com/abc-defg-hij' });
   e.eventos.push({ id: eventoId, status: 'confirmed', start: { dateTime: inicio }, end: { dateTime: fin }, hangoutLink: 'https://meet.google.com/abc-defg-hij', attendees: [{ email: 'diego@ejemplo.cl' }] });
 
-  // 1) El cron despacha el bot (una sola vez aunque corra de nuevo).
+  // 1) Vale abre la sesión (decisión de Vale, 18 oct: el robot entra solo cuando entra ella); el cron
+  // del minuto no manda otro.
+  assert.equal(await e.pipeline.despacharPorEnlace({ bookingId, googleEventId: eventoId }, e.ahora()), 'lanzado');
   await e.correr();
   const g0 = e.db.tabla('grabaciones')[0];
   assert.deepEqual([g0.estado, g0.origen, g0.patient_id, g0.creada_por, g0.meet_url, g0.hora_fin_prevista], ['bot_lanzando', 'online', p, 'cron', 'https://meet.google.com/abc-defg-hij', fin]);
@@ -346,7 +348,12 @@ test('E2E online (consentimiento v2, decisión 9): bot → sondeo sin webhook �
   assert.equal((await evento({ tipo: 'segmento_subido', seq: 0, bytes: 4000, offset_ms: 0, duracion_ms: 45 * 60_000 })).status, 200);
   const linea = [{ t_ms: 0, nombre: 'Valentina Orellana', on: true }, { t_ms: 1900, nombre: 'Valentina Orellana', on: false }, { t_ms: 2000, nombre: 'Diego Soto', on: true }, { t_ms: 6000, nombre: 'Diego Soto', on: false }];
   assert.equal((await evento({ tipo: 'fin', motivo: 'vale_salio', linea_hablantes: linea })).status, 200);
-  assert.equal(e.grab(id).estado, 'subida');
+  // Una sesión = una grabación: queda abierta 15 min por si Vale vuelve; después se cierra y se transcribe.
+  assert.equal(e.grab(id).estado, 'grabando');
+  assert.equal(e.grab(id).nota_sistema, NOTA_ESPERANDO_VALE);
+  e.avanzar(14); await e.correr();
+  assert.equal(e.grab(id).estado, 'grabando');
+  e.avanzar(1);
 
   // 3) Envío a AssemblyAI (online individual: universal-2, sin diarización pagada).
   await e.correr();
@@ -443,6 +450,7 @@ test('sin consentimiento: no se lanza el bot y queda la fila sin_consentimiento 
   e.firma(p, 'Sofía Paz', '16.666.666-6', '2026-10-v1'); // v1 no autoriza grabar
   const inicio = new Date(e.ahora().getTime() + 60_000).toISOString();
   e.eventos.push({ id: 'evencuadrado1', start: { dateTime: inicio }, end: { dateTime: new Date(e.ahora().getTime() + 51 * 60_000).toISOString() }, hangoutLink: 'https://meet.google.com/xyz-abcd-efg', attendees: [{ email: 'sofia@ejemplo.cl' }] });
+  assert.equal(await e.pipeline.despacharPorEnlace({ bookingId: randomUUID(), googleEventId: 'evencuadrado1' }, e.ahora()), 'sin_consentimiento');
   await e.correr();
   assert.equal(e.maquinas.length, 0);
   assert.equal(e.db.tabla('grabaciones')[0].estado, 'sin_consentimiento');
@@ -658,6 +666,7 @@ test('H2: evento online sin tipo de una ficha de pareja con UNA firma → no se 
   e.firma(p, 'Clara Ríos', '13.131.313-3');
   const inicio = new Date(e.ahora().getTime() + 60_000).toISOString();
   e.eventos.push({ id: 'evpareja1', start: { dateTime: inicio }, end: { dateTime: new Date(e.ahora().getTime() + 51 * 60_000).toISOString() }, hangoutLink: 'https://meet.google.com/xyz-abcd-efg', attendees: [{ email: 'clara@ejemplo.cl' }] });
+  await e.pipeline.despacharPorEnlace({ bookingId: randomUUID(), googleEventId: 'evpareja1' }, e.ahora());
   await e.correr();
   assert.equal(e.maquinas.length, 0);
   const g = e.db.tabla('grabaciones')[0];
@@ -729,7 +738,12 @@ function sesionOnline(e: ReturnType<typeof escenario>, inicioMin = 2) {
   e.db.tabla('bookings').push({ id: bookingId, google_event_id: eventoId, session_type: 'online', status: 'confirmed', patient_email: 'diego@ejemplo.cl', notes: 'Meet: https://meet.google.com/abc-defg-hij' });
   const ev = { id: eventoId, status: 'confirmed', start: { dateTime: inicio }, end: { dateTime: fin }, hangoutLink: 'https://meet.google.com/abc-defg-hij', attendees: [{ email: 'diego@ejemplo.cl' }] };
   e.eventos.push(ev);
-  return { p, eventoId, ev, inicio, fin };
+  return { p, eventoId, ev, inicio, fin, bookingId };
+}
+
+/** Vale abre la sesión (panel o enlace con su sesión del panel): así se manda el robot (decisión de Vale, 18 oct). */
+function abrirVale(e: ReturnType<typeof escenario>, s: { bookingId: string; eventoId: string }) {
+  return e.pipeline.despacharPorEnlace({ bookingId: s.bookingId, googleEventId: s.eventoId }, e.ahora());
 }
 
 function eventoDe(e: ReturnType<typeof escenario>, token: string) {
@@ -749,8 +763,7 @@ async function subirSegmento(e: ReturnType<typeof escenario>, ev: ReturnType<typ
 
 test('r2 punto 1b: el robot se cae a mitad → robot de reemplazo a la MISMA grabación, seq continuo, mismo origen y sin duplicar', async () => {
   const e = escenario();
-  sesionOnline(e);
-  await e.correr();
+  await abrirVale(e, sesionOnline(e));
   const id = e.db.tabla('grabaciones')[0].id as string;
   const bot1 = eventoDe(e, e.maquinas[0].token);
   assert.equal((await bot1({ tipo: 'lobby' })).status, 200);
@@ -793,12 +806,14 @@ test('r2 punto 1b: el robot se cae a mitad → robot de reemplazo a la MISMA gra
   const linea2 = [{ t_ms: off2 + 100, nombre: 'Diego Soto', on: true }, { t_ms: off2 + 900, nombre: 'Diego Soto', on: false }];
   assert.equal((await bot2({ tipo: 'fin', motivo: 'vale_salio', linea_hablantes: linea2 })).status, 200, 'el fin del 2.º robot no se toma por repetido');
   g = e.grab(id);
-  assert.equal(g.estado, 'subida');
+  assert.deepEqual([g.estado, g.nota_sistema], ['grabando', NOTA_ESPERANDO_VALE_RECONECTADO], 'espera 15 min por si Vale vuelve');
+  e.avanzar(15); await e.correr();
+  g = e.grab(id);
+  assert.equal(g.estado, 'transcribiendo');
   assert.deepEqual(g.linea_hablantes, [...linea1, ...linea2]);
   assert.equal(g.nota_sistema, NOTA_RECONECTADO);
   assert.deepEqual(e.segs(id).map((s) => [s.seq, s.offset_ms]), [[0, 0], [1, off2]]);
   assert.equal(e.db.tabla('transcriptor_auditoria').filter((a) => a.accion === 'bot_lanzar' && a.grabacion_id === id).length, 2);
-  await e.correr();
   assert.equal(e.aai.envios.length, 2, 'se transcriben los dos tramos');
 });
 
@@ -831,8 +846,7 @@ test('r2 punto 1b: el env del robot de reemplazo lleva SEQ_INICIAL, ORIGEN_MS y 
 
 test('r2 punto 1b: la máquina murió sin mandar fin → el vigilante lo detecta y manda reemplazo; Fly sin respuesta → no toca nada', async () => {
   const e = escenario();
-  sesionOnline(e);
-  await e.correr();
+  await abrirVale(e, sesionOnline(e));
   const id = e.db.tabla('grabaciones')[0].id as string;
   const bot1 = eventoDe(e, e.maquinas[0].token);
   await bot1({ tipo: 'lobby' }); await bot1({ tipo: 'activo' });
@@ -850,8 +864,7 @@ test('r2 punto 1b: la máquina murió sin mandar fin → el vigilante lo detecta
   assert.ok(e.db.tabla('transcriptor_auditoria').some((a) => a.accion === 'bot_salio' && a.detalle?.motivo === 'caida'));
   // Antes de grabar: una máquina caída en la sala de espera también se relanza sola.
   const e2 = escenario();
-  sesionOnline(e2);
-  await e2.correr();
+  await abrirVale(e2, sesionOnline(e2));
   const id2 = e2.db.tabla('grabaciones')[0].id as string;
   await eventoDe(e2, e2.maquinas[0].token)({ tipo: 'lobby' });
   e2.estadosMaquina.set(e2.maquinas[0].id, '404');
@@ -887,14 +900,18 @@ test('r2 punto 1b: sin tiempo o con el tope de lanzamientos no hay reemplazo: se
   await ev({ tipo: 'lobby' }); await ev({ tipo: 'activo' });
   assert.equal((await subirSegmento(e, ev, g.id, 0, 0, 60_000)).status, 200);
   await ev({ tipo: 'fin', motivo: 'error', linea_hablantes: [] });
-  assert.equal(e.grab(g.id).estado, 'subida', 'quedan menos de 3 min: no se relanza, se transcribe ya');
-  assert.equal(e.grab(g.id).nota_sistema, notaFinBot('error', Math.round((e.grab(g.id).duracion_seg as number) / 60)));
+  assert.equal(e.grab(g.id).estado, 'grabando', 'quedan menos de 3 min: no se relanza solo; espera que Vale vuelva');
+  assert.equal(e.maquinas.length, 0);
+  e.avanzar(15); await e.correr();
+  assert.equal(e.grab(g.id).estado, 'transcribiendo', 'Vale no volvió: se cierra con lo grabado y se transcribe');
+  assert.equal(e.grab(g.id).nota_sistema, null);
+  // Motivos que cierran al tiro (decisión o resguardo): sin espera.
+  assert.equal(notaFinBot('participantes_extra', 3)?.includes('más participantes'), true);
 });
 
 test('r2 punto 3: nadie llegó → sin_audio con nota clara, sin alerta de "transcripción vacía"', async () => {
   const e = escenario();
-  sesionOnline(e);
-  await e.correr();
+  await abrirVale(e, sesionOnline(e));
   const id = e.db.tabla('grabaciones')[0].id as string;
   const bot = eventoDe(e, e.maquinas[0].token);
   await bot({ tipo: 'lobby' });
@@ -912,8 +929,9 @@ test('r2 punto 3: nadie llegó → sin_audio con nota clara, sin alerta de "tran
 
 test('r2 punto 2: sin consentimiento al empezar a grabar o al pedir URL → 403 con codigo; fin sin_consentimiento antes de grabar → cancelada', async () => {
   const e = escenario();
-  const { p } = sesionOnline(e);
-  await e.correr();
+  const s1 = sesionOnline(e);
+  const { p } = s1;
+  await abrirVale(e, s1);
   const id = e.db.tabla('grabaciones')[0].id as string;
   const bot = eventoDe(e, e.maquinas[0].token);
   await bot({ tipo: 'lobby' });
@@ -926,7 +944,7 @@ test('r2 punto 2: sin consentimiento al empezar a grabar o al pedir URL → 403 
   // En plena grabación: pide_url 403 con codigo y el fin cierra con lo grabado (no relanza).
   const e2 = escenario();
   const s2 = sesionOnline(e2);
-  await e2.correr();
+  await abrirVale(e2, s2);
   const id2 = e2.db.tabla('grabaciones')[0].id as string;
   const b2 = eventoDe(e2, e2.maquinas[0].token);
   await b2({ tipo: 'lobby' }); await b2({ tipo: 'activo' });
@@ -939,25 +957,32 @@ test('r2 punto 2: sin consentimiento al empezar a grabar o al pedir URL → 403 
   assert.equal(e2.maquinas.length, 1);
 });
 
-test('r2 punto 5: la ventana de despacho cubre hasta 20 min después del inicio, sin duplicar', async () => {
+test('Vale, 18 oct: el cron ya no manda robots por la hora; Vale abre la sesión → uno solo, también si llega tarde', async () => {
   const e = escenario();
-  sesionOnline(e, -15); // el cron/Calendar fallaron: la sesión empezó hace 15 min
+  const s0 = sesionOnline(e, -15); // la sesión empezó hace 15 min y Vale no ha entrado
   await e.correr();
-  assert.equal(e.maquinas.length, 1);
   e.avanzar(1); await e.correr();
-  assert.equal(e.db.tabla('grabaciones').length, 1);
+  assert.equal(e.maquinas.length, 0, 'sin Vale no hay robot');
+  assert.equal(e.db.tabla('grabaciones').length, 0);
+  assert.equal(await abrirVale(e, s0), 'lanzado');
+  assert.equal(await abrirVale(e, s0), 'activo', 'otro clic no duplica');
+  e.avanzar(1); await e.correr();
   assert.equal(e.maquinas.length, 1);
+  assert.equal(e.db.tabla('grabaciones').length, 1);
+  // Vale llega 70 min tarde a una sesión de 50 (20 min después del término agendado): igual va, y el término
+  // previsto se corre a su llegada + 50 min.
   const tarde = escenario();
-  sesionOnline(tarde, -25);
-  await tarde.correr();
-  assert.equal(tarde.maquinas.length, 0, 'más de 20 min tarde: no');
-  assert.equal(tarde.db.tabla('grabaciones').length, 0);
+  const st = sesionOnline(tarde, -70);
+  assert.equal(await abrirVale(tarde, st), 'lanzado');
+  assert.equal(tarde.db.tabla('grabaciones')[0].hora_fin_prevista, new Date(tarde.ahora().getTime() + 50 * 60_000).toISOString());
+  const muyTarde = escenario();
+  assert.equal(await abrirVale(muyTarde, sesionOnline(muyTarde, -111)), 'fuera', 'pasada 1 h del término: no');
 });
 
 test('r2 punto 7: evento movido — con robot lanzado sigue la hora nueva; si el robot ya volvió sin audio, se despacha a la hora nueva', async () => {
   const e = escenario();
   const s = sesionOnline(e);
-  await e.correr();
+  await abrirVale(e, s);
   const id = e.db.tabla('grabaciones')[0].id as string;
   const bot = eventoDe(e, e.maquinas[0].token);
   await bot({ tipo: 'lobby' });
@@ -973,7 +998,7 @@ test('r2 punto 7: evento movido — con robot lanzado sigue la hora nueva; si el
   // Otro caso: el robot fue a la hora vieja, nadie llegó; Vale había movido la sesión 2 h más tarde.
   const m = escenario();
   const sm = sesionOnline(m);
-  await m.correr();
+  await abrirVale(m, sm);
   const idm = m.db.tabla('grabaciones')[0].id as string;
   const bm = eventoDe(m, m.maquinas[0].token);
   await bm({ tipo: 'lobby' });
@@ -982,14 +1007,17 @@ test('r2 punto 7: evento movido — con robot lanzado sigue la hora nueva; si el
   sm.ev.start.dateTime = new Date(Date.parse(sm.inicio) + 2 * 60 * 60_000).toISOString();
   sm.ev.end.dateTime = new Date(Date.parse(sm.fin) + 2 * 60 * 60_000).toISOString();
   m.avanzar(1); await m.correr();
-  assert.equal(m.maquinas.length, 1, 'aún no es la hora nueva');
-  m.avanzar(90); await m.correr();
-  assert.equal(m.maquinas.length, 2, 'se despacha a la hora nueva aunque el google_event_id sea el mismo');
+  assert.equal(await abrirVale(m, sm), 'sin_sesion', 'aún no es la hora nueva (falta más de 30 min)');
+  assert.equal(m.maquinas.length, 1);
+  m.avanzar(90);
+  assert.equal(await abrirVale(m, sm), 'lanzado', 'Vale abre a la hora nueva: se despacha aunque el google_event_id sea el mismo');
+  assert.equal(m.maquinas.length, 2);
   const filas = m.db.tabla('grabaciones');
   assert.equal(filas.length, 2);
   assert.equal(m.grab(idm).google_event_id, `${sm.eventoId}~movido-${idm.slice(0, 8)}`, 'la fila vieja queda trazable');
   assert.equal(filas.find((f) => f.id !== idm)!.google_event_id, sm.eventoId);
   m.avanzar(1); await m.correr();
+  assert.equal(await abrirVale(m, sm), 'activo');
   assert.equal(m.maquinas.length, 2, 'sin duplicar');
 });
 
@@ -1019,4 +1047,103 @@ test('r2 punto 7: previaLiberable solo libera filas sin audio terminadas antes d
   assert.equal(previaLiberable({ ...base, estado: 'error', estado_antes_error: 'bot_lanzando', fin_at: null }, '2026-10-20T15:00:00Z', '2026-10-20T15:50:00Z'), false, 'error: nunca (no salta el tope de lanzamientos)');
   assert.equal(previaLiberable({ ...base, estado: 'lista', fin_at: '2026-10-20T13:20:00Z' }, '2026-10-20T15:00:00Z', '2026-10-20T15:50:00Z'), false, 'con audio: nunca');
   assert.equal(previaLiberable({ ...base, estado: 'cancelada', fin_at: null }, '2026-10-20T15:00:00Z', '2026-10-20T15:50:00Z'), false);
+});
+
+// ─── Vale, 18 oct: una sesión = una grabación = una transcripción; atraso; avisos ─────────────────
+
+/** Un tramo del robot: lobby → activo → un segmento de `minutos` → fin con `motivo`. */
+async function tramo(e: ReturnType<typeof escenario>, id: string, seq: number, minutos: number, motivo = 'vale_salio') {
+  const bot = eventoDe(e, e.maquinas.at(-1)!.token);
+  assert.equal((await bot({ tipo: 'lobby' })).status, 200);
+  assert.equal((await bot({ tipo: 'activo' })).status, 200);
+  const offset = e.ahora().getTime() - Date.parse(String(e.grab(id).inicio_at));
+  e.avanzar(minutos);
+  assert.equal((await subirSegmento(e, bot, id, seq, offset, minutos * 60_000)).status, 200);
+  assert.equal((await bot({ tipo: 'fin', motivo, linea_hablantes: [] })).status, 200);
+}
+
+/** Completa en AssemblyAI todos los segmentos enviados (texto por seq) y deja pasar el sondeo. */
+async function transcribir(e: ReturnType<typeof escenario>, id: string, textos: string[]) {
+  for (const s of e.segs(id)) e.aai.completar(s.aai_transcript_id, textos[s.seq] ? palabras(textos[s.seq]) : []);
+  e.avanzar(31); await e.correr();
+}
+
+test('una sesión = una grabación: Vale sale y vuelve por el mismo enlace → el robot sigue la MISMA grabación y se transcribe UNA vez; tramo silencioso + tramo con voz = sin aviso', async () => {
+  const e = escenario();
+  const s = sesionOnline(e);
+  assert.equal(await abrirVale(e, s), 'lanzado');
+  const id = e.db.tabla('grabaciones')[0].id as string;
+  await tramo(e, id, 0, 4); // tramo 1: silencio (p. ej. micrófono apagado), Vale se cae
+  let g = e.grab(id);
+  assert.deepEqual([g.estado, g.bot_machine_id, g.nota_sistema], ['grabando', null, NOTA_ESPERANDO_VALE]);
+  e.avanzar(1); await e.correr();
+  assert.equal(e.maquinas.length, 1, 'el cron no manda robot sin Vale');
+  assert.equal(e.aai.envios.length, 0, 'no se transcribe un tramo parcial');
+  // Vale vuelve a entrar por el mismo enlace a los 5 min: robot nuevo, misma grabación, seq continuo.
+  e.avanzar(4);
+  assert.equal(await abrirVale(e, s), 'lanzado');
+  assert.equal(e.maquinas.length, 2);
+  assert.equal(await abrirVale(e, s), 'activo', 'otro clic no duplica');
+  await tramo(e, id, 1, 30);
+  assert.equal(e.grab(id).nota_sistema, NOTA_ESPERANDO_VALE_RECONECTADO);
+  e.avanzar(14); await e.correr();
+  assert.equal(e.grab(id).estado, 'grabando', 'aún puede volver');
+  e.avanzar(1); await e.correr();
+  g = e.grab(id);
+  assert.equal(g.estado, 'transcribiendo');
+  assert.equal(g.nota_sistema, NOTA_RECONECTADO);
+  assert.equal(e.db.tabla('grabaciones').length, 1, 'una sola grabación');
+  assert.deepEqual(e.segs(id).map((x) => x.seq), [0, 1]);
+  await transcribir(e, id, ['', 'hola valentina perdón se me cayó la conexión']);
+  assert.equal(e.db.tabla('transcripciones').filter((t) => t.grabacion_id === id).length, 1, 'una sola transcripción');
+  assert.equal(e.grab(id).estado, 'lista');
+  assert.equal(e.db.tabla('resumenes_ia').filter((r) => r.grabacion_id === id).length, 1, 'un solo resumen');
+  assert.ok(!e.alertas.some((a) => String(a.clave).startsWith('sin-voz:')), 'hay voz en la sesión completa: sin aviso');
+});
+
+test('sin voz en TODA la sesión: con menos de 5 min grabados no hay aviso; con más, aviso solo en el panel (sin correo)', async () => {
+  for (const [minutos, aviso] of [[3, false], [12, true]] as const) {
+    const e = escenario();
+    const s = sesionOnline(e);
+    await abrirVale(e, s);
+    const id = e.db.tabla('grabaciones')[0].id as string;
+    await tramo(e, id, 0, minutos);
+    e.avanzar(15); await e.correr();
+    await transcribir(e, id, []);
+    const a = e.alertas.filter((x) => String(x.clave).startsWith('sin-voz:'));
+    assert.equal(a.length, aviso ? 1 : 0, `${minutos} min`);
+    if (aviso) assert.equal(a[0].accion, 'ninguna', 'informativo: no manda correo');
+  }
+  assert.equal(avisarSinVoz([{ duracion_ms: 4 * 60_000 }, { duracion_ms: 60_000 }]), false);
+  assert.equal(avisarSinVoz([{ duracion_ms: 4 * 60_000 }, { duracion_ms: 61_000 }]), true);
+  assert.equal(avisarSinVoz([{ duracion_ms: null }]), false);
+});
+
+test('Vale atrasada: el término efectivo = llegada de Vale + duración (tope fin + 2 h); el cron no lo deshace y alarga token y vigilante', async () => {
+  assert.equal(finEfectivo('2026-10-20T13:00:00Z', '2026-10-20T13:50:00Z', null), Date.parse('2026-10-20T13:50:00Z'));
+  assert.equal(finEfectivo('2026-10-20T13:00:00Z', '2026-10-20T13:50:00Z', '2026-10-20T12:55:00Z'), Date.parse('2026-10-20T13:50:00Z'), 'llegó antes');
+  assert.equal(finEfectivo('2026-10-20T13:00:00Z', '2026-10-20T13:50:00Z', '2026-10-20T13:25:00Z'), Date.parse('2026-10-20T14:15:00Z'));
+  assert.equal(finEfectivo('2026-10-20T13:00:00Z', '2026-10-20T13:50:00Z', '2026-10-20T16:00:00Z'), Date.parse('2026-10-20T15:50:00Z'), 'tope fin + 2 h');
+  const e = escenario();
+  const s = sesionOnline(e, -25); // empezó hace 25 min; termina en 25
+  assert.equal(await abrirVale(e, s), 'lanzado');
+  const id = e.db.tabla('grabaciones')[0].id as string;
+  assert.equal(e.grab(id).hora_fin_prevista, new Date(e.ahora().getTime() + 50 * 60_000).toISOString(), 'al despachar: Vale llega ahora');
+  const bot = eventoDe(e, e.maquinas[0].token);
+  await bot({ tipo: 'lobby' });
+  e.avanzar(2);
+  await bot({ tipo: 'activo' }); // Vale ya está: empieza a grabar
+  const llegada = Date.parse(String(e.grab(id).inicio_at));
+  e.avanzar(1); await e.correr();
+  const finEf = new Date(llegada + 50 * 60_000).toISOString();
+  assert.equal(e.grab(id).hora_fin_prevista, finEf, 'el cron fija llegada + 50 min');
+  assert.equal(e.grab(id).bot_token_vence_at, new Date(llegada + 50 * 60_000 + 2 * 60 * 60_000).toISOString());
+  e.avanzar(1); await e.correr();
+  assert.equal(e.grab(id).hora_fin_prevista, finEf, 'el seguimiento de cada minuto no lo deshace');
+  const seg = await subirSegmento(e, bot, id, 0, 0, 60_000);
+  assert.equal(seg.cuerpo.hora_fin, finEf, 'el robot recibe el término efectivo');
+  // 40 min después del término AGENDADO el vigilante no apaga una sesión que partió tarde.
+  e.avanzar(25 + 40 - 4); await e.correr();
+  assert.equal(e.matadas.length, 0);
+  assert.equal(e.grab(id).estado, 'grabando');
 });

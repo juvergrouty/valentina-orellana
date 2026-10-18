@@ -1,8 +1,8 @@
 // Bot "Notas Ps. Valentina Orellana": entra al Meet como invitado (o, en modo 'cuenta', con la
 // cuenta de Google del robot: invitado del calendario, entra sin pedir permiso; ver
 // docs/transcriptor/85-robot-meet.md), espera que Vale lo admita (hasta 20 min), y EMPIEZA A GRABAR
-// recién cuando hay alguien en la llamada (r2: no graba silencio; si nadie llega en 30 min sale sin
-// subir nada). Graba el audio mezclado de la reunión en segmentos de 15 min que sube directo a R2
+// recién cuando VALE está en la llamada (18 oct: el robot lo manda Vale al abrir la sesión y nunca graba
+// al paciente solo; si la llamada queda sin nadie 30 min sale sin subir nada). Graba el audio mezclado de la reunión en segmentos de 15 min que sube directo a R2
 // (URL prefirmada que pide al sitio), registra quién habla por el tile iluminado y sale según
 // vigia.ts (Vale salió, quedó solo, alguien de más, expulsado, sin consentimiento, HORA_FIN + 30 min).
 // Al terminar, el proceso sale y la máquina de Fly se autodestruye (config.auto_destroy = true,
@@ -23,12 +23,12 @@ import { salirDeMeet } from './meet/salir.js';
 import { clasesHablando } from './meet/selectores.js';
 import { instalarGrabadorEnPagina } from './captura/audio-pagina.js';
 import { capturarPistasRTC } from './captura/rtc-pagina.js';
-import { instalarHablantesEnPagina, participantesEnPagina } from './captura/hablantes-pagina.js';
+import { instalarHablantesEnPagina, lecturaParticipantes } from './captura/hablantes-pagina.js';
 import { Segmentos } from './segmentos.js';
 import { horaFinDeRespuesta, SinConsentimientoError, Sitio, TokenRechazadoError } from './sitio.js';
 import { sanearError } from './saneo.js';
 import { estadoSesionValido, soloGoogle, type EstadoSesion } from './sesion.js';
-import { Vigia, type MotivoFin } from './vigia.js';
+import { decidirInicio, listaIlegible, Vigia, type LecturaParticipantes, type MotivoFin } from './vigia.js';
 
 const log = (m: string) => console.log(`[bot ${new Date().toISOString()}] ${m}`);
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -116,37 +116,39 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
       if (exp) { motivo = exp === 'expulsado' ? 'expulsado' : 'vale_salio'; break; }
       if (segs.sinConsentimiento) { motivo = 'sin_consentimiento'; break; }
 
-      let nombres: string[] = [];
-      try { nombres = await p.evaluate(participantesEnPagina); } catch { /* página ocupada: se reintenta */ }
+      let lectura: LecturaParticipantes | null = null;
+      try { lectura = await p.evaluate(lecturaParticipantes); } catch { /* página ocupada: se reintenta */ }
+      const nombres = lectura?.nombres ?? [];
       const humanos = vigia.humanos(nombres);
       if (humanos.length) vioHumanos = true;
       motivo = vigia.observar(ahora, nombres);
       if (motivo) break;
 
-      // r2 (punto 3): se empieza a grabar recién cuando hay al menos una persona. `activo` le dice al
-      // sitio que empezó (pasa a 'grabando'); si no hay consentimiento, el sitio responde 403 y se sale.
+      // Se empieza a grabar recién cuando VALE está en la llamada (atraso de Vale, 18 oct: si el paciente
+      // llega antes y espera solo, no se le graba). `activo` le dice al sitio que empezó (pasa a 'grabando';
+      // inicio_at = llegada de Vale); si no hay consentimiento, el sitio responde 403 y se sale.
       if (inicio == null) {
-        if (!humanos.length && !cfg.valeVista && ahora - ultimoNivel >= 10_000) {
-          // Respaldo si Meet cambió el DOM y no se leen los participantes: si llega VOZ por las pistas
-          // remotas (alguien habla) dos veces seguidas, hay gente aunque no se vea → se graba y se avisa.
+        const ilegible = listaIlegible(lectura);
+        if (ilegible && !cfg.valeVista && ahora - ultimoNivel >= 10_000) {
+          // Respaldo SOLO si la lista de participantes no se puede leer (Meet cambió el DOM): si llega VOZ por
+          // las pistas remotas dos sondeos seguidos, hay gente aunque no se vea → se graba y se avisa.
           ultimoNivel = ahora;
           const pico = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.nivel().pico).catch(() => 0);
           vozSinTiles = pico >= UMBRAL_VOZ ? vozSinTiles + 1 : 0;
-          if (vozSinTiles >= 2) {
-            log('hay voz pero no se ven participantes: se graba igual');
-            await sitio.enviar({ tipo: 'error', detalle: 'El bot no pudo leer los participantes de Meet (¿cambió el DOM?); graba porque hay voz' }).catch(() => {});
-            vioHumanos = true;
-            humanos.push('(voz)');
-          }
+        } else if (!ilegible) vozSinTiles = 0;
+        const decision = decidirInicio({ hayVale: vigia.hayVale(nombres), ilegible, vozSeguida: vozSinTiles, reemplazo: cfg.valeVista });
+        if (decision === 'esperar') continue;
+        if (decision === 'grabar_por_voz') {
+          log('hay voz pero no se puede leer la lista de participantes: se graba igual');
+          await sitio.enviar({ tipo: 'error', detalle: 'El bot no pudo leer los participantes de Meet (¿cambió el DOM?); graba porque hay voz' }).catch(() => {});
+          vioHumanos = true;
         }
-        if (!humanos.length) continue;
-        // Robot de reemplazo: solo con Vale presente (nunca empieza grabando al paciente solo).
-        if (cfg.valeVista && !vigia.hayVale(nombres)) continue;
         try { await sitio.enviar({ tipo: 'activo' }); } catch (e) {
           if (e instanceof SinConsentimientoError) { motivo = 'sin_consentimiento'; break; }
           throw e;
         }
         inicio = Date.now();
+        vigia.empezoGrabacion();
         desfase = desfaseOrigen(inicio, cfg.origenMs);
         await iniciar(seq);
         proximoCorte = inicio + cfg.segmentoMs;
@@ -326,7 +328,9 @@ async function main(): Promise<number> {
         await sitio.enviar({ tipo: 'error', detalle: adm.detalle }).catch(() => {});
         await enviarFin('error');
       } else {
-        await enviarFin('no_admitido');
+        // 'vencido' = nadie lo admitió a tiempo (no es un rechazo): se informa como nadie_llego para que el
+        // siguiente clic de Vale lo vuelva a mandar. 'rechazado' (Vale dijo que no) sí es no_admitido.
+        await enviarFin(adm.tipo === 'vencido' ? 'nadie_llego' : 'no_admitido');
       }
       await salirDeMeet(p, log);
       return 0;

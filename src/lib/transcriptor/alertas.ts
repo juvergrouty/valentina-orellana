@@ -1,7 +1,8 @@
 // Transcriptor IA — avisos de errores técnicos (paquete P8).
 // Decisión 8 (docs/transcriptor/01-decisiones-16oct.md): cada error técnico aparece en el PANEL
 // (todas las páginas de /admin, ver src/components/admin/AlertasTranscriptor.astro) hasta que se
-// resuelve; el correo a Vale es solo respaldo (máx. 1 por clave cada 6 h).
+// resuelve; el correo a Vale es solo respaldo (máx. 1 por clave cada 6 h) y SOLO para fallas que Vale
+// tiene que arreglar (Vale, 18 oct: correoParaAlerta): nunca por silencio ni por avisos informativos.
 // Decisión A (02-decisiones-16oct-noche.md): NO hay "Marcar como resuelto". Un aviso se cierra
 // SOLO cuando el problema se arregla (resuelta_por = 'sistema'): el paso de la grabación salió
 // bien (se revisa al listar, ver alertaSuperada en accionesAlerta.ts) o el chequeo volvió a OK.
@@ -121,6 +122,16 @@ export function normalizarAlerta(a: NuevaAlerta): Required<Omit<NuevaAlerta, 'de
   // Una acción de reintento sin grabación no tiene qué reintentar.
   const accionFinal: AlertaAccion = !grabacionId && (accion === 'reintentar' || accion === 'reintentar_resumen') ? 'revisar' : accion;
   return { tipo, titulo, detalle, grabacionId, accion: accionFinal, clave: claveDe({ ...a, tipo, grabacionId, titulo }) };
+}
+
+/**
+ * ¿Esta alerta manda correo de respaldo? (Vale, 18 oct: "nada de correos por tramos vacíos o cortos".)
+ * Solo las que piden algo a Vale (accion distinta de 'ninguna': reintentar, revisar credenciales, consentimiento,
+ * el robot no pudo entrar…). Nunca las de silencio (sin-voz:) ni las informativas ('ninguna'): esas quedan solo
+ * en el panel.
+ */
+export function correoParaAlerta(n: Pick<ReturnType<typeof normalizarAlerta>, 'accion' | 'clave'>): boolean {
+  return n.accion !== 'ninguna' && !n.clave.startsWith('sin-voz:');
 }
 
 const ETIQUETA_TIPO: Record<AlertaTipo, string> = {
@@ -487,7 +498,7 @@ export function crearAlertas(deps: DepsAlertas = {}): ServicioAlertas {
       if (!fila) throw new Error('no se pudo registrar la alerta tras 4 intentos');
     } catch (e) {
       console.error('[transcriptor/alertas] no se pudo guardar la alerta', n.clave, '-', e instanceof Error ? e.message : e);
-      if (e instanceof TablaAlertasFaltanteError) return;
+      if (e instanceof TablaAlertasFaltanteError || !correoParaAlerta(n)) return;
       try { await correoDeRespaldoSinBase(n); } catch { /* nunca lanza */ }
       return;
     }
@@ -496,7 +507,8 @@ export function crearAlertas(deps: DepsAlertas = {}): ServicioAlertas {
       try { await deps.auditarNueva(fila); } catch { /* la bitácora no bloquea el aviso */ }
     }
 
-    // Correo de respaldo (máx. 1 por clave cada 6 h).
+    // Correo de respaldo (máx. 1 por clave cada 6 h), solo si Vale tiene que hacer algo.
+    if (!correoParaAlerta(n)) return;
     try {
       const t = ahora();
       const ultimo = await r.ultimoCorreo(n.clave);

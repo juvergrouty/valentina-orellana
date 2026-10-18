@@ -11,6 +11,7 @@ import {
 } from './bot';
 import { BOT_NOMBRE, type Grabacion } from './tipos';
 import { cifrarSesion, filtrarEstadoSesion, TABLA_SESION_BOT } from './botCuenta';
+import { NOTA_ESPERANDO_VALE } from './botReconexion';
 import type { NuevaAlerta } from './alertas';
 
 const SECRETO = 's'.repeat(32);
@@ -303,7 +304,10 @@ test('endpoint: flujo completo lobby → activo → segmentos → fin, sin devol
 
   const fin = await s.enviar({ tipo: 'fin', motivo: 'vale_salio', linea_hablantes: [{ t_ms: 0, nombre: 'Camila', on: true }, { t_ms: 5, nombre: 'Camila', on: false }] });
   assert.deepEqual(fin.cuerpo, { ok: true });
-  assert.equal(s.g().estado, 'subida');
+  // Una sesión = una grabación (Vale, 18 oct): Vale salió → la grabación queda abierta 15 min por si vuelve.
+  assert.equal(s.g().estado, 'grabando');
+  assert.equal(s.g().nota_sistema, NOTA_ESPERANDO_VALE);
+  assert.equal(s.g().bot_machine_id, null);
   assert.deepEqual(s.g().linea_hablantes, [{ t_ms: 0, nombre: 'Camila', on: true }, { t_ms: 5, nombre: 'Camila', on: false }]);
   assert.equal(s.db.tablas.grabacion_segmentos.length, 1); // el seq 1 sin confirmar se descartó
   // Token revocado: cualquier evento posterior → 404.
@@ -327,8 +331,12 @@ test('auditoría seguridad: pide_url revisa el consentimiento; retirado → 403 
 
 test('endpoint: fin sin segmentos → sin_audio; no admitido → bot_no_admitido; error antes de grabar → error', async () => {
   const a = escenario('grabando');
-  await a.enviar({ tipo: 'fin', motivo: 'solo', linea_hablantes: [] });
+  await a.enviar({ tipo: 'fin', motivo: 'hora_fin', linea_hablantes: [] });
   assert.equal(a.g().estado, 'sin_audio');
+  // 'solo' (sin tiempo para un reemplazo automático): espera a que Vale vuelva, no cierra.
+  const a2 = escenario('grabando');
+  await a2.enviar({ tipo: 'fin', motivo: 'solo', linea_hablantes: [] });
+  assert.deepEqual([a2.g().estado, a2.g().nota_sistema], ['grabando', NOTA_ESPERANDO_VALE]);
 
   const b = escenario('bot_en_lobby');
   await b.enviar({ tipo: 'fin', motivo: 'no_admitido', linea_hablantes: [] });

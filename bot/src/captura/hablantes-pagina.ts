@@ -72,3 +72,30 @@ export function participantesEnPagina(): string[] {
   });
   return [...out];
 }
+
+/**
+ * Lo mismo que participantesEnPagina, más cuánto se pudo leer (para listaIlegible de vigia.ts):
+ * `estructura` = hay tiles de Meet (incluido el propio); `otros` = tiles de otras personas (sin el panel
+ * de efectos); `nombres` = los nombres leídos de esos tiles.
+ */
+export function lecturaParticipantes(): { estructura: boolean; otros: number; nombres: string[] } {
+  const BASURA = /^Google Participant \(|spaces\/|devices\/|visual_effects|backgrounds and effects/i;
+  const EFECTOS = /visual_effects|backgrounds and effects/i;
+  const marca = document.querySelector('[data-self-name]');
+  const idPropio = marca?.closest('[data-participant-id]')?.getAttribute('data-participant-id') || null;
+  const out = new Set<string>();
+  const vistos = new Set<string>();
+  let otros = 0;
+  const tiles = document.querySelectorAll('[data-participant-id]');
+  tiles.forEach((el) => {
+    const id = el.getAttribute('data-participant-id') || '';
+    if (!id || vistos.has(id) || id === idPropio) return;
+    vistos.add(id);
+    if (el.hasAttribute('data-self-name') || el.querySelector('[data-self-name]')) return;
+    if (EFECTOS.test(el.getAttribute('aria-label') || '') || EFECTOS.test(id)) return;
+    otros += 1;
+    const t = el.querySelector('span.notranslate')?.textContent?.trim() || '';
+    if (t && t.length >= 2 && t.length <= 50 && !BASURA.test(t)) out.add(t);
+  });
+  return { estructura: !!marca || tiles.length > 0, otros, nombres: [...out] };
+}

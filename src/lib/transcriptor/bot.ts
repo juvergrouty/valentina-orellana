@@ -26,8 +26,8 @@ import {
 } from './botCuenta';
 import { alertaDeAvisoRobot, alertaDeErrorBot, esMotivoSinSesion } from './avisosRobot';
 import {
-  cerrarConLoGrabado, debeRelanzarBot, ESPERA_LLEGADA_RELANZADO_MS, lanzamientosDe, maquinaMuerta, NOTA_NADIE_LLEGO,
-  NOTA_SIN_CONSENTIMIENTO_BOT, prepararRelanzamiento,
+  cerrarConLoGrabado, debeRelanzarBot, ESPERA_LLEGADA_RELANZADO_MS, esperarVale, lanzamientosDe, maquinaMuerta, MOTIVOS_ESPERAR_VALE,
+  NOTA_NADIE_LLEGO, NOTA_SIN_CONSENTIMIENTO_BOT, prepararRelanzamiento,
 } from './botReconexion';
 import type { NuevaAlerta } from './alertas';
 import {
@@ -919,10 +919,14 @@ export async function procesarEventoBot(entrada: EntradaEvento, deps: DepsEvento
         // r2 (punto 1b): se cayó o quedó 'solo' antes de la hora → robot de reemplazo a la misma grabación.
         const relanzar = debeRelanzarBot({ motivo: ev.motivo, horaFinPrevista: grab.hora_fin_prevista, ahora, lanzamientos: await lanzamientosDe(c, grab.id) })
           && await prepararRelanzamiento(c, grab, { ahora, linea: ev.linea_hablantes });
-        if (!relanzar) {
+        // Una sesión = una grabación (Vale, 18 oct): si Vale salió o el robot no puede seguir solo, la grabación
+        // queda abierta esperando que Vale vuelva (15 min); se transcribe UNA vez al cerrarse (botReconexion.ts).
+        const espera = !relanzar && MOTIVOS_ESPERAR_VALE.includes(ev.motivo)
+          && await esperarVale(c, grab, { ahora, linea: ev.linea_hablantes });
+        if (!relanzar && !espera) {
           await cerrarConLoGrabado(c, grab, { ahora, linea: ev.linea_hablantes, notaFin: notaFinBot(ev.motivo, Math.round(duracionSeg / 60)) });
         }
-        await auditar('bot', 'bot_salio', { ...auditoria, detalle: { motivo: ev.motivo, duracion_seg: duracionSeg, ...(relanzar ? { relanzar: true } : {}) } });
+        await auditar('bot', 'bot_salio', { ...auditoria, detalle: { motivo: ev.motivo, duracion_seg: duracionSeg, ...(relanzar ? { relanzar: true } : {}), ...(espera ? { espera_vale: true } : {}) } });
         await marcar();
         return ok();
       }

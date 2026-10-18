@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  armarCorreo, claveDe, crearAlertas, debeEnviarCorreo, normalizarAlerta, sanearTexto,
+  armarCorreo, claveDe, correoParaAlerta, crearAlertas, debeEnviarCorreo, normalizarAlerta, sanearTexto,
   FRENO_CORREO_MS, TablaAlertasFaltanteError, type AlertaAbierta, type AlertaFila, type RepoAlertas,
 } from './alertas';
 
@@ -202,4 +202,24 @@ test('sin la tabla 0017 (migración sin aplicar): no manda correos de respaldo',
   const orig = console.error; console.error = () => {};
   try { await s.registrarAlerta({ tipo: 'subida', titulo: 'x', grabacionId: GID }); } finally { console.error = orig; }
   assert.equal(correos.length, 0);
+});
+
+test('Vale, 18 oct: correo solo para fallas que Vale debe arreglar; nunca por silencio ni por avisos informativos', async () => {
+  const { s, m, correos } = servicio();
+  await s.registrarAlerta({ tipo: 'transcripcion', titulo: 'No se reconoció voz', grabacionId: GID, clave: `sin-voz:${GID}`, accion: 'ninguna' });
+  await s.registrarAlerta({ tipo: 'transcripcion', titulo: 'No se reconoció voz', grabacionId: GID, clave: `sin-voz:${GID}`, accion: 'revisar' });
+  await s.registrarAlerta({ tipo: 'bot', titulo: 'El asistente se cayó; lo grabado se transcribe', grabacionId: GID, clave: `bot-caido:${GID}`, accion: 'ninguna' });
+  assert.equal(correos.length, 0, 'silencio e informativos: solo panel');
+  assert.equal(m.filas.length, 2, 'igual quedan en el panel');
+  await s.registrarAlerta({ tipo: 'bot', titulo: 'No se pudo enviar el asistente', grabacionId: GID, accion: 'reintentar' });
+  assert.equal(correos.length, 1, 'falla que pide acción: correo');
+  assert.equal(correoParaAlerta(normalizarAlerta({ tipo: 'config', titulo: 'Falta una llave', clave: 'salud:config' })), true);
+  // Base caída: tampoco hay correo de respaldo para el silencio.
+  const caida = servicio();
+  caida.m.setFallar(true);
+  const orig = console.error;
+  console.error = () => {};
+  try { await caida.s.registrarAlerta({ tipo: 'transcripcion', titulo: 'No se reconoció voz', grabacionId: GID, clave: `sin-voz:${GID}`, accion: 'ninguna' }); }
+  finally { console.error = orig; }
+  assert.equal(caida.correos.length, 0);
 });

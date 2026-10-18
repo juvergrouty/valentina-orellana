@@ -125,6 +125,7 @@ const embedUrl = googleConnected
                   )}
                   {ev.hangoutLink && (
                     <a href={(isFromSystem(ev) && urlSesion(reservaDeEventId(ev.id))) || ev.hangoutLink} target="_blank"
+                       data-llamar-asistente={(isFromSystem(ev) && reservaDeEventId(ev.id)) || undefined}
                        style="font-size:0.72rem;color:var(--forest);display:block;margin-top:0.25rem;text-decoration:none;">
                       📹 Unirse al Meet
                     </a>
@@ -171,6 +172,19 @@ const embedUrl = googleConnected
 </AdminLayout>
 
 <script is:inline>
+  // "Unirse al Meet" de una sesión del sistema: Vale la abre, así que el asistente de notas va (18 oct 2026:
+  // entra solo cuando entra ella). POST con la sesión del panel; no espera ni impide abrir el enlace.
+  document.querySelectorAll('a[data-llamar-asistente]').forEach((a) => {
+    a.addEventListener('click', () => {
+      try {
+        void fetch('/api/admin/transcriptor/llamar-asistente', {
+          method: 'POST', keepalive: true, credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-Panel': '1' }, body: JSON.stringify({ reserva: a.dataset.llamarAsistente }),
+        }).catch(() => {});
+      } catch {}
+    });
+  });
+
   // Eliminar evento del calendario
   window.deleteEvent = async function(eventId) {
     if (!confirm('¿Eliminar este evento del calendario?')) return;

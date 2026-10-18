@@ -7,8 +7,8 @@ import {
   bloqueEntrarSesion, codigoSesion, destinoMeet, enlaceEntradaSesion, enlaceParaSesion, esVisitaAutomatica,
   lineaEntrarCalendario, lineaEntrarWhatsApp, meetDeNotas, reservaDeEventId, reservaDesdeCodigo, urlSesion,
 } from '../enlaceSesion';
-import { abrirEnlaceSesion, ACCION_ENLACE, cercaDeLaHora, inicioChileMs, MAX_DESPACHOS_ENLACE, MAX_INVALIDOS_IP, type DepsEnlace } from './enlaceSesionRuta';
-import { crearPipeline, enVentanaEnlace, previaReintentablePorEnlace, VENTANA_ENLACE_ANTES_MS } from './pipeline';
+import { abrirEnlaceSesion, ACCION_ENLACE, cercaDeLaHora, inicioChileMs, llamarAsistentePanel, MAX_DESPACHOS_ENLACE, MAX_INVALIDOS_IP, valeConSesionPanel, type DepsEnlace } from './enlaceSesionRuta';
+import { crearPipeline, enVentanaEnlace, previaReintentablePorEnlace, VENTANA_ENLACE_ANTES_MS, VENTANA_ENLACE_DESPUES_MS } from './pipeline';
 import { crearBot } from './bot';
 import { evaluarEnBase } from './consentimiento';
 import { NOTA_NADIE_LLEGO } from './botReconexion';
@@ -84,15 +84,17 @@ test('vistas previas y robots no mandan el robot de notas', () => {
 
 // ─── Ventana ────────────────────────────────────────────────────────────────
 
-test('ventana: desde 30 min antes del inicio hasta el término', () => {
+test('ventana: desde 30 min antes del inicio hasta 60 min después del término agendado (Vale atrasada)', () => {
   const inicio = '2026-10-20T13:00:00.000Z', fin = '2026-10-20T13:50:00.000Z';
   const en = (iso: string) => enVentanaEnlace(inicio, fin, new Date(iso));
   assert.equal(VENTANA_ENLACE_ANTES_MS, 30 * 60_000);
+  assert.equal(VENTANA_ENLACE_DESPUES_MS, 60 * 60_000);
   assert.equal(en('2026-10-20T12:29:59.000Z'), false);
   assert.equal(en('2026-10-20T12:30:00.000Z'), true);
   assert.equal(en('2026-10-20T13:20:00.000Z'), true);
-  assert.equal(en('2026-10-20T13:49:59.000Z'), true);
-  assert.equal(en('2026-10-20T13:50:00.000Z'), false);
+  assert.equal(en('2026-10-20T13:50:00.000Z'), true);
+  assert.equal(en('2026-10-20T14:49:59.000Z'), true);
+  assert.equal(en('2026-10-20T14:50:00.000Z'), false);
   assert.equal(enVentanaEnlace('x', fin, new Date()), false);
   // Hora de Chile → UTC (octubre: UTC−3) y filtro previo barato.
   assert.equal(new Date(inicioChileMs('2026-10-20', '10:00:00')).toISOString(), inicio);
@@ -105,6 +107,10 @@ test('qué intento anterior se repite al abrir el enlace', () => {
   assert.equal(previaReintentablePorEnlace({ estado: 'sin_audio', estado_antes_error: null, nota_sistema: NOTA_NADIE_LLEGO }), 'liberar');
   assert.equal(previaReintentablePorEnlace({ estado: 'error', estado_antes_error: 'bot_lanzando' }), 'reintentar');
   assert.equal(previaReintentablePorEnlace({ estado: 'sin_consentimiento', estado_antes_error: null }), 'sin_consentimiento');
+  // Salidas antes de grabar sin decisión de nadie (Vale atrasada): solo y hora_fin también se repiten.
+  for (const m of ['error', 'solo', 'hora_fin']) {
+    assert.equal(previaReintentablePorEnlace({ estado: 'error', estado_antes_error: 'bot_lanzando', ultimo_error: `El asistente de notas terminó antes de grabar (${m})` }), 'reintentar', m);
+  }
   // Nunca: con audio, decisión de Vale (no admitido, retirado, cancelada) o error con audio de por medio.
   for (const p of [
     { estado: 'sin_audio', estado_antes_error: null, nota_sistema: 'El asistente de notas fue retirado de la reunión' },
@@ -116,7 +122,7 @@ test('qué intento anterior se repite al abrir el enlace', () => {
 
 // ─── Ruta /sesion/<código> ────────────────────────────────────────────────────
 
-function ruta(opc: { ahora?: string; reserva?: Record<string, unknown> | null; meetCal?: string | null; despacho?: string | Error } = {}) {
+function ruta(opc: { ahora?: string; reserva?: Record<string, unknown> | null; meetCal?: string | null; despacho?: string | Error; vale?: boolean } = {}) {
   const db = new SupabaseMemoria();
   const ahora = new Date(opc.ahora ?? '2026-10-20T12:50:00Z'); // 09:50 en Chile, sesión 10:00
   db.ahora = () => ahora;
@@ -135,18 +141,55 @@ function ruta(opc: { ahora?: string; reserva?: Record<string, unknown> | null; m
     despachar: async (ref) => { despachos.push(ref); if (opc.despacho instanceof Error) throw opc.despacho; return opc.despacho ?? 'lanzado'; },
     meetDeCalendario: async () => opc.meetCal ?? null,
   };
-  const pedir = async (codigo: unknown, o: { ua?: string; ip?: string; metodo?: string; authuser?: string } = {}) => {
+  const pedir = async (codigo: unknown, o: { ua?: string; ip?: string; metodo?: string; authuser?: string; vale?: boolean } = {}) => {
     const request = new Request('https://www.valentinaorellana.cl/sesion/x', {
       method: o.metodo ?? 'GET',
       headers: { 'user-agent': o.ua ?? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) Safari/604.1', 'x-forwarded-for': o.ip ?? '200.1.1.1' },
     });
-    const r = await abrirEnlaceSesion({ codigo, metodo: o.metodo ?? 'GET', request, authuser: o.authuser ?? null }, deps);
+    // Por defecto lo abre Vale (con su sesión del panel); vale: false = el paciente.
+    const r = await abrirEnlaceSesion({ codigo, metodo: o.metodo ?? 'GET', request, authuser: o.authuser ?? null, esVale: async () => o.vale ?? opc.vale ?? true }, deps);
     await Promise.all(pendientes.splice(0));
     return r;
   };
   const bitacora = () => db.tabla('transcriptor_auditoria').filter((f) => f.accion === ACCION_ENLACE);
-  return { db, id, codigo: codigoSesion(id, S)!, pedir, despachos, bitacora };
+  return { db, id, codigo: codigoSesion(id, S)!, pedir, despachos, bitacora, deps };
 }
+
+test('Vale, 18 oct: el robot entra solo cuando entra Vale — el paciente con el enlace solo es redirigido', async () => {
+  const e = ruta();
+  assert.deepEqual(await e.pedir(e.codigo, { vale: false }), { tipo: 'redirigir', url: MEET });
+  assert.equal(e.despachos.length, 0, 'el paciente no manda el robot');
+  assert.equal(e.bitacora().at(-1)!.detalle.despacho, 'no_vale');
+  assert.deepEqual(await e.pedir(e.codigo), { tipo: 'redirigir', url: MEET });
+  assert.equal(e.despachos.length, 1, 'Vale (sesión del panel) sí');
+  // Sin forma de saber quién abre (sin esVale): no despacha.
+  const sin = ruta();
+  const request = new Request('https://www.valentinaorellana.cl/sesion/x', { headers: { 'user-agent': 'Mozilla/5.0 (iPhone) Safari/604.1', 'x-forwarded-for': '200.1.1.1' } });
+  await abrirEnlaceSesion({ codigo: sin.codigo, metodo: 'GET', request }, { ...sin.deps, enSegundoPlano: (t) => { void t(); } });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(sin.despachos.length, 0);
+  // Cookie del panel: token inválido o ausente → no es Vale (sin tocar la base).
+  assert.equal(await valeConSesionPanel(undefined), false);
+  assert.equal(await valeConSesionPanel('v1.123.firma-falsa'), false);
+});
+
+test('botones del panel (POST llamar-asistente): mismas reglas y cupo que el enlace, con texto para Vale', async () => {
+  const e = ruta();
+  const request = new Request('https://www.valentinaorellana.cl/api/admin/transcriptor/llamar-asistente', { method: 'POST' });
+  const r = await llamarAsistentePanel(e.id, { request }, e.deps);
+  assert.deepEqual([r.status, r.despacho], [200, 'lanzado']);
+  assert.match(r.texto, /va en camino/);
+  assert.equal(e.despachos.length, 1);
+  assert.equal(e.bitacora().at(-1)!.detalle.via, 'panel');
+  assert.equal((await llamarAsistentePanel(randomUUID(), { request }, e.deps)).status, 404);
+  const fuera = ruta({ ahora: '2026-10-22T12:50:00Z' });
+  assert.equal((await llamarAsistentePanel(fuera.id, { request }, fuera.deps)).despacho, 'fuera_de_ventana');
+  assert.equal(fuera.despachos.length, 0);
+  const presencial = ruta({ reserva: { session_type: 'presencial' } });
+  assert.equal((await llamarAsistentePanel(presencial.id, { request }, presencial.deps)).despacho, 'sin_meet');
+  for (let i = 0; i < MAX_DESPACHOS_ENLACE + 2; i++) await llamarAsistentePanel(e.id, { request }, e.deps);
+  assert.equal(e.despachos.length, MAX_DESPACHOS_ENLACE);
+});
 
 test('código válido en la ventana: redirige YA al Meet y despacha el robot una vez (en segundo plano)', async () => {
   const e = ruta();
@@ -269,7 +312,7 @@ test('despacho por enlace: fuera de ventana no lanza; apagado no lanza', async (
   const e = despacho();
   e.avanzar(-31); // 51 min antes
   assert.equal(await e.pipeline.despacharPorEnlace(e.ref, e.ahora()), 'sin_sesion'); // aún no está en el rango de Calendar
-  e.avanzar(102); // 13:51 UTC: terminó hace 1 min
+  e.avanzar(162); // 14:51 UTC: terminó hace 61 min (pasó la hora de margen por atraso)
   assert.equal(await e.pipeline.despacharPorEnlace(e.ref, e.ahora()), 'fuera');
   assert.equal(e.maquinas.length, 0);
   const off = despacho();
@@ -299,7 +342,7 @@ test('despacho por enlace: si el robot salió porque nadie llegó, un clic lo vu
 });
 
 test('despacho por enlace: falla técnica antes de entrar se reintenta; si Vale lo sacó o había un tercero, no', async () => {
-  for (const [motivo, esperado, maquinas] of [['error', 'lanzado', 2], ['expulsado', 'existe', 1], ['participantes_extra', 'existe', 1], ['vale_salio', 'existe', 1]] as const) {
+  for (const [motivo, esperado, maquinas] of [['error', 'lanzado', 2], ['solo', 'lanzado', 2], ['hora_fin', 'lanzado', 2], ['expulsado', 'existe', 1], ['participantes_extra', 'existe', 1], ['vale_salio', 'existe', 1]] as const) {
     const e = despacho();
     await e.pipeline.despacharPorEnlace(e.ref, e.ahora());
     const g = e.grabs()[0];

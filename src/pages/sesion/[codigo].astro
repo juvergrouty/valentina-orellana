@@ -1,10 +1,12 @@
 ---
 export const prerender = false;
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { abrirEnlaceSesion } from '../../lib/transcriptor/enlaceSesionRuta';
+import { abrirEnlaceSesion, valeConSesionPanel } from '../../lib/transcriptor/enlaceSesionRuta';
+import { COOKIE_ADMIN } from '../../lib/adminSession';
 
 // Enlace propio de cada sesión online (pedido de Vale, 18 oct 2026): /sesion/<código>.
-// Redirige al Meet de la reserva y, si es la hora de la sesión, manda el robot de notas en segundo plano
+// Redirige al Meet de la reserva y, si quien abre es Vale (sesión del panel en este navegador) y es la hora
+// de la sesión, manda el robot de notas en segundo plano. El paciente solo es redirigido
 // (lógica y reglas en src/lib/transcriptor/enlaceSesionRuta.ts). Nunca bloquea la entrada a la sesión.
 // Privada: noindex, fuera del sitemap y de robots; sin datos de la reserva en la página.
 const cabeceras = {
@@ -14,12 +16,15 @@ const cabeceras = {
   'Referrer-Policy': 'no-referrer',
 };
 
+// Cookie del panel leída ya (el chequeo corre en segundo plano, después de responder).
+const tokenPanel = Astro.cookies.get(COOKIE_ADMIN)?.value ?? null;
 const r = await abrirEnlaceSesion({
   codigo: Astro.params.codigo,
   metodo: Astro.request.method,
   request: Astro.request,
   clientAddress: (() => { try { return Astro.clientAddress; } catch { return null; } })(),
   authuser: Astro.url.searchParams.get('authuser'),
+  esVale: () => valeConSesionPanel(tokenPanel),
 });
 
 if (r.tipo === 'redirigir') {

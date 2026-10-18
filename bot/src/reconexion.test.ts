@@ -47,6 +47,7 @@ test('vigía r2 (revisión): el reemplazo con el paciente solo sale a los 3 min 
 test('vigía r2 (revisión): Vale esperando sola y se le corta → solo (reemplazo), no vale_salio', () => {
   const v = new Vigia(VIGIA);
   v.observar(0, ['Valentina Orellana']);
+  v.empezoGrabacion(); // Vale está: el robot graba
   v.observar(2_000, []);
   assert.equal(v.observar(62_000, []), 'solo');
 });

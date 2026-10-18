@@ -4,10 +4,14 @@
 //    pasado el límite por IP ya no se escribe nada más (no se puede llenar la bitácora).
 //  - Código válido → SIEMPRE redirige al Meet de la reserva (nunca se bloquea la entrada a la sesión).
 //    Solo a https://meet.google.com/<sala> (normalizado: sin redirección abierta).
-//  - En segundo plano (waitUntil, el usuario no espera): si la sesión es online, va a ocurrir y estamos
-//    en [inicio − 30 min, fin), se despacha el robot por el MISMO camino del cron
-//    (pipeline.despacharPorEnlace: índice único google_event_id, consentimiento, toma, cuenta del robot).
-//    Las vistas previas de WhatsApp/correo no mandan el robot. Tope de despachos por enlace.
+//  - En segundo plano (waitUntil, el usuario no espera): SOLO si quien lo abre es Vale (decisión de Vale,
+//    18 oct: "el robot entra solo cuando entro yo"), detectada por una sesión válida y no cerrada del panel
+//    en ese navegador (cookie del panel: tokenAdminValido + tokenRevocado estricto, lo mismo que el
+//    middleware y guardiaPanel), y si la sesión es online, va a ocurrir y estamos en
+//    [inicio − 30 min, fin agendado + 60 min), se despacha el robot (pipeline.despacharPorEnlace: índice
+//    único google_event_id, consentimiento, toma, cuenta del robot). El paciente (sin sesión del panel)
+//    solo es redirigido a Meet. Las vistas previas de WhatsApp/correo no mandan el robot. Tope de
+//    despachos por enlace. Los botones del panel además despachan por POST (llamar-asistente.ts).
 //  - Bitácora: transcriptor_auditoria, accion 'enlace_sesion', solo el id de la reserva y el resultado
 //    (nunca el Meet, el código ni datos clínicos). Los logs de consola tampoco llevan el Meet.
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -49,6 +53,19 @@ export interface EntradaEnlace {
   clientAddress?: string | null;
   /** ?authuser=<correo> (panel de Vale: abrir Meet con la cuenta del negocio). */
   authuser?: string | null;
+  /** ¿Quien abre es Vale? (sesión del panel en este navegador: valeConSesionPanel). Sin esto, no despacha. */
+  esVale?: () => Promise<boolean>;
+}
+
+/**
+ * ¿El token de la cookie del panel es una sesión válida y no cerrada? Mismas funciones que el middleware y
+ * guardiaPanel (adminSession.ts), en modo estricto: si no se puede verificar, false (no se despacha; se
+ * entra igual a Meet).
+ */
+export async function valeConSesionPanel(token: string | null | undefined): Promise<boolean> {
+  const { tokenAdminValido, tokenRevocado } = await import('../adminSession');
+  if (!tokenAdminValido(token)) return false;
+  try { return !(await tokenRevocado(token!, { estricto: true })); } catch { return false; }
 }
 
 export interface DepsEnlace {
@@ -180,6 +197,7 @@ export async function abrirEnlaceSesion(entrada: EntradaEnlace, deps: DepsEnlace
     if (entrada.metodo !== 'GET') detalle.despacho = 'no_get';
     else if (esVisitaAutomatica(entrada.request.headers.get('user-agent'))) detalle.despacho = 'vista_previa';
     else if (!online || !destino) detalle.despacho = 'sin_meet';
+    else if (!(await (entrada.esVale?.() ?? Promise.resolve(false)).catch(() => false))) detalle.despacho = 'no_vale';
     else if (!reservaVaAOcurrir({ status: reserva.status, created_by_admin: reserva.created_by_admin ?? null })) detalle.despacho = 'reserva_no_vigente';
     else if (!cercaDeLaHora(reserva, ahora)) detalle.despacho = 'fuera_de_ventana';
     else {
@@ -208,4 +226,70 @@ export async function abrirEnlaceSesion(entrada: EntradaEnlace, deps: DepsEnlace
   });
 
   return destino ? { tipo: 'redirigir', url: destino } : { tipo: 'sin_meet' };
+}
+
+// ─── Botones del panel (POST /api/admin/transcriptor/llamar-asistente) ───────────
+
+/** Texto para Vale según el resultado del despacho (sin datos del paciente). */
+export function textoLlamarAsistente(despacho: string): string {
+  switch (despacho) {
+    case 'lanzado': return 'El asistente de notas va en camino. Empieza a grabar cuando estés en la llamada.';
+    case 'activo': return 'El asistente de notas ya va o ya está en esta sesión.';
+    case 'existe': return 'Esta sesión ya tiene una grabación (o rechazaste al asistente): no se manda otro.';
+    case 'fuera': case 'fuera_de_ventana': return 'Fuera del horario: el asistente va desde 30 min antes del inicio hasta 1 h después del término.';
+    case 'sin_sesion': return 'No encontré esta sesión con link de Meet en tu Google Calendar.';
+    case 'sin_consentimiento': return 'Falta el consentimiento de grabación de esta ficha: el asistente no va.';
+    case 'apagado': return 'El asistente de notas está apagado en los ajustes del transcriptor.';
+    case 'reserva_no_vigente': return 'La reserva no está confirmada: el asistente no va.';
+    case 'sin_meet': return 'Esta sesión no es online.';
+    case 'limite': return 'Ya lo pediste varias veces en los últimos minutos; espera un poco.';
+    default: return 'No se pudo enviar el asistente de notas. Intenta de nuevo.';
+  }
+}
+
+/**
+ * Vale apretó un botón del panel que abre la sesión (agenda, sala online, calendario, "Llamar al asistente
+ * ahora"). La guardia del panel (guardiaPanel: cookie, Origin, X-Panel) la hace el endpoint; aquí, las
+ * mismas reglas del enlace (reserva online vigente, cerca de la hora, cupo por reserva en la bitácora) y el
+ * mismo despacho (despacharPorEnlace). Sirve aunque Meet se abra en otro navegador sin la cookie del panel.
+ */
+export async function llamarAsistentePanel(
+  reservaId: string, op: { request: Request; clientAddress?: string | null }, deps: DepsEnlace = {},
+): Promise<{ status: number; despacho: string; texto: string }> {
+  const ahora = deps.ahora?.() ?? new Date();
+  const c = deps.db ?? (await clientePorDefecto());
+  const auditar = deps.auditar ?? (async (accion, o) => (await import('./auditoria')).auditar('vale', accion, { ...o, cliente: c }));
+  const salida = (status: number, despacho: string) => ({ status, despacho, texto: textoLlamarAsistente(despacho) });
+  const { data, error } = await c.from('bookings')
+    .select('id, session_type, status, created_by_admin, notes, google_event_id, session_date, session_time')
+    .eq('id', reservaId).maybeSingle();
+  if (error) return salida(503, 'error');
+  const b = data as FilaReservaEnlace | null;
+  if (!b) return { status: 404, despacho: 'no_encontrado', texto: 'No se encontró la reserva.' };
+  let despacho: string;
+  let resultado: 'ok' | 'error' = 'ok';
+  if (!String(b.session_type ?? '').includes('online')) despacho = 'sin_meet';
+  else if (!reservaVaAOcurrir({ status: b.status, created_by_admin: b.created_by_admin ?? null })) despacho = 'reserva_no_vigente';
+  else if (!cercaDeLaHora(b, ahora)) despacho = 'fuera_de_ventana';
+  else {
+    const desde = new Date(ahora.getTime() - VENTANA_ENLACE_MS).toISOString();
+    const { count, error: eD } = await c.from('transcriptor_auditoria').select('id', { count: 'exact', head: true })
+      .eq('accion', ACCION_ENLACE).eq('detalle->>reserva', b.id).eq('detalle->>intento', 'si').gte('at', desde);
+    if (eD || (count ?? 0) >= MAX_DESPACHOS_ENLACE) despacho = 'limite';
+    // Cupo reservado antes de despachar (igual que el enlace); sin bitácora no se despacha.
+    else if (!(await auditar(ACCION_ENLACE, { resultado: 'ok', detalle: { reserva: b.id, intento: 'si', via: 'panel' }, request: op.request, clientAddress: op.clientAddress }))) {
+      resultado = 'error';
+      despacho = 'error';
+    } else {
+      try {
+        despacho = await (deps.despachar ?? despacharPorDefecto)({ bookingId: b.id, googleEventId: b.google_event_id }, ahora);
+      } catch (e) {
+        resultado = 'error';
+        despacho = 'error';
+        console.warn('[llamar-asistente] despacho falló:', e instanceof Error ? e.name : 'error');
+      }
+    }
+  }
+  await auditar(ACCION_ENLACE, { resultado, detalle: { reserva: b.id, via: 'panel', despacho }, request: op.request, clientAddress: op.clientAddress });
+  return salida(resultado === 'error' ? 502 : 200, despacho);
 }

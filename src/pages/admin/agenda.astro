@@ -1218,9 +1218,15 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>
           Grabar
         </a>
-        <div id="sp-grabar-meet" class="sp-grabar-meet" style="display:none;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>
-          La graba el asistente de Meet
+        <div id="sp-grabar-meet" class="sp-grabar-meet" style="display:none;flex-direction:column;align-items:flex-start;">
+          <span style="display:flex;align-items:center;gap:0.4rem;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>
+            La graba el asistente de Meet
+          </span>
+          <!-- Vale, 18 oct: el asistente entra solo cuando Vale abre la sesión desde el panel. -->
+          <span style="font-size:0.74rem;">Entra siempre desde aquí («Ingresar a Google Meet») para que el asistente de notas te acompañe.</span>
+          <button type="button" id="sp-llamar-asistente" class="sp-action-row" style="font-weight:600;color:#576352;padding-left:0;">Llamar al asistente ahora</button>
+          <span id="sp-llamar-estado" aria-live="polite" style="font-size:0.74rem;"></span>
         </div>
         <!-- Ronda 2: reserva online sin link de Meet. El grabador presencial no la acepta (grabacion-iniciar
              responde que es online): en vez de un "Grabar" que falla, se explica qué hacer. -->
@@ -3258,10 +3264,33 @@ document.getElementById('sp-meet-href')?.addEventListener('click', async (e) => 
   const meet = await ensureMeetLink(id);
   label.textContent = original;
   if (!meet) { alert('No se pudo generar el link de Meet. Intenta de nuevo.'); return; }
-  // Por el enlace propio: el sitio manda el robot de notas y redirige a este Meet con la cuenta del negocio.
+  // Vale abre la sesión desde el panel: el robot de notas va (POST con la sesión del panel, sirve aunque Meet
+  // se abra en otro navegador sin la cookie), y el enlace propio redirige a este Meet con la cuenta del negocio.
+  void llamarAsistente(id);
   const link = enlaceDe(id, meet);
   const business = `${link}${link.includes('?') ? '&' : '?'}authuser=vinculosquesostienen@gmail.com`;
   window.open(business, '_blank');
+});
+
+// Manda el asistente de notas a la sesión (Vale, 18 oct: entra solo cuando entra ella). Nunca bloquea la entrada.
+async function llamarAsistente(id) {
+  if (!id) return null;
+  try {
+    const res = await fetch('/api/admin/transcriptor/llamar-asistente', {
+      method: 'POST', keepalive: true, credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Panel': '1' }, body: JSON.stringify({ reserva: id }),
+    });
+    return await res.json().catch(() => null);
+  } catch { return null; }
+}
+document.getElementById('sp-llamar-asistente')?.addEventListener('click', async () => {
+  const btn = document.getElementById('sp-llamar-asistente');
+  const estado = document.getElementById('sp-llamar-estado');
+  btn.disabled = true;
+  if (estado) estado.textContent = 'Llamando al asistente…';
+  const r = await llamarAsistente(window.__currentMeetBookingId);
+  if (estado) estado.textContent = (r && (r.texto || r.error)) || 'No se pudo llamar al asistente. Intenta de nuevo.';
+  btn.disabled = false;
 });
 
 document.getElementById('sp-meet-share-toggle')?.addEventListener('click', (e) => {

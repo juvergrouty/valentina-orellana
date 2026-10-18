@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { esNombreDeBot, esVale, leerConfig, normalizarNombre, NOMBRE_ROBOT } from './config.js';
 import { estadoSesionValido, muestraCorreo, soloGoogle } from './sesion.js';
 import { LineaHablantes } from './linea.js';
-import { nombreVisible, Vigia } from './vigia.js';
+import { decidirInicio, listaIlegible, nombreVisible, Vigia } from './vigia.js';
 import { Segmentos } from './segmentos.js';
 import { horaFinDeRespuesta, SinConsentimientoError, Sitio, TokenRechazadoError, type EventoBot } from './sitio.js';
 import { desfaseOrigen, lineaConDesfase } from './linea.js';
@@ -66,6 +66,7 @@ test('vigía: Vale se va con el paciente en la llamada → a lo más 3 min más 
 test('vigía r2: Vale reconecta dentro de 3 min → sigue; Vale era la última y cuelga → vale_salio en 60 s', () => {
   const v = new Vigia(VIGIA);
   v.observar(0, ['Valentina Orellana', 'Camila']);
+  v.empezoGrabacion(); // Vale está: el robot graba
   v.observar(10_000, ['Camila']);
   assert.equal(v.observar(150_000, ['Valentina Orellana', 'Camila']), null);
   assert.equal(v.observar(400_000, ['Valentina Orellana', 'Camila']), null);
@@ -76,6 +77,7 @@ test('vigía r2: Vale reconecta dentro de 3 min → sigue; Vale era la última y
   // Desaparecen todos a la vez (falla de la página o de la red del robot) → 'solo' (el sitio relanza).
   const w = new Vigia(VIGIA);
   w.observar(0, ['Valentina Orellana', 'Camila']);
+  w.empezoGrabacion();
   assert.equal(w.observar(2_000, []), null);
   assert.equal(w.observar(62_000, []), 'solo');
 });
@@ -110,6 +112,7 @@ test('vigía: si Vale vuelve dentro de la gracia, sigue', () => {
 
 test('vigía: después de ver a alguien, solo bots durante soloMs → solo', () => {
   const v = new Vigia(VIGIA);
+  v.empezoGrabacion();
   assert.equal(v.observar(0, ['Paciente Prueba']), null);
   assert.equal(v.observar(1_000, ['Otter Notetaker']), null);
   assert.equal(v.observar(60_000, []), null);
@@ -322,4 +325,38 @@ test('nombre del robot: "Notas Ps. Valentina Orellana" y no cuenta como humano',
   assert.equal(NOMBRE_ROBOT, 'Notas Ps. Valentina Orellana');
   assert.ok(esNombreDeBot('Notas Ps. Valentina Orellana', 'otro nombre'));
   assert.ok(!esVale('Notas Ps. Valentina Orellana', ['Valentina Orellana']));
+});
+
+test('atraso de Vale: ningún robot empieza a grabar sin Vale; el respaldo por voz solo si la lista no se puede leer', () => {
+  const base = { hayVale: false, ilegible: false, vozSeguida: 0, reemplazo: false };
+  assert.equal(decidirInicio({ ...base, hayVale: true }), 'grabar');
+  assert.equal(decidirInicio(base), 'esperar', 'el paciente llegó antes y espera solo: no se le graba');
+  assert.equal(decidirInicio({ ...base, vozSeguida: 5 }), 'esperar', 'hay voz pero la lista se lee (y Vale no está): no');
+  assert.equal(decidirInicio({ ...base, ilegible: true, vozSeguida: 1 }), 'esperar');
+  assert.equal(decidirInicio({ ...base, ilegible: true, vozSeguida: 2 }), 'grabar_por_voz');
+  assert.equal(decidirInicio({ ...base, ilegible: true, vozSeguida: 2, reemplazo: true }), 'esperar', 'un reemplazo nunca sin ver a Vale');
+  assert.equal(decidirInicio({ ...base, hayVale: true, reemplazo: true }), 'grabar');
+  // ¿La lista se puede leer?
+  assert.equal(listaIlegible(null), true, 'la página no respondió');
+  assert.equal(listaIlegible({ estructura: false, otros: 0, nombres: [] }), true, 'sin tiles de Meet');
+  assert.equal(listaIlegible({ estructura: true, otros: 1, nombres: [] }), true, 'tiles sin nombres: cambió el DOM');
+  assert.equal(listaIlegible({ estructura: true, otros: 0, nombres: [] }), false, 'el robot solo en la llamada');
+  assert.equal(listaIlegible({ estructura: true, otros: 1, nombres: ['Diego Soto'] }), false);
+});
+
+test('atraso de Vale: antes de grabar el robot espera a Vale mientras haya alguien; sin nadie 30 min → nadie_llego', () => {
+  const v = new Vigia(VIGIA);
+  assert.equal(v.observar(0, ['Diego Soto']), null, 'el paciente llegó a la hora');
+  assert.equal(v.observar(25 * 60_000, ['Diego Soto']), null, 'Vale 25 min atrasada: sigue esperando');
+  assert.equal(v.observar(26 * 60_000, []), null, 'el paciente se fue a buscar el enlace');
+  assert.equal(v.observar(50 * 60_000, []), null);
+  assert.equal(v.observar(56 * 60_000, []), 'nadie_llego', '30 min sin nadie: sale (el próximo clic de Vale lo trae)');
+  // Vale llega a los 28 min: empieza a grabar y desde ahí rigen solo / vale_salio.
+  const w = new Vigia(VIGIA);
+  assert.equal(w.observar(0, ['Diego Soto']), null);
+  assert.equal(w.hayVale(['Diego Soto', 'Valentina Orellana']), true);
+  w.observar(28 * 60_000, ['Diego Soto', 'Valentina Orellana']);
+  w.empezoGrabacion();
+  assert.equal(w.observar(29 * 60_000, []), null);
+  assert.equal(w.observar(30 * 60_000, []), 'solo');
 });
