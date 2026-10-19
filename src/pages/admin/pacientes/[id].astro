@@ -129,6 +129,10 @@ const ERRORES_ACCION: Record<string, string> = {
   tarifa_guardar: '', rebote_guardar: '', feriado: '',
   insert_failed: 'No se pudo guardar en la base de datos. Intenta de nuevo.',
   boleta_failed: 'El pago se registró, pero la boleta NO se emitió. Emítela manualmente.',
+  // El defecto al agendar ahora es "Link de pago" (19 oct 2026): antes estos dos
+  // se mostraban como el código crudo ("need_email").
+  need_email: 'La paciente necesita un correo en su ficha para enviarle el link de pago. Agrégalo y vuelve a agendar.',
+  flow_disabled: 'Flow está deshabilitado en Configuración.',
   flow_error: 'No se pudo generar el link de pago. Revisa en la agenda que no hayan quedado sesiones "esperando pago" de este intento antes de reintentar.',
 };
 const errorCrudo = Astro.url.searchParams.get('error') ?? '';
@@ -865,17 +869,23 @@ const formatCLP = (n: number) =>
            que ya soporta ambos modos. -->
       <div>
         <label class="label" style="display:block;margin-bottom:0.3rem;">Pago</label>
+        <!-- "Pago en consulta" va escondido en "Más opciones de pago" (pedido de
+             Vale, 19 oct 2026): el defecto ahora es "Link de pago". -->
         <label style="margin-right:1rem;font-size:0.85rem;">
-          <input type="radio" name="payment_mode" value="manual" checked /> Pago en consulta
-        </label>
-        <label style="margin-right:1rem;font-size:0.85rem;">
-          <input type="radio" name="payment_mode" value="link" /> Enviar link de pago
+          <input type="radio" name="payment_mode" value="link" checked /> Enviar link de pago
         </label>
         <label style="font-size:0.85rem;">
           <input type="radio" name="payment_mode" value="free" /> Sin costo
         </label>
+        <details style="margin-top:0.3rem;">
+          <summary style="font-size:0.72rem;color:var(--stone);cursor:pointer;">Más opciones de pago</summary>
+          <label style="display:block;font-size:0.85rem;margin-top:0.35rem;">
+            <input type="radio" name="payment_mode" value="manual" /> Pago en consulta
+          </label>
+          <p style="font-size:0.72rem;color:#b45309;margin-top:0.2rem;">No envía Pasos a seguir ni consentimiento hasta que marques el pago.</p>
+        </details>
         <p style="font-size:0.72rem;color:var(--stone);margin-top:0.35rem;">
-          "En consulta" confirma la cita de inmediato. "Link de pago" la deja pendiente y le envía al paciente
+          "Link de pago" la deja pendiente y le envía al paciente
           un enlace de Flow por correo (y por WhatsApp si ya lo conectaste en Configuración). "Sin costo" (obra
           social) la confirma en $0, sin boleta, y si es su primera sesión le envía Pasos a seguir y el consentimiento.
         </p>
