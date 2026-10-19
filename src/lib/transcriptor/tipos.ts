@@ -268,7 +268,8 @@ export type AccionAuditoria =
   | 'ver_transcripcion' | 'ver_resumen' | 'editar_resumen' | 'ocultar_resumen' | 'regenerar_resumen'
   | 'preguntar' | 'descargar' | 'exportar'
   | 'asignar_paciente' | 'renombrar_hablantes' | 'reintentar' | 'cambiar_ajuste' | 'cambiar_instrucciones'
-  | 'consentimiento_faltante' | 'alerta' | 'rotar_llave';
+  | 'consentimiento_faltante' | 'alerta' | 'rotar_llave'
+  | 'correo_masivo_prueba';
 
 export interface RegistroAuditoria {
   id: number;

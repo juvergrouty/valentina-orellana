@@ -3,6 +3,7 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { leerCorreosAutomaticos, marcarCorreosVistos, type CorreoAutomatico } from '../../lib/correosAutomaticos';
+import { AVISO_CIERRE_DUPLICADO } from '../../lib/correoMasivo';
 
 const sentParam   = Astro.url.searchParams.get('sent');
 const failedParam = Astro.url.searchParams.get('failed');
@@ -189,6 +190,7 @@ function fmt(iso: string) {
         <p>Nuevo correo masivo</p>
         <button id="close-compose" class="com-modal-x">✕</button>
       </div>
+      <div class="com-compose-grid">
       <form method="POST" action="/api/admin/comunicaciones" class="com-form">
         <input type="hidden" name="action" value="send-bulk">
         <input type="hidden" name="redirect" value="/admin/comunicaciones">
@@ -206,7 +208,7 @@ function fmt(iso: string) {
           <div class="com-checklist">
             {patientList.map(p => (
               <label class="com-check-item">
-                <input type="checkbox" class="com-sel-cb" value={p.email} />
+                <input type="checkbox" class="com-sel-cb" value={p.email} data-nombre={p.name} />
                 <span>{p.name} <em>{p.email}</em></span>
               </label>
             ))}
@@ -216,19 +218,48 @@ function fmt(iso: string) {
 
         <div class="com-field">
           <label>Asunto *</label>
-          <input type="text" name="subject" required placeholder="Ej: Cambio de horario en julio">
+          <input type="text" name="subject" id="com-subject" required maxlength="200" placeholder="Ej: Cambio de horario en julio">
         </div>
 
         <div class="com-field">
           <label>Mensaje *</label>
-          <textarea name="body" rows="8" required placeholder="Escribe tu mensaje aquí. Se enviará personalizado con el nombre de cada paciente."></textarea>
-          <p class="com-hint">Se agrega automáticamente el saludo "Hola [nombre]," y la firma de Valentina.</p>
+          <textarea name="body" id="com-body" rows="8" required placeholder="Escribe tu mensaje aquí. Se enviará personalizado con el nombre de cada paciente."></textarea>
+          <p class="com-hint">Se agrega automáticamente el saludo "Hola [nombre]," y, al final, "Un saludo," con tu firma.</p>
+          <p id="com-aviso-cierre" class="com-aviso" role="status" hidden>{AVISO_CIERRE_DUPLICADO}</p>
+        </div>
+
+        <div class="com-test">
+          <button type="button" id="com-test-btn" class="btn btn-outline" style="width:100%;justify-content:center;">
+            Enviarme una prueba
+          </button>
+          <p id="com-test-status" class="com-test-status" role="status"></p>
         </div>
 
         <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
           Enviar correo
         </button>
       </form>
+
+      <!-- Vista previa: el correo EXACTO que se enviará (mismo armado que el envío real, src/lib/correoMasivo.ts).
+           iframe con sandbox (sin scripts): solo muestra, no envía nada. -->
+      <section class="com-preview" aria-label="Vista previa del correo">
+        <div class="com-preview-head">
+          <p class="com-preview-title">Vista previa</p>
+          <div class="com-seg" role="group" aria-label="Ancho de la vista previa">
+            <button type="button" class="com-seg-btn active" data-ancho="375" aria-pressed="true">Celular</button>
+            <button type="button" class="com-seg-btn" data-ancho="600" aria-pressed="false">Computador</button>
+          </div>
+        </div>
+        <div class="com-preview-meta">
+          <p><span>De:</span> Ps. Valentina Orellana</p>
+          <p><span>Asunto:</span> <strong id="com-prev-subject">(sin asunto)</strong></p>
+          <p class="com-preview-ejemplo">Ejemplo con el nombre de <strong id="com-prev-nombre"></strong>; cada paciente recibe el suyo.</p>
+        </div>
+        <div class="com-preview-stage">
+          <iframe id="com-prev-frame" title="Vista previa del correo" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" style="width:375px;"></iframe>
+        </div>
+      </section>
+      </div>
     </div>
   </div>
 
@@ -269,7 +300,30 @@ function fmt(iso: string) {
 /* Modal */
 .com-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 100; align-items: center; justify-content: center; padding: 1rem; }
 .com-modal.open { display: flex; }
-.com-modal-box { background: white; width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; border-radius: 10px; }
+.com-modal-box { background: white; width: 100%; max-width: 1180px; max-height: 92vh; overflow-y: auto; border-radius: 10px; }
+.com-compose-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
+.com-preview { background: #f9fafb; border-top: 1px solid #f3f4f6; padding: 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+@media (min-width: 1100px) {
+  .com-compose-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 660px); align-items: start; }
+  .com-preview { border-top: none; border-left: 1px solid #f3f4f6; }
+}
+.com-preview-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.com-preview-title { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; }
+.com-seg { display: inline-flex; background: #e5e7eb; border-radius: 8px; padding: 2px; }
+.com-seg-btn { border: none; background: transparent; font-size: 0.8rem; font-weight: 500; color: #374151; padding: 0.3rem 0.75rem; border-radius: 6px; cursor: pointer; }
+.com-seg-btn.active { background: white; color: #111827; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.com-preview-meta { font-size: 0.8rem; color: #374151; display: flex; flex-direction: column; gap: 0.15rem; overflow-wrap: anywhere; }
+.com-preview-meta span { color: #6b7280; }
+.com-preview-ejemplo { font-size: 0.72rem; color: #9ca3af; }
+.com-preview-stage { overflow-x: auto; display: flex; justify-content: center; }
+#com-prev-frame { display: block; max-width: 100%; min-height: 420px; border: 1px solid #e5e7eb; border-radius: 8px; background: white; }
+.com-aviso { font-size: 0.78rem; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 0.45rem 0.6rem; line-height: 1.45; }
+.com-aviso[hidden] { display: none; }
+.com-test { display: flex; flex-direction: column; gap: 0.35rem; }
+.com-test-status { font-size: 0.78rem; color: #6b7280; overflow-wrap: anywhere; }
+.com-test-status:empty { display: none; }
+.com-test-status.ok { color: #15803d; }
+.com-test-status.err { color: #dc2626; }
 .com-modal-head { display: flex; justify-content: space-between; align-items: center; padding: 1.25rem 1.5rem; border-bottom: 1px solid #f3f4f6; }
 .com-modal-head p { font-size: 1.1rem; font-weight: 600; }
 .com-modal-x { background: none; border: none; font-size: 1.3rem; cursor: pointer; color: #9ca3af; }
@@ -284,8 +338,10 @@ function fmt(iso: string) {
 </style>
 
 <script>
+  import { htmlCorreoMasivo, terminaConCierre, textoMasivoAHtml } from '../../lib/correoMasivo';
   const modal = document.getElementById('compose-modal');
-  const open  = () => modal.classList.add('open');
+  // Al abrir, se re-mide la vista previa (con el modal oculto el iframe no tiene alto).
+  const open  = () => { modal.classList.add('open'); setTimeout(ajustarAlto, 0); };
   const close = () => modal.classList.remove('open');
   document.querySelectorAll('#open-compose').forEach(b => b.addEventListener('click', open));
   document.getElementById('close-compose')?.addEventListener('click', close);
@@ -296,6 +352,84 @@ function fmt(iso: string) {
   const selWrap = document.getElementById('com-sel-wrap');
   target?.addEventListener('change', () => {
     selWrap.style.display = target.value === 'seleccion' ? 'flex' : 'none';
+  });
+
+  // ─── Vista previa + aviso de cierre duplicado + "Enviarme una prueba" (19 oct 2026) ───
+  // La vista previa usa EXACTAMENTE el mismo armado que el envío real (src/lib/correoMasivo.ts).
+  const subjectEl = document.getElementById('com-subject') as HTMLInputElement | null;
+  const bodyEl    = document.getElementById('com-body') as HTMLTextAreaElement | null;
+  const frame     = document.getElementById('com-prev-frame') as HTMLIFrameElement | null;
+  const avisoEl   = document.getElementById('com-aviso-cierre');
+  const prevSubj  = document.getElementById('com-prev-subject');
+  const prevNom   = document.getElementById('com-prev-nombre');
+  const TODOS     = Array.from(document.querySelectorAll('.com-sel-cb')) as HTMLInputElement[];
+  const NOMBRE_RESPALDO = 'Camila Rojas';
+
+  /** Nombre de ejemplo: la primera paciente que recibirá el correo. */
+  function nombreEjemplo(): string {
+    const lista = (target as HTMLSelectElement | null)?.value === 'seleccion' ? TODOS.filter(cb => cb.checked) : TODOS;
+    return lista[0]?.dataset.nombre || NOMBRE_RESPALDO;
+  }
+
+  function ajustarAlto() {
+    try {
+      const doc = frame?.contentDocument;
+      // Se mide el body (margin:0), no el documento: así la vista también se achica al borrar texto.
+      if (frame && doc?.body) frame.style.height = Math.max(420, Math.ceil(doc.body.getBoundingClientRect().height) + 2) + 'px';
+    } catch { /* sin acceso: queda el alto mínimo */ }
+  }
+  frame?.addEventListener('load', () => {
+    ajustarAlto();
+    // Las imágenes (logo, sello) cambian el alto al cargar.
+    frame.contentDocument?.querySelectorAll('img').forEach(img => img.addEventListener('load', ajustarAlto));
+  });
+
+  function actualizarVista() {
+    const texto = bodyEl?.value ?? '';
+    const nombre = nombreEjemplo();
+    const cuerpo = texto.trim() ? textoMasivoAHtml(texto) : '<span style="color:#9B9485;">(Aquí aparecerá tu mensaje)</span>';
+    const html = htmlCorreoMasivo({ nombre, cuerpoHtml: cuerpo });
+    if (frame) frame.srcdoc = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base target="_blank"></head><body style="margin:0;background:#fff;">${html}</body></html>`;
+    if (prevSubj) prevSubj.textContent = subjectEl?.value.trim() || '(sin asunto)';
+    if (prevNom) prevNom.textContent = nombre;
+    if (avisoEl) avisoEl.hidden = !terminaConCierre(texto);
+  }
+  let espera: ReturnType<typeof setTimeout> | undefined;
+  const programar = () => { clearTimeout(espera); espera = setTimeout(actualizarVista, 150); };
+  subjectEl?.addEventListener('input', programar);
+  bodyEl?.addEventListener('input', programar);
+  target?.addEventListener('change', programar);
+  TODOS.forEach(cb => cb.addEventListener('change', programar));
+  actualizarVista();
+
+  // Celular (375 px) / Computador (600 px)
+  document.querySelectorAll('.com-seg-btn').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.com-seg-btn').forEach(x => { x.classList.remove('active'); x.setAttribute('aria-pressed', 'false'); });
+    b.classList.add('active'); b.setAttribute('aria-pressed', 'true');
+    if (frame) frame.style.width = `${(b as HTMLElement).dataset.ancho}px`;
+    setTimeout(ajustarAlto, 50);
+  }));
+
+  // "Enviarme una prueba": el mismo correo, solo a tu correo de avisos, con asunto "[Prueba] …".
+  const testBtn = document.getElementById('com-test-btn') as HTMLButtonElement | null;
+  const testSt  = document.getElementById('com-test-status');
+  testBtn?.addEventListener('click', async () => {
+    const subject = subjectEl?.value.trim() ?? '';
+    const body = bodyEl?.value.trim() ?? '';
+    const estado = (msg: string, clase = '') => { if (testSt) { testSt.textContent = msg; testSt.className = `com-test-status ${clase}`; } };
+    if (!subject || !body) { estado('Escribe el asunto y el mensaje antes de enviarte la prueba.', 'err'); return; }
+    testBtn.disabled = true; testBtn.textContent = 'Enviando prueba…'; estado('');
+    try {
+      const r = await fetch('/api/admin/comunicaciones', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Panel': '1' },
+        body: JSON.stringify({ action: 'send-test', subject, body, nombre: nombreEjemplo() }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) estado(`✓ Prueba enviada a ${d.to}. Revisa tu bandeja (asunto "[Prueba] ${subject}").`, 'ok');
+      else estado(d.error || 'No se pudo enviar la prueba. Intenta de nuevo.', 'err');
+    } catch { estado('No se pudo enviar la prueba (sin conexión). Intenta de nuevo.', 'err'); }
+    finally { testBtn.disabled = false; testBtn.textContent = 'Enviarme una prueba'; }
   });
 
   // Recolectar emails seleccionados al enviar

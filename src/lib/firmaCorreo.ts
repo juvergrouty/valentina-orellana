@@ -8,6 +8,9 @@ const SITIO = 'https://www.valentinaorellana.cl';
 export const URL_WHATSAPP_FIRMA = 'https://wa.me/56972735696';
 export const URL_AGENDA_FIRMA = `${SITIO}/agenda`;
 
+/** Logo (la V de la marca) arriba de los correos a pacientes (public/firma/v.png). */
+export const LOGO_HEADER_HTML = `<img src="${SITIO}/firma/v.png" width="44" height="44" alt="Ps. Valentina Orellana" style="display:block;border:0;width:44px;height:44px;margin:0 0 1.25rem;">`;
+
 // Firma idéntica a la de Gmail de Vale (copiada del HTML de un correo enviado desde consulta@, 9 oct 2026).
 export const FIRMA_GMAIL = `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;color:#2e332a;margin-top:0.5rem;"><tbody><tr><td style="padding:0 10px 0 0;vertical-align:middle;width:84px"><img src="${SITIO}/firma/sello.png" width="84" height="84" alt="Valentina Orellana" style="display:block;border:0;width:84px;height:84px"></td><td style="padding:0 0 0 10px;border-left:2px solid #f5a623;vertical-align:middle;font-family:Arial,Helvetica,sans-serif;"><div style="font-family:Georgia,'Times New Roman',serif;font-size:16px;font-weight:bold;color:#576352;line-height:1.3">Valentina Orellana</div><div style="font-size:11px;color:rgb(139,138,128);line-height:1.5">Psicóloga · Adultos y parejas</div><div style="font-size:12px;line-height:1.6"><a href="${URL_WHATSAPP_FIRMA}" style="color:rgb(87,99,82);font-weight:bold">WhatsApp</a> <span style="color:#f5a623">·</span> <a href="${SITIO}" style="color:rgb(87,99,82);font-weight:bold">valentinaorellana.cl</a></div><div style="font-size:11px;color:rgb(139,138,128);line-height:1.5">Presencial en Las Condes · Online</div><div style="font-size:12px;line-height:1.6"><a href="${URL_AGENDA_FIRMA}" style="color:rgb(87,99,82);font-weight:bold">Agenda tu hora</a></div></td></tr></tbody></table>`;
 

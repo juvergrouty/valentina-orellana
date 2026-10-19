@@ -1,11 +1,32 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
-import { sendBulkEmail } from '../../../lib/email';
+import { sendBulkEmail, sendBulkTestEmail } from '../../../lib/email';
+import { textoMasivoAHtml } from '../../../lib/correoMasivo';
 import { rutaInterna } from '../../../lib/rutaInterna';
+import { guardiaPanel, json, leerJson } from '../../../lib/transcriptor/peticion';
 
 export const prerender = false;
 
-export const POST: APIRoute = async ({ request, redirect }) => {
+export const POST: APIRoute = async (ctx) => {
+  const { request, redirect } = ctx;
+
+  // "Enviarme una prueba" (19 oct 2026): fetch JSON desde el compositor. Va SOLO al correo de avisos
+  // de Vale (sendBulkTestEmail no acepta destinatario), no se registra como envío masivo.
+  // Guardia del panel: POST + Origin propio + X-Panel + sesión estricta (como las acciones sensibles).
+  if ((request.headers.get('content-type') ?? '').includes('application/json')) {
+    const rechazo = await guardiaPanel(ctx, 'correo_masivo_prueba');
+    if (rechazo) return rechazo;
+    const body = await leerJson(request);
+    if (!body || body.action !== 'send-test') return json({ ok: false, error: 'Acción no válida.' }, 400);
+    const subject = String(body.subject ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 200);
+    const texto  = String(body.body ?? '').trim();
+    const nombre  = String(body.nombre ?? '').trim().slice(0, 120) || 'Camila';
+    if (!subject || !texto) return json({ ok: false, error: 'Faltan el asunto o el contenido del correo.' }, 400);
+    const r = await sendBulkTestEmail({ nombre, subject, bodyHtml: textoMasivoAHtml(texto) });
+    if (!r.sent) return json({ ok: false, error: 'No se pudo enviar la prueba. Intenta de nuevo en un rato.' }, 502);
+    return json({ ok: true, to: r.to });
+  }
+
   const form    = await request.formData();
   const action  = form.get('action')?.toString();
   const dest    = rutaInterna(form.get('redirect'), '/admin/comunicaciones');
@@ -31,9 +52,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (target === 'seleccion') recipients = recipients.filter(p => elegidos.has((p.email ?? '').toLowerCase()));
     if (!recipients.length) return redirect(dest + '?error=none_selected');
 
-    // El texto se escapa (un "<" ya no rompe el correo) y los saltos de línea pasan a <br>.
-    const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const bodyHtml = esc(body).replace(/\n/g, '<br>');
+    // El texto se escapa (un "<" ya no rompe el correo) y los saltos de línea pasan a <br>
+    // (mismo armado que la vista previa y la prueba: src/lib/correoMasivo.ts).
+    const bodyHtml = textoMasivoAHtml(body);
 
     // Se registra el envío y cada destinatario ANTES de mandar: así cada
     // correo lleva su imagen invisible de apertura (/api/abierto/<id>.gif,

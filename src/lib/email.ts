@@ -8,7 +8,8 @@ import { frasePlazoPago, AVISO_REAGENDAR } from './cobrosProximos';
 import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
 import { asuntoAnulacion, htmlAnulacion, textoAnulacion, type DatosAnulacion } from './correoAnulacion';
-import { cierreFirmaHtml } from './firmaCorreo';
+import { cierreFirmaHtml, LOGO_HEADER_HTML } from './firmaCorreo';
+import { asuntoPrueba, htmlCorreoMasivo } from './correoMasivo';
 import { bloqueEntrarSesion, enlacePacienteSesion, enlaceValeSesion, filaEnlaceVale, meetDeNotas, normalizarMeet } from './enlaceSesion';
 
 // Inicialización perezosa — no falla si la key no está configurada
@@ -34,7 +35,8 @@ const FROM = `${FROM_NAME} <${FROM_ADDR}>`;
 // Gmail personal.
 // Logo (la V de la marca) arriba de los correos. Imagen chica con fondo crema
 // igual al del correo; alojada en el sitio (public/firma/v.png).
-const LOGO_HEADER = `<img src="https://www.valentinaorellana.cl/firma/v.png" width="44" height="44" alt="Ps. Valentina Orellana" style="display:block;border:0;width:44px;height:44px;margin:0 0 1.25rem;">`;
+// (definido en firmaCorreo.ts para que la vista previa del correo masivo use el mismo).
+const LOGO_HEADER = LOGO_HEADER_HTML;
 
 const PATIENT_REPLY_TO = 'Ps. Valentina Orellana <consulta@valentinaorellana.cl>';
 
@@ -865,14 +867,8 @@ export async function sendBulkEmail(
 
   for (const r of recipients) {
     if (!r.email) { skipped++; continue; }
-    const html = `
-      <div style="font-family:'Inter',sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
-        ${LOGO_HEADER}
-        <p style="font-size:0.9rem;color:#6B6860;margin-bottom:1.5rem;">Hola ${escapeHtml(r.name)},</p>
-        <div style="font-size:0.92rem;line-height:1.7;color:#1A1A18;">${bodyHtml}</div>
-        ${CIERRE_PACIENTE}
-        ${r.pixelId ? `<img src="https://www.valentinaorellana.cl/api/abierto/${r.pixelId}.gif" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;" />` : ''}
-      </div>`;
+    // Mismo armado que la vista previa y el correo de prueba (src/lib/correoMasivo.ts).
+    const html = htmlCorreoMasivo({ nombre: r.name, cuerpoHtml: bodyHtml, pixelId: r.pixelId });
     try {
       const res = await client.emails.send({ from: FROM, to: r.email, replyTo: PATIENT_REPLY_TO, subject, html });
       if (res.error) { failed++; console.error('[email] bulk:', res.error); }
@@ -884,6 +880,28 @@ export async function sendBulkEmail(
   }
 
   return { sent, failed, skipped, enviados: enviados.filter(Boolean) };
+}
+
+/**
+ * "Enviarme una prueba" del correo masivo (pedido de Vale, 19 oct 2026): el MISMO correo que recibirán
+ * las pacientes, con asunto "[Prueba] …", SOLO al correo de avisos de Vale (setting `notification_email`,
+ * o su correo de respaldo). No recibe destinatario a propósito: no hay forma de mandarlo a otra persona.
+ * No cuenta como envío masivo (no se registra en bulk_emails) y no lleva píxel de apertura.
+ */
+export async function sendBulkTestEmail(opts: { nombre: string; subject: string; bodyHtml: string }): Promise<{ sent: boolean; to?: string; reason?: string }> {
+  const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
+  const to = String(notifRow?.value ?? '').trim() || ADMIN_EMAIL_FALLBACK;
+  const client = getResend();
+  if (!client) return { sent: false, to, reason: 'RESEND_API_KEY no configurado' };
+  const html = htmlCorreoMasivo({ nombre: opts.nombre, cuerpoHtml: opts.bodyHtml });
+  try {
+    const res = await client.emails.send({ from: FROM, to, replyTo: PATIENT_REPLY_TO, subject: asuntoPrueba(opts.subject), html });
+    if (res.error) { console.error('[email] prueba masivo:', res.error); return { sent: false, to, reason: res.error.message }; }
+    return { sent: true, to };
+  } catch (e) {
+    console.error('[email] prueba masivo exception:', e);
+    return { sent: false, to, reason: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 // ─── Email al admin: hora liberada automáticamente por falta de pago ────────
