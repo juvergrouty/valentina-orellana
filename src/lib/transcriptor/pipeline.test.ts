@@ -173,8 +173,8 @@ function escenario(planClaude: (string | number)[] = [RESUMEN]) {
     { key: 'transcriptor_resumen_modo', value: 'directo' }, { key: 'transcriptor_bot_nombres_vale', value: 'Valentina Orellana' },
   );
   const paciente = (name: string, email: string) => { const id = randomUUID(); db.tabla('patients').push({ id, name, email, active: true, birthdate: '1990-05-05' }); return id; };
-  const firma = (patient_id: string, signer_name: string, signer_rut: string, version = '2026-11-v3') =>
-    db.tabla('consents').push({ id: randomUUID(), patient_id, version, signed_at: '2026-10-10T12:00:00Z', signer_name, signer_rut, signer_email: null, accept_recording: true, revoked_at: null });
+  const firma = (patient_id: string, signer_name: string, signer_rut: string, version = '2026-11-v3', accept_recording = true) =>
+    db.tabla('consents').push({ id: randomUUID(), patient_id, version, signed_at: '2026-10-10T12:00:00Z', signer_name, signer_rut, signer_email: null, accept_recording, revoked_at: null });
 
   /** Lo que hacen grabacion-iniciar + subida-url + grabacion-finalizar (P4) con la base. */
   async function grabarPresencial(patientId: string, tipo: 'individual' | 'pareja', segundos: number[]): Promise<string> {
@@ -447,7 +447,7 @@ test('envío a AssemblyAI que falla: backoff 1/5/15/60 min y, agotado, error + a
 test('sin consentimiento: no se lanza el bot y queda la fila sin_consentimiento (sin alerta)', async () => {
   const e = escenario();
   const p = e.paciente('Sofía Paz', 'sofia@ejemplo.cl');
-  e.firma(p, 'Sofía Paz', '16.666.666-6', '2026-10-v1'); // v1 no autoriza grabar
+  e.firma(p, 'Sofía Paz', '16.666.666-6', '2026-10-v1', false); // firmó sin autorizar la grabación
   const inicio = new Date(e.ahora().getTime() + 60_000).toISOString();
   e.eventos.push({ id: 'evencuadrado1', start: { dateTime: inicio }, end: { dateTime: new Date(e.ahora().getTime() + 51 * 60_000).toISOString() }, hangoutLink: 'https://meet.google.com/xyz-abcd-efg', attendees: [{ email: 'sofia@ejemplo.cl' }] });
   assert.equal(await e.pipeline.despacharPorEnlace({ bookingId: randomUUID(), googleEventId: 'evencuadrado1' }, e.ahora()), 'sin_consentimiento');

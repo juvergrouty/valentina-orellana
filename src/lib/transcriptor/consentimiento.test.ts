@@ -13,11 +13,11 @@ const fila = (p: Partial<FilaConsentimiento>): FilaConsentimiento => ({
 const evaluar = (tipo: 'individual' | 'pareja' | 'sin_tipo', filas: FilaConsentimiento[], fechaNacimiento: string | null = '1990-05-05') =>
   evaluarConsentimientos({ patientId: 'p1', tipo, fechaNacimiento, filas, hoy: HOY });
 
-test('versiones (decisión 9, 16 oct): v1 no sirve para grabar; v2, v3 y posteriores sí', () => {
+test('versiones (decisión de Vale 19 oct): v1, v2, v3 y posteriores sirven para grabar', () => {
   assert.equal(numeroVersion('2026-10-v2'), 2);
   assert.equal(numeroVersion('2026-11-v3'), 3);
   assert.equal(numeroVersion('raro'), null);
-  assert.equal(esVersionGrabacion('2026-10-v1'), false);
+  assert.equal(esVersionGrabacion('2026-10-v1'), true);
   assert.equal(esVersionGrabacion('2026-10-v2'), true);
   assert.equal(esVersionGrabacion('2026-11-v3'), true);
   assert.equal(esVersionGrabacion('2027-03-v4'), true);
@@ -58,9 +58,10 @@ test('individual con v2 sin autorizar grabación → sin_consentimiento; v2 revo
   assert.equal(evaluar('individual', [fila({ version: '2026-10-v2', revoked_at: '2026-10-14T00:00:00Z' })]).motivo, 'revocado');
 });
 
-test('individual solo con v1 → version_antigua', () => {
+test('individual solo con v1 y grabación autorizada → puede (pacientes antiguos, decisión de Vale 19 oct)', () => {
   const r = evaluar('individual', [fila({ version: '2026-10-v1' })]);
-  assert.deepEqual([r.puede, r.motivo], [false, 'version_antigua']);
+  assert.equal(r.puede, true);
+  assert.equal(evaluar('individual', [fila({ version: '2026-10-v1', accept_recording: false })]).motivo, 'sin_consentimiento');
 });
 
 test('v2 antigua + v3 nueva de la misma persona → vale la última', () => {
@@ -96,16 +97,16 @@ test('pareja: una sola persona firmó → falta_segunda_firma; dos personas → 
   assert.equal(r.consentIds.length, 2);
 });
 
-test('pareja: v3 + v2 con grabación autorizada → puede; segunda solo v1 → falta_segunda_firma; revocó → revocado', () => {
+test('pareja: v3 + v2 con grabación autorizada → puede; segunda v1 autorizada → puede; revocó → revocado', () => {
   assert.equal(evaluar('pareja', [fila({}), fila({ signer_rut: '9.876.543-2', version: '2026-10-v2' })]).puede, true);
-  assert.equal(evaluar('pareja', [fila({}), fila({ signer_rut: '9.876.543-2', version: '2026-10-v1' })]).motivo, 'falta_segunda_firma');
+  assert.equal(evaluar('pareja', [fila({}), fila({ signer_rut: '9.876.543-2', version: '2026-10-v1' })]).puede, true);
   assert.equal(evaluar('pareja', [fila({}), fila({ signer_rut: '9.876.543-2', version: '2026-10-v2', accept_recording: false })]).motivo, 'sin_consentimiento');
   assert.equal(evaluar('pareja', [fila({}), fila({ signer_rut: '9.876.543-2', revoked_at: '2026-10-13T00:00:00Z' })]).motivo, 'revocado');
 });
 
-test('ficha con dos personas: si una solo tiene v1, tampoco se graba eligiendo individual', () => {
-  const r = evaluar('individual', [fila({}), fila({ signer_rut: '9.876.543-2', version: '2026-10-v1' })]);
-  assert.deepEqual([r.puede, r.motivo], [false, 'falta_segunda_firma']);
+test('ficha con dos personas: si una no autorizó la grabación, tampoco se graba eligiendo individual', () => {
+  const r = evaluar('individual', [fila({}), fila({ signer_rut: '9.876.543-2', version: '2026-10-v1', accept_recording: false })]);
+  assert.equal(r.puede, false);
 });
 
 test('menores de 18 nunca se graban (aunque tengan firma)', () => {

@@ -49,8 +49,9 @@ export interface FilaConsentimiento {
 }
 
 export const EDAD_MINIMA_GRABACION = 18;
-/** Decisión 9 (16 oct): la v2 con accept_recording=true habilita grabar; la v1 no. */
-export const VERSION_MINIMA_GRABACION = 2;
+/** Decisión de Vale (19 oct, reemplaza la decisión 9): cualquier versión firmada con accept_recording=true
+ *  habilita grabar, también la v1 (pacientes antiguos). Las v1 y v2 reciben el aviso único (avisoV2.ts). */
+export const VERSION_MINIMA_GRABACION = 1;
 
 /** Número de versión de 'AAAA-MM-vN' (o 'vN'). null si no se reconoce. */
 export function numeroVersion(version: string | null | undefined): number | null {

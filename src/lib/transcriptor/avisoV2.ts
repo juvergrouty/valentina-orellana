@@ -2,7 +2,7 @@
 // 81-revision-etica-clinica H4; texto de 12-consentimiento-nuevo.md §c adaptado a "cambié de herramienta").
 //   • Se muestra UNA sola vez por firma, escrito abajo en el correo de confirmación de su siguiente hora.
 //   • Solo si transcriptor_activo = 'true' (el transcriptor está en uso).
-//   • Solo a firmas cuya ÚLTIMA versión por persona es la v2, con accept_recording = true, sin revocar
+//   • Solo a firmas cuya ÚLTIMA versión por persona es la v1 o la v2 (v1 desde el 19 oct, decisión de Vale), con accept_recording = true, sin revocar
 //     y sin retiro de la grabación. Las v3 ya describen el sistema nuevo: no lo necesitan.
 //   • Queda constancia en consent_avisos (0019: consent_id único, canal, texto_version, fecha).
 //   • E (02-decisiones-16oct-noche): además se guarda una COPIA FIEL del correo que salió (HTML completo
@@ -48,7 +48,7 @@ export function firmasParaAviso(filas: Fila[], yaAvisadas: ReadonlySet<string>):
     if (!prev || String(f.signed_at) > String(prev.signed_at)) ultimas.set(k, f);
   }
   return [...ultimas.values()].filter((f) =>
-    numeroVersion(f.version) === 2 && f.accept_recording === true && !f.revoked_at && !f.recording_revoked_at && !yaAvisadas.has(f.id));
+    (numeroVersion(f.version) === 1 || numeroVersion(f.version) === 2) && f.accept_recording === true && !f.revoked_at && !f.recording_revoked_at && !yaAvisadas.has(f.id));
 }
 
 export interface AvisoPendiente { patientId: string; consentIds: string[]; html: string }
