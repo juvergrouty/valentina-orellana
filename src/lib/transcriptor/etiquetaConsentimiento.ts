@@ -29,3 +29,9 @@ export function hrefEnviarConsentimiento(patientId: string): string {
 export function textoEnlaceConsentimiento(e: string | null | undefined): string {
   return e === 'sin_grabacion' ? 'Ver consentimiento' : 'Enviar consentimiento';
 }
+
+/** Aviso del panel: solo pacientes con al menos una sesión vigente (por pagar o confirmada). */
+export function tieneSesionVigente(email: string | null | undefined, vigentes: Set<string>): boolean {
+  const e = String(email ?? '').trim().toLowerCase();
+  return !!e && vigentes.has(e);
+}

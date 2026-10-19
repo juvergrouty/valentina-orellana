@@ -137,3 +137,11 @@ test('en lote: si fallan las señales de pareja, nadie sale "firmado" (pero lo q
   assert.equal(m.has('p-ok'), false);
   assert.equal(m.get('p-sin'), 'sin_firma');
 });
+
+test('aviso del panel: solo con sesión vigente (horas anuladas no cuentan)', async () => {
+  const { tieneSesionVigente } = await import('./etiquetaConsentimiento');
+  const vigentes = new Set(['diego@x.cl']);
+  assert.equal(tieneSesionVigente('Diego@X.cl ', vigentes), true);
+  assert.equal(tieneSesionVigente('edinson@x.cl', vigentes), false);
+  assert.equal(tieneSesionVigente(null, vigentes), false);
+});

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { supabase } from './supabase';
 import { FaltaMigracion0021, pendienteOCrear, personaDe } from './transcriptor/pareja';
 import { vigentePropio } from './transcriptor/estadoConsentimiento';
+import { tieneSesionVigente } from './transcriptor/etiquetaConsentimiento';
 
 // Consentimiento informado de tratamiento de datos personales y de salud
 // (Ley 21.719, que modifica la Ley 19.628). Pedido por Valentina el 3 oct
@@ -172,13 +173,20 @@ export function vigente(rows: ConsentRow[]): ConsentRow | null {
 export interface ConsentAlert { patientId: string; name: string; sentAt: string | null }
 
 // Pacientes activos sin consentimiento vigente — aviso permanente del admin.
+// Solo los que tienen al menos una sesión vigente (por pagar o confirmada): si todas sus horas
+// se anularon o vencieron, no hay atención en curso y no se avisa (Vale, 19 oct 2026). Si
+// vuelven a agendar, reaparecen solos.
+
 export async function getConsentAlerts(): Promise<ConsentAlert[]> {
-  const [{ data: patients, error: pErr }, { data: consents, error: cErr }] = await Promise.all([
-    supabase.from('patients').select('id, name').eq('active', true).order('name'),
+  const [{ data: patients, error: pErr }, { data: consents, error: cErr }, { data: reservas, error: bErr }] = await Promise.all([
+    supabase.from('patients').select('id, name, email').eq('active', true).order('name'),
     supabase.from('consents').select('*').not('patient_id', 'is', null),
+    supabase.from('bookings').select('patient_email').not('status', 'in', '(cancelled,expired)').limit(20000), // tope explícito: PostgREST corta en 1000 sin avisar
   ]);
   // Si la tabla aún no existe (migración sin correr) no avisar en falso a todos.
   if (pErr || cErr) return [];
+  // Si falla leer las reservas, se avisa como antes (mejor de más que de menos).
+  const vigentes = bErr ? null : new Set((reservas ?? []).map((r: { patient_email: string | null }) => String(r.patient_email ?? '').trim().toLowerCase()).filter(Boolean));
   const porPaciente = new Map<string, ConsentRow[]>();
   for (const c of (consents ?? []) as ConsentRow[]) {
     const l = porPaciente.get(c.patient_id!) ?? [];
@@ -188,6 +196,7 @@ export async function getConsentAlerts(): Promise<ConsentAlert[]> {
   for (const p of patients ?? []) {
     const rows = porPaciente.get(p.id) ?? [];
     if (vigente(rows)) continue;
+    if (vigentes && !tieneSesionVigente((p as { email?: string | null }).email, vigentes)) continue;
     const enviado = rows.filter(r => !r.signed_at && r.sent_at && personaConsent(r) === 1).map(r => r.sent_at!).sort().pop() ?? null;
     alerts.push({ patientId: p.id, name: p.name, sentAt: enviado });
   }
