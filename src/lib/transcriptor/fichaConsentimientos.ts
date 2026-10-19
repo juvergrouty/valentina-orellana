@@ -3,7 +3,7 @@
 // pareja; se sube aquí para que la franja y el bloque digan exactamente lo mismo.
 // "¿Es de pareja?" sale SIEMPRE de la regla única (consentimiento.ts fichaEsParejaEnBase, 86-revisión B1).
 import { consentUrl, FaltaMigracion0021, getOrCreatePendingConsent } from '../consent';
-import { estadoPareja, fichaConReservaPareja, urlWhatsAppPareja, type EstadoPareja, type InfoServicio, type ReservaMinima } from './pareja';
+import { estadoPareja, fichaConReservaPareja, reservaCuentaParaPareja, urlWhatsAppPareja, type EstadoPareja, type InfoServicio, type ReservaMinima } from './pareja';
 import { fichaEsPareja, fichaEsParejaEnBase } from './consentimiento';
 import { qrSvg } from './qr';
 
@@ -31,8 +31,9 @@ export async function prepararPareja(p: {
   demo: boolean;
 }): Promise<ParejaFicha> {
   const { patient, bookings, servicios, consentRows, demo } = p;
+  // Respaldo (base caída o demo): misma regla, sin reservas anuladas ni vencidas (reservaCuentaParaPareja).
   const porFicha = () => fichaConReservaPareja(bookings, servicios) || fichaEsPareja({
-    sessionTypes: bookings.map((b) => b.session_type), tiposGrabaciones: [], filas: consentRows, nombre: patient.name,
+    sessionTypes: bookings.filter(reservaCuentaParaPareja).map((b) => b.session_type), tiposGrabaciones: [], filas: consentRows, nombre: patient.name,
   });
   let esPareja = false;
   let errorReservas = false;

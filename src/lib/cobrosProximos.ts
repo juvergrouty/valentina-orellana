@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { hoursUntilSessionCL } from './dateUtils';
 import { comprobanteEnRevision } from './comprobantes';
+import { esPagoEnConsulta } from './pagoEnConsulta';
 
 // Plazo de pago (Valentina, 14 oct 2026): el pago de una sesión debe quedar
 // confirmado con un plazo máximo de 24 horas antes de la sesión. Se dice desde
@@ -51,6 +52,8 @@ export type CobroProximo = {
   monto: number;
   waUrl: string | null;  // WhatsApp con el mensaje y el link listos
   sinLink: boolean;      // no hay link de pago que mandar (sin ficha ni orden de Flow)
+  // "Pago en consulta" (19 oct 2026, ver pagoEnConsulta.ts): se cobra en la sesión, sin link ni plazo de 24 h.
+  enConsulta: boolean;
 };
 
 /** Sesiones de la página (no las de Encuadrado) que empiezan en las próximas
@@ -60,7 +63,7 @@ export async function cobrosProximos(origen: string): Promise<CobroProximo[]> {
   const desde = new Date(hoy.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10);
   const hasta = new Date(hoy.getTime() + 3 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const { data, error } = await supabase.from('bookings')
-    .select('id, patient_name, patient_email, patient_phone, session_date, session_time, session_type, amount, status, paid_at, debt_voided, no_show, mp_preference_id, created_by_admin, notes')
+    .select('id, patient_name, patient_email, patient_phone, session_date, session_time, session_type, amount, status, paid_at, debt_voided, no_show, mp_preference_id, created_by_admin, notes, payment_method')
     .gte('session_date', desde).lte('session_date', hasta)
     .is('paid_at', null)
     .not('status', 'in', '(cancelled,expired)');
@@ -96,6 +99,7 @@ export async function cobrosProximos(origen: string): Promise<CobroProximo[]> {
       const digitos = String(b.patient_phone ?? '').replace(/\D/g, '');
       const tel = digitos.length === 9 ? '56' + digitos : digitos;
       const presencial = !String(b.session_type ?? '').includes('online');
+      const enConsulta = esPagoEnConsulta(b);
       const texto = url ? mensajeLinkPago(b.patient_name, url, b.session_date, hora) : `Hola ${String(b.patient_name).split(' ')[0]} 👋`;
       return {
         id: b.id,
@@ -104,8 +108,10 @@ export async function cobrosProximos(origen: string): Promise<CobroProximo[]> {
         hora,
         presencial,
         monto: Number(b.amount),
-        waUrl: tel.length >= 10 ? `https://wa.me/${tel}?text=${encodeURIComponent(texto)}` : null,
-        sinLink: !url,
+        // Paga en consulta: sin WhatsApp de cobro (no hay link que mandar ni plazo que recordar).
+        waUrl: !enConsulta && tel.length >= 10 ? `https://wa.me/${tel}?text=${encodeURIComponent(texto)}` : null,
+        sinLink: !enConsulta && !url,
+        enConsulta,
       };
     })
     .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));

@@ -8,6 +8,8 @@ import { sesionesPorCobrar, sesionesQueTeDeben } from '../../lib/porCobrar';
 import { getValidAccessToken } from '../../lib/syncCalendar';
 import { pacienteDeTitulo } from '../../lib/boxCala';
 import { URL_SII } from '../../lib/impuestos';
+import { ETIQUETA_PAGO_EN_CONSULTA, esPagoEnConsulta } from '../../lib/pagoEnConsulta';
+import { textoPagoPorDevolver } from '../../lib/pagosPorDevolver';
 
 // Inicio del panel (rediseño aprobado por Valentina, 14 oct 2026): TODO lleva
 // directo a donde está la acción. Arriba el día que se mira (‹ › para moverse,
@@ -90,7 +92,7 @@ const [avisos, reservasRes, google, porCobrar, deben, recientesRes] = await Prom
   // Sesiones desde el lunes de la semana del día mirado hasta 7 días después
   // (o el domingo, lo que llegue más lejos). Sin canceladas NI vencidas.
   supabase.from('bookings')
-    .select('id, patient_name, session_type, session_date, session_time, status, amount, duration_min, paid_at, debt_voided')
+    .select('id, patient_name, session_type, session_date, session_time, status, amount, duration_min, paid_at, debt_voided, notes, payment_method')
     .gte('session_date', lunes).lte('session_date', hasta)
     .not('status', 'in', '(cancelled,expired)')
     .order('session_date').order('session_time'),
@@ -107,7 +109,7 @@ const reservas = (reservasRes.data ?? []) as Reserva[];
 // ── Sesiones (página + Google/Encuadrado) ───────────────────────────────────
 type Sesion = {
   id: string | null; fecha: string; hora: string; dur: number; paciente: string;
-  online: boolean; tipo: string; pago: 'pagada' | 'por-pagar' | 'anulada' | 'sin-cobro' | 'externa'; href: string;
+  online: boolean; tipo: string; pago: 'pagada' | 'por-pagar' | 'en-consulta' | 'anulada' | 'sin-cobro' | 'externa'; href: string;
 };
 const TIPOS: Record<string, string> = {
   'online': 'Individual online', 'presencial': 'Individual presencial',
@@ -123,7 +125,7 @@ const sesiones: Sesion[] = reservas.filter((b) => b.session_date !== '2099-12-31
   tipo: TIPOS[b.session_type] ?? b.session_type,
   // El pago se lee de paid_at (no del estado de la reserva): igual que el calendario.
   // Sin costo (obra social): queda con paid_at pero $0; antes salía "pagada" (auditoría 19 oct 2026).
-  pago: b.paid_at ? (Number(b.amount) > 0 ? 'pagada' : 'sin-cobro') : b.debt_voided ? 'anulada' : (Number(b.amount) > 0 ? 'por-pagar' : 'sin-cobro'),
+  pago: b.paid_at ? (Number(b.amount) > 0 ? 'pagada' : 'sin-cobro') : b.debt_voided ? 'anulada' : (Number(b.amount) > 0 ? (esPagoEnConsulta(b) ? 'en-consulta' : 'por-pagar') : 'sin-cobro'),
   href: `/admin/agenda?booking=${b.id}`,
 }));
 {
@@ -211,9 +213,35 @@ type Tarea = {
 };
 const vuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); return u.pathname + u.search; })();
 const tareas: Tarea[] = [];
-const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos, encuadrado } = avisos;
+const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos, encuadrado, pagosPorDevolver } = avisos;
+
+// Pago por devolver o reagendar (19 oct 2026, ver src/lib/pagosPorDevolver.ts): queda hasta "Resuelto".
+for (const p of pagosPorDevolver ?? []) {
+  tareas.push({
+    clave: ahoraClave,
+    chip: 'pago por devolver',
+    titulo: textoPagoPorDevolver(p),
+    detalle: `${p.estado === 'expired' ? 'Pagó después de que venciera la reserva' : 'La sesión estaba pagada y se anuló'} · devuélvele el pago o pásala a otra hora`,
+    href: p.href,
+    accion: { tipo: 'form', action: '/api/admin/pago-resuelto', campos: { id: p.id, redirect: vuelta }, texto: 'Resuelto' },
+  });
+}
+if (pagosPorDevolver === null) {
+  tareas.push({ clave: ahoraClave, chip: 'revisar', titulo: 'No se pudieron revisar los pagos por devolver', detalle: 'Recarga en un rato.', href: null });
+}
 
 for (const c of cobros ?? []) {
+  // Paga en consulta (19 oct 2026, ver src/lib/pagoEnConsulta.ts): sin plazo de 24 h, sin box ni link.
+  if (c.enConsulta) {
+    tareas.push({
+      clave: `${c.fecha}T${c.hora}`,
+      chip: `sesión ${cuando(c.fecha, c.hora)}`,
+      titulo: `${ETIQUETA_PAGO_EN_CONSULTA}: ${c.paciente}`,
+      detalle: `${c.presencial ? 'Presencial' : 'Online'} · ${clp(c.monto)} · cóbrale en la sesión y márcala pagada`,
+      href: `/admin/agenda?booking=${c.id}`,
+    });
+    continue;
+  }
   const plazo = sumarDias(c.fecha, -1); // el pago debe quedar 24 h antes
   const vencido = hoursUntilSessionCL(plazo, c.hora) <= 0;
   tareas.push({
@@ -385,7 +413,7 @@ for (const b of recientesRes.data ?? []) {
 const origenes = [...porCanal.entries()].sort((a, b) => b[1].n - a[1].n);
 
 const chevron = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>';
-const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-pagar': 'por pagar', 'anulada': 'deuda anulada', 'sin-cobro': 'sin costo', 'externa': 'Encuadrado' };
+const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-pagar': 'por pagar', 'en-consulta': 'paga en consulta', 'anulada': 'deuda anulada', 'sin-cobro': 'sin costo', 'externa': 'Encuadrado' };
 ---
 
 <AdminLayout title="Inicio" current="/admin" avisos={avisos} ocultarAvisosDeInicio>
@@ -502,7 +530,8 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
                               </>
                             : <span class="ini-hecho">sin teléfono válido</span>)}
                           {t.accion.tipo === 'form' && (
-                            <form method="POST" action={t.accion.action}>
+                            <form method="POST" action={t.accion.action}
+                              onsubmit={t.accion.action === '/api/admin/pago-resuelto' ? "return confirm('¿Marcar como resuelto? (ya devolviste el pago o la pasaste a otra hora). El aviso desaparece; la sesión y su pago no cambian.')" : undefined}>
                               {Object.entries(t.accion.campos).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
                               <button type="submit" class="btn btn-outline ini-btn">{t.accion.texto}</button>
                             </form>
@@ -639,6 +668,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
   .ini-pago { font-size: 0.7rem; font-weight: 600; padding: 0.2rem 0.55rem; border-radius: 99px; border: 1px solid; white-space: nowrap; flex-shrink: 0; }
   .ini-pago-pagada { color: #15803d; border-color: #86efac; background: #f0fdf4; }
   .ini-pago-por-pagar { color: #b91c1c; border-color: #fca5a5; background: #fef2f2; }
+  .ini-pago-en-consulta { color: #78350f; border-color: #b45309; border-style: dashed; background: #fef3c7; }
   .ini-pago-anulada, .ini-pago-sin-cobro, .ini-pago-externa { color: var(--enc-text-3); border-color: var(--enc-border); background: var(--enc-body-bg); }
 
   /* Números */
@@ -697,6 +727,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
   .ini-punto { width: 9px; height: 9px; border-radius: 50%; padding: 0; flex-shrink: 0; border: none; background: #d1d5db; }
   .ini-punto.ini-pago-pagada { background: #16a34a; }
   .ini-punto.ini-pago-por-pagar { background: #dc2626; }
+  .ini-punto.ini-pago-en-consulta { background: #d97706; }
 
   /* Origen */
   .ini-origen summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 0.4rem; list-style: none; }

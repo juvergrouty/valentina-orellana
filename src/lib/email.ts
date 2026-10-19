@@ -7,6 +7,7 @@ import { todayCL, hoursUntilSessionCL } from './dateUtils';
 import { frasePlazoPago, AVISO_REAGENDAR } from './cobrosProximos';
 import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
+import { asuntoAnulacion, htmlAnulacion, textoAnulacion, type DatosAnulacion } from './correoAnulacion';
 import { bloqueEntrarSesion, enlacePacienteSesion, enlaceValeSesion, filaEnlaceVale, meetDeNotas, normalizarMeet } from './enlaceSesion';
 
 // Inicialización perezosa — no falla si la key no está configurada
@@ -347,6 +348,25 @@ ${enlace ? bloqueEntrarSesion(enlace) : ''}
     `,
   });
   await logEmail('email/sesion-actualizada', data.patient_email, subject, !res.error, res.error?.message);
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
+}
+
+// ─── Email al cliente: hora anulada (solo si Vale marca "Avisar a la paciente") ─
+// Texto en src/lib/correoAnulacion.ts. idempotencyKey: dos clics seguidos no mandan dos correos.
+export async function sendCancellationEmail(data: DatosAnulacion & { patient_email: string }, opts: { idempotencyKey?: string } = {}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+  const subject = asuntoAnulacion(data);
+  const res = await client.emails.send({
+    from: FROM,
+    replyTo: PATIENT_REPLY_TO,
+    to: data.patient_email,
+    subject,
+    html: htmlAnulacion(data),
+    text: textoAnulacion(data),
+  }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+  await logEmail('email/hora-anulada', data.patient_email, subject, !res.error, res.error?.message);
   if (res.error) return { sent: false, reason: res.error.message };
   return { sent: true };
 }

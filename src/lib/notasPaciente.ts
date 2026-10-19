@@ -8,7 +8,7 @@
 // El texto sigue siendo legible para Valentina (solo se agrega un guion).
 
 const REEMPLAZOS: [RegExp, string][] = [
-  [/(pago)(?=token|sinaviso)/gi, '$1-'],                          // PagoToken, PagoSinAviso
+  [/(pago)(?=token|sinaviso|enconsulta)/gi, '$1-'],               // PagoToken, PagoSinAviso, PagoEnConsulta
   [/(boleta)(\s+)(folio)/gi, '$1-$3'],                             // Boleta Folio N
   [/(boleta)(?=(email|pendiente|emitiendo))/gi, '$1-'],            // BoletaEmailEnviada, BoletaPendiente*, BoletaEmitiendo
   [/(comprobante)(?=transferencia)/gi, '$1-'],                     // ComprobanteTransferencia
