@@ -6,6 +6,8 @@
 // Verifica que nada del robot online (espera de 15 min "Vale puede volver", una sesión = una grabación)
 // retrasa ni toca una grabación presencial: iniciar → subir → finalizar → transcribir → 'lista' con
 // resumen y evolución autollenada, individual y pareja, con internet y retomando sin internet.
+// 19 oct (rama presencial-pulido): seguir CON internet la misma sesión (GET ?verificar=1 + mismo gid) y
+// correo de la reserva con otras mayúsculas.
 // Correr: pnpm test
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -207,6 +209,7 @@ function escenario() {
   const post = async (r: Ruta, ruta: string, body: unknown) => { const res = await r(ctx(ruta, body)); return { status: res.status, data: await res.json() as Record<string, any> }; };
   const iniciar = (body: Record<string, unknown>) => post(rutas.iniciar, '/api/admin/transcriptor/grabacion-iniciar', body);
   const estado = async (id: string) => (await rutas.finalizarGet(ctx(`/api/admin/transcriptor/grabacion-finalizar?id=${id}`))).json() as Promise<Record<string, any>>;
+  const verificar = async (id: string) => { const res = await rutas.finalizarGet(ctx(`/api/admin/transcriptor/grabacion-finalizar?id=${id}&verificar=1`)); return { status: res.status, data: await res.json() as Record<string, any> }; };
 
   /** Lo que hace subirUna() del Grabador: subida-url por segmento, PUT de cada parte y finalizar. */
   async function subirYFinalizar(gid: string, segs: { seq: number; audio: Uint8Array; offsetMs: number; durMs: number }[], extra: Record<string, unknown> = {}) {
@@ -236,7 +239,7 @@ function escenario() {
     { repo: repoWebhookSupabase(db.cliente), aai },
   );
   const audiosEnR2 = () => [...r2.objetos.keys()].filter((k) => k.startsWith(`${BUCKETS.audio}/`)).length;
-  return { db, r2, aai, claude, alertas, hoy, paciente, firma, reserva, iniciar, estado, subirYFinalizar, grab, segs, correr, webhook, audiosEnR2, cifrado };
+  return { db, r2, aai, claude, alertas, hoy, paciente, firma, reserva, iniciar, estado, verificar, subirYFinalizar, grab, segs, correr, webhook, audiosEnR2, cifrado };
 }
 
 // ─── Pruebas ─────────────────────────────────────────────────────────────────
@@ -373,4 +376,59 @@ test('presencial sin reserva (botón de la ficha) → evolución por fecha; sin 
   assert.equal(e.grab(gid2).estado, 'lista');
   const notas = e.db.tabla('session_notes').filter((n) => n.patient_id === p);
   assert.deepEqual(notas.map((n) => [n.booking_id, n.session_date]), [[null, e.hoy]]);
+});
+
+test('seguir CON internet tras perder la pestaña (19 oct): verificar=1 → mismo gid, seq que sigue → UNA grabación, UN resumen; correo de la reserva con mayúsculas → evolución en esa reserva', async () => {
+  const e = escenario();
+  const p = e.paciente('Camila Rojas', 'camila@ejemplo.cl');
+  e.firma(p, 'Camila Rojas', '12.345.678-5');
+  // La reserva trae el correo con mayúsculas y un espacio: grabacion-iniciar la encuentra igual (ilike).
+  const bookingId = e.reserva(' Camila@Ejemplo.CL', 'Camila Rojas', 'presencial');
+  const ini = await e.iniciar({ booking_id: bookingId, tipo: 'individual' });
+  assert.equal(ini.status, 200, JSON.stringify(ini.data));
+  const gid = ini.data.grabacion_id as string;
+  assert.equal(e.grab(gid).patient_id, p);
+
+  // iOS descartó la pestaña; Vale reabre CON internet: el grabador pregunta antes de seguir. Solo lectura.
+  const v = await e.verificar(gid);
+  assert.equal(v.status, 200, JSON.stringify(v.data));
+  assert.deepEqual([v.data.ok, v.data.acepta_audio, v.data.puede_grabar, v.data.estado], [true, true, true, 'creada']);
+  assert.equal(e.grab(gid).estado, 'creada', 'verificar no cambia nada');
+
+  // Sigue la misma grabación: seg 0 (antes del corte) y seg 1 (después), un solo finalizar.
+  const fin = await e.subirYFinalizar(gid, [
+    { seq: 0, audio: new Uint8Array(randomBytes(2000)), offsetMs: 0, durMs: 18 * 60_000 },
+    { seq: 1, audio: new Uint8Array(randomBytes(2600)), offsetMs: 21 * 60_000, durMs: 29 * 60_000 },
+  ]);
+  assert.deepEqual([fin.status, fin.data.estado], [200, 'transcribiendo'], JSON.stringify(fin.data));
+  const [t0, t1] = e.segs(gid).map((s) => s.aai_transcript_id as string);
+  e.aai.completar(t0, palabras('partamos por lo que pasó en el trabajo'));
+  e.aai.completar(t1, palabras('y después de eso me sentí más tranquila'));
+  await e.webhook(t0); await e.webhook(t1);
+  await e.correr();
+
+  assert.equal(e.grab(gid).estado, 'lista');
+  assert.equal(e.db.tabla('grabaciones').filter((g) => g.patient_id === p).length, 1, 'una sesión = una grabación');
+  assert.equal(e.db.tabla('resumenes_ia').filter((r) => r.grabacion_id === gid).length, 1, 'un solo resumen');
+  const notas = e.db.tabla('session_notes').filter((n) => n.patient_id === p);
+  assert.deepEqual(notas.map((n) => [n.booking_id, n.session_date]), [[bookingId, e.hoy]], 'la evolución queda en la reserva aunque el correo venga con mayúsculas');
+
+  // Ya cerrada: verificar dice que no acepta audio (el grabador no ofrece seguir y la subida explica).
+  const cerrada = await e.verificar(gid);
+  assert.deepEqual([cerrada.data.acepta_audio, cerrada.data.puede_grabar], [false, false]);
+});
+
+test('seguir CON internet: si retiraron el consentimiento, verificar=1 lo dice y subida-url sigue rechazando el audio', async () => {
+  const e = escenario();
+  const p = e.paciente('Diego Pérez', 'diego@ejemplo.cl');
+  e.firma(p, 'Diego Pérez', '15.555.555-5');
+  const ini = await e.iniciar({ patient_id: p, tipo: 'individual' });
+  const gid = ini.data.grabacion_id as string;
+  e.db.tabla('consents').filter((c) => c.patient_id === p).forEach((c) => { c.revoked_at = new Date().toISOString(); });
+  const v = await e.verificar(gid);
+  assert.deepEqual([v.data.ok, v.data.acepta_audio, v.data.puede_grabar, v.data.motivo], [true, true, false, 'revocado']);
+  assert.match(String(v.data.error), /autorización de grabación/);
+  const fin = await e.subirYFinalizar(gid, []).catch((x) => x);
+  assert.equal(fin.status, 403, 'finalizar sigue verificando el consentimiento');
+  assert.equal(e.grab(gid).estado, 'creada');
 });

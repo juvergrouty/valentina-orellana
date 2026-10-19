@@ -17,6 +17,8 @@ const { datos } = Astro.props;
     )}
     {datos.errorLectura && <div class="gr-alerta gr-alerta-roja" role="alert">No se pudieron leer las sesiones de hoy. Puedes buscar al paciente abajo.</div>}
     <div id="gr-pendientes" hidden></div>
+    <!-- Con internet (19 oct): seguir la misma sesión si iOS descartó la pestaña (una sesión = una transcripción). -->
+    <div id="gr-retomar-red" class="gr-pila" hidden></div>
     <div id="gr-espacio" class="gr-alerta gr-alerta-ambar" hidden>
       <b>Hay poco espacio en el iPhone.</b> Una sesión ocupa unos 25 MB. Libera espacio antes de grabar.
     </div>
@@ -336,7 +338,8 @@ const { datos } = Astro.props;
   import { barrasDesdeDb, dbDesdeRms, dbSuavizado } from '../../lib/transcriptor/medidor';
   import { cuentaComoSilencio, finGrabacionMs } from '../../lib/transcriptor/grabador';
   import {
-    arregloBloqueo, cerrarSegmentoCortado, claveReutilizar, esRetomable, etiquetaBloqueo, localYaEnServidor,
+    arregloBloqueo, cerrarSegmentoCortado, claveReutilizar, decidirSeguir, destinoPendiente, esRetomable, etiquetaBloqueo,
+    localYaEnServidor, textoSinSubir, type VerificacionSeguir,
     type CandidataGrabador, type DatosGrabador, type SegServidor,
   } from '../../lib/transcriptor/grabadorDatos';
   // Grabador presencial (P4). Ver la cabecera del archivo y docs/transcriptor/40-ux-diseno.md §2 y §6.
@@ -786,6 +789,9 @@ const { datos } = Astro.props;
     if (!('mediaDevices' in navigator) || elegirMime() === null) { errorMicrofono({ name: 'NoSoportado' }); return; }
     try { await navigator.storage?.persist?.(); } catch { /* opcional */ }
     if (D.demo) { demoVista('grabando'); return; }
+    // Empezar otra grabación = Vale eligió no seguir la que se cortó: esa se sube como antes, al terminar.
+    for (const g of ofrecidas) { g.estado = 'terminada'; await guardarGrab(g).catch(() => {}); }
+    ofrecidas = []; $('gr-retomar-red').hidden = true; $('gr-retomar-red').textContent = '';
     grab = { gid: gidPreparado, nombre: sel.nombre, patientId: sel.patientId, etiqueta: `${sel.nombre}, hoy ${horaTxt(Date.now())}`, ruido, inicioMs: Date.now(), finMs: null, estado: 'grabando', segmentos: [], pausas: [] };
     try {
       modo = 'grabando';
@@ -823,6 +829,17 @@ const { datos } = Astro.props;
     try {
       if (!(await abandonada(g))) { msg.textContent = 'Esta grabación está abierta en otra pestaña de este teléfono: sigue allá.'; return; }
       if (!('mediaDevices' in navigator) || elegirMime() === null) { msg.textContent = 'Este navegador no puede grabar.'; return; }
+      // Con internet (19 oct): antes de seguir se pregunta al sitio si la grabación sigue abierta y si el
+      // consentimiento sigue vigente. Sin respuesta (red inestable) se sigue como sin internet: subida-url
+      // y finalizar lo vuelven a verificar antes de aceptar audio.
+      if (!D.sinInternet && !D.demo && navigator.onLine) {
+        msg.textContent = 'Verificando el consentimiento…';
+        const d = decidirSeguir(await verificarSeguir(g.gid));
+        msg.textContent = '';
+        if (d === 'no_acepta') { await noSeguir(g); return; } // la subida explica qué pasó (cerrada, cancelada, otro dispositivo)
+        if (d === 'sin_consentimiento') { msg.textContent = `${ultimaVerificacion?.error || 'Falta el consentimiento de grabación.'} No se sigue grabando; lo grabado sigue en este teléfono.`; return; }
+        if (grab || modo !== 'listo') return;
+      }
       const ult = g.segmentos[g.segmentos.length - 1];
       const tiempos = ult && ult.finMs === null ? (await trozosDe(g.gid, ult.seq)).map((t) => t.t) : [];
       cerrarSegmentoCortado(g, tiempos);
@@ -842,23 +859,72 @@ const { datos } = Astro.props;
         return;
       }
       activarGrabacion(g, `${etiquetaSesion(g)} · continuación`, g.ruido, true);
+      ofrecidas = []; $('gr-retomar-red').hidden = true; $('gr-retomar-red').textContent = '';
       anunciar('Grabando de nuevo.');
     } finally { retomando = false; }
   }
   // La página sin internet es pública (sin login): no muestra nombres de pacientes, solo la hora de la sesión.
   const etiquetaSesion = (g: GrabLocal) => D.sinInternet ? `Sesión de las ${horaTxt(g.inicioMs)}` : g.nombre;
-  function tarjetaRetomar(g: GrabLocal, hastaMs: number): HTMLElement {
+  function tarjetaRetomar(g: GrabLocal, hastaMs: number, conRed = false): HTMLElement {
     const a = document.createElement('div'); a.className = 'gr-alerta gr-alerta-roja gr-pendiente'; a.setAttribute('role', 'alert');
-    const t = document.createElement('p'); t.className = 'gr-alerta-titulo'; t.textContent = `La grabación de la sesión de las ${horaTxt(g.inicioMs)} se cortó`;
+    const t = document.createElement('p'); t.className = 'gr-alerta-titulo';
+    // Sin internet la página es pública: sin nombres. Con internet (detrás del login) se dice de quién es.
+    t.textContent = conRed ? `La grabación de ${g.nombre} (sesión de las ${horaTxt(g.inicioMs)}) se cortó` : `La grabación de la sesión de las ${horaTxt(g.inicioMs)} se cortó`;
     const p = document.createElement('p');
-    p.textContent = `Hay audio hasta las ${horaTxt(hastaMs)}. Toca para seguir: el resto se agrega a la misma sesión, sin internet.`;
+    p.textContent = conRed
+      ? `Hay audio hasta las ${horaTxt(hastaMs)}. Toca para seguir: el resto se agrega a la misma sesión y queda una sola transcripción. Después vuelve a activar el modo avión.`
+      : `Hay audio hasta las ${horaTxt(hastaMs)}. Toca para seguir: el resto se agrega a la misma sesión, sin internet.`;
     const b = document.createElement('button'); b.type = 'button'; b.className = 'gr-btn gr-btn-rec gr-btn-medio';
     const dot = document.createElement('span'); dot.className = 'gr-dot'; dot.setAttribute('aria-hidden', 'true');
     b.append(dot, document.createTextNode('Seguir grabando'));
     const m = document.createElement('p'); m.setAttribute('aria-live', 'polite');
     b.addEventListener('click', () => retomar(g, m));
-    a.append(t, p, b, m);
+    a.append(t, p, b);
+    if (conRed) {
+      // Si Vale no sigue, todo queda como antes: se sube tal cual quedó.
+      const n = document.createElement('button'); n.type = 'button'; n.className = 'gr-btn gr-btn-out gr-btn-chico'; n.style.marginTop = '8px';
+      n.textContent = 'No seguir: subir lo grabado';
+      n.addEventListener('click', () => { if (!retomando && !grab) noSeguir(g); });
+      a.append(n);
+    }
+    a.append(m);
     return a;
+  }
+  // Hasta dónde hay audio de verdad: el último trozo guardado (el latido también corre en pausa).
+  async function hastaDe(g: GrabLocal): Promise<number> {
+    const ult = g.segmentos[g.segmentos.length - 1];
+    const tr = ult ? await trozosDe(g.gid, ult.seq).catch(() => [] as Trozo[]) : [];
+    return Math.max(g.inicioMs, ...g.segmentos.map((s) => s.finMs ?? s.inicioMs), ...tr.map((x) => x.t));
+  }
+
+  // ─── Seguir la misma sesión CON internet (19 oct) ───────────────────────
+  // Antes, al reabrir con internet, subirPendientes() subía sola la grabación cortada y lo que seguía quedaba
+  // en otra grabación (dos resúmenes). Ahora se ofrece seguir (mismo mecanismo que sin internet). Mientras se
+  // ofrece no se sube; si Vale toca "No seguir", empieza otra grabación o pasan 3 h, se sube como antes.
+  let ofrecidas: GrabLocal[] = [];
+  let ultimaVerificacion: VerificacionSeguir | null = null;
+  async function verificarSeguir(gid: string): Promise<VerificacionSeguir | null> {
+    ultimaVerificacion = null;
+    try {
+      const r = await fetch(`/api/admin/transcriptor/grabacion-finalizar?id=${encodeURIComponent(gid)}&verificar=1`, { credentials: 'same-origin', signal: AbortSignal.timeout(8000) });
+      if (r.status === 401) return null; // la subida pedirá volver a entrar; no se pierde la sesión por esto
+      ultimaVerificacion = await r.json();
+      return ultimaVerificacion;
+    } catch { return null; }
+  }
+  async function noSeguir(g: GrabLocal) {
+    ofrecidas = ofrecidas.filter((x) => x.gid !== g.gid);
+    g.estado = 'terminada';
+    await guardarGrab(g).catch(() => {});
+    subirPendientes();
+  }
+  async function pintarRetomarRed(lista: GrabLocal[]) {
+    ofrecidas = lista;
+    const caja = $('gr-retomar-red');
+    if (modo !== 'listo' || !lista.length) { caja.hidden = true; caja.textContent = ''; return; }
+    const tarjetas = await Promise.all(lista.map(async (g) => tarjetaRetomar(g, await hastaDe(g), true)));
+    if (modo !== 'listo' || ofrecidas !== lista) return;
+    caja.textContent = ''; tarjetas.forEach((t) => caja.append(t)); caja.hidden = false;
   }
   async function pintarSinInternet() {
     if (modo !== 'listo') return;
@@ -868,10 +934,7 @@ const { datos } = Astro.props;
     const ret: { g: GrabLocal; hasta: number }[] = [];
     for (const g of todas) {
       if (!esRetomable(g, await abandonada(g), ahora)) continue;
-      // Hasta dónde hay audio de verdad: el último trozo guardado (el latido también corre en pausa).
-      const ult = g.segmentos[g.segmentos.length - 1];
-      const tr = ult ? await trozosDe(g.gid, ult.seq).catch(() => [] as Trozo[]) : [];
-      ret.push({ g, hasta: Math.max(g.inicioMs, ...g.segmentos.map((s) => s.finMs ?? s.inicioMs), ...tr.map((x) => x.t)) });
+      ret.push({ g, hasta: await hastaDe(g) });
     }
     if (modo !== 'listo') return;
     const caja = $('gr-retomar'); caja.textContent = '';
@@ -1156,6 +1219,8 @@ const { datos } = Astro.props;
 
   // Errores que no se arreglan reintentando (consentimiento retirado, grabación rechazada): por grabación.
   const erroresDef = new Map<string, string>();
+  // La última subida respondió 401 (sesión del panel vencida): no se reintenta sola hasta volver a entrar.
+  let sesionVencida = false;
 
   let otraVuelta = false;
   let irAOtra = false;
@@ -1165,11 +1230,18 @@ const { datos } = Astro.props;
     if (subiendo) { otraVuelta = true; return; } // p. ej. la sesión recién terminada: se sube al acabar la vuelta en curso
     if (reintento) { clearTimeout(reintento); reintento = null; }
     let lista: GrabLocal[];
+    const seguir: GrabLocal[] = [];
     try {
       const todas = await listarGrabs();
       lista = [];
-      for (const g of todas) if (g.estado === 'terminada' || (g.estado === 'grabando' && await abandonada(g))) lista.push(g);
+      const ahora = Date.now();
+      for (const g of todas) {
+        const d = destinoPendiente(g, g.estado === 'grabando' && await abandonada(g), ahora);
+        if (d === 'subir') lista.push(g);
+        else if (d === 'ofrecer_seguir') seguir.push(g); // se ofrece seguir; no se sube mientras tanto
+      }
     } catch { return; }
+    pintarRetomarRed(seguir);
     pintarPendientes(lista);
     if (!lista.length || !navigator.onLine) return;
     subiendo = true;
@@ -1180,7 +1252,7 @@ const { datos } = Astro.props;
         const enPantalla = grab?.gid === g.gid;
         try {
           const r = await subirUna(g, (h, t) => { if (enPantalla) progreso(`Subiendo… ${h} de ${t} ${t === 1 ? 'parte' : 'partes'}`, t ? h / t : 0, 'Deja esta página abierta un momento.'); });
-          intentos = 0;
+          intentos = 0; sesionVencida = false;
           if (enPantalla) { progreso('Subida ✓', 1, ''); $('gr-progreso').hidden = true; $('gr-aviso-cerrar').hidden = true; seguirEstado(g.gid, r.estado); }
         } catch (e) {
           const err = e instanceof ErrorSubida ? e : new ErrorSubida('No se pudo subir la grabación.');
@@ -1188,7 +1260,7 @@ const { datos } = Astro.props;
             progreso('No se pudo subir la grabación.', null, `${err.message} Está segura en este teléfono${err.definitivo ? '.' : ' y se reintentará sola cuando haya internet.'}`, !err.definitivo);
             $('gr-descartar').hidden = !(err.definitivo && err.motivo !== 'sesion');
           }
-          if (err.definitivo) { if (err.motivo !== 'sesion') erroresDef.set(g.gid, err.message); continue; } // sigue con las demás
+          if (err.definitivo) { if (err.motivo !== 'sesion') erroresDef.set(g.gid, err.message); else sesionVencida = true; continue; } // sigue con las demás
           hayReintentable = true;
         }
       }
@@ -1222,7 +1294,9 @@ const { datos } = Astro.props;
     const a = document.createElement('div'); a.className = 'gr-alerta gr-alerta-ambar gr-pendiente'; a.setAttribute('role', 'status');
     const t = document.createElement('p');
     const b = document.createElement('b'); b.textContent = otras.length === 1 ? 'Tienes 1 grabación sin subir' : `Tienes ${otras.length} grabaciones sin subir`;
-    t.append(b, document.createTextNode(` (${otras.map((g) => g.etiqueta).join('; ')}). ${navigator.onLine ? 'Se está subiendo sola.' : 'Se sube sola cuando vuelva internet.'}`));
+    // El texto dice lo que de verdad pasa: las que tienen un error definitivo no se suben solas.
+    const conError = otras.filter((g) => erroresDef.has(g.gid)).length;
+    t.append(b, document.createTextNode(` (${otras.map((g) => g.etiqueta).join('; ')}). ${textoSinSubir(otras.length, conError, navigator.onLine, sesionVencida)}`));
     a.append(t);
     for (const g of otras) {
       const msg = erroresDef.get(g.gid);
@@ -1305,6 +1379,12 @@ const { datos } = Astro.props;
     if (sel !== c) elegir(c);
     const g: GrabLocal = { gid: 'demo', nombre: c.nombre, patientId: c.patientId, etiqueta: `${c.nombre}, hoy 16:00`, ruido: false, inicioMs: Date.now() - 1421000, finMs: null, estado: 'grabando', segmentos: [{ seq: 0, inicioMs: Date.now() - 1421000, finMs: null, mime: 'audio/mp4' }], pausas: [] };
     if (v === 'conexion') $('gr-hoja').hidden = false;
+    // Seguir con internet una grabación que se cortó (19 oct) y lista "sin subir" con un error definitivo.
+    if (v === 'retomar') pintarRetomarRed([{ ...g, gid: 'cortada', inicioMs: Date.now() - 1500000, vivoMs: Date.now() - 240000 }]);
+    if (v === 'sin-subir') {
+      erroresDef.set('rechazada', 'Esta grabación quedó sin consentimiento de grabación y el sitio ya no acepta su audio. No se borró nada de este dispositivo.');
+      pintarPendientes([{ ...g, gid: 'rechazada', etiqueta: 'Tomás Fuentes, ayer 18:00', estado: 'terminada' }]);
+    }
     if (v === 'error-mic') errorMicrofono({ name: 'NotAllowedError' });
     if (['grabando', 'silencio'].includes(v)) {
       grab = g; segActual = g.segmentos[0]; modo = 'grabando';

@@ -6,6 +6,7 @@
 //   ?falta=0020    → aviso de la migración 0020 pendiente.
 //   ?evo=auto      → la sesión más reciente tiene la evolución autollenada desde su resumen IA.
 //   ?evo=vacia     → la sesión más reciente no tiene evolución (se ve "Usar como base de mi evolución").
+//   ?nacimiento=falta → la ficha no tiene fecha de nacimiento (pendiente "Falta la fecha de nacimiento").
 import type { GrabFicha, ResFicha } from '../fichaNotas';
 import { textoEvolucionDesdeResumen } from '../panel';
 
@@ -29,7 +30,7 @@ export interface FichaDemo {
 export function fichaDemo(id: string, params: URLSearchParams): FichaDemo {
   const parejaFalta = params.get('pareja') === 'falta';
   const extra = Math.min(Math.max(Number(params.get('n') ?? 0) || 0, 0), 200);
-  const patient = { id, name: 'Camila Rojas', email: 'camila@example.com', phone: '+56911112222', active: true, birthdate: '1993-04-02', rut: null, notes: '', address: 'Av. Siempre Viva 123', comuna: 'Ñuñoa', steps_sent_at: '2026-09-10T12:00:00Z' };
+  const patient = { id, name: 'Camila Rojas', email: 'camila@example.com', phone: '+56911112222', active: true, birthdate: params.get('nacimiento') === 'falta' ? null : '1993-04-02', rut: null, notes: '', address: 'Av. Siempre Viva 123', comuna: 'Ñuñoa', steps_sent_at: '2026-09-10T12:00:00Z' };
   const notas: Record<string, unknown>[] = [
     { id: 'n1', patient_id: id, booking_id: 'b1', session_date: '2026-10-15', session_type: 'presencial', content: 'Buena adherencia. Trabajar asertividad con la jefa. Retomar registro de pensamientos.', deleted_at: null },
     { id: 'n3', patient_id: id, booking_id: 'b3', session_date: '2026-10-01', session_type: 'presencial', content: 'Se trabaja motivo de consulta: ansiedad laboral. Acuerdo de frecuencia semanal.', deleted_at: null },

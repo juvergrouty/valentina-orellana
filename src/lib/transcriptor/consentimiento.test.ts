@@ -129,6 +129,11 @@ test('sin fecha de nacimiento (o ilegible) SÍ se graba si hay consentimiento (d
   assert.equal(enlaceArreglo('menor_de_edad', 'p1'), null);
   assert.equal(enlaceArreglo('sin_consentimiento', 'p1')?.etiqueta, 'Enviar consentimiento');
   assert.match(notaRobotSinPermiso('sin_fecha_nacimiento'), /fecha de nacimiento/);
+  // Desde el 18 oct la fecha no bloquea: ningún texto puede decir que sin ella no se graba.
+  for (const t of [notaRobotSinPermiso('sin_fecha_nacimiento'), textoMotivo('sin_fecha_nacimiento', 'Ana Soto')]) {
+    assert.doesNotMatch(t, /sin ella|así que no se graba/i);
+    assert.match(t, /si es menor de 18 no se graba/);
+  }
   assert.match(notaRobotSinPermiso('sin_consentimiento'), /consentimiento/);
 });
 

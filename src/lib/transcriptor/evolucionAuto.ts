@@ -44,6 +44,11 @@ class ErrorEvolucion extends Error {
 }
 const errDe = (etapa: string, e: { code?: string } | null | undefined) => new ErrorEvolucion(etapa, e?.code ?? null);
 
+/** Correo comparable: sin espacios al inicio o al final y en minúsculas. '' si no hay. */
+export function normalizarCorreo(c: string | null | undefined): string {
+  return String(c ?? '').trim().toLowerCase();
+}
+
 /** Reserva "sin fecha" (cobro manual, ver lib/encuadrado.ts): no es una sesión con evolución. */
 const FECHA_SIN_SESION = '2099-12-31';
 
@@ -76,9 +81,11 @@ export async function autollenarEvolucion(p: {
       ]);
       if (er || ep) throw errDe('leer_sesion', er ?? ep);
       const reserva = r as { id: string; session_date?: string | null; session_type?: string | null; patient_email?: string | null } | null;
-      // Mismo criterio que la ficha: sus reservas son las de patient_email = patients.email (exacto).
-      const email = (pac as { email?: string | null } | null)?.email ?? null;
-      if (!reserva || !email || reserva.patient_email !== email || !reserva.session_date) {
+      // La reserva es de esta ficha si su correo es el de la ficha. Mismo criterio que grabacion-iniciar
+      // (que encuentra al paciente con ilike): sin distinguir mayúsculas ni espacios al inicio o al final.
+      // Nada más se relaja: correo vacío no coincide con nada.
+      const email = normalizarCorreo((pac as { email?: string | null } | null)?.email);
+      if (!reserva || !email || normalizarCorreo(reserva.patient_email) !== email || !reserva.session_date) {
         await registrar('ok', { motivo: 'sin_sesion' });
         return 'sin_sesion';
       }

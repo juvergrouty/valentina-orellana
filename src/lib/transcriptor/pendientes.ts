@@ -44,7 +44,8 @@ export interface EntradaPendientes {
   tieneSesiones: boolean;
   faltanDatos: string[];
   hrefInfo: string;
-  /** Ronda 2 (18 oct): sin fecha de nacimiento no se graba (chequeo de menores, consentimiento.ts). */
+  /** Falta la fecha de nacimiento. Desde el 18 oct NO bloquea la grabación (manda el consentimiento
+   *  firmado); solo bloquea si la fecha es de un menor de 18 (consentimiento.ts). */
   faltaNacimiento?: boolean;
 }
 
@@ -82,7 +83,7 @@ export function calcularPendientes(e: EntradaPendientes): Pendiente[] {
     out.push({
       clave: 'fecha_nacimiento',
       texto: 'Falta la fecha de nacimiento',
-      detalle: 'sin ella no se graba la sesión',
+      detalle: 'para tener la ficha al día; si es menor de 18 no se graba',
       accion: { tipo: 'ir', href: `${e.hrefInfo}#pf-nacimiento`, etiqueta: 'Completar' },
     });
   }

@@ -322,7 +322,7 @@ const formatCLP = (n: number) =>
             <div>
               <label class="label" for="pf-nacimiento" style="display:block;margin-bottom:0.3rem;">Fecha de nacimiento</label>
               <input type="date" name="birthdate" id="pf-nacimiento" value={patient.birthdate ?? ''} style="scroll-margin-top:6rem;" />
-              {!patient.birthdate && <p style="margin:0.3rem 0 0;font-size:0.78rem;color:#92400e;">Sin fecha de nacimiento no se pueden grabar sus sesiones (no se graba a menores de 18).</p>}
+              {!patient.birthdate && <p style="margin:0.3rem 0 0;font-size:0.78rem;color:#92400e;">Falta la fecha de nacimiento. Complétala para tener la ficha al día; si es menor de 18 no se graba.</p>}
             </div>
             <div id="pf-doc" style={`grid-column:1/-1;display:${patient.sin_rut === true && !patient.rut ? 'grid' : 'none'};grid-template-columns:1fr 1fr 1fr;gap:1rem;`}>
               <div>

@@ -410,7 +410,8 @@ export interface ClienteClaude {
 /** P4 — consentimiento.ts. */
 export interface ResultadoPuedeGrabar {
   puede: boolean;
-  // 'sin_fecha_nacimiento' añadido en la ronda 2 (18 oct): sin fecha de nacimiento en la ficha no se graba.
+  // 'sin_fecha_nacimiento' (ronda 2): desde el 18 oct ya no se produce (la fecha no bloquea; solo
+  // bloquea si es de un menor de 18). Se mantiene por compatibilidad con valores antiguos.
   motivo?: 'sin_consentimiento' | 'revocado' | 'version_antigua' | 'falta_segunda_firma' | 'menor_de_edad' | 'sin_ficha' | 'sin_fecha_nacimiento';
   consentIds: string[];
 }

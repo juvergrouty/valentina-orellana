@@ -68,10 +68,11 @@ test('base: marcar y leer el historial; sin la tabla (0023) se lee vacío y marc
   assert.deepEqual(await leerGestionados({ from: () => { throw new Error('sin tabla'); } } as never, p), []);
 });
 
-test('ronda 2: falta la fecha de nacimiento: pendiente con Completar que lleva al campo (sin ella no se graba)', () => {
+test('falta la fecha de nacimiento: pendiente con Completar; dice la verdad (no bloquea, solo menores de 18)', () => {
   const [p] = calcularPendientes(base({ faltaNacimiento: true }));
   assert.equal(p.clave, 'fecha_nacimiento');
-  assert.match(p.detalle ?? '', /no se graba/);
+  assert.match(p.detalle ?? '', /si es menor de 18 no se graba/);
+  assert.doesNotMatch(p.detalle ?? '', /sin ella/i);
   assert.deepEqual(p.accion, { tipo: 'ir', href: '/admin/pacientes/x?tab=info#pf-nacimiento', etiqueta: 'Completar' });
   assert.equal(claveValida('fecha_nacimiento'), true);
   assert.deepEqual(calcularPendientes(base({ faltaNacimiento: false })), []);

@@ -19,11 +19,17 @@ export const prerender = false;
 // Idempotente: si ya estaba subida o más adelante responde ok (el navegador recién borra
 // los trozos de IndexedDB cuando recibe ok de aquí).
 // GET ?id=<grabacion_id> → { estado } para que la página muestre el avance.
+// GET ?id=<grabacion_id>&verificar=1 → además { acepta_audio, puede_grabar, motivo?, error? }: antes de
+//   SEGUIR CON INTERNET una grabación que se cortó (iOS descartó la pestaña), el grabador pregunta si la
+//   grabación sigue abierta y si el consentimiento sigue vigente (mismo chequeo que subida-url/finalizar).
+//   Solo lectura: no cambia nada. Igual, subida-url y finalizar lo vuelven a verificar antes de aceptar audio.
 //
 // Cuerpo: { grabacion_id, lugar_con_ruido, inicio_at, fin_at, duracion_seg, pausas: [{desde_ms,hasta_ms}],
 //           segmentos: [{ seq, upload_id, partes: [{n, etag}], bytes, sha256, offset_ms, duracion_ms }] }
 
 const YA_SUBIDA: EstadoGrabacion[] = ['subida', 'transcribiendo', 'transcrita', 'resumiendo', 'lista', 'sin_audio'];
+/** Estados en que la grabación todavía acepta audio (los mismos que subida-url y el POST de aquí). */
+const ACEPTA_AUDIO: EstadoGrabacion[] = ['creada', 'grabando', 'pausada', 'subiendo'];
 const entero = (x: unknown, min: number, max: number): number | null =>
   typeof x === 'number' && Number.isInteger(x) && x >= min && x <= max ? x : null;
 const fecha = (x: unknown): string | null => typeof x === 'string' && !Number.isNaN(Date.parse(x)) ? new Date(x).toISOString() : null;
@@ -62,9 +68,22 @@ function leerPausas(x: unknown): PausaGrabacion[] {
 export const GET: APIRoute = async ({ url }) => {
   const id = url.searchParams.get('id');
   if (!esUuid(id)) return json({ ok: false, error: 'Falta la grabación.' }, 400);
-  const { data, error } = await supabase.from('grabaciones').select('id, estado, patient_id').eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from('grabaciones').select('id, estado, patient_id, tipo, origen').eq('id', id).maybeSingle();
   if (error) return json({ ok: false, error: 'No se pudo leer el estado.' }, 503);
   if (!data) return json({ ok: false, error: 'No encontré esa grabación.' }, 404);
+  if (url.searchParams.get('verificar') === '1') {
+    const acepta = data.origen === 'presencial' && ACEPTA_AUDIO.includes(data.estado as EstadoGrabacion);
+    if (!acepta) return json({ ok: true, estado: data.estado, patient_id: data.patient_id, acepta_audio: false, puede_grabar: false });
+    try {
+      const v = await verificarGrabacion(data.patient_id, data.tipo as TipoSesion);
+      return json({
+        ok: true, estado: data.estado, patient_id: data.patient_id, acepta_audio: true, puede_grabar: v.puede,
+        ...(v.puede ? {} : { motivo: v.motivo, error: textoMotivo(motivoVisible(v)) }),
+      });
+    } catch {
+      return json({ ok: false, error: 'No se pudo verificar el consentimiento.' }, 503);
+    }
+  }
   // Ronda 2 (18 oct): 'lista' sin resumen = no se reconoció voz (pipeline: resumen en error 'sin_voz'). El
   // grabador no debe decir "El resumen está en la ficha" si no lo hay. Solo un sí/no, sin contenido.
   let resumen: boolean | null = null;
@@ -92,7 +111,7 @@ export const POST: APIRoute = async (ctx) => {
     const g = gData as Grabacion | null;
     if (!g || g.origen !== 'presencial') return json({ ok: false, error: 'No encontré esa grabación.' }, 404);
     if (YA_SUBIDA.includes(g.estado)) return json({ ok: true, estado: g.estado, patient_id: g.patient_id });
-    if (!['creada', 'grabando', 'pausada', 'subiendo'].includes(g.estado)) {
+    if (!ACEPTA_AUDIO.includes(g.estado)) {
       return json({ ok: false, error: 'Esta grabación ya no acepta audio.', estado: g.estado }, 409);
     }
 

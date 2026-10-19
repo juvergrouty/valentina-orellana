@@ -61,6 +61,55 @@ export function cerrarSegmentoCortado(g: GrabRetomar, tiemposTrozosUltimo: numbe
   return g.segmentos.length;
 }
 
+// ─── Seguir la misma sesión CON internet (19 oct) ───────────────────────────
+// "Una sesión = una transcripción": si iOS descartó la pestaña y Vale reabre el grabador con internet, antes
+// la grabación cortada se subía sola tal cual y lo que seguía quedaba en otra grabación (dos resúmenes). Ahora
+// se ofrece "Seguir grabando" igual que sin internet (mismo gid, seq que continúa). Si Vale dice que no, o
+// pasaron más de RETOMAR_MAX_MS, se sube como antes.
+
+/** Qué hacer con una grabación guardada en el teléfono al revisar lo pendiente. */
+export type DestinoPendiente = 'subir' | 'ofrecer_seguir' | 'ninguno';
+
+export function destinoPendiente(g: GrabRetomar, abandonada: boolean, ahora: number): DestinoPendiente {
+  if (g.estado === 'terminada') return 'subir';
+  if (g.estado !== 'grabando' || !abandonada) return 'ninguno'; // la está grabando esta u otra pestaña
+  return esRetomable(g, abandonada, ahora) ? 'ofrecer_seguir' : 'subir';
+}
+
+/** Respuesta de GET grabacion-finalizar?verificar=1 antes de seguir con internet. */
+export interface VerificacionSeguir { ok?: boolean; acepta_audio?: boolean; puede_grabar?: boolean; error?: string }
+
+/**
+ * ¿Se puede seguir con internet? 'seguir' solo si el servidor confirma que la grabación sigue abierta y el
+ * consentimiento vigente. 'no_acepta' = ya se cerró, canceló o subió desde otro dispositivo: no se sigue (se
+ * sube lo grabado y la subida explica qué pasó). 'sin_consentimiento' = no se graba más. Si el servidor no
+ * responde (red inestable) se sigue igual que sin internet: subida-url y finalizar vuelven a verificar.
+ */
+export function decidirSeguir(r: VerificacionSeguir | null): 'seguir' | 'no_acepta' | 'sin_consentimiento' {
+  if (!r || r.ok !== true) return 'seguir';
+  if (r.acepta_audio === false) return 'no_acepta';
+  if (r.puede_grabar === false) return 'sin_consentimiento';
+  return 'seguir';
+}
+
+// ─── Lista "grabaciones sin subir" ───────────────────────────────────────────
+
+/**
+ * Texto de la lista ámbar. Las que tienen un error definitivo (consentimiento retirado, cancelada, subida
+ * desde otro dispositivo) NO se suben solas: no se puede decir "Se está subiendo sola" de ellas. Tampoco si
+ * la sesión del panel venció (401): ahí se suben recién cuando Vale vuelve a entrar.
+ */
+export function textoSinSubir(total: number, conErrorDefinitivo: number, enLinea: boolean, sesionVencida = false): string {
+  const resto = total - conErrorDefinitivo;
+  if (total <= 0) return '';
+  if (resto <= 0) return total === 1 ? 'No se pudo subir: abajo está el motivo.' : 'No se pudieron subir: abajo está el motivo de cada una.';
+  const sola = !enLinea ? (resto === 1 ? 'se sube sola cuando vuelva internet' : 'se suben solas cuando vuelva internet')
+    : sesionVencida ? (resto === 1 ? 'se sube cuando vuelvas a entrar al panel (tu sesión venció)' : 'se suben cuando vuelvas a entrar al panel (tu sesión venció)')
+    : (resto === 1 ? 'se está subiendo sola' : 'se están subiendo solas');
+  if (!conErrorDefinitivo) return `${sola[0].toUpperCase()}${sola.slice(1)}.`;
+  return `${resto === 1 ? 'Una' : `${resto}`} ${sola}; ${conErrorDefinitivo === 1 ? (resto === 1 ? 'la otra no se pudo subir' : '1 no se pudo subir') : `${conErrorDefinitivo} no se pudieron subir`} (abajo está el motivo).`;
+}
+
 // ─── Dos dispositivos (iPhone y Mac en la misma sesión) ──────────────────────
 
 /** Clave de localStorage con la grabación preparada en ESTE dispositivo para esa sesión y día. */

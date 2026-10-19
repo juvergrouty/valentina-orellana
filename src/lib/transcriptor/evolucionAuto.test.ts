@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { SupabaseMemoria } from './pruebas/supabaseMemoria';
-import { ACCION_EVOLUCION_AUTO, autollenarEvolucion, reasignarEvolucion, type GrabacionParaEvolucion } from './evolucionAuto';
+import { ACCION_EVOLUCION_AUTO, autollenarEvolucion, normalizarCorreo, reasignarEvolucion, type GrabacionParaEvolucion } from './evolucionAuto';
 import { ENCABEZADO_EVOLUCION_IA, esEvolucionDesdeResumen, textoEvolucionDesdeResumen } from './panel';
 
 const MD = '## Resumen de la sesión\n### Temas\n- **Trabajo**: sobrecarga.\n### Tareas\n- Registrar momentos de calma.';
@@ -160,4 +160,30 @@ test('reasignar: un fallo no lanza y queda en la bitácora', async () => {
   (e.db as unknown as { from: () => never }).from = () => { throw new Error('caída'); };
   const r = await reasignarEvolucion({ db: e.db.cliente, grabacion: e.g(), anteriorPatientId: randomUUID() });
   assert.equal(r.nueva, 'error');
+});
+
+test('correo de la reserva con otras mayúsculas o espacios → es la misma persona (igual que grabacion-iniciar)', async () => {
+  const e = base();
+  const bid = randomUUID();
+  e.db.tabla('bookings').push({ id: bid, session_date: '2026-10-21', session_type: 'online', status: 'confirmed', patient_email: '  Camila@Ejemplo.CL ' });
+  assert.equal(await autollenarEvolucion({ db: e.db.cliente, grabacion: e.g({ booking_id: bid, session_date: '2026-10-21' }), contenido: MD }), 'guardada');
+  assert.equal(e.notas().length, 1);
+  assert.equal(e.notas()[0].booking_id, bid);
+  assert.equal(e.notas()[0].session_date, '2026-10-21');
+});
+
+test('normalizar el correo no relaja nada más: otro correo o correo vacío siguen sin coincidir', async () => {
+  assert.equal(normalizarCorreo('  A@B.cl '), 'a@b.cl');
+  assert.equal(normalizarCorreo(null), '');
+  const e = base();
+  const otra = randomUUID();
+  e.db.tabla('bookings').push({ id: otra, session_date: '2026-10-20', session_type: 'online', status: 'confirmed', patient_email: 'CAMILA@ejemplo.com' });
+  assert.equal(await autollenarEvolucion({ db: e.db.cliente, grabacion: e.g({ booking_id: otra }), contenido: MD }), 'sin_sesion');
+  // Ficha sin correo y reserva sin correo: no se asocian (vacío no es igual a vacío).
+  const pid = randomUUID();
+  e.db.tabla('patients').push({ id: pid, name: 'Sin Correo', email: '  ' });
+  const bVacia = randomUUID();
+  e.db.tabla('bookings').push({ id: bVacia, session_date: '2026-10-20', session_type: 'online', status: 'confirmed', patient_email: '' });
+  assert.equal(await autollenarEvolucion({ db: e.db.cliente, grabacion: e.g({ patient_id: pid, booking_id: bVacia }), contenido: MD }), 'sin_sesion');
+  assert.equal(e.notas().length, 0);
 });

@@ -165,7 +165,7 @@ export function enlaceArreglo(motivo: string | undefined, patientId: string | nu
 
 /** Nota del robot de Meet cuando no se envía (grabaciones.nota_sistema). */
 export function notaRobotSinPermiso(motivo: string | undefined): string {
-  if (motivo === 'sin_fecha_nacimiento') return 'No se envió el asistente de notas: falta la fecha de nacimiento en la ficha (sin ella no se graba). Complétala en la ficha del paciente.';
+  if (motivo === 'sin_fecha_nacimiento') return 'No se envió el asistente de notas. Falta la fecha de nacimiento en la ficha. Complétala para tener la ficha al día; si es menor de 18 no se graba.';
   if (motivo === 'menor_de_edad') return 'No se envió el asistente de notas: no se graba a menores de 18 años.';
   return 'No se envió el asistente de notas: falta el consentimiento de grabación o la ficha.';
 }
@@ -176,7 +176,7 @@ export function textoMotivo(motivo: string | undefined, nombre?: string | null):
   switch (motivo) {
     case 'sin_ficha': return 'Esta sesión no está asociada a una ficha. Elige al paciente para poder grabar.';
     case 'menor_de_edad': return 'No se graba a menores de 18 años.';
-    case 'sin_fecha_nacimiento': return `Falta la fecha de nacimiento en la ficha de ${quien}. Sin ella no se puede comprobar que sea mayor de 18 años, así que no se graba. Complétala en la ficha (Información → Fecha de nacimiento).`;
+    case 'sin_fecha_nacimiento': return `Falta la fecha de nacimiento en la ficha de ${quien}. Complétala para tener la ficha al día (Información → Fecha de nacimiento); si es menor de 18 no se graba.`;
     case 'revocado': return `Se retiró la autorización de grabación en la ficha de ${quien}. Sin ella no se puede grabar.`;
     case 'version_antigua': return `Falta el consentimiento de grabación de ${quien}. La versión que firmó no incluye la autorización de grabación; envíale el consentimiento actual.`;
     case 'falta_segunda_firma': return 'Falta el consentimiento de grabación de la otra persona de la pareja. Sin él no se puede grabar.';
