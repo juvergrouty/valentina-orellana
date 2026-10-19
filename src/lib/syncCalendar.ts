@@ -9,7 +9,7 @@ import { quitarPrefijoSiHayInvitados, refreshAccessToken, createCalendarEvent, d
 import { logError } from './logger';
 import { cambiarNotas } from './apigateway';
 import { ESTACIONAMIENTO } from '../data/consulta';
-import { lineaEntrarCalendario, urlSesion } from './enlaceSesion';
+import { normalizarMeet, quitarLineaEnlacePropio, traeEnlacePropio } from './enlaceSesion';
 
 const SESSION_LABELS: Record<string, string> = {
   'online':            'Sesión Individual Online',
@@ -86,8 +86,11 @@ export async function rescheduleBookingInCalendar(bookingId: string, date: strin
     if (!auth) return;
     // Presencial: la invitación lleva la dirección (también corrige eventos
     // antiguos que se crearon sin ella).
-    // Online: el enlace propio de la sesión (también lo deja en eventos antiguos al reagendarlos).
-    const location = (booking.session_type ?? '').includes('online') ? (urlSesion(bookingId) ?? undefined) : await direccionConsulta();
+    // Online: la ubicación no se toca (la paciente es invitada: solo ve el Meet del evento). Si el evento es de
+    // los que llevaron el enlace propio (18–19 oct 2026), se limpia antes de mover la hora.
+    const online = (booking.session_type ?? '').includes('online');
+    if (online) await limpiarEnlacePropioDelEvento(bookingId, booking.google_event_id, auth);
+    const location = online ? undefined : await direccionConsulta();
     await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin, location, notify);
   } catch (e) {
     await logError('calendar/reagendar', 'No se pudo actualizar el evento de Google Calendar', { bookingId, date, time, error: e instanceof Error ? e.message : String(e) });
@@ -108,6 +111,55 @@ export async function retitleBookingInCalendar(bookingId: string, title: string)
     await updateCalendarEventTitle(auth.token, auth.calendarId, booking.google_event_id, finalTitle);
   } catch (e) {
     await logError('calendar/renombrar', 'No se pudo actualizar el título del evento de Google Calendar', { bookingId, title, error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+const CALENDAR_API_EVENTOS = 'https://www.googleapis.com/calendar/v3/calendars';
+
+/** Meet directo (hangoutLink) de un evento de Calendar; null si no tiene o no se pudo leer (3 s). */
+export async function meetDeEventoCalendario(googleEventId: string): Promise<string | null> {
+  const auth = await getValidAccessToken();
+  if (!auth) return null;
+  const res = await fetch(`${CALENDAR_API_EVENTOS}/${encodeURIComponent(auth.calendarId)}/events/${encodeURIComponent(googleEventId)}`, {
+    headers: { Authorization: `Bearer ${auth.token}` }, signal: AbortSignal.timeout(3000),
+  });
+  if (!res.ok) return null;
+  const ev = (await res.json()) as { hangoutLink?: string; conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] } };
+  return normalizarMeet(ev.hangoutLink) ?? normalizarMeet(ev.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri);
+}
+
+/**
+ * Eventos online creados el 18–19 oct 2026 llevaban el enlace propio /sesion/ en la ubicación y la
+ * descripción (que la paciente ve como invitada). Esto los deja solo con el Meet directo: ubicación = Meet
+ * del evento (o vacía) y descripción sin la línea "Entrar a la sesión: …/sesion/…". Sin aviso a la invitada
+ * (sendUpdates=none). Solo escribe si el evento trae el enlace propio. Mejor esfuerzo: nunca lanza.
+ */
+export async function limpiarEnlacePropioDelEvento(
+  bookingId: string,
+  googleEventId: string,
+  auth?: { token: string; calendarId: string } | null,
+): Promise<boolean> {
+  try {
+    const a = auth ?? (await getValidAccessToken());
+    if (!a) return false;
+    const url = `${CALENDAR_API_EVENTOS}/${encodeURIComponent(a.calendarId)}/events/${encodeURIComponent(googleEventId)}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${a.token}` }, signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return false;
+    const ev = (await res.json()) as { location?: string; description?: string; hangoutLink?: string };
+    if (!traeEnlacePropio(ev.location) && !traeEnlacePropio(ev.description)) return false;
+    const meet = normalizarMeet(ev.hangoutLink);
+    const body: Record<string, string> = {};
+    if (traeEnlacePropio(ev.location)) body.location = meet ?? '';
+    if (traeEnlacePropio(ev.description)) body.description = quitarLineaEnlacePropio(ev.description);
+    const r = await fetch(`${url}?sendUpdates=none`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${a.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) throw new Error(`PATCH ${r.status}`);
+    return true;
+  } catch (e) {
+    await logError('calendar/limpiar-enlace', 'No se pudo quitar el enlace propio del evento de Google Calendar', { bookingId, error: e instanceof Error ? e.message : String(e) });
+    return false;
   }
 }
 
@@ -183,14 +235,13 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
 
     const sessionLabel = SESSION_LABELS[booking.session_type] ?? booking.session_type;
     // Presencial: la invitación de Google lleva la dirección de la consulta.
-    // Online (18 oct 2026): el enlace propio de la sesión (/sesion/<código>) va en la ubicación y la
-    // descripción; al abrirlo se manda el robot de notas y se entra al mismo Meet de este evento.
-    const enlaceSesion = isOnline ? urlSesion(booking.id) : null;
-    const location = isOnline ? (enlaceSesion ?? undefined) : await direccionConsulta();
+    // Online: la paciente es invitada y ve el evento, así que solo lleva el Meet directo del propio evento
+    // (decisión de Vale, 19 oct 2026: el enlace propio /sesion/ es solo para ella, en el panel).
+    const location = isOnline ? undefined : await direccionConsulta();
 
     const event = await createCalendarEvent(accessToken, {
       title:         `${sessionLabel} — ${booking.patient_name}`,
-      description:   `Sesión con Ps. Valentina Orellana\nPaciente: ${booking.patient_name}\nTipo: ${sessionLabel}${!isOnline && location ? `\nDirección: ${location}\n${ESTACIONAMIENTO}` : ''}${lineaEntrarCalendario(enlaceSesion)}`,
+      description:   `Sesión con Ps. Valentina Orellana\nPaciente: ${booking.patient_name}\nTipo: ${sessionLabel}${location ? `\nDirección: ${location}\n${ESTACIONAMIENTO}` : ''}`,
       location,
       date:          booking.session_date,
       startTime:     booking.session_time.slice(0, 5),

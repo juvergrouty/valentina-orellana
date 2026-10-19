@@ -4,9 +4,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
-  bloqueEntrarSesion, codigoSesion, destinoMeet, enlaceEntradaSesion, enlaceParaSesion, esVisitaAutomatica,
-  lineaEntrarCalendario, lineaEntrarWhatsApp, meetDeNotas, reservaDeEventId, reservaDesdeCodigo, urlSesion,
+  bloqueEntrarSesion, codigoSesion, destinoMeet, enlacePacienteSesion, enlaceParaSesion, enlaceValeSesion, esVisitaAutomatica,
+  ETIQUETA_ENLACE_VALE, filaEnlaceVale, lineaEntrarWhatsApp, meetDeNotas, quitarLineaEnlacePropio, reservaDeEventId,
+  reservaDesdeCodigo, traeEnlacePropio, urlSesion,
 } from '../enlaceSesion';
+import { readFileSync } from 'node:fs';
 import { abrirEnlaceSesion, ACCION_ENLACE, cercaDeLaHora, inicioChileMs, llamarAsistentePanel, MAX_DESPACHOS_ENLACE, MAX_INVALIDOS_IP, valeConSesionPanel, type DepsEnlace } from './enlaceSesionRuta';
 import { crearPipeline, enVentanaEnlace, previaReintentablePorEnlace, VENTANA_ENLACE_ANTES_MS, VENTANA_ENLACE_DESPUES_MS } from './pipeline';
 import { crearBot } from './bot';
@@ -376,20 +378,112 @@ test('despacho por enlace: sin consentimiento no lanza ni repite filas; al firma
   assert.equal(e.maquinas.length, 1);
 });
 
-// ─── Textos ─────────────────────────────────────────────────────────────────
+// ─── Textos: qué enlace va en cada salida (Vale, 19 oct 2026) ────────────────
+// "A la gente solamente le debe llegar el enlace de Google Meet para las sesiones online. A mí mándame
+// el otro enlace para que el robot entre de inmediato." Paciente = meet.google.com; Vale = /sesion/.
 
-test('textos: correos, WhatsApp, Calendar y Pasos a seguir llevan el enlace propio', () => {
+const fuente = (ruta: string) => readFileSync(new URL(`../../${ruta}`, import.meta.url), 'utf8');
+/** Cuerpo de una función exportada de un archivo (desde su firma hasta la siguiente función exportada). */
+function cuerpo(src: string, nombre: string): string {
+  const i = src.indexOf(`export async function ${nombre}(`);
+  assert.ok(i >= 0, `no está ${nombre}`);
+  const j = src.indexOf('\nexport ', i + 10);
+  return src.slice(i, j < 0 ? undefined : j);
+}
+
+test('paciente: el botón de los correos solo lleva el Meet directo (nunca /sesion/)', () => {
   const id = randomUUID();
-  const enlace = enlaceEntradaSesion({ session_type: 'pareja-online', sesion_id: id }, S)!;
-  assert.equal(enlace, urlSesion(id, S));
-  assert.equal(enlaceEntradaSesion({ session_type: 'presencial', sesion_id: id }, S), null);
-  assert.equal(enlaceEntradaSesion({ session_type: 'online', booking_id: id }, S), enlace);
-  assert.equal(enlaceEntradaSesion({ session_type: 'online' }, S), null);
-  const html = bloqueEntrarSesion(enlace);
-  assert.ok(html.includes(`href="${enlace}"`) && html.includes('Entrar a la sesión') && !html.includes('meet.google.com'));
-  assert.equal(lineaEntrarWhatsApp(enlace), `\n🔗 Entrar a la sesión (Google Meet): ${enlace}`);
+  assert.equal(enlacePacienteSesion({ session_type: 'pareja-online' }, `${MEET}?authuser=0`), MEET);
+  assert.equal(enlacePacienteSesion({ session_type: 'presencial' }, MEET), null);
+  assert.equal(enlacePacienteSesion({ session_type: 'online' }, urlSesion(id, S)), null, 'el enlace propio no sirve como Meet');
+  assert.equal(enlacePacienteSesion({ session_type: 'online' }, null), null);
+  const html = bloqueEntrarSesion(MEET);
+  assert.ok(html.includes(`href="${MEET}"`) && html.includes('Entrar a la sesión'));
+  assert.ok(!html.includes('/sesion/'));
+  assert.equal(bloqueEntrarSesion(urlSesion(id, S)), '', 'con el enlace propio no se arma el botón');
+  assert.equal(bloqueEntrarSesion('https://evil.example/x'), '');
+  assert.equal(bloqueEntrarSesion(null), '');
+});
+
+test('paciente: el WhatsApp del link de pago lleva el Meet directo', () => {
+  const id = randomUUID();
+  assert.equal(lineaEntrarWhatsApp(MEET), `\n🔗 Entrar a la sesión (Google Meet): ${MEET}`);
+  assert.equal(lineaEntrarWhatsApp(urlSesion(id, S)), '');
   assert.equal(lineaEntrarWhatsApp(null), '');
-  assert.equal(lineaEntrarCalendario(enlace), `\nEntrar a la sesión: ${enlace}`);
+  const pl = fuente('pages/api/admin/payment-link.ts');
+  assert.ok(!/enlaceParaSesion|urlSesion/.test(pl), 'payment-link no arma el enlace propio');
+  assert.match(pl, /lineaEntrarWhatsApp\(meetPaciente\)/);
+  assert.match(pl, /meetLink:\s+meetPaciente/); // vista en Cobros = el mismo Meet
+});
+
+test('paciente: los correos de confirmación, recordatorio y cambio de hora usan el Meet de la reserva', () => {
+  const email = fuente('lib/email.ts');
+  for (const f of ['sendConfirmationToClient', 'sendSessionUpdatedEmail', 'sendReminderEmail']) {
+    const c = cuerpo(email, f);
+    assert.match(c, /await meetPacienteDeReserva\(data\)/, f);
+    assert.ok(!/enlaceValeSesion|urlSesion|enlaceParaSesion/.test(c), `${f} no usa el enlace propio`);
+  }
+  // Sin Meet todavía: el texto de siempre (está en la invitación del calendario), sin botón.
+  assert.match(email, /el enlace de Google Meet está en la invitación de tu calendario/);
+});
+
+test('paciente: el evento de Google Calendar no lleva el enlace propio (ubicación ni descripción)', () => {
+  const cal = fuente('lib/syncCalendar.ts');
+  assert.ok(!/urlSesion|enlaceParaSesion|enlaceValeSesion|lineaEntrarCalendario/.test(cal));
+  // Eventos del 18–19 oct con el enlace propio: se limpian al reagendar y al mandar el recordatorio.
+  assert.match(cuerpo(cal, 'rescheduleBookingInCalendar'), /limpiarEnlacePropioDelEvento/);
+  assert.match(fuente('pages/api/cron/reminders.ts'), /limpiarEnlacePropioDelEvento\(b\.id, b\.google_event_id\)/);
+  const enlace = urlSesion(randomUUID(), S)!;
+  assert.ok(traeEnlacePropio(enlace) && traeEnlacePropio(`Online · ${enlace}`));
+  assert.ok(!traeEnlacePropio(MEET) && !traeEnlacePropio('') && !traeEnlacePropio(null));
+  const desc = `Sesión con Ps. Valentina Orellana\nPaciente: Ana\nTipo: Sesión Individual Online\nEntrar a la sesión: ${enlace}`;
+  assert.equal(quitarLineaEnlacePropio(desc), 'Sesión con Ps. Valentina Orellana\nPaciente: Ana\nTipo: Sesión Individual Online');
+  assert.equal(quitarLineaEnlacePropio(`Entrar a la sesión: ${MEET}`), `Entrar a la sesión: ${MEET}`, 'no toca un Meet');
+});
+
+test('paciente: agenda (Copiar link de Meet y WhatsApp) manda el Meet directo; Pasos a seguir habla del Meet', () => {
+  const agenda = fuente('pages/admin/agenda.astro');
+  assert.match(agenda, /Te comparto el link para entrar a tu sesión por Google Meet: \$\{meet\}`/);
+  assert.match(agenda, /copiarEnlace\('sp-meet-copy', false\)/);
+  assert.match(agenda, /paraVale \? enlaceDe\(id, meet\) : meet/);
   const online = stepsItems('').find((p) => p.titulo === 'Si tu sesión es online')!;
-  assert.match(online.texto, /correo de confirmación, en el recordatorio y en la invitación/);
+  assert.match(online.texto, /enlace de Google Meet te llega en el correo de confirmación, en el recordatorio y en la invitación/);
+  assert.ok(!online.texto.includes('/sesion/'));
+});
+
+test('Vale: su correo de reserva nueva o reagendada lleva su enlace propio, con etiqueta clara', () => {
+  const id = randomUUID();
+  const enlace = enlaceValeSesion({ session_type: 'pareja-online', sesion_id: id }, S)!;
+  assert.equal(enlace, urlSesion(id, S));
+  assert.ok(enlace.startsWith('https://www.valentinaorellana.cl/sesion/'));
+  assert.equal(enlaceValeSesion({ session_type: 'online', booking_id: id }, S), enlace);
+  assert.equal(enlaceValeSesion({ session_type: 'presencial', sesion_id: id }, S), null);
+  assert.equal(enlaceValeSesion({ session_type: 'online' }, S), null);
+  assert.equal(ETIQUETA_ENLACE_VALE, 'Tu enlace para entrar (llama al asistente de notas)');
+  const fila = filaEnlaceVale(enlace);
+  assert.ok(fila.includes(ETIQUETA_ENLACE_VALE) && fila.includes(`href="${enlace}"`));
+  assert.equal(filaEnlaceVale(MEET), '', 'la fila de Vale es solo para su enlace propio');
+  assert.equal(filaEnlaceVale(null), '');
+  const email = fuente('lib/email.ts');
+  for (const f of ['sendNotificationToAdmin', 'sendRescheduleAdminAlert']) {
+    assert.match(cuerpo(email, f), /filaEnlaceVale\(enlaceValeSesion\(data\)\)|filaEnlaceVale\(enlaceVale\)/, f);
+  }
+  assert.match(fuente('pages/api/reschedule.ts'), /booking_id:\s+booking\.id/);
+});
+
+test('Vale: panel (Ingresar, Copiar mi enlace, calendario, sala online) usa el enlace propio o llama al asistente', () => {
+  const agenda = fuente('pages/admin/agenda.astro');
+  assert.match(agenda, /const link = enlaceDe\(id, meet\);/); // Ingresar a Google Meet
+  assert.match(agenda, /void llamarAsistente\(id\)/);
+  assert.match(agenda, /copiarEnlace\('sp-meet-copy-vale', true\)/);
+  assert.match(fuente('pages/admin/calendario.astro'), /urlSesion\(reservaDeEventId\(ev\.id\)\)\}\?panel=1/);
+  assert.match(fuente('pages/admin/sala-online.astro'), /\/api\/admin\/transcriptor\/llamar-asistente/);
+  assert.match(fuente('pages/api/admin/generate-meet.ts'), /enlace: meetLink \? enlaceParaSesion\(id, meetLink\) : null/);
+});
+
+test('orden de envíos: el evento de Calendar (crea el Meet) va antes de la confirmación', () => {
+  const t = fuente('lib/tareasEnvio.ts');
+  assert.match(t, /ORDEN: TareaPago\[\] = \['calendario', 'confirmacion', 'aviso_admin'/);
+  const cm = fuente('pages/api/bookings/confirm-manual.ts');
+  assert.ok(cm.indexOf('syncBookingToCalendar(') < cm.indexOf('sendConfirmationToClient(emailData)'));
 });

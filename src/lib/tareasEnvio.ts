@@ -29,8 +29,10 @@ import { todayCL } from './dateUtils';
 // calendario_pagado: pago de una sesión que ya estaba agendada (deuda o sesión
 // ya pasada): el evento existente pasa de rojo "Por pagar" a pagado (8 oct 2026).
 export type TareaPago = 'confirmacion' | 'aviso_admin' | 'calendario' | 'calendario_pagado' | 'boleta' | 'pasos';
-// Orden en que se ejecutan las de una misma reserva (todas independientes).
-const ORDEN: TareaPago[] = ['confirmacion', 'aviso_admin', 'calendario', 'calendario_pagado', 'boleta', 'pasos'];
+// Orden en que se ejecutan las de una misma reserva (todas independientes). 'calendario' va primero
+// (19 oct 2026): crea el Meet y lo deja en las notas, así la confirmación de una sesión online le lleva a
+// la paciente el Meet directo (si falla, la confirmación sale igual y dice que está en la invitación).
+export const ORDEN: TareaPago[] = ['calendario', 'confirmacion', 'aviso_admin', 'calendario_pagado', 'boleta', 'pasos'];
 
 /**
  * Qué envíos corresponden a una reserva recién pagada por Flow. Una sola regla

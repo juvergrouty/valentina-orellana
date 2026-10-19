@@ -1204,8 +1204,10 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
               </span>
             </button>
             <div id="sp-meet-share-menu" style="display:none;position:absolute;top:100%;left:0;z-index:20;background:white;border:1px solid var(--dust);border-radius:var(--radius);box-shadow:0 4px 14px rgba(0,0,0,0.12);min-width:190px;overflow:hidden;">
-              <button type="button" id="sp-meet-copy" style="display:block;width:100%;text-align:left;padding:0.6rem 0.9rem;font-size:0.82rem;background:none;border:none;cursor:pointer;color:var(--ink);">Copiar link</button>
-              <a href="#" id="sp-meet-wa" target="_blank" rel="noopener" style="display:block;padding:0.6rem 0.9rem;font-size:0.82rem;color:var(--ink);text-decoration:none;">Enviar por WhatsApp</a>
+              <!-- Vale, 19 oct 2026: al paciente solo el Meet directo; su enlace propio (llama al asistente) es aparte. -->
+              <button type="button" id="sp-meet-copy" style="display:block;width:100%;text-align:left;padding:0.6rem 0.9rem;font-size:0.82rem;background:none;border:none;cursor:pointer;color:var(--ink);">Copiar link de Meet (paciente)</button>
+              <a href="#" id="sp-meet-wa" target="_blank" rel="noopener" style="display:block;padding:0.6rem 0.9rem;font-size:0.82rem;color:var(--ink);text-decoration:none;">Enviar por WhatsApp al paciente</a>
+              <button type="button" id="sp-meet-copy-vale" style="display:block;width:100%;text-align:left;padding:0.6rem 0.9rem;font-size:0.82rem;background:none;border:none;border-top:1px solid var(--dust);cursor:pointer;color:var(--ink);">Copiar mi enlace (llama al asistente)</button>
             </div>
           </div>
         </div>
@@ -3214,8 +3216,9 @@ document.getElementById('sp-btn-edit-amount')?.addEventListener('click', () => {
 // toma los datos de SU sesión antes de esperar.
 const meetPorReserva = {};
 const meetEnCurso = {};
-// Enlace propio de la sesión (/sesion/<código>, 18 oct 2026): es lo que se abre, copia y manda por
-// WhatsApp (abre el mismo Meet y manda el robot de notas). Sin él (no se pudo generar), el Meet tal cual.
+// Enlace propio de la sesión (/sesion/<código>, 18 oct 2026): SOLO para Vale («Ingresar a Google Meet» y
+// «Copiar mi enlace»): abre el mismo Meet y llama al asistente de notas. Sin él, el Meet tal cual.
+// Al paciente (Copiar link de Meet / WhatsApp) va SIEMPRE el Meet directo (decisión de Vale, 19 oct 2026).
 const enlacePorReserva = {};
 function enlaceDe(id, meet) {
   if (id === window.__currentMeetBookingId && window.__currentEnlaceSesion) return window.__currentEnlaceSesion;
@@ -3303,18 +3306,23 @@ document.addEventListener('click', (e) => {
   if (menu && menu.style.display !== 'none' && !e.target.closest('#sp-meet-link')) menu.style.display = 'none';
 });
 
-document.getElementById('sp-meet-copy')?.addEventListener('click', async () => {
-  const btn = document.getElementById('sp-meet-copy');
-  const original = btn.textContent;
-  btn.textContent = 'Generando…';
-  const id = window.__currentMeetBookingId;
-  const meet = await ensureMeetLink(id);
-  if (!meet) { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = original; }, 1500); return; }
-  navigator.clipboard.writeText(enlaceDe(id, meet)).then(() => {
-    btn.textContent = '✓ Copiado';
-    setTimeout(() => { btn.textContent = original; }, 1500);
+// Copiar: «link de Meet (paciente)» copia el Meet directo; «mi enlace» copia el enlace propio de Vale.
+function copiarEnlace(btnId, paraVale) {
+  document.getElementById(btnId)?.addEventListener('click', async () => {
+    const btn = document.getElementById(btnId);
+    const original = btn.textContent;
+    btn.textContent = 'Generando…';
+    const id = window.__currentMeetBookingId;
+    const meet = await ensureMeetLink(id);
+    if (!meet) { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = original; }, 1500); return; }
+    navigator.clipboard.writeText(paraVale ? enlaceDe(id, meet) : meet).then(() => {
+      btn.textContent = '✓ Copiado';
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    });
   });
-});
+}
+copiarEnlace('sp-meet-copy', false);
+copiarEnlace('sp-meet-copy-vale', true);
 
 document.getElementById('sp-meet-wa')?.addEventListener('click', async (e) => {
   e.preventDefault();
@@ -3325,7 +3333,8 @@ document.getElementById('sp-meet-wa')?.addEventListener('click', async (e) => {
   if (!phone) { alert('El paciente no tiene un teléfono válido guardado.'); return; }
   const meet = await ensureMeetLink(id);
   if (!meet) { alert('No se pudo generar el link de Meet. Intenta de nuevo.'); return; }
-  const msg = `Hola ${nombre} 👋 Te comparto el link para entrar a tu sesión por Google Meet: ${enlaceDe(id, meet)}`;
+  // Al paciente: el Meet directo (nunca el enlace propio de Vale).
+  const msg = `Hola ${nombre} 👋 Te comparto el link para entrar a tu sesión por Google Meet: ${meet}`;
   window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
 });
 

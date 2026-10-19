@@ -147,6 +147,8 @@ export const POST: APIRoute = async ({ request }) => {
       old_time:      booking.session_time,
       new_date:      session_date,
       new_time:      session_time,
+      session_type:  booking.session_type, // online: el correo a Vale lleva su enlace propio (llama al asistente)
+      booking_id:    booking.id,
     }, adminEmail).catch(console.error),
   ]);
 

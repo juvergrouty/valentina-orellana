@@ -6,6 +6,7 @@ import { sendReminderEmail, emailTypeEnabled, deDiaRelativo } from '../../../lib
 import { sendWhatsappText, sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { nowCL, hoursUntilSessionCL } from '../../../lib/dateUtils';
 import { reservarEnvioUnico, terminarEnvioUnico } from '../../../lib/tareasEnvio';
+import { limpiarEnlacePropioDelEvento } from '../../../lib/syncCalendar';
 
 export const prerender = false;
 
@@ -75,14 +76,14 @@ export const GET: APIRoute = async ({ request }) => {
   {
     const q = await supabase
       .from('bookings')
-      .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, notes, reminder_email_enabled, whatsapp_reminder_enabled')
+      .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, notes, google_event_id, reminder_email_enabled, whatsapp_reminder_enabled')
       .or('status.eq.confirmed,and(status.eq.pending_payment,created_by_admin.eq.true)')
       .gte('session_date', today)
       .lte('session_date', tomorrow);
     if (q.error?.code === '42703') {
       const retry = await supabase
         .from('bookings')
-        .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, notes')
+        .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, notes, google_event_id')
         .or('status.eq.confirmed,and(status.eq.pending_payment,created_by_admin.eq.true)')
         .gte('session_date', today)
         .lte('session_date', tomorrow);
@@ -129,6 +130,12 @@ export const GET: APIRoute = async ({ request }) => {
         serviceName = svc?.name;
       }
 
+      // Online: el evento de Calendar (que la paciente ve) queda solo con el Meet directo si era de los que
+      // llevaron el enlace propio /sesion/ (18–19 oct 2026). Una vez por sesión; mejor esfuerzo.
+      if (String(b.session_type ?? '').includes('online') && b.google_event_id) {
+        await limpiarEnlacePropioDelEvento(b.id, b.google_event_id);
+      }
+
       const res = await sendReminderEmail({
         patient_name:   b.patient_name,
         patient_email:  b.patient_email,
@@ -139,7 +146,7 @@ export const GET: APIRoute = async ({ request }) => {
         amount:         b.amount ?? 0,
         payment_method: b.payment_method ?? 'manual',
         service_name:   serviceName,
-        sesion_id:      b.id, // enlace propio de la sesión online
+        sesion_id:      b.id, // de aquí sale el Meet directo de la sesión online
       }, { idempotencyKey: `${b.id}:${tareaCorreo}` });
       await terminarEnvioUnico(b.id, tareaCorreo, res.sent, res.reason);
 

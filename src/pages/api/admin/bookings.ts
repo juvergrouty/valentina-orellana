@@ -122,7 +122,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
           amount:         booking.amount,
           payment_method: booking.payment_method ?? 'manual',
           service_name:   svcName,
-          sesion_id:      booking.id ?? id, // enlace propio de la sesión online (no activa el de reagendar)
+          sesion_id:      booking.id ?? id, // Meet directo (paciente) y enlace propio (aviso a Vale); no activa el de reagendar
         };
         try { await sendConfirmationToClient(emailData); } catch (e) { console.error('[confirm] email cliente:', e); }
         try { await sendNotificationToAdmin(emailData, notifEmail); } catch (e) { console.error('[confirm] email admin:', e); }

@@ -1,11 +1,16 @@
-// Enlace propio de cada sesión online (pedido de Vale, 18 oct 2026): "el robot tiene que estar
-// disponible SIEMPRE que venga de una sesión y se clickee el link para abrirla".
+// Enlace propio de cada sesión online (18 oct 2026), SOLO PARA VALE (decisión de Vale, 19 oct 2026:
+// "a la gente solamente le debe llegar el enlace de Google Meet para las sesiones online. A mí mándame
+// el otro enlace para que el robot entre de inmediato").
 //
 //   https://www.valentinaorellana.cl/sesion/<código>
 //
-// Paciente y Vale reciben este enlace en vez del de Meet (correos, WhatsApp, evento de Calendar,
-// panel). Al abrirlo, el sitio manda el robot de notas a esa sesión (si corresponde) y redirige al
-// Meet de la reserva, que no cambia (la sala sigue siendo la que crea Google Calendar).
+// Quién recibe qué:
+//  - PACIENTE (correos de confirmación, recordatorio y cambio de hora; WhatsApp del link de pago y del
+//    panel; evento de Google Calendar): SIEMPRE el Meet directo https://meet.google.com/<sala>
+//    (enlacePacienteSesion, bloqueEntrarSesion, lineaEntrarWhatsApp solo aceptan salas de Meet).
+//  - VALE (botones del panel, correo de reserva nueva o cambio): este enlace propio (enlaceValeSesion).
+//    Al abrirlo con la sesión del panel, el sitio manda el robot de notas y redirige al Meet.
+// Los enlaces propios ya enviados siguen funcionando: sin sesión del panel solo redirigen al Meet (sin robot).
 //
 // Código (sin columna nueva: sirve para todas las reservas, también las antiguas):
 //   base64url( AES-256-ECB(kCifrado, uuid de 16 bytes) ‖ HMAC-SHA256(kFirma, uuid)[0..16] ) → 43 caracteres
@@ -82,8 +87,8 @@ export function urlSesion(bookingId: string | null | undefined, base: string | u
 }
 
 /**
- * Enlace para entrar a la sesión que se le da a paciente y Vale: el propio si se puede, si no el de Meet
- * (nunca quedan sin enlace). null si no hay ninguno.
+ * Enlace para entrar a la sesión que usa VALE (panel): el propio si se puede, si no el de Meet
+ * (nunca queda sin enlace). null si no hay ninguno. Nunca para el paciente (usar normalizarMeet).
  */
 export function enlaceParaSesion(bookingId: string | null | undefined, meetUrl: string | null | undefined, base: string | undefined = secreto('ADMIN_SECRET')): string | null {
   return urlSesion(bookingId, base) ?? normalizarMeet(meetUrl);
@@ -136,8 +141,8 @@ export function esVisitaAutomatica(userAgent: string | null | undefined): boolea
 
 const escapar = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-/** Enlace propio para los correos de una sesión online; null si no es online o no se puede generar. */
-export function enlaceEntradaSesion(
+/** Enlace de VALE para entrar (llama al asistente de notas): el propio de una sesión online; null si no aplica. */
+export function enlaceValeSesion(
   data: { session_type?: string | null; sesion_id?: string | null; booking_id?: string | null },
   base: string | undefined = secreto('ADMIN_SECRET'),
 ): string | null {
@@ -145,9 +150,34 @@ export function enlaceEntradaSesion(
   return urlSesion(data.sesion_id ?? data.booking_id ?? null, base);
 }
 
-/** Recuadro con el botón "Entrar a la sesión" (correo de confirmación, recordatorio y cambio de hora). */
-export function bloqueEntrarSesion(enlace: string): string {
+/**
+ * Enlace del PACIENTE para entrar: el Meet directo (https://meet.google.com/<sala>) de una sesión online.
+ * null si no es online o no hay una sala de Meet válida. Nunca devuelve el enlace propio /sesion/.
+ */
+export function enlacePacienteSesion(data: { session_type?: string | null }, meetUrl: string | null | undefined): string | null {
+  if (!String(data.session_type ?? '').includes('online')) return null;
+  return normalizarMeet(meetUrl);
+}
+
+/** Etiqueta del enlace de Vale en sus correos. */
+export const ETIQUETA_ENLACE_VALE = 'Tu enlace para entrar (llama al asistente de notas)';
+
+/** Fila del correo a Vale con su enlace propio ('' si no hay). */
+export function filaEnlaceVale(enlace: string | null | undefined): string {
+  if (!enlace || !enlace.startsWith(`${SITIO_ENLACE}${RUTA_ENLACE}`)) return '';
   const e = escapar(enlace);
+  return `<tr><td style="padding:0.35rem 0.6rem 0.35rem 0;color:#6B6860;vertical-align:top;">${ETIQUETA_ENLACE_VALE}</td>
+              <td style="padding:0.35rem 0;"><a href="${e}" style="color:#576352;word-break:break-all;">${e}</a></td></tr>`;
+}
+
+/**
+ * Recuadro con el botón "Entrar a la sesión" para el PACIENTE (confirmación, recordatorio y cambio de hora).
+ * Solo acepta una sala de Meet: con cualquier otro enlace devuelve '' (el paciente nunca recibe /sesion/).
+ */
+export function bloqueEntrarSesion(meetUrl: string | null | undefined): string {
+  const meet = normalizarMeet(meetUrl);
+  if (!meet) return '';
+  const e = escapar(meet);
   return `
         <div style="border:1px solid #DDD8CF;background:#FFFFFF;padding:1.1rem 1.25rem;margin-bottom:1.5rem;">
           <p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#1A1A18;margin:0 0 0.75rem;">Para entrar a tu sesión por Google Meet:</p>
@@ -163,12 +193,21 @@ export function bloqueEntrarSesion(enlace: string): string {
         </div>`;
 }
 
-/** Línea del mensaje de WhatsApp con el link de pago. */
-export function lineaEntrarWhatsApp(enlace: string | null | undefined): string {
-  return enlace ? `\n🔗 Entrar a la sesión (Google Meet): ${enlace}` : '';
+/** Línea del mensaje de WhatsApp al PACIENTE (link de pago): solo con una sala de Meet; si no, ''. */
+export function lineaEntrarWhatsApp(meetUrl: string | null | undefined): string {
+  const meet = normalizarMeet(meetUrl);
+  return meet ? `\n🔗 Entrar a la sesión (Google Meet): ${meet}` : '';
 }
 
-/** Línea de la descripción del evento de Google Calendar. */
-export function lineaEntrarCalendario(enlace: string | null | undefined): string {
-  return enlace ? `\nEntrar a la sesión: ${enlace}` : '';
+/** ¿El texto trae un enlace propio /sesion/? (para limpiar eventos de Calendar del 18–19 oct 2026). */
+export function traeEnlacePropio(texto: string | null | undefined): boolean {
+  return String(texto ?? '').includes(`${SITIO_ENLACE}${RUTA_ENLACE}`) || /(^|[\s/])sesion\/[A-Za-z0-9_-]{43}/.test(String(texto ?? ''));
+}
+
+/** Descripción de un evento sin la línea "Entrar a la sesión: …/sesion/…" que se agregó el 18 oct 2026. */
+export function quitarLineaEnlacePropio(descripcion: string | null | undefined): string {
+  return String(descripcion ?? '')
+    .split('\n')
+    .filter((l) => !(/^Entrar a la sesión:/.test(l.trim()) && traeEnlacePropio(l)))
+    .join('\n');
 }

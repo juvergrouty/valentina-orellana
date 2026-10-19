@@ -7,7 +7,7 @@ import { todayCL, hoursUntilSessionCL } from './dateUtils';
 import { frasePlazoPago, AVISO_REAGENDAR } from './cobrosProximos';
 import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
-import { bloqueEntrarSesion, enlaceEntradaSesion } from './enlaceSesion';
+import { bloqueEntrarSesion, enlacePacienteSesion, enlaceValeSesion, filaEnlaceVale, meetDeNotas, normalizarMeet } from './enlaceSesion';
 
 // Inicialización perezosa — no falla si la key no está configurada
 let _resend: Resend | null = null;
@@ -77,8 +77,11 @@ export interface BookingEmailData {
   is_new_patient?: boolean;
   service_name?:  string;
   booking_id?:    string; // si viene, el correo de confirmación trae el link para reagendar
-  /** Reserva de la sesión online para el enlace propio /sesion/<código> (si no viene, se usa booking_id). */
+  /** Reserva de la sesión online (si no viene, se usa booking_id): de ella sale el Meet del paciente y el
+   *  enlace propio de Vale (/sesion/<código>). No activa el link de reagendar. */
   sesion_id?:     string;
+  /** Meet de la sesión si quien llama ya lo tiene (si no, se lee de la reserva o del evento de Calendar). */
+  meet_link?:     string | null;
 }
 
 const SESSION_LABELS: Record<string, string> = {
@@ -88,8 +91,33 @@ const SESSION_LABELS: Record<string, string> = {
   'pareja-presencial': 'Sesión de Pareja Presencial',
 };
 
-// Enlace propio de la sesión online (18 oct 2026): enlaceEntradaSesion / bloqueEntrarSesion viven en
-// enlaceSesion.ts (puras, con pruebas). Abren el Meet de la sesión y mandan el robot de notas.
+// Enlaces de la sesión online (decisión de Vale, 19 oct 2026): al PACIENTE solo el Meet directo
+// (meetPacienteDeReserva + bloqueEntrarSesion, que no acepta otra cosa); a VALE su enlace propio
+// /sesion/<código>, que llama al asistente de notas (enlaceValeSesion + filaEnlaceVale).
+
+/**
+ * Meet directo de una sesión online para los correos del paciente: el que trae quien llama, el de las
+ * notas de la reserva ("Meet: …", lo escribe syncCalendar) o el del evento de Calendar. null si no es online
+ * o todavía no existe (el correo dice entonces que el enlace está en la invitación del calendario).
+ * Nunca falla: cualquier error = null.
+ */
+async function meetPacienteDeReserva(data: { session_type?: string | null; sesion_id?: string | null; booking_id?: string | null; meet_link?: string | null }): Promise<string | null> {
+  if (!String(data.session_type ?? '').includes('online')) return null;
+  const directo = enlacePacienteSesion(data, data.meet_link);
+  if (directo) return directo;
+  const id = data.sesion_id ?? data.booking_id ?? null;
+  if (!id) return null;
+  try {
+    const { data: b } = await supabase.from('bookings').select('notes, google_event_id').eq('id', id).maybeSingle();
+    const deNotas = meetDeNotas(b?.notes);
+    if (deNotas) return deNotas;
+    if (!b?.google_event_id) return null;
+    const { meetDeEventoCalendario } = await import('./syncCalendar');
+    return normalizarMeet(await meetDeEventoCalendario(b.google_event_id));
+  } catch {
+    return null;
+  }
+}
 // ─── Email al cliente: confirmación ──────────────────────────────────────────
 // opts.skipToggle = true → reenvío manual del admin (ignora el interruptor de correos automáticos)
 /** Dónde es la sesión: la dirección de la consulta (presencial) o el aviso del Meet (online). */
@@ -118,7 +146,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
   }
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
-  const enlace = enlaceEntradaSesion(data);
+  const enlace = await meetPacienteDeReserva(data); // paciente: solo el Meet directo
   const lugar = await lugarSesion(data.session_type, !!enlace);
   // Sesión que Valentina no cobra (obra social): "Sin costo" y sin fila de pago.
   // 'Sin costo' llega así desde el reenvío manual (usa el payment_note).
@@ -263,8 +291,9 @@ export async function sendSessionUpdatedEmail(data: {
   session_time:  string;
   amount:        number;
   service_name?: string;
-  /** Reserva (online): agrega el botón "Entrar a la sesión" con el enlace propio. */
+  /** Reserva (online): agrega el botón "Entrar a la sesión" con el Meet directo de la reserva. */
   sesion_id?:    string;
+  meet_link?:    string | null;
 }): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
   if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
@@ -273,7 +302,7 @@ export async function sendSessionUpdatedEmail(data: {
   const subject = `${data.reason} — Ps. Valentina Orellana`;
   // Dónde: dirección de la consulta (presencial) o aviso del Meet (online).
   const esOnline = (data.session_type ?? '').includes('online');
-  const enlace = enlaceEntradaSesion(data);
+  const enlace = await meetPacienteDeReserva(data); // paciente: solo el Meet directo
   let lugar = enlace ? 'Online · Google Meet (entra con el botón de abajo)' : 'Online · el enlace de Google Meet está en la invitación de tu calendario';
   if (!esOnline) {
     const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
@@ -473,7 +502,7 @@ export async function sendReminderEmail(data: BookingEmailData, opts: { idempote
 
   const sessionLabel = data.service_name ?? SESSION_LABELS[data.session_type] ?? data.session_type;
   const isOnline = (data.session_type ?? '').includes('online');
-  const enlace = enlaceEntradaSesion(data);
+  const enlace = await meetPacienteDeReserva(data); // paciente: solo el Meet directo
   const lugar = await lugarSesion(data.session_type, !!enlace);
   // "hoy" / "mañana" / la fecha, según el día real de la sesión (hora de Chile).
   // Antes decía siempre "hoy", aunque el recordatorio sale hasta 24 h antes.
@@ -908,6 +937,8 @@ export async function sendRescheduleAdminAlert(
     patient_name: string; patient_email: string;
     old_date: string; old_time: string;
     new_date: string; new_time: string;
+    /** Online: agrega el enlace propio de Vale (llama al asistente de notas). */
+    session_type?: string | null; booking_id?: string | null;
   },
   adminEmail: string,
 ) {
@@ -932,6 +963,7 @@ export async function sendRescheduleAdminAlert(
               <td style="padding:0.35rem 0;text-decoration:line-through;color:#9B968C;">${formatDate(data.old_date)} ${String(data.old_time).slice(0, 5)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Ahora</td>
               <td style="padding:0.35rem 0;font-weight:600;font-size:1rem;">${formatDate(data.new_date)} ${String(data.new_time).slice(0, 5)}</td></tr>
+          ${filaEnlaceVale(enlaceValeSesion(data))}
         </table>
       </div>
     `,
@@ -949,8 +981,9 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
   // (desde el 12 oct 2026; antes se anotaba en Reservo). El panel también lo
   // recuerda con un botón para marcarlo (ver src/lib/boxCala.ts).
   const isPresencial = data.session_type.includes('presencial');
-  // Online: el enlace propio de la sesión (abre el Meet y manda el robot de notas).
-  const enlaceVale = enlaceEntradaSesion(data);
+  // Online: el enlace propio de Vale (/sesion/<código>: abre el Meet y llama al asistente de notas).
+  // Este correo es solo para Vale; al paciente nunca le llega este enlace.
+  const enlaceVale = enlaceValeSesion(data);
 
   // CORREGIDO: cuando se genera un link de pago desde el panel (agendar +
   // "Enviar link de pago"), este correo se mandaba diciendo "confirmada"
@@ -998,8 +1031,7 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
               <td style="padding:0.35rem 0;">${data.payment_method === 'manual' ? '💵 Pago en consulta' : data.payment_method === 'sin_costo' ? '🤝 Sin costo' : '💳 Flow'}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Monto</td>
               <td style="padding:0.35rem 0;font-weight:500;">${formatCLP(data.amount)}</td></tr>
-          ${enlaceVale ? `<tr><td style="padding:0.35rem 0;color:#6B6860;">Entrar a la sesión</td>
-              <td style="padding:0.35rem 0;"><a href="${escapeHtml(enlaceVale)}" style="color:#576352;word-break:break-all;">${escapeHtml(enlaceVale)}</a></td></tr>` : ''}
+          ${filaEnlaceVale(enlaceVale)}
         </table>
 
         <a href="https://www.valentinaorellana.cl/admin/agenda"

@@ -80,12 +80,15 @@ export const POST: APIRoute = async ({ request }) => {
     payment_method: paymentMethod,
     is_new_patient: isNewPatient,
     service_name:   undefined,
-    sesion_id:      bookingId, // enlace propio de la sesión online
+    sesion_id:      bookingId, // Meet directo (paciente) y enlace propio (aviso a Vale)
   };
+  // Primero el evento de Calendar (crea el Meet y lo deja en las notas) y después los correos: así la
+  // confirmación de una sesión online le lleva a la paciente el Meet directo (19 oct 2026).
   Promise.all([
-    sendConfirmationToClient(emailData).catch(console.error),
-    sendNotificationToAdmin(emailData, notificationEmail).catch(console.error),
-    syncBookingToCalendar({ ...emailData, id: bookingId }).catch(console.error),
+    syncBookingToCalendar({ ...emailData, id: bookingId }).catch(console.error).then(() => Promise.all([
+      sendConfirmationToClient(emailData).catch(console.error),
+      sendNotificationToAdmin(emailData, notificationEmail).catch(console.error),
+    ])),
     upsertPatientFromBooking({ ...emailData, rut: booking.patient_rut }).catch(console.error),
   ]);
 

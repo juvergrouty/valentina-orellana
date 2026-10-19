@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { syncBookingToCalendar } from '../../../lib/syncCalendar';
-import { enlaceParaSesion, lineaEntrarWhatsApp } from '../../../lib/enlaceSesion';
+import { lineaEntrarWhatsApp, normalizarMeet } from '../../../lib/enlaceSesion';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { chocaConOtraSesion } from '../../../lib/disponibilidad';
 import { tagBookingsWithPaymentToken, totalACobrarPorEmail } from '../../../lib/debt';
@@ -207,9 +207,10 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     const modalityLine = isOnline ? '🎥 Sesión online\n' : '📍 Sesión presencial\n';
-    // Enlace propio de la sesión (18 oct 2026): abre el mismo Meet y manda el robot de notas.
-    const enlaceSesion = meetLink ? enlaceParaSesion(bookingId, meetLink) : null;
-    const meetLine     = lineaEntrarWhatsApp(enlaceSesion);
+    // WhatsApp a la PACIENTE: solo el Meet directo (decisión de Vale, 19 oct 2026; el enlace propio
+    // /sesion/ es solo para ella en el panel). lineaEntrarWhatsApp no acepta otra cosa que una sala de Meet.
+    const meetPaciente = normalizarMeet(meetLink);
+    const meetLine     = lineaEntrarWhatsApp(meetPaciente);
 
     const waMessage = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n${modalityLine}${dateLine}💰 ${incluyeOtras ? `Total a pagar: $${amountFmt} CLP\nIncluye otras sesiones que tienes pendientes de pago.` : `$${amountFmt} CLP`}\n\n💳 Enlace de pago: ${paymentUrl}${meetLine}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
 
@@ -225,7 +226,7 @@ export const POST: APIRoute = async ({ request }) => {
       waPhone,
       waMessage,
       totalAPagar,
-      meetLink:     enlaceSesion ?? null, // el enlace propio (o el Meet si no se pudo generar)
+      meetLink:     meetPaciente, // Cobros lo muestra: el mismo Meet directo que va en el WhatsApp
     });
 
   } catch (err: any) {

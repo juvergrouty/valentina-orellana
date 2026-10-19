@@ -23,7 +23,7 @@ export function stepsItems(clinicAddress?: string | null): StepItem[] {
     {
       icon: 'video',
       titulo: 'Si tu sesión es online',
-      texto: 'Se realiza por Google Meet. El enlace para entrar te llega en el correo de confirmación, en el recordatorio y en la invitación de tu calendario; solo tienes que abrirlo a la hora de la sesión desde un lugar tranquilo y privado.',
+      texto: 'Se realiza por Google Meet. El enlace de Google Meet te llega en el correo de confirmación, en el recordatorio y en la invitación de tu calendario; solo tienes que abrirlo a la hora de la sesión desde un lugar tranquilo y privado.',
     },
     {
       icon: 'map-pin',
