@@ -9,6 +9,7 @@ import { mismaPersona } from '../../lib/mismaPersona';
 import { tipoDesdeSessionType } from '../../lib/transcriptor/reglas';
 import { evaluarEnBase, motivoVisible, transcriptorActivo, textoMotivo } from '../../lib/transcriptor/consentimiento';
 import { preseleccion } from '../../lib/transcriptor/preseleccion';
+import { estadosConsentimientoSeguro } from '../../lib/transcriptor/estadoConsentimiento';
 import Grabador from '../../components/admin/Grabador.astro';
 import type { CandidataGrabador, DatosGrabador } from '../../lib/transcriptor/grabadorDatos';
 
@@ -31,7 +32,7 @@ const paramPaciente = Astro.url.searchParams.get('paciente') ?? '';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Candidata = CandidataGrabador;
-interface Paciente { id: string; name: string; email: string | null; active: boolean | null }
+interface Paciente { id: string; name: string; email: string | null; rut?: string | null; active: boolean | null }
 
 async function eventosGoogleHoy(): Promise<{ id: string; hora: string; dur: number; titulo: string }[] | null> {
   const auth = await getValidAccessToken();
@@ -71,7 +72,9 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo')) {
   activo = true;
   const sin = demo === 'sin-consentimiento';
   const sinFecha = demo === 'sin-fecha';
-  candidatas = demo === 'elegir' ? [
+  candidatas = demo === 'sin-firma' ? [
+    { clave: 'a', fuente: 'reserva', bookingId: '00000000-0000-4000-8000-000000000004', googleEventId: null, patientId: 'p4', nombre: 'Tomás Fuentes', fecha: hoy, hora: '16:00', dur: 50, tipo: 'individual', faltaMin: 2, consentOk: false, consentTexto: textoMotivo('sin_consentimiento', 'Tomás Fuentes'), consentMotivo: 'sin_consentimiento', firmantes: [] },
+  ] : demo === 'elegir' ? [
     { clave: 'a', fuente: 'reserva', bookingId: '00000000-0000-4000-8000-000000000001', googleEventId: null, patientId: 'p1', nombre: 'Camila Rojas', fecha: hoy, hora: '16:00', dur: 50, tipo: 'individual', faltaMin: 8, consentOk: true, consentTexto: null, firmantes: ['Camila Rojas'] },
     { clave: 'b', fuente: 'calendario', bookingId: null, googleEventId: 'evdemo', patientId: 'p2', nombre: 'Diego Pérez y Ana Soto', fecha: hoy, hora: '16:00', dur: 60, tipo: 'pareja', faltaMin: 8, consentOk: false, consentTexto: textoMotivo('falta_segunda_firma'), firmantes: ['Diego Pérez'] },
     { clave: 'c', fuente: 'reserva', bookingId: '00000000-0000-4000-8000-000000000003', googleEventId: null, patientId: 'p3', nombre: 'Josefa Muñoz', fecha: hoy, hora: '16:10', dur: 50, tipo: 'individual', faltaMin: 18, consentOk: false, consentTexto: textoMotivo('sin_fecha_nacimiento', 'Josefa Muñoz'), consentMotivo: 'sin_fecha_nacimiento', firmantes: [] },
@@ -80,8 +83,10 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo')) {
   ] : [
     { clave: 'a', fuente: 'reserva', bookingId: '00000000-0000-4000-8000-000000000001', googleEventId: null, patientId: 'p1', nombre: sin ? 'Diego Pérez' : 'Camila Rojas', fecha: hoy, hora: '16:00', dur: 50, tipo: sin ? 'pareja' : 'individual', faltaMin: 2, consentOk: !sin, consentTexto: sin ? textoMotivo('falta_segunda_firma') : null, firmantes: sin ? ['Diego Pérez'] : ['Camila Rojas'] },
   ];
-  pacientes = [{ id: 'p1', name: 'Camila Rojas' }, { id: 'p2', name: 'Diego Pérez' }, { id: 'p3', name: 'Josefa Muñoz' }, { id: 'p4', name: 'Tomás Fuentes' }];
-  recientes = ['p1', 'p2', 'p3'];
+  pacientes = [{ id: 'p1', name: 'Camila Rojas', consent: 'firmado' }, { id: 'p2', name: 'Diego Pérez', consent: 'falta_pareja' }, { id: 'p3', name: 'Josefa Muñoz', consent: 'sin_grabacion' }, { id: 'p4', name: 'Tomás Fuentes', consent: 'sin_firma' }];
+  const consentDemo = new Map(pacientes.map((p) => [p.id, p.consent ?? null]));
+  for (const c of candidatas) c.consentEstado = sin ? 'falta_pareja' : c.patientId ? (consentDemo.get(c.patientId) ?? null) : null;
+  recientes = ['p1', 'p2', 'p3', 'p4'];
 } else {
   try {
     const [act, resReservas, resPacientes, resRecientes, google, resParam] = await Promise.all([
@@ -90,7 +95,7 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo')) {
         .select('id, patient_name, patient_email, session_type, session_date, session_time, duration_min, status')
         .eq('session_date', hoy).in('session_type', ['presencial', 'pareja-presencial'])
         .not('status', 'in', '(cancelled,expired)').order('session_time'),
-      supabase.from('patients').select('id, name, email, active').order('name').limit(2000),
+      supabase.from('patients').select('id, name, email, rut, active').order('name').limit(2000),
       supabase.from('bookings').select('patient_email').lte('session_date', hoy)
         .not('status', 'in', '(cancelled,expired)').order('session_date', { ascending: false }).limit(80),
       eventosGoogleHoy().catch(() => null),
@@ -139,6 +144,12 @@ if (import.meta.env.DEV && Astro.url.searchParams.get('demo')) {
       });
     }
     candidatas.sort((a, b) => a.hora.localeCompare(b.hora));
+    // Indicador "Sin consentimiento firmado" (pedido de Vale, 19 oct) de cada sesión y de cada paciente del
+    // buscador: misma regla de la ficha (estadoConsentimiento.ts). Solo el estado, ningún otro dato.
+    const idsConsent = new Set([...candidatas.map((c) => c.patientId).filter(Boolean) as string[], ...pacientes.map((p) => p.id)]);
+    const estados = await estadosConsentimientoSeguro(todos.filter((p) => idsConsent.has(p.id)));
+    for (const c of candidatas) c.consentEstado = c.patientId ? (estados.get(c.patientId) ?? null) : null;
+    pacientes = pacientes.map((p) => ({ ...p, consent: estados.get(p.id) ?? null }));
     // Consentimiento (informativo) de cada sesión con ficha y tipo conocidos.
     await Promise.all(candidatas.map(async (c) => {
       if (!c.patientId || !c.tipo) return;

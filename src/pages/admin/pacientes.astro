@@ -4,7 +4,8 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { esCobrable } from '../../lib/debt';
 import { sesionYaEmpezo } from '../../lib/porCobrar';
-import { getConsentAlerts } from '../../lib/consent';
+import { estadosConsentimientoSeguro } from '../../lib/transcriptor/estadoConsentimiento';
+import IndicadorConsentimiento from '../../components/admin/IndicadorConsentimiento.astro';
 
 const q      = Astro.url.searchParams.get('q') ?? '';
 const filtro = Astro.url.searchParams.get('filtro') ?? 'todos';
@@ -54,8 +55,10 @@ const statByEmail: Record<string, Stat> = {};
   }
 });
 
-// Pacientes activos sin consentimiento de datos firmado (Ley 21.719).
-const sinConsentimiento = new Set((await getConsentAlerts().catch(() => [])).map(a => a.patientId));
+// Consentimiento de cada paciente de la lista (Ley 21.719; pedido de Vale, 19 oct: "muéstrame siempre
+// cuando un paciente no tiene el consentimiento firmado"). Misma regla de la ficha y del grabador
+// (estadoConsentimiento.ts). Si la base falla, no se muestra el indicador (no se inventa).
+const estadoConsent = await estadosConsentimientoSeguro((patients ?? []).map((p: { id: string; name?: string | null; email?: string | null; rut?: string | null }) => ({ id: p.id, name: p.name, email: p.email, rut: p.rut })));
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const MONTHS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
@@ -154,7 +157,7 @@ const TABS = [
                   <td>
                     <span class="pac-name">{p.name}</span>
                     {p.rut && <span class="pac-rut">{p.rut}</span>}
-                    {sinConsentimiento.has(p.id) && <span class="pac-rut" style="color:#b45309;font-weight:600;">⚠ Sin consentimiento</span>}
+                    <IndicadorConsentimiento estado={estadoConsent.get(p.id)} compacto />
                   </td>
                   <td class="pac-muted">{fmtDate(st.last) || '—'}</td>
                   <td class="pac-muted">{fmtDate(st.next) || '—'}</td>
@@ -353,6 +356,8 @@ const TABS = [
 .pac-row:hover td { background: #fafbff; }
 .pac-name { font-weight: 600; color: #111827; display: block; }
 .pac-rut { font-size: 0.75rem; color: #9ca3af; }
+/* Nombre con espacio para el indicador de consentimiento (19 oct); la tabla ya se desplaza en el celular. */
+.pac-table td:first-child { min-width: 10.5rem; }
 .pac-muted { color: #6b7280; }
 
 .pac-pay { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 99px; font-size: 0.75rem; font-weight: 600; }

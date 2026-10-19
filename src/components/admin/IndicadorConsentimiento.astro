@@ -1,0 +1,30 @@
+---
+// Indicador "Sin consentimiento firmado" / "Consentimiento sin autorización de grabación" (pedido de Vale,
+// 19 oct 2026). Mismo aspecto en la lista de pacientes, la cabecera de la ficha y el calendario; la agenda y
+// el grabador lo pintan en el navegador con las mismas clases (.ic-*, estilos globales en AdminLayout.astro)
+// y los mismos textos (estadoConsentimiento.ts). Si está firmado no muestra nada.
+import { claseConsentimiento, etiquetaConsentimiento, hrefEnviarConsentimiento, textoEnlaceConsentimiento, type EstadoConsentimiento } from '../../lib/transcriptor/etiquetaConsentimiento';
+
+interface Props {
+  estado: EstadoConsentimiento | null | undefined;
+  patientId?: string | null;
+  /** Muestra el enlace "Enviar consentimiento" (va al bloque Consentimientos de la ficha). */
+  enlace?: boolean;
+  /** En la ficha: id del panel de envío del bloque Consentimientos (botón que lo abre, data-abrir-envio). */
+  abrirEnvio?: string | null;
+  /** Versión chica (listas). */
+  compacto?: boolean;
+}
+const { estado, patientId, enlace = false, abrirEnvio = null, compacto = false } = Astro.props;
+const texto = etiquetaConsentimiento(estado);
+---
+{texto && (
+  <span class={`${claseConsentimiento(estado)}${compacto ? ' ic-compacto' : ''}`} data-consent-estado={estado}>
+    <span class="ic-icono" aria-hidden="true">!</span>
+    <span class="ic-texto">{texto}</span>
+    {abrirEnvio
+      ? <button type="button" class="ic-enlace ic-boton" data-abrir-envio={abrirEnvio}>Enviar consentimiento</button>
+      : enlace && patientId && <a class="ic-enlace" href={hrefEnviarConsentimiento(patientId)} onclick="event.stopPropagation()">{textoEnlaceConsentimiento(estado)}</a>}
+  </span>
+)}
+

@@ -83,7 +83,7 @@ export const CONSENT_VERSION = '2026-10-v3';
 
 **Notas de implementación (para el equipo de código, no para el paciente)**
 - `CONSENT_OPTIONS[1].titulo` sigue igual: "2. Grabación de sesiones (opcional)". Las autorizaciones 1 y 3 y las secciones 1 y 2 no cambian.
-- La regla para grabar debe aceptar **v2 o v3** con `accept_recording = true` (decisión 9). Esto contradice `10-etica-legal.md` §4.1, que exigía solo v3. Manda la decisión del 16 oct.
+- La regla para grabar debe aceptar **v2 o v3** con `accept_recording = true` (decisión 9). Esto contradice `10-etica-legal.md` §4.1, que exigía solo v3. Manda la decisión del 16 oct. **Actualización 19 oct (Vale reemplazó la decisión 9):** también la v1 con `accept_recording = true` habilita grabar; la versión ya no bloquea.
 - **Condición previa a publicar la v3:** `/condiciones#privacidad` tiene que listar ya, por nombre y país, los proveedores de transcripción y de IA (AssemblyAI, Anthropic, Fly.io, Cloudflare, Backblaze) y los plazos de las copias temporales (1 día y 30 días; hasta 2 años si el sistema de seguridad de Anthropic marca algo). Sin eso, la v3 remite a un documento que no informa, y deja de ser "informada" (ver el límite de abajo).
 - `whatsappConsentMessage` puede seguir igual.
 

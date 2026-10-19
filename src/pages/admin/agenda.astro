@@ -12,6 +12,7 @@ import { reviewRequestUrl } from '../../lib/googleReviews';
 import { nowCL } from '../../lib/dateUtils';
 import { urlSesion } from '../../lib/enlaceSesion';
 import { mensajeLinkPago } from '../../lib/cobrosProximos';
+import { estadosConsentimientoSeguro, ETIQUETA_CONSENTIMIENTO, type EstadoConsentimiento } from '../../lib/transcriptor/estadoConsentimiento';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
 // ?w=abc daba NaN y la página se caía al armar las fechas (8 oct 2026): si no es un número, semana actual.
@@ -175,10 +176,22 @@ patientList.forEach((p: { id: string; email: string | null; rut: string | null }
   if (p.email) patientIdByEmail[p.email.toLowerCase()] = p.id;
 });
 
+// ── Consentimiento (pedido de Vale, 19 oct: "muéstrame siempre cuando un paciente no tiene el
+//    consentimiento firmado"). Todas las fichas (también archivadas) para reconocer a quien tiene sesión;
+//    el estado sale de estadoConsentimiento.ts (misma regla de la ficha y del grabador). ──
+type FichaConsent = { id: string; name: string; email: string | null; rut: string | null; active: boolean | null };
+const fichasConsent: FichaConsent[] = ((await supabase.from('patients').select('id, name, email, rut, active').limit(5000)).data ?? []) as FichaConsent[];
+const fichaPorCorreo = new Map<string, FichaConsent>();
+for (const f of fichasConsent) {
+  const k = String(f.email ?? '').trim().toLowerCase();
+  if (k && (!fichaPorCorreo.has(k) || (f.active !== false && fichaPorCorreo.get(k)!.active === false))) fichaPorCorreo.set(k, f);
+}
+
 // ── Eventos de Google Calendar de la semana (solo lectura) ──────────────────
 const minutosDe = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + (m || 0); };
 // grabar: sesión de paciente de HOY (botón Grabar / texto del asistente de Meet en su panel).
-type GEvent = { date: string; time: string; dur: number; title: string; id: string; grabar: '' | 'grabar' | 'meet' };
+// pid: ficha de la paciente (por el nombre del título, misma regla del grabador) para el indicador de consentimiento.
+type GEvent = { date: string; time: string; dur: number; title: string; id: string; grabar: '' | 'grabar' | 'meet'; pid: string };
 const gcalByDate: Record<string, GEvent[]> = {};
 try {
   const auth = await getValidAccessToken();
@@ -243,11 +256,31 @@ try {
         const tieneMeet = !!ev.hangoutLink || /meet\.google\.com\/[a-z]/i.test(`${ev.location ?? ''} ${ev.description ?? ''}`);
         const esOnline = /online/i.test(titulo) || tieneMeet;
         const grabar: GEvent['grabar'] = date === todayStr && ev.id && ev.status !== 'cancelled' && esSesion ? (esOnline && tieneMeet ? 'meet' : 'grabar') : '';
-        (gcalByDate[date] ??= []).push({ date, time, dur, title: ev.summary ?? 'Ocupado', id: String(ev.id ?? ''), grabar });
+        // Ficha de la sesión (solo si el título calza con UNA paciente; igual que /admin/grabar).
+        let pid = '';
+        if (esSesion) {
+          const nombre = pacienteDeTitulo(titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, ''));
+          const coinciden = nombre ? fichasConsent.filter((p) => p.active !== false && mismaPersona(p.name, nombre)) : [];
+          if (coinciden.length === 1) pid = coinciden[0].id;
+        }
+        (gcalByDate[date] ??= []).push({ date, time, dur, title: ev.summary ?? 'Ocupado', id: String(ev.id ?? ''), grabar, pid });
       }
     }
   }
 } catch (e) { console.error('[agenda] gcal:', e); }
+
+// Estado del consentimiento de cada ficha con sesión esta semana (reservas del sitio y Google Calendar).
+const idsConConsent = new Set<string>();
+for (const b of bookings) { const f = fichaPorCorreo.get(String(b.patient_email ?? '').trim().toLowerCase()); if (f) idsConConsent.add(f.id); }
+for (const lista of Object.values(gcalByDate)) for (const g of lista) if (g.pid) idsConConsent.add(g.pid);
+const estadoConsentPorFicha = await estadosConsentimientoSeguro(fichasConsent.filter((f) => idsConConsent.has(f.id)));
+/** Ficha y estado de una reserva. Sin ficha → sin consentimiento firmado (la firma vive en la ficha). */
+function consentDeReserva(b: Record<string, any>): { pid: string; estado: EstadoConsentimiento | null } {
+  const f = fichaPorCorreo.get(String(b.patient_email ?? '').trim().toLowerCase());
+  if (!f) return { pid: '', estado: 'sin_firma' };
+  return { pid: f.id, estado: estadoConsentPorFicha.get(f.id) ?? null };
+}
+const tituloConsent = (e: EstadoConsentimiento | null | undefined) => (e && e !== 'firmado' ? ETIQUETA_CONSENTIMIENTO[e] : '');
 
 // ── Week days ─────────────────────────────────────────────────────────────────
 const DAYS_ES      = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
@@ -642,7 +675,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
                 style={`top:${x.min - 360}px;height:${Math.max(x.height, 24) - 2}px;--svcbg:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bg};--svcbd:${(x.svc && svcColor[x.svc] ? svcColor[x.svc] : NEUTRAL_COLOR).bd}`}></div>
             ))}
 
-            {(byDate[day.isoDate] ?? []).map(b => (
+            {(byDate[day.isoDate] ?? []).map(b => { const cs = consentDeReserva(b); return (
               <div
                 class={`cal-event ${evClass(b.status, b.payment_method, b.paid_at, b.debt_voided)}`}
                 data-svc={b.service_id ?? ''}
@@ -679,25 +712,29 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
                   service_id:     b.service_id ?? '',
                   // Enlace propio de la sesión online (/sesion/<código>): abre su Meet y manda el robot de notas.
                   enlace_sesion:  String(b.session_type ?? '').includes('online') ? urlSesion(b.id) : null,
+                  // Indicador de consentimiento (estadoConsentimiento.ts); ficha_consent = ficha aunque esté archivada.
+                  consent_estado: cs.estado ?? '',
+                  ficha_consent:  cs.pid,
                 })}
-                title={`${b.patient_name} · ${b.session_time.slice(0, 5)}`}
+                title={`${b.patient_name} · ${b.session_time.slice(0, 5)}${tituloConsent(cs.estado) ? ` · ${tituloConsent(cs.estado)}` : ''}`}
               >
-                <span class="ev-time">{b.session_time.slice(0, 5)}</span>
+                <span class="ev-time">{b.session_time.slice(0, 5)}{tituloConsent(cs.estado) && <span class={`ev-consent ${cs.estado === 'sin_grabacion' ? 'ev-consent-aviso' : ''}`} aria-label={tituloConsent(cs.estado)}>!</span>}</span>
                 <span class="ev-name">{b.patient_name}</span>
                 {(b.duration_min ?? 50) > 35 && <span class="ev-type">{svcLabel(b)}</span>}
               </div>
-            ))}
+            ); })}
 
-            {(gcalByDate[day.isoDate] ?? []).map(g => (
+            {(gcalByDate[day.isoDate] ?? []).map(g => { const ce = g.pid ? (estadoConsentPorFicha.get(g.pid) ?? null) : null; return (
               <div class={`cal-gcal-event${g.grabar ? ' cal-gcal-grabable' : ''}`} data-date={g.date} data-time={g.time} data-dur={g.dur}
                 data-gid={g.grabar ? g.id : undefined} data-grabar={g.grabar || undefined} data-titulo={g.grabar ? g.title : undefined}
+                data-consent-estado={g.grabar && ce ? ce : undefined} data-ficha={g.grabar && g.pid ? g.pid : undefined}
                 role={g.grabar ? 'button' : undefined} tabindex={g.grabar ? 0 : undefined}
-                style={evStyle(g.time, g.dur)} title={`${g.title} · ${g.time} (Google Calendar)`}>
-                <span class="ev-time">{g.time}</span>
+                style={evStyle(g.time, g.dur)} title={`${g.title} · ${g.time} (Google Calendar)${tituloConsent(ce) ? ` · ${tituloConsent(ce)}` : ''}`}>
+                <span class="ev-time">{g.time}{tituloConsent(ce) && <span class={`ev-consent ${ce === 'sin_grabacion' ? 'ev-consent-aviso' : ''}`} aria-label={tituloConsent(ce)}>!</span>}</span>
                 <span class="ev-name">{g.title}</span>
                 {g.dur > 35 && <span class="ev-type">Google Calendar</span>}
               </div>
-            ))}
+            ); })}
 
             {day.isToday && <div class="cal-now-line" id="now-line"></div>}
           </div>
@@ -1135,6 +1172,8 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
     <div class="sp-body">
       <div class="sp-section">
         <div class="sp-patient-name" id="gp-titulo" style="overflow-wrap:anywhere;"></div>
+        <!-- Consentimiento de la ficha (pedido de Vale, 19 oct); lo pinta openGcalDetail. -->
+        <div id="gp-consent" class="sp-consent" hidden></div>
       </div>
       <div class="sp-section" style="border-bottom:none;">
         <a href="/admin/grabar" id="gp-btn-grabar" class="sp-action-row" style="display:none;font-weight:600;color:#576352;">
@@ -1177,6 +1216,8 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       <div class="sp-section">
         <div class="sp-patient-name" id="sp-patient-name"></div>
         <div class="sp-patient-info" id="sp-patient-info"></div>
+        <!-- Consentimiento de la ficha (pedido de Vale, 19 oct); lo pinta openSessionDetail. -->
+        <div id="sp-consent" class="sp-consent" hidden></div>
         <!-- Videollamada — igual que Encuadrado: "Ingresar a Google Meet" siempre
              visible en sesiones online (no depende del pago; genera el link al
              instante si todavía no existe) y "Compartir link" se despliega en
@@ -1657,6 +1698,11 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 .sp-action-row:hover { color: #4f5ce8; background: #f3f4ff; }
 .sp-action-row:active { transform: scale(0.98); background: #e7e9fe; }
 .sp-grabar-meet { display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: #6b7280; padding: 0.4rem 0; }
+/* Indicador de consentimiento (19 oct): "!" en el bloque del calendario y chip en el panel lateral. */
+.ev-consent { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; margin-left: 4px;
+  border-radius: 50%; background: #c2410c; color: #fff; font-size: 9px; font-weight: 800; line-height: 1; vertical-align: 1px; }
+.ev-consent-aviso { background: #a16207; }
+.sp-consent { margin-top: 0.5rem; }
 /* Sesión de paciente de hoy en Google Calendar: se puede tocar (abre el panel con Grabar). */
 .cal-gcal-event.cal-gcal-grabable { pointer-events: auto; cursor: pointer; }
 .cal-gcal-event.cal-gcal-grabable:hover { filter: brightness(0.96); }
@@ -1870,7 +1916,29 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 }
 </style>
 
-<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase, direccionLlegar, weekOffset }}>
+<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase, direccionLlegar, weekOffset, etiquetasConsent: ETIQUETA_CONSENTIMIENTO }}>
+// ── Indicador de consentimiento en los paneles (mismos textos y clases que IndicadorConsentimiento.astro) ──
+function pintarConsentPanel(caja, estado, fichaId) {
+  if (!caja) return;
+  caja.textContent = '';
+  const texto = estado && estado !== 'firmado' ? etiquetasConsent[estado] : '';
+  caja.hidden = !texto;
+  if (!texto) return;
+  const chip = document.createElement('span');
+  chip.className = `ic ${estado === 'sin_grabacion' ? 'ic-aviso' : 'ic-grave'}`;
+  chip.dataset.consentEstado = estado;
+  const ico = document.createElement('span'); ico.className = 'ic-icono'; ico.setAttribute('aria-hidden', 'true'); ico.textContent = '!';
+  const t = document.createElement('span'); t.className = 'ic-texto'; t.textContent = texto;
+  chip.append(ico, t);
+  if (fichaId) {
+    const a = document.createElement('a');
+    a.className = 'ic-enlace';
+    a.href = `/admin/pacientes/${encodeURIComponent(fichaId)}#consentimiento`;
+    a.textContent = estado === 'sin_grabacion' ? 'Ver consentimiento' : 'Enviar consentimiento';
+    chip.append(a);
+  }
+  caja.append(chip);
+}
 // ── Copiar link de pago (banner tras crear cita con link) ──────────────────────
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-copy-link]');
@@ -2572,6 +2640,7 @@ document.querySelectorAll('.cal-event').forEach(el => {
 // ── Evento de Google Calendar / Encuadrado de hoy: panel con Grabar (transcriptor) ──
 function openGcalDetail(el) {
   document.getElementById('gp-titulo').textContent = el.dataset.titulo || 'Sesión';
+  pintarConsentPanel(document.getElementById('gp-consent'), el.dataset.consentEstado || '', el.dataset.ficha || '');
   const dur = Number(el.dataset.dur) || 0;
   document.getElementById('gp-hora').textContent = `Hoy · ${el.dataset.time}${dur ? ` · ${dur} min` : ''}`;
   const meet = el.dataset.grabar === 'meet';
@@ -2705,6 +2774,7 @@ function openSessionDetail(b) {
   }
 
   document.getElementById('sp-patient-name').textContent = b.patient_name;
+  pintarConsentPanel(document.getElementById('sp-consent'), b.consent_estado, b.ficha_consent || b.patient_id);
   // Email y teléfono son clicables (correo / WhatsApp directo, sin plantilla) —
   // igual que en Encuadrado, donde el panel de la cita permite contactar al
   // paciente sin salir de ahí.

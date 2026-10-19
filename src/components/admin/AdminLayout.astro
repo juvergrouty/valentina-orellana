@@ -486,6 +486,20 @@ body {
 .badge-confirmed { color: #15803d; border-color: #86efac; background: #f0fdf4; }
 .badge-pending   { color: #92400e; border-color: #fcd34d; background: #fffbeb; }
 .badge-cancelled { color: var(--enc-text-3); border-color: var(--enc-border); background: var(--enc-body-bg); }
+/* Indicador de consentimiento (IndicadorConsentimiento.astro; agenda.astro y Grabador.astro usan las mismas clases). */
+.ic { display: inline-block; max-width: 100%; font-size: 0.78rem; font-weight: 600; line-height: 1.4;
+      padding: 0.2rem 0.6rem; border-radius: 8px; border: 1px solid; }
+.ic-grave { color: #9a3412; background: #fff7ed; border-color: #fdba74; }
+.ic-aviso { color: #854d0e; background: #fefce8; border-color: #fde047; }
+.ic-icono { display: inline-flex; align-items: center; justify-content: center; width: 1rem; height: 1rem; border-radius: 50%;
+            margin-right: 0.35rem; vertical-align: -0.2em; font-size: 0.68rem; font-weight: 800; }
+.ic-grave .ic-icono { background: #c2410c; color: #fff; }
+.ic-aviso .ic-icono { background: #a16207; color: #fff; }
+.ic-texto { overflow-wrap: break-word; }
+.ic-enlace { margin-left: 0.45rem; color: inherit; text-decoration: underline; font-weight: 600; white-space: nowrap; }
+.ic-boton { background: none; border: none; padding: 0; font: inherit; cursor: pointer; }
+.ic-compacto { display: block; width: fit-content; font-size: 0.7rem; padding: 0.1rem 0.45rem; margin-top: 0.2rem; }
+.ic-compacto .ic-icono { width: 0.85rem; height: 0.85rem; font-size: 0.6rem; }
 
 /* ── Table ───────────────────────────────────────────────────────────────── */
 table { width: 100%; border-collapse: collapse; }

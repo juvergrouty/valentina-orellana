@@ -4,21 +4,24 @@
 // 10-etica-legal.md §4.1–4.2. El botón de la interfaz solo refleja este resultado:
 // grabacion-iniciar, subida-url y grabacion-finalizar lo vuelven a consultar.
 //
-// Versiones que habilitan grabar (decisión 9 de 01-decisiones-16oct.md, que manda):
+// Versiones que habilitan grabar (decisión de Vale del 19 oct, que REEMPLAZA la decisión 9 de
+// 01-decisiones-16oct.md):
 //   - Se lee la misma tabla `consents` (0004). No se agregan columnas.
 //   - La versión es el texto `consents.version` con la forma 'AAAA-MM-vN'.
-//   - La v2 ('2026-10-v2') con la autorización `accept_recording = true` SÍ habilita grabar
-//     (Vale quiere que sirva a quienes ya firmaron; la abogada lo confirmará). La v3 (nueva,
-//     amplia, para pacientes nuevos) y posteriores también. La v1 no → 'version_antigua'.
+//   - CUALQUIER versión firmada (v1, v2, v3, v4 y posteriores) con la autorización
+//     `accept_recording = true` habilita grabar. La v1 también (pacientes antiguos: su texto ya
+//     autorizaba grabar el audio para transcribirlo). Las v1 y v2 reciben una vez el aviso de
+//     "cambio de herramienta" (avisoV2.ts). La versión ya no bloquea: el motivo 'version_antigua'
+//     dejó de producirse (queda en el tipo solo por compatibilidad).
 //   - Revocación o `accept_recording = false` bloquea.
 //   - Pareja = UNA ficha y cada persona firma su propio formulario (fila propia con el
 //     mismo patient_id). Las firmas se agrupan por persona: RUT normalizado, si no hay,
-//     correo, si no, nombre. Se exigen 2 personas distintas con firma vigente (v2 o v3+)
-//     que autorice la grabación.
+//     correo, si no, nombre. Se exigen 2 personas distintas con firma vigente (de cualquier
+//     versión) que autorice la grabación.
 //   - De cada persona vale su ÚLTIMA firma: si después firmó sin autorizar la grabación
 //     o la revocó (revoked_at), esa persona bloquea la grabación aunque antes aceptara.
-//   - Conservador: si CUALQUIER persona de la ficha tiene su última firma revocada, sin
-//     autorizar grabación o anterior a la v2, no se graba (aunque se elija 'individual').
+//   - Conservador: si CUALQUIER persona de la ficha tiene su última firma revocada o sin
+//     autorizar grabación, no se graba (aunque se elija 'individual').
 //   - H1 (81-revision-etica-clinica): "Retirar solo la grabación" marca `recording_revoked_at`
 //     (0019) en la firma de ESA persona; se trata igual que una revocación para grabar
 //     (motivo 'revocado'), sin tocar el resto de su consentimiento.
@@ -59,6 +62,8 @@ export function numeroVersion(version: string | null | undefined): number | null
   return m ? Number(m[1]) : null;
 }
 
+/** Informativo: ¿la versión se reconoce y es ≥ la mínima? Desde el 19 oct NO se usa para decidir si se graba
+ *  (cualquier firma con accept_recording = true habilita, aunque su versión no se reconozca). */
 export function esVersionGrabacion(version: string | null | undefined): boolean {
   const n = numeroVersion(version);
   return n !== null && n >= VERSION_MINIMA_GRABACION;
@@ -104,7 +109,7 @@ export interface EvaluacionConsentimiento extends ResultadoPuedeGrabar {
   tipoEfectivo: TipoSesion;
   /** true si la pantalla pidió otro tipo y el servidor dedujo pareja desde la ficha. */
   parejaDeducida: boolean;
-  /** Nombres de quienes tienen firma vigente (v2 o v3+) con grabación autorizada (para mostrar "firmado por ambos ✓"). */
+  /** Nombres de quienes tienen firma vigente (cualquier versión) con grabación autorizada (para mostrar "firmado por ambos ✓"). */
   firmantes: string[];
   /** Firmas vigentes que se necesitan (pareja 2, resto 1). */
   requeridas: number;
@@ -135,11 +140,11 @@ export function evaluarConsentimientos(e: EntradaEvaluacion): EvaluacionConsenti
   if (!ultimas.size) return { ...base, puede: false, motivo: 'sin_consentimiento' };
 
   const validas: FilaConsentimiento[] = [];
-  let hayRevocada = false, hayAntigua = false, hayNegada = false;
+  let hayRevocada = false, hayNegada = false;
   for (const f of ultimas.values()) {
     if (f.revoked_at || f.recording_revoked_at) { hayRevocada = true; continue; }
-    if (!esVersionGrabacion(f.version)) { hayAntigua = true; continue; }
-    if (!f.accept_recording) { hayNegada = true; continue; }
+    // Decisión de Vale (19 oct): la versión no importa; manda accept_recording.
+    if (f.accept_recording !== true) { hayNegada = true; continue; }
     validas.push(f);
   }
   const consentIds = validas.map((f) => f.id);
@@ -148,11 +153,8 @@ export function evaluarConsentimientos(e: EntradaEvaluacion): EvaluacionConsenti
   // Alguien de la ficha revocó o firmó sin autorizar la grabación: no se graba.
   if (hayRevocada) return { ...base, consentIds, firmantes, puede: false, motivo: 'revocado' };
   if (hayNegada) return { ...base, consentIds, firmantes, puede: false, motivo: 'sin_consentimiento' };
-  // Cualquier persona de la ficha cuya última firma es anterior a la v2 bloquea, aunque se elija
-  // "individual" (evita saltarse la segunda firma de una pareja eligiendo el tipo equivocado).
-  if (hayAntigua) return { ...base, consentIds, firmantes, puede: false, motivo: validas.length ? 'falta_segunda_firma' : 'version_antigua' };
   if (validas.length >= requeridas) return { ...base, consentIds, firmantes, puede: true };
-  if (validas.length === 0) return { ...base, consentIds, firmantes, puede: false, motivo: hayAntigua ? 'version_antigua' : 'sin_consentimiento' };
+  if (validas.length === 0) return { ...base, consentIds, firmantes, puede: false, motivo: 'sin_consentimiento' };
   return { ...base, consentIds, firmantes, puede: false, motivo: 'falta_segunda_firma' };
 }
 
@@ -179,7 +181,7 @@ export function textoMotivo(motivo: string | undefined, nombre?: string | null):
     case 'menor_de_edad': return 'No se graba a menores de 18 años.';
     case 'sin_fecha_nacimiento': return `Falta la fecha de nacimiento en la ficha de ${quien}. Complétala para tener la ficha al día (Información → Fecha de nacimiento); si es menor de 18 no se graba.`;
     case 'revocado': return `Se retiró la autorización de grabación en la ficha de ${quien}. Sin ella no se puede grabar.`;
-    case 'version_antigua': return `Falta el consentimiento de grabación de ${quien}. La versión que firmó no incluye la autorización de grabación; envíale el consentimiento actual.`;
+    // 'version_antigua' ya no se produce (19 oct); si llegara de un registro viejo, se dice lo mismo que sin consentimiento.
     case 'falta_segunda_firma': return 'Falta el consentimiento de grabación de la otra persona de la pareja. Sin él no se puede grabar.';
     case 'ficha_pareja': return 'Esta ficha es de pareja. Para grabar se necesita el consentimiento de las dos personas.';
     case 'transcriptor_apagado': return 'El grabador está apagado en la configuración del transcriptor.';

@@ -112,16 +112,27 @@ class Consulta implements PromiseLike<Resp> {
   lte(k: string, v: unknown) { this.filtros.push((f) => cmp(val(f, k), v) <= 0); return this; }
   gt(k: string, v: unknown) { this.filtros.push((f) => cmp(val(f, k), v) > 0); return this; }
   gte(k: string, v: unknown) { this.filtros.push((f) => cmp(val(f, k), v) >= 0); return this; }
-  /** Solo la forma 'col.op.valor,col.op.valor' (is/eq/lt/lte/gt/gte). */
+  /** Solo la forma 'col.op.valor,col.op.valor' (is/eq/lt/lte/gt/gte; y like/ilike con * e in.(a,b), 19 oct). */
   or(expr: string) {
-    const partes = expr.split(',').map((p) => {
+    // Separa por comas fuera de paréntesis (in.(a,b) lleva comas adentro).
+    const trozos: string[] = []; let prof = 0, ini = 0;
+    for (let k = 0; k < expr.length; k++) {
+      if (expr[k] === '(') prof++; else if (expr[k] === ')') prof--;
+      else if (expr[k] === ',' && prof === 0) { trozos.push(expr.slice(ini, k)); ini = k + 1; }
+    }
+    trozos.push(expr.slice(ini));
+    const partes = trozos.map((p) => {
       const i = p.indexOf('.'); const j = p.indexOf('.', i + 1);
       return { col: p.slice(0, i), op: p.slice(i + 1, j), v: p.slice(j + 1) };
     });
+    const comodin = (patron: string, flags: string) =>
+      new RegExp(`^${patron.split('*').map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, flags);
     this.filtros.push((f) => partes.some(({ col, op, v }) => {
       const x = val(f, col);
       if (op === 'is') return v === 'null' ? x === null : String(x) === v;
       if (op === 'eq') return String(x) === v;
+      if (op === 'like' || op === 'ilike') return x !== null && comodin(v, op === 'ilike' ? 'i' : '').test(String(x));
+      if (op === 'in') return v.replace(/^\(|\)$/g, '').split(',').includes(String(x));
       const c = cmp(x, v);
       return op === 'lt' ? c < 0 : op === 'lte' ? c <= 0 : op === 'gt' ? c > 0 : op === 'gte' ? c >= 0 : false;
     }));

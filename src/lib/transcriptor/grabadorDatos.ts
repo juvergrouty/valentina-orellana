@@ -10,12 +10,14 @@ export interface CandidataGrabador {
   faltaMin: number; consentOk: boolean | null; consentTexto: string | null; firmantes: string[];
   /** Motivo del bloqueo (consentimiento.ts) para mostrar qué hacer. */
   consentMotivo?: string | null;
+  /** Indicador "Sin consentimiento firmado" (estadoConsentimiento.ts, calculado en el servidor; 19 oct). */
+  consentEstado?: string | null;
 }
 
 export interface DatosGrabador {
   activo: boolean; errorLectura: boolean; hoy: string;
   ventana: CandidataGrabador[]; otras: CandidataGrabador[];
-  pacientes: { id: string; name: string }[]; recientes: string[];
+  pacientes: { id: string; name: string; consent?: string | null }[]; recientes: string[];
   demo: string | null; pedida: string | null; pacientePedido: string | null;
   /** Página estática /grabar-sin-internet (la sirve el service worker sin red): solo retomar y ver lo pendiente. */
   sinInternet?: boolean;

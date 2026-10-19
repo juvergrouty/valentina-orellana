@@ -5,6 +5,10 @@ import { supabase } from '../../lib/supabase';
 import { getValidAccessToken } from '../../lib/syncCalendar';
 import { todayCL } from '../../lib/dateUtils';
 import { reservaDeEventId, urlSesion } from '../../lib/enlaceSesion';
+import { pacienteDeTitulo } from '../../lib/boxCala';
+import { mismaPersona } from '../../lib/mismaPersona';
+import { estadosConsentimientoSeguro, type EstadoConsentimiento } from '../../lib/transcriptor/estadoConsentimiento';
+import IndicadorConsentimiento from '../../components/admin/IndicadorConsentimiento.astro';
 
 // Leer settings de Google
 const { data: rows } = await supabase.from('settings').select('key, value');
@@ -39,6 +43,35 @@ if (googleConnected) {
     }
   } catch (err) {
     console.error('[calendario]', err);
+  }
+}
+
+// Consentimiento de la paciente de cada sesión (pedido de Vale, 19 oct): por correo invitado o, si el
+// título dice "sesión", por el nombre (solo si calza con UNA ficha, igual que el grabador). Misma regla
+// de la ficha (estadoConsentimiento.ts).
+const consentPorEvento = new Map<string, { pid: string; estado: EstadoConsentimiento | null }>();
+if (events.length) {
+  try {
+    type F = { id: string; name: string; email: string | null; rut: string | null; active: boolean | null };
+    const { data } = await supabase.from('patients').select('id, name, email, rut, active').limit(5000);
+    const fichas = (data ?? []) as F[];
+    const porCorreo = new Map(fichas.filter((f) => f.email).map((f) => [String(f.email).trim().toLowerCase(), f]));
+    const fichaDe = (ev: any): F | null => {
+      for (const a of (ev.attendees ?? []) as { email?: string }[]) {
+        const f = porCorreo.get(String(a.email ?? '').trim().toLowerCase());
+        if (f) return f;
+      }
+      const titulo = String(ev.summary ?? '');
+      if (!/sesi[oó]n/i.test(titulo)) return null;
+      const nombre = pacienteDeTitulo(titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, ''));
+      const coinciden = nombre ? fichas.filter((f) => f.active !== false && mismaPersona(f.name, nombre)) : [];
+      return coinciden.length === 1 ? coinciden[0] : null;
+    };
+    const pares = events.map((ev) => [String(ev.id ?? ''), fichaDe(ev)] as const).filter(([, f]) => f) as [string, F][];
+    const estados = await estadosConsentimientoSeguro(pares.map(([, f]) => f));
+    for (const [id, f] of pares) consentPorEvento.set(id, { pid: f.id, estado: estados.get(f.id) ?? null });
+  } catch (err) {
+    console.error('[calendario] consentimiento:', err);
   }
 }
 
@@ -118,6 +151,9 @@ const embedUrl = googleConnected
                       onmouseout="this.style.color='var(--dust)'"
                     >✕</button>
                   </div>
+                  {consentPorEvento.get(String(ev.id ?? '')) && (
+                    <IndicadorConsentimiento estado={consentPorEvento.get(String(ev.id ?? ''))!.estado} patientId={consentPorEvento.get(String(ev.id ?? ''))!.pid} enlace compacto />
+                  )}
                   {isFromSystem(ev) && (
                     <span style="font-size:0.65rem;background:var(--forest);color:white;padding:0.1rem 0.4rem;border-radius:99px;margin-top:0.3rem;display:inline-block;">
                       Sistema

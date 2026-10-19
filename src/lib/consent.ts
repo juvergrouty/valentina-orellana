@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { supabase } from './supabase';
-import { FaltaMigracion0021, pendienteOCrear, personaDe, soloPersona1 } from './transcriptor/pareja';
+import { FaltaMigracion0021, pendienteOCrear, personaDe } from './transcriptor/pareja';
+import { vigentePropio } from './transcriptor/estadoConsentimiento';
 
 // Consentimiento informado de tratamiento de datos personales y de salud
 // (Ley 21.719, que modifica la Ley 19.628). Pedido por Valentina el 3 oct
@@ -18,13 +19,15 @@ import { FaltaMigracion0021, pendienteOCrear, personaDe, soloPersona1 } from './
 // Sin nombres de proveedores en la autorización 2 (la lista vive en
 // /condiciones#privacidad); agrega audio/transcripción, IA sin decisiones
 // clínicas, borrado del audio y pareja. La v2 sigue vigente para quienes ya
-// firmaron (decisión 9 del 16 oct): su texto queda en su text_snapshot.
+// firmaron (decisión 9 del 16 oct; desde el 19 oct, decisión de Vale, también la v1 con grabación
+// autorizada habilita grabar): su texto queda en su text_snapshot.
 // v4 (17 oct 2026, aprobada por Valentina): versión corta por capas
 // (docs/transcriptor/14-consentimiento-corto.md). La capa 1 es este texto; el
 // detalle (proveedores con país, plazos de copias temporales, derechos uno por
 // uno, grabación y pareja) vive en /condiciones#privacidad (versión 5). La v2 y
-// la v3 siguen vigentes para quienes ya firmaron: su texto queda en su
-// text_snapshot, y con accept_recording = true siguen habilitando grabar.
+// la v3 (y la v1, decisión de Vale del 19 oct) siguen vigentes para quienes ya
+// firmaron: su texto queda en su text_snapshot, y con accept_recording = true
+// siguen habilitando grabar.
 export const CONSENT_VERSION = '2026-10-v4';
 
 export const RESPONSABLE = {
@@ -160,11 +163,10 @@ export interface ConsentRow {
 // pendiente (hay que pedirle uno nuevo).
 // Solo de la persona agendada (persona 1): la firma de la pareja (persona 2)
 // nunca reemplaza ni tapa la falta del consentimiento propio de la paciente.
+// La regla vive en transcriptor/estadoConsentimiento.ts (pura, con pruebas) y la usa también el
+// indicador "Sin consentimiento firmado" de la lista, la agenda y el grabador.
 export function vigente(rows: ConsentRow[]): ConsentRow | null {
-  const firmados = soloPersona1(rows).filter(r => r.signed_at && r.accept_treatment)
-    .sort((a, b) => (b.signed_at ?? '').localeCompare(a.signed_at ?? ''));
-  const ultimo = firmados[0];
-  return ultimo && !ultimo.revoked_at ? ultimo : null;
+  return vigentePropio(rows);
 }
 
 export interface ConsentAlert { patientId: string; name: string; sentAt: string | null }

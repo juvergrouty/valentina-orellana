@@ -64,6 +64,28 @@ test('individual solo con v1 y grabación autorizada → puede (pacientes antigu
   assert.equal(evaluar('individual', [fila({ version: '2026-10-v1', accept_recording: false })]).motivo, 'sin_consentimiento');
 });
 
+test('revisión 8112bc1: el motivo version_antigua ya no aparece para firmas con grabación autorizada (v1, sin versión o versión rara)', () => {
+  for (const version of ['2026-10-v1', 'v1', null, 'raro', '']) {
+    const r = evaluar('individual', [fila({ version })]);
+    assert.equal(r.puede, true, `versión ${String(version)}`);
+    assert.notEqual(r.motivo, 'version_antigua');
+  }
+  // Pareja: v1 + v1, ambas con grabación autorizada → se graba; ninguna combinación da version_antigua.
+  const par = evaluar('pareja', [fila({ version: '2026-10-v1' }), fila({ signer_rut: '9.876.543-2', version: '2026-10-v1' })]);
+  assert.equal(par.puede, true);
+  assert.equal(par.firmantes.length, 2);
+  // Una sola v1 en pareja → falta la segunda firma (no "versión antigua").
+  assert.equal(evaluar('pareja', [fila({ version: '2026-10-v1' })]).motivo, 'falta_segunda_firma');
+  // Retiro de solo la grabación en una v1 → revocado.
+  assert.equal(evaluar('individual', [fila({ version: '2026-10-v1', recording_revoked_at: '2026-10-18T00:00:00Z' })]).motivo, 'revocado');
+});
+
+test('textos de bloqueo: ninguno habla de "versión" ni de v1/v2 (decisión de Vale 19 oct)', () => {
+  const fuente = readFileSync(new URL('./consentimiento.ts', import.meta.url), 'utf8');
+  const cuerpo = fuente.slice(fuente.indexOf('export function textoMotivo'), fuente.indexOf('// ─── Con base de datos'));
+  assert.doesNotMatch(cuerpo, /versi[oó]n que firm|consentimiento actual|\bv[12]\b/i);
+});
+
 test('v2 antigua + v3 nueva de la misma persona → vale la última', () => {
   const r = evaluar('individual', [
     fila({ version: '2026-10-v1', signed_at: '2026-10-01T00:00:00Z' }),

@@ -228,6 +228,8 @@ Notas:
 Cada salvaguarda indica qué la exige. “Debe” significa que es requisito para lanzar.
 
 ### 4.1 Consentimiento como bloqueo técnico
+> **Nota (19 oct 2026):** lo que se exige sobre la versión quedó reemplazado. La decisión 9 de `01-decisiones-16oct.md` (16 oct) aceptó la v2; el 19 oct Vale la reemplazó: **cualquier versión firmada con `accept_recording = true` habilita grabar, también la v1**. El resto del bloqueo (cada persona presente, revocación, menores) sigue igual.
+
 - **No hay grabación sin consentimiento v3 vigente** de cada persona presente. El botón “Grabar” queda deshabilitado y el bot de Meet no se despacha si:
   - el paciente (o **cualquiera de los dos** en pareja) no tiene un consentimiento v3 firmado,
   - el consentimiento fue revocado, o

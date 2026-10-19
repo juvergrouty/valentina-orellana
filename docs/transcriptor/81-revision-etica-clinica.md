@@ -14,7 +14,7 @@ Nota previa: la rama `transcriptor` **no incluye** `origin/main` (que ya trae la
 |---|---|---|
 | Chequeo de consentimiento **en el servidor** al preparar, al pedir URL de subida y al finalizar | `grabacion-iniciar.ts:75`, `subida-url.ts:51`, `grabacion-finalizar.ts:92` | OK |
 | Bot de Meet: no se despacha sin consentimiento (queda `sin_consentimiento` + bitácora) | `pipeline.ts:363-382` | OK |
-| v2 con `accept_recording=true` o v3+ habilitan; v1 no; revocación o `accept_recording=false` bloquean; última firma por persona; pareja = 2 personas distintas (RUT validado) | `consentimiento.ts:93-131` | OK |
+| v2 con `accept_recording=true` o v3+ habilitan; v1 no (**19 oct: Vale lo reemplazó, la v1 con grabación autorizada también habilita**); revocación o `accept_recording=false` bloquean; última firma por persona; pareja = 2 personas distintas (RUT validado) | `consentimiento.ts:93-131` | OK |
 | Conservador: cualquier persona de la ficha con firma revocada/negada/antigua bloquea | `consentimiento.ts:122-127` | OK |
 | Menores de 18: bloqueo si la fecha de nacimiento lo indica; sin fecha se permite (decisión 10) | `consentimiento.ts:98-99` | OK |
 | Falla cerrado si la base no responde o el transcriptor está apagado | `consentimiento.ts:171-202` | OK |

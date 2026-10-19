@@ -412,6 +412,8 @@ export interface ResultadoPuedeGrabar {
   puede: boolean;
   // 'sin_fecha_nacimiento' (ronda 2): desde el 18 oct ya no se produce (la fecha no bloquea; solo
   // bloquea si es de un menor de 18). Se mantiene por compatibilidad con valores antiguos.
+  // 'version_antigua': desde el 19 oct ya no se produce (decisión de Vale: cualquier versión firmada con
+  // accept_recording = true habilita grabar, también la v1). Igual, solo por compatibilidad.
   motivo?: 'sin_consentimiento' | 'revocado' | 'version_antigua' | 'falta_segunda_firma' | 'menor_de_edad' | 'sin_ficha' | 'sin_fecha_nacimiento';
   consentIds: string[];
 }

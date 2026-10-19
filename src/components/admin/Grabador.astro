@@ -64,6 +64,8 @@ const { datos } = Astro.props;
         <p class="gr-paciente" id="gr-sel-nombre"></p>
         <p class="gr-sub" id="gr-sel-tipo"></p>
         <p class="gr-consent" id="gr-sel-consent" hidden></p>
+        <!-- Indicador "Sin consentimiento firmado" (19 oct): estado calculado en el servidor, antes de grabar. -->
+        <div id="gr-sel-indicador" class="gr-indicador" hidden></div>
       </div>
 
       <div class="gr-card gr-pila" id="gr-tipo" hidden>
@@ -277,6 +279,12 @@ const { datos } = Astro.props;
   .gr-opcion { display:flex; flex-direction:column; align-items:flex-start; gap:2px; width:100%; text-align:left; background:#fff; border:1px solid #d1d5db; border-radius:10px; padding:12px 14px; min-height:64px; font:inherit; cursor:pointer; color:var(--gr-ink); }
   .gr-opcion b { font-size:18px; } .gr-opcion span { font-size:14px; color:var(--gr-stone); }
   .gr-opcion .no { color:var(--gr-red); font-weight:600; }
+  /* Indicador de consentimiento dentro del grabador (clases .ic de AdminLayout.astro). */
+  .gr-opcion .ic, .gr-indicador .ic { margin-top:4px; font-size:14px; }
+  .gr-opcion .ic.ic-grave { color:#9a3412; } .gr-opcion .ic.ic-aviso { color:#854d0e; }
+  .gr-opcion .ic span { font-size:inherit; color:inherit; }
+  .gr-opcion .ic .ic-icono, .gr-indicador .ic .ic-icono { color:#fff; font-size:11px; }
+  .gr-indicador { margin-top:8px; }
   .gr-alerta { border-radius:8px; padding:12px 14px; font-size:15px; }
   .gr-alerta-ambar { background:var(--gr-amber-soft); border:1px solid #fcd34d; color:var(--gr-amber); }
   .gr-alerta-roja { background:#fef2f2; border:1px solid #fca5a5; color:var(--gr-red); }
@@ -342,6 +350,7 @@ const { datos } = Astro.props;
     localYaEnServidor, RETOMAR_MAX_MS, textoSinSubir, type VerificacionSeguir,
     type CandidataGrabador, type DatosGrabador, type SegServidor,
   } from '../../lib/transcriptor/grabadorDatos';
+  import { claseConsentimiento, etiquetaConsentimiento, hrefEnviarConsentimiento, textoEnlaceConsentimiento } from '../../lib/transcriptor/etiquetaConsentimiento';
   // Grabador presencial (P4). Ver la cabecera del archivo y docs/transcriptor/40-ux-diseno.md §2 y §6.
   // Audio: MediaRecorder en trozos de 10 s → IndexedDB (ArrayBuffer: Safari guarda Blobs mal en IDB
   // en versiones antiguas). Cada pausa o interrupción cierra el segmento y la continuación abre uno nuevo
@@ -439,13 +448,35 @@ const { datos } = Astro.props;
     if (c.faltaMin <= 0) return `En curso · empezó a las ${c.hora}`;
     return `Empieza a las ${c.hora} (en ${c.faltaMin} min)`;
   }
+  // Indicador de consentimiento (mismas clases y textos que IndicadorConsentimiento.astro).
+  function chipConsent(estado: string | null | undefined, patientId: string | null = null): HTMLElement | null {
+    const texto = etiquetaConsentimiento(estado);
+    if (!texto) return null;
+    const chip = document.createElement('div');
+    chip.className = claseConsentimiento(estado);
+    chip.dataset.consentEstado = String(estado);
+    const ico = document.createElement('span'); ico.className = 'ic-icono'; ico.setAttribute('aria-hidden', 'true'); ico.textContent = '!';
+    const t = document.createElement('span'); t.className = 'ic-texto'; t.textContent = texto;
+    chip.append(ico, t);
+    if (patientId) {
+      const a = document.createElement('a'); a.className = 'ic-enlace';
+      a.href = hrefEnviarConsentimiento(patientId); a.textContent = textoEnlaceConsentimiento(estado);
+      chip.append(a);
+    }
+    return chip;
+  }
   function botonCandidata(c: Candidata) {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'gr-opcion';
     const n = document.createElement('b'); n.textContent = c.nombre;
     const s = document.createElement('span'); s.textContent = `${c.hora} · ${tipoTxt(c.tipo)}${c.fuente === 'calendario' ? ' · Google Calendar' : ''}`;
     b.append(n, s);
-    if (c.consentOk === false) { const x = document.createElement('span'); x.className = 'no'; x.textContent = etiquetaBloqueo(c.consentMotivo); b.append(x); }
+    const chip = chipConsent(c.consentEstado);
+    if (chip) b.append(chip);
+    // El motivo del bloqueo solo si el indicador no lo dice ya (edad, fecha de nacimiento, consentimiento).
+    if (c.consentOk === false && (!chip || ['menor_de_edad', 'sin_fecha_nacimiento'].includes(String(c.consentMotivo)))) {
+      const x = document.createElement('span'); x.className = 'no'; x.textContent = etiquetaBloqueo(c.consentMotivo); b.append(x);
+    }
     if (!c.patientId) { const x = document.createElement('span'); x.textContent = 'Sin ficha asociada: elige al paciente abajo'; b.append(x); }
     b.addEventListener('click', () => elegir(c));
     return b;
@@ -456,18 +487,20 @@ const { datos } = Astro.props;
     const f = norm(filtro.trim());
     const lista = f
       ? D.pacientes.filter((p) => norm(p.name).includes(f)).slice(0, 8)
-      : D.recientes.map((id) => D.pacientes.find((p) => p.id === id)).filter((p): p is { id: string; name: string } => !!p);
+      : D.recientes.map((id) => D.pacientes.find((p) => p.id === id)).filter((p): p is Datos['pacientes'][number] => !!p);
     $('gr-buscar-ayuda').textContent = f ? (lista.length ? 'Resultados:' : 'No encontré a nadie con ese nombre.') : (lista.length ? 'Atendidos recientemente:' : '');
     for (const p of lista) {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'gr-opcion';
       const n = document.createElement('b'); n.textContent = p.name; b.append(n);
+      const chip = chipConsent(p.consent);
+      if (chip) b.append(chip);
       b.addEventListener('click', () => elegir(sinReserva(p)));
       caja.append(b);
     }
   }
   // "Grabar sin reserva" para un paciente (buscador o botón "Grabar sesión" de la ficha).
-  function sinReserva(p: { id: string; name: string }): Candidata {
-    return { clave: `p:${p.id}`, fuente: 'ficha', bookingId: null, googleEventId: null, patientId: p.id, nombre: p.name, fecha: D.hoy, hora: horaTxt(Date.now()), dur: 50, tipo: null, faltaMin: 0, consentOk: null, consentTexto: null, firmantes: [] };
+  function sinReserva(p: { id: string; name: string; consent?: string | null }): Candidata {
+    return { clave: `p:${p.id}`, fuente: 'ficha', bookingId: null, googleEventId: null, patientId: p.id, nombre: p.name, fecha: D.hoy, hora: horaTxt(Date.now()), dur: 50, tipo: null, faltaMin: 0, consentOk: null, consentTexto: null, firmantes: [], consentEstado: p.consent ?? null };
   }
   function mostrarElegir() {
     const v = $('gr-lista-ventana'); v.textContent = '';
@@ -486,6 +519,10 @@ const { datos } = Astro.props;
     sel = c; tipoSel = c.tipo; gidPreparado = null;
     $('gr-sel-cuando').textContent = c.fuente === 'ficha' ? 'Sesión de ahora' : `Sesión de las ${c.hora}`;
     $('gr-sel-nombre').textContent = c.nombre;
+    const ind = $('gr-sel-indicador'); ind.textContent = '';
+    const chip = chipConsent(c.consentEstado, c.patientId);
+    if (chip) ind.append(chip);
+    ind.hidden = !chip;
     pintarTipo();
     vista('listo');
     preparar();

@@ -10,8 +10,10 @@ import { URL_CONFIRMAR_PASSKEY } from '../../../lib/transcriptor/acceso';
 import { cargarNotasFicha, ENTRADAS_INICIALES } from '../../../lib/transcriptor/fichaNotas';
 import { fichaDemo } from '../../../lib/transcriptor/pruebas/fichaDemo';
 import { prepararPareja } from '../../../lib/transcriptor/fichaConsentimientos';
-import { calcularPendientes, leerGestionados, separarPendientes } from '../../../lib/transcriptor/pendientes';
+import { calcularPendientes, leerGestionados, separarPendientes, ID_PANEL_PAREJA, ID_PANEL_PROPIO } from '../../../lib/transcriptor/pendientes';
 import ConsentimientosFicha from '../../../components/admin/ConsentimientosFicha.astro';
+import IndicadorConsentimiento from '../../../components/admin/IndicadorConsentimiento.astro';
+import { estadoConsentimiento } from '../../../lib/transcriptor/estadoConsentimiento';
 import HistorialEntrada from '../../../components/admin/HistorialEntrada.astro';
 
 const { id } = Astro.params;
@@ -76,6 +78,10 @@ const pareja = await prepararPareja({
   servicios: new Map(allServices.map((s: any) => [String(s.id), { type: s.type ?? null, name: s.name ?? null }])),
   consentRows: filasConsent, origin: Astro.url.origin, demo: demoIA,
 });
+
+// Indicador de la cabecera (pedido de Vale, 19 oct): misma regla de la lista, la agenda y el grabador.
+const estadoConsent = estadoConsentimiento({ filas: filasConsent, fichaPareja: pareja.esPareja, rut: patient.rut ?? null, nombre: patient.name });
+const panelEnvioConsent = estadoConsent === 'sin_firma' ? ID_PANEL_PROPIO : estadoConsent === 'falta_pareja' ? ID_PANEL_PAREJA : null;
 
 // Datos mínimos de la ficha (Valentina, 4 oct 2026): se avisa si faltan (en la franja Pendientes).
 const sinRutFicha = patient?.sin_rut === true && !patient?.rut;
@@ -194,6 +200,11 @@ const formatCLP = (n: number) =>
           {patient.birthdate && <span style="font-size:0.78rem;color:var(--stone);">{age(patient.birthdate)} años</span>}
           {patient.rut && <span style="font-size:0.78rem;color:var(--stone);">RUT {patient.rut}</span>}
         </div>
+        {estadoConsent !== 'firmado' && (
+          <div style="margin-top:0.35rem;">
+            <IndicadorConsentimiento estado={estadoConsent} patientId={patient.id} enlace abrirEnvio={panelEnvioConsent} />
+          </div>
+        )}
       </div>
     </div>
 

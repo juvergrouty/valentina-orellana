@@ -82,7 +82,9 @@ const ENVIO: Record<string, string> = { whatsapp: 'WhatsApp', email: 'correo ele
   <h2>Autorizaciones</h2>
   <table>
     {CONSENT_OPTIONS.map(o => (
-      <tr><td>{o.titulo}</td><td class={c[o.key] ? 'ok' : 'bad'}>{c[o.key] ? 'Sí autoriza' : 'No autoriza'}</td></tr>
+      <tr><td>{o.titulo}</td>{o.key === 'accept_recording' && c[o.key] && c.recording_revoked_at
+        ? <td class="bad">Autorizó; retirada el {fmt(c.recording_revoked_at)}</td>
+        : <td class={c[o.key] ? 'ok' : 'bad'}>{c[o.key] ? 'Sí autoriza' : 'No autoriza'}</td>}</tr>
     ))}
   </table>
 
