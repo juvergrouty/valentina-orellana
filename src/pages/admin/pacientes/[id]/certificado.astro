@@ -11,146 +11,296 @@ import { DIRECCION } from '../../../../data/consulta';
 // desde el navegador, igual que la constancia del consentimiento.
 // Por secreto profesional NO incluye diagnóstico ni motivo de consulta; solo
 // lleva una observación si Valentina la escribe (con acuerdo del paciente).
+//
+// Tipo "isapre" (19 oct 2026): informe para responder a la Isapre cuando pide
+// antecedentes de una boleta (art. 189 DFL 1/2005). Lleva registro de sesiones
+// con monto y N° de boleta, y campos clínicos que Valentina escribe en cada
+// caso (motivo, diagnóstico, plan): nunca se rellenan solos, para que no se
+// cuele información de otro paciente. Incluye sesiones ya pagadas con boleta
+// aunque aún no se realicen (marcadas "agendada") y la nota del SII.
 const { id } = Astro.params;
 const q = Astro.url.searchParams;
 
 const { data: patient } = await supabase.from('patients').select('id, name, rut, email, sin_rut, doc_tipo, doc_numero').eq('id', id!).maybeSingle();
 if (!patient) return Astro.redirect('/admin/pacientes');
 
+const tipoParam = q.get('tipo');
+const tipo = tipoParam === 'tratamiento' ? 'tratamiento' : tipoParam === 'isapre' ? 'isapre' : 'asistencia';
+const esIsapre = tipo === 'isapre';
+
 const hoy = todayCL();
-const { data: filas } = patient.email
-  ? await supabase.from('bookings')
-      .select('session_date, session_time, session_type, status, no_show')
-      .eq('patient_email', patient.email)
-      .eq('status', 'confirmed')
-      .lte('session_date', hoy)
-      .order('session_date')
-  : { data: [] as { session_date: string; session_time: string; session_type: string; status: string; no_show: boolean | null }[] };
+type Fila = { session_date: string; session_time: string; session_type: string; status: string; no_show: boolean | null; amount: number | null; notes: string | null };
+let consulta = patient.email
+? supabase.from('bookings')
+.select('session_date, session_time, session_type, status, no_show, amount, notes')
+.eq('patient_email', patient.email)
+.eq('status', 'confirmed')
+.order('session_date')
+: null;
+// El informe Isapre también mira sesiones futuras ya pagadas con boleta.
+if (consulta && !esIsapre) consulta = consulta.lte('session_date', hoy);
+const { data: filas } = consulta ? await consulta : { data: [] as Fila[] };
+const yaEmpezo = (b: Fila) => !(b.session_date > hoy || (b.session_date === hoy && hoursUntilSessionCL(b.session_date, String(b.session_time).slice(0, 5)) > 0));
+const validas = ((filas ?? []) as Fila[]).filter((b) => !b.no_show && b.session_date !== '2099-12-31');
 // Una sesión de hoy cuenta solo si ya empezó.
-const realizadas = (filas ?? []).filter((b) => !b.no_show && b.session_date !== '2099-12-31' && !(b.session_date === hoy && hoursUntilSessionCL(b.session_date, String(b.session_time).slice(0, 5)) > 0));
+const realizadas = validas.filter(yaEmpezo);
+
+// N° de boleta: misma regla que la ficha (última línea "Boleta Folio N", salvo anulada).
+const folioDe = (b: Fila) => {
+const lines = [...(b.notes ?? '').matchAll(/Boleta\s+Folio\s+(\d+)[^\n]*/gi)];
+const last = lines.length ? lines[lines.length - 1] : null;
+return last && !/ANULADA/i.test(last[0]) ? last[1] : null;
+};
 
 const esFecha = (v: string | null) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().startsWith(v);
 const primera = realizadas[0]?.session_date ?? hoy;
 const desde = esFecha(q.get('desde')) ? q.get('desde')! : primera;
-const hasta = esFecha(q.get('hasta')) ? q.get('hasta')! : hoy;
-const tipo = q.get('tipo') === 'tratamiento' ? 'tratamiento' : 'asistencia';
+const hastaDefault = esIsapre ? (validas.filter((b) => !yaEmpezo(b) && folioDe(b)).at(-1)?.session_date ?? hoy) : hoy;
+const hasta = esFecha(q.get('hasta')) ? q.get('hasta')! : hastaDefault;
 const destinatario = (q.get('para') ?? '').trim().slice(0, 120);
 const observacion = (q.get('obs') ?? '').trim().slice(0, 600);
 const listar = q.get('fechas') !== '0';
 
+// Campos del informe Isapre (los escribe Valentina; nada se rellena solo).
+const txt = (k: string, max = 1500) => (q.get(k) ?? '').trim().slice(0, max);
+const isapre = txt('isapre', 120);
+const referencia = txt('ref', 300);
+const motivo = txt('motivo');
+const diagnostico = txt('diag', 600);
+const plan = txt('plan');
+const notaSII = q.get('sii') !== '0';
+
 const enRango = realizadas.filter((b) => b.session_date >= desde && b.session_date <= hasta);
+// Para Isapre: realizadas en rango + futuras con boleta emitida.
+const filasIsapre = validas.filter((b) => b.session_date >= desde && b.session_date <= hasta && (yaEmpezo(b) || folioDe(b)));
+const agendadas = filasIsapre.filter((b) => !yaEmpezo(b));
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const larga = (f: string) => { const [y, m, d] = f.split('-').map(Number); return `${d} de ${MESES[m - 1]} de ${y}`; };
 const corta = (f: string) => f.split('-').reverse().join('-');
 const modalidad = (t: string) => t?.includes('online') ? 'online' : 'presencial';
+const clp = (v: number | null) => v == null ? '—' : '$' + Math.round(v).toLocaleString('es-CL');
 // 15367112-5 → 15.367.112-5
 const conPuntos = (r: string) => { const m = r.replace(/\./g, '').match(/^(\d+)-([\dkK])$/); return m ? `${m[1].replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${m[2].toUpperCase()}` : r; };
 const identidad = patient.sin_rut
-  ? (patient.doc_numero ? `${patient.doc_tipo || 'documento'} N° ${patient.doc_numero}` : '')
-  : (patient.rut ? `RUT ${conPuntos(patient.rut)}` : '');
+? (patient.doc_numero ? `${patient.doc_tipo || 'documento'} N° ${patient.doc_numero}` : '')
+: (patient.rut ? `RUT ${conPuntos(patient.rut)}` : '');
 const n = enRango.length;
+const modalidades = [...new Set(filasIsapre.map((b) => modalidad(b.session_type)))];
+const nRealIsapre = filasIsapre.length - agendadas.length;
+const parrafos = (t: string) => t.split(/\n+/).filter(Boolean);
+const titulo = esIsapre ? 'Informe psicológico para Isapre' : 'Certificado de atención psicológica';
 ---
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="robots" content="noindex" />
-  <title>Certificado · {patient.name} · {hoy}</title>
-  <style>
-    body { font-family: Georgia, 'Times New Roman', serif; color: #1A1A18; background: #fff; max-width: 760px; margin: 0 auto; padding: 2rem 1.25rem; font-size: 15px; line-height: 1.7; }
-    .bar { font-family: -apple-system, 'Inter', sans-serif; font-size: 13px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 2rem; display: flex; flex-direction: column; gap: 0.75rem; }
-    .bar form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.6rem 0.9rem; align-items: end; }
-    .bar label { display: flex; flex-direction: column; gap: 0.2rem; color: #4b5563; font-size: 12px; }
-    .bar input, .bar select, .bar textarea { font: inherit; padding: 0.4rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #111827; }
-    .bar .full { grid-column: 1 / -1; }
-    .bar .acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-    .bar a, .bar button { font: inherit; padding: 0.45rem 0.9rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #111827; text-decoration: none; cursor: pointer; }
-    .bar .principal { background: #576352; color: #fff; border-color: #576352; }
-    .bar .nota { color: #6b7280; margin: 0; }
-    .membrete { display: flex; align-items: center; gap: 1rem; border-bottom: 1px solid #DDD8CF; padding-bottom: 1rem; margin-bottom: 2.5rem; }
-    .membrete img { width: 64px; height: auto; }
-    .membrete p { margin: 0; font-family: -apple-system, 'Inter', sans-serif; font-size: 12px; color: #6B6860; line-height: 1.5; }
-    .membrete strong { font-family: Georgia, serif; font-size: 16px; color: #1A1A18; font-weight: 400; }
-    h1 { font-weight: 400; font-size: 1.35rem; text-align: center; letter-spacing: 0.04em; margin: 0 0 2rem; text-transform: uppercase; }
-    .fechas { columns: 3 140px; margin: 0.5rem 0 1.25rem; padding-left: 1.1rem; font-size: 14px; }
-    .firma { margin-top: 3.5rem; text-align: center; font-size: 14px; line-height: 1.5; }
-    .firma .linea { width: 260px; border-top: 1px solid #1A1A18; margin: 0 auto 0.5rem; }
-    .pie { margin-top: 3rem; font-family: -apple-system, 'Inter', sans-serif; font-size: 11px; color: #6B6860; border-top: 1px solid #DDD8CF; padding-top: 0.75rem; }
-    .aviso { font-family: -apple-system, 'Inter', sans-serif; font-size: 13px; color: #b45309; }
-    @media print { .bar { display: none; } body { padding: 0; } @page { margin: 2cm; } }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>{esIsapre ? 'Informe Isapre' : 'Certificado'} · {patient.name} · {hoy}</title>
+<style>
+body { font-family: Georgia, 'Times New Roman', serif; color: #1A1A18; background: #fff; max-width: 760px; margin: 0 auto; padding: 2rem 1.25rem; font-size: 15px; line-height: 1.7; }
+.bar { font-family: -apple-system, 'Inter', sans-serif; font-size: 13px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 2rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.bar form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.6rem 0.9rem; align-items: end; }
+.bar label { display: flex; flex-direction: column; gap: 0.2rem; color: #4b5563; font-size: 12px; }
+.bar input, .bar select, .bar textarea { font: inherit; padding: 0.4rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #111827; }
+.bar .full { grid-column: 1 / -1; }
+.bar .acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.bar a, .bar button { font: inherit; padding: 0.45rem 0.9rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #111827; text-decoration: none; cursor: pointer; }
+.bar .principal { background: #576352; color: #fff; border-color: #576352; }
+.bar .nota { color: #6b7280; margin: 0; }
+.membrete { display: flex; align-items: center; gap: 1rem; border-bottom: 1px solid #DDD8CF; padding-bottom: 1rem; margin-bottom: 2.5rem; }
+.membrete img { width: 64px; height: auto; }
+.membrete p { margin: 0; font-family: -apple-system, 'Inter', sans-serif; font-size: 12px; color: #6B6860; line-height: 1.5; }
+.membrete strong { font-family: Georgia, serif; font-size: 16px; color: #1A1A18; font-weight: 400; }
+h1 { font-weight: 400; font-size: 1.35rem; text-align: center; letter-spacing: 0.04em; margin: 0 0 2rem; text-transform: uppercase; }
+h2 { font-weight: 400; font-size: 1.02rem; margin: 1.6rem 0 0.4rem; border-bottom: 1px solid #DDD8CF; padding-bottom: 0.2rem; }
+.conf { text-align: center; font-family: -apple-system, 'Inter', sans-serif; font-size: 11px; letter-spacing: 0.05em; color: #8a1c1c; margin: -1.4rem 0 1.8rem; text-transform: uppercase; }
+.fechas { columns: 3 140px; margin: 0.5rem 0 1.25rem; padding-left: 1.1rem; font-size: 14px; }
+table.datos, table.reg { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 0.4rem 0 0.8rem; }
+table.datos td { border: 1px solid #DDD8CF; padding: 0.3rem 0.55rem; vertical-align: top; }
+table.datos td:first-child { width: 38%; background: #f7f5f1; }
+table.reg th, table.reg td { border: 1px solid #DDD8CF; padding: 0.25rem 0.45rem; text-align: center; }
+table.reg th { background: #f0ede7; font-weight: 400; }
+table.reg tr.ag td { background: #fdf8ea; }
+.firma { margin-top: 3.5rem; text-align: center; font-size: 14px; line-height: 1.5; page-break-inside: avoid; }
+.firma .linea { width: 260px; border-top: 1px solid #1A1A18; margin: 0 auto 0.5rem; }
+.pie { margin-top: 3rem; font-family: -apple-system, 'Inter', sans-serif; font-size: 11px; color: #6B6860; border-top: 1px solid #DDD8CF; padding-top: 0.75rem; }
+.aviso { font-family: -apple-system, 'Inter', sans-serif; font-size: 13px; color: #b45309; }
+.falta { color: #b45309; font-style: italic; }
+@media print { .bar { display: none; } body { padding: 0; } @page { size: letter; margin: 2cm; } .falta { display: none; } }
+</style>
 </head>
 <body>
-  <div class="bar">
-    <form method="get">
-      <label>Tipo de certificado
-        <select name="tipo">
-          <option value="asistencia" selected={tipo === 'asistencia'}>Asistencia a sesiones</option>
-          <option value="tratamiento" selected={tipo === 'tratamiento'}>En proceso de atención</option>
-        </select>
-      </label>
-      <label>Desde <input type="date" name="desde" value={desde} /></label>
-      <label>Hasta <input type="date" name="hasta" value={hasta} /></label>
-      <label>Listar fechas
-        <select name="fechas">
-          <option value="1" selected={listar}>Sí</option>
-          <option value="0" selected={!listar}>No</option>
-        </select>
-      </label>
-      <label class="full">Para presentar ante (opcional, ej. "su empleador", "la universidad")
-        <input type="text" name="para" value={destinatario} maxlength="120" placeholder="Quien corresponda" />
-      </label>
-      <label class="full">Observación (opcional; sin diagnóstico salvo que el paciente lo pida por escrito)
-        <textarea name="obs" rows="2" maxlength="600">{observacion}</textarea>
-      </label>
-      <div class="acciones full">
-        <button type="submit">Actualizar</button>
-        <button type="button" class="principal" onclick="window.print()">Imprimir / Guardar PDF</button>
-        <a href={`/admin/pacientes/${patient.id}`}>← Volver a la ficha</a>
-      </div>
-    </form>
-    <p class="nota">Cuenta las sesiones realizadas registradas en tu página (confirmadas, ya pasadas y sin inasistencia). Lo de esta barra no sale en el PDF.</p>
-    {(n === 0 || (tipo === 'tratamiento' && realizadas.length === 0)) && <p class="aviso">⚠ No hay sesiones realizadas en ese rango. Revisa las fechas antes de emitirlo.</p>}
-  </div>
+<div class="bar">
+<form method="get">
+<label>Tipo de certificado
+<select name="tipo" onchange="this.form.submit()">
+<option value="asistencia" selected={tipo === 'asistencia'}>Asistencia a sesiones</option>
+<option value="tratamiento" selected={tipo === 'tratamiento'}>En proceso de atención</option>
+<option value="isapre" selected={esIsapre}>Informe para Isapre</option>
+</select>
+</label>
+<label>Desde <input type="date" name="desde" value={desde} /></label>
+<label>Hasta <input type="date" name="hasta" value={hasta} /></label>
+{!esIsapre && (
+<label>Listar fechas
+<select name="fechas">
+<option value="1" selected={listar}>Sí</option>
+<option value="0" selected={!listar}>No</option>
+</select>
+</label>
+)}
+{esIsapre ? (
+<>
+<label>Isapre <input type="text" name="isapre" value={isapre} maxlength="120" placeholder="Ej: Banmédica" /></label>
+<label class="full">Referencia (lo que pide la Isapre)
+<input type="text" name="ref" value={referencia} maxlength="300" placeholder="Ej: Solicitud de informe por boleta de honorarios N° 242, de fecha 15 de octubre de 2026" />
+</label>
+<label class="full">Motivo de consulta y evolución (solo lo necesario)
+<textarea name="motivo" rows="3" maxlength="1500">{motivo}</textarea>
+</label>
+<label class="full">Diagnóstico / hipótesis diagnóstica (con código CIE-10)
+<input type="text" name="diag" value={diagnostico} maxlength="600" placeholder="Ej: Trastorno de adaptación con reacción mixta de ansiedad y depresión (CIE-10 F43.22)" />
+</label>
+<label class="full">Plan e indicación terapéutica (frecuencia, objetivos)
+<textarea name="plan" rows="3" maxlength="1500">{plan}</textarea>
+</label>
+<label>Nota SII sobre fecha de boletas
+<select name="sii">
+<option value="1" selected={notaSII}>Incluir</option>
+<option value="0" selected={!notaSII}>No incluir</option>
+</select>
+</label>
+</>
+) : (
+<>
+<label class="full">Para presentar ante (opcional, ej. "su empleador", "la universidad")
+<input type="text" name="para" value={destinatario} maxlength="120" placeholder="Quien corresponda" />
+</label>
+<label class="full">Observación (opcional; sin diagnóstico salvo que el paciente lo pida por escrito)
+<textarea name="obs" rows="2" maxlength="600">{observacion}</textarea>
+</label>
+</>
+)}
+<div class="acciones full">
+<button type="submit">Actualizar</button>
+<button type="button" class="principal" onclick="window.print()">Imprimir / Guardar PDF</button>
+<a href={`/admin/pacientes/${patient.id}`}>← Volver a la ficha</a>
+</div>
+</form>
+{esIsapre
+? <p class="nota">Incluye las sesiones realizadas del rango y las ya pagadas con boleta aunque aún no se hagan (salen como "agendada"). Escribe motivo, diagnóstico y plan para este paciente y presiona Actualizar. Lo de esta barra no sale en el PDF.</p>
+: <p class="nota">Cuenta las sesiones realizadas registradas en tu página (confirmadas, ya pasadas y sin inasistencia). Lo de esta barra no sale en el PDF.</p>}
+{!esIsapre && (n === 0 || (tipo === 'tratamiento' && realizadas.length === 0)) && <p class="aviso">⚠ No hay sesiones realizadas en ese rango. Revisa las fechas antes de emitirlo.</p>}
+{esIsapre && filasIsapre.length === 0 && <p class="aviso">⚠ No hay sesiones en ese rango. Revisa las fechas antes de emitirlo.</p>}
+{esIsapre && (!motivo || !diagnostico || !plan) && <p class="aviso">⚠ Faltan campos por completar: {[!motivo && 'motivo', !diagnostico && 'diagnóstico', !plan && 'plan'].filter(Boolean).join(', ')}.</p>}
+</div>
 
-  <div class="membrete">
-    <img src="/firma/sello.png" alt="" />
-    <p><strong>Ps. Valentina Orellana Jaramillo</strong><br />Psicóloga · Adultos y parejas<br />Registro Superintendencia de Salud N° 360070<br />{DIRECCION.calle}, {DIRECCION.detalle}, {DIRECCION.comuna} · consulta@valentinaorellana.cl</p>
-  </div>
+<div class="membrete">
+<img src="/firma/sello.png" alt="" />
+<p><strong>Ps. Valentina Orellana Jaramillo</strong><br />Psicóloga · Adultos y parejas<br />Registro Superintendencia de Salud N° 360070<br />{DIRECCION.calle}, {DIRECCION.detalle}, {DIRECCION.comuna} · consulta@valentinaorellana.cl</p>
+</div>
 
-  <h1>Certificado de atención psicológica</h1>
+<h1>{titulo}</h1>
 
-  {tipo === 'asistencia' ? (
-    <p>
-      Certifico que <strong>{patient.name}</strong>{identidad && <>, {identidad}</>}, asistió a <strong>{n} {n === 1 ? 'sesión' : 'sesiones'}</strong> de atención psicológica conmigo
-      {desde === hasta ? <> el {larga(desde)}</> : <> entre el {larga(desde)} y el {larga(hasta)}</>}{listar && n > 0 ? ', en las siguientes fechas:' : '.'}
-    </p>
-  ) : (
-    <p>
-      Certifico que <strong>{patient.name}</strong>{identidad && <>, {identidad}</>}, se encuentra en proceso de atención psicológica conmigo desde el {larga(realizadas[0]?.session_date ?? desde)}, con <strong>{realizadas.length} {realizadas.length === 1 ? 'sesión realizada' : 'sesiones realizadas'}</strong> a la fecha{listar && n > 0 ? <>. Sesiones entre el {larga(desde)} y el {larga(hasta)}:</> : '.'}
-    </p>
-  )}
+{esIsapre ? (
+<>
+<p class="conf">Confidencial — contiene datos sensibles de salud (Ley 20.584 y Ley 19.628)</p>
 
-  {listar && n > 0 && (
-    <ul class="fechas">
-      {enRango.map((b) => <li>{corta(b.session_date)} · {modalidad(b.session_type)}</li>)}
-    </ul>
-  )}
+<p>Santiago, {larga(hoy)}</p>
+<p>
+<strong>A:</strong> {isapre ? <>Isapre {isapre.replace(/^isapre\s+/i, '')}</> : 'Isapre'} — Contraloría médica{referencia && <><br /><strong>Ref.:</strong> {referencia}</>}
+</p>
+<p>De mi consideración:</p>
+<p>En respuesta a la solicitud de antecedentes efectuada en relación con la cobertura de la prestación indicada en la referencia, informo lo siguiente respecto del beneficiario individualizado más abajo.</p>
 
-  {observacion && <p>{observacion}</p>}
+<h2>1. Identificación del prestador</h2>
+<table class="datos">
+<tr><td>Nombre</td><td>Valentina Orellana Jaramillo</td></tr>
+<tr><td>Profesión</td><td>Psicóloga</td></tr>
+<tr><td>RUT</td><td>16.768.831-4</td></tr>
+<tr><td>Registro Superintendencia de Salud</td><td>N° 360070</td></tr>
+<tr><td>Correo de contacto</td><td>consulta@valentinaorellana.cl</td></tr>
+</table>
 
-  <p>Se extiende el presente certificado a solicitud del/la interesado/a{destinatario ? <>, para ser presentado ante {destinatario}</> : ', para los fines que estime convenientes'}.</p>
+<h2>2. Identificación del beneficiario</h2>
+<table class="datos">
+<tr><td>Nombre</td><td>{patient.name}</td></tr>
+{identidad && <tr><td>Identificación</td><td>{identidad}</td></tr>}
+<tr><td>Fecha de inicio de atención</td><td>{realizadas[0] ? larga(realizadas[0].session_date) : '—'}</td></tr>
+<tr><td>Tipo de atención</td><td>Psicoterapia individual</td></tr>
+<tr><td>Modalidad</td><td>{modalidades.length ? modalidades.join(' y ') : '—'}</td></tr>
+</table>
 
-  <p style="margin-top:2rem;">Santiago, {larga(hoy)}.</p>
+<h2>3. Motivo de consulta</h2>
+{motivo ? parrafos(motivo).map((p) => <p>{p}</p>) : <p class="falta">[Completar en la barra]</p>}
 
-  <div class="firma">
-    <div class="linea"></div>
-    Ps. Valentina Orellana Jaramillo<br />
-    Psicóloga · Universidad del Desarrollo<br />
-    Registro Superintendencia de Salud N° 360070
-  </div>
+<h2>4. Diagnóstico / hipótesis diagnóstica</h2>
+{diagnostico ? <p>{diagnostico}</p> : <p class="falta">[Completar en la barra]</p>}
 
-  {!observacion && <p class="pie">En resguardo del secreto profesional, este certificado no contiene información clínica.</p>}
+<h2>5. Plan e indicación terapéutica</h2>
+{plan ? parrafos(plan).map((p) => <p>{p}</p>) : <p class="falta">[Completar en la barra]</p>}
+
+<h2>6. Registro de atenciones</h2>
+<table class="reg">
+<tr><th>N°</th><th>Fecha</th><th>Modalidad</th><th>Valor</th><th>Boleta N°</th></tr>
+{(() => { let k = 0; return filasIsapre.map((b) => { const real = yaEmpezo(b); if (real) k++; return (
+<tr class={real ? '' : 'ag'}><td>{real ? k : '—'}</td><td>{corta(b.session_date)}</td><td>{modalidad(b.session_type)}{real ? '' : ' (agendada)'}</td><td>{clp(b.amount)}</td><td>{folioDe(b) ?? '—'}</td></tr>
+); }); })()}
+</table>
+<p>Total de sesiones realizadas al {larga(hoy)}: {nRealIsapre}.</p>
+{notaSII && (
+<p>
+En esta consulta las sesiones se pagan al momento de agendarlas y la boleta de honorarios electrónica se emite en la misma fecha del pago. Esto se ajusta a lo dispuesto por el Servicio de Impuestos Internos (Circular N° 21 de 1991), según el cual la boleta de honorarios debe emitirse al momento de la percepción del honorario, con independencia de la fecha en que se preste el servicio.{agendadas.length > 0 && <> Por ello, la{agendadas.length > 1 ? 's' : ''} boleta{agendadas.length > 1 ? 's' : ''} N° {agendadas.map(folioDe).join(', ')} tiene{agendadas.length > 1 ? 'n' : ''} fecha anterior a la atención correspondiente, la que a la fecha de este informe aún no se ha realizado.</>}
+</p>
+)}
+
+<h2>7. Declaración</h2>
+<p>Certifico que la información contenida en este informe es fidedigna y se encuentra respaldada en la ficha clínica del paciente. Este informe se emite a solicitud de la Isapre, en el marco de la evaluación de cobertura requerida por el beneficiario, y se limita a la información estrictamente necesaria para ese fin, en resguardo del secreto profesional.</p>
+<p>Sin otro particular, saluda atentamente,</p>
+
+<div class="firma">
+<div class="linea"></div>
+Ps. Valentina Orellana Jaramillo<br />
+Psicóloga · RUT 16.768.831-4<br />
+Registro Superintendencia de Salud N° 360070<br />
+Fecha: ______ / ______ / ________
+</div>
+</>
+) : (
+<>
+{tipo === 'asistencia' ? (
+<p>
+Certifico que <strong>{patient.name}</strong>{identidad && <>, {identidad}</>}, asistió a <strong>{n} {n === 1 ? 'sesión' : 'sesiones'}</strong> de atención psicológica conmigo
+{desde === hasta ? <> el {larga(desde)}</> : <> entre el {larga(desde)} y el {larga(hasta)}</>}{listar && n > 0 ? ', en las siguientes fechas:' : '.'}
+</p>
+) : (
+<p>
+Certifico que <strong>{patient.name}</strong>{identidad && <>, {identidad}</>}, se encuentra en proceso de atención psicológica conmigo desde el {larga(realizadas[0]?.session_date ?? desde)}, con <strong>{realizadas.length} {realizadas.length === 1 ? 'sesión realizada' : 'sesiones realizadas'}</strong> a la fecha{listar && n > 0 ? <>. Sesiones entre el {larga(desde)} y el {larga(hasta)}:</> : '.'}
+</p>
+)}
+
+{listar && n > 0 && (
+<ul class="fechas">
+{enRango.map((b) => <li>{corta(b.session_date)} · {modalidad(b.session_type)}</li>)}
+</ul>
+)}
+
+{observacion && <p>{observacion}</p>}
+
+<p>Se extiende el presente certificado a solicitud del/la interesado/a{destinatario ? <>, para ser presentado ante {destinatario}</> : ', para los fines que estime convenientes'}.</p>
+
+<p style="margin-top:2rem;">Santiago, {larga(hoy)}.</p>
+
+<div class="firma">
+<div class="linea"></div>
+Ps. Valentina Orellana Jaramillo<br />
+Psicóloga · Universidad del Desarrollo<br />
+Registro Superintendencia de Salud N° 360070
+</div>
+
+{!observacion && <p class="pie">En resguardo del secreto profesional, este certificado no contiene información clínica.</p>}
+</>
+)}
 </body>
 </html>
