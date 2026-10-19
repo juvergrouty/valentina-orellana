@@ -339,7 +339,7 @@ const { datos } = Astro.props;
   import { cuentaComoSilencio, finGrabacionMs } from '../../lib/transcriptor/grabador';
   import {
     arregloBloqueo, cerrarSegmentoCortado, claveReutilizar, decidirSeguir, destinoPendiente, esRetomable, etiquetaBloqueo,
-    localYaEnServidor, textoSinSubir, type VerificacionSeguir,
+    localYaEnServidor, RETOMAR_MAX_MS, textoSinSubir, type VerificacionSeguir,
     type CandidataGrabador, type DatosGrabador, type SegServidor,
   } from '../../lib/transcriptor/grabadorDatos';
   // Grabador presencial (P4). Ver la cabecera del archivo y docs/transcriptor/40-ux-diseno.md §2 y §6.
@@ -789,9 +789,6 @@ const { datos } = Astro.props;
     if (!('mediaDevices' in navigator) || elegirMime() === null) { errorMicrofono({ name: 'NoSoportado' }); return; }
     try { await navigator.storage?.persist?.(); } catch { /* opcional */ }
     if (D.demo) { demoVista('grabando'); return; }
-    // Empezar otra grabación = Vale eligió no seguir la que se cortó: esa se sube como antes, al terminar.
-    for (const g of ofrecidas) { g.estado = 'terminada'; await guardarGrab(g).catch(() => {}); }
-    ofrecidas = []; $('gr-retomar-red').hidden = true; $('gr-retomar-red').textContent = '';
     grab = { gid: gidPreparado, nombre: sel.nombre, patientId: sel.patientId, etiqueta: `${sel.nombre}, hoy ${horaTxt(Date.now())}`, ruido, inicioMs: Date.now(), finMs: null, estado: 'grabando', segmentos: [], pausas: [] };
     try {
       modo = 'grabando';
@@ -801,6 +798,13 @@ const { datos } = Astro.props;
     }
     activarGrabacion(grab, `${sel.nombre} · ${tipoTxt(tipoSel)}`, ruido);
     anunciar('Grabando.');
+    // Empezar otra grabación (y que el micrófono abriera) = Vale eligió no seguir la que se cortó: esa se
+    // sube como antes, al terminar. Se relee de IndexedDB y se respeta si otra pestaña la tiene.
+    const noSeguidas = ofrecidas; ofrecidas = []; vaciarRetomarRed();
+    for (const o of noSeguidas) {
+      const f = await leerGrab(o.gid);
+      if (f && f.estado === 'grabando' && await abandonada(f)) { f.estado = 'terminada'; await guardarGrab(f).catch(() => {}); }
+    }
   }
   function tomarLock(g: GrabLocal) {
     try { navigator.locks?.request(`vo-grab-${g.gid}`, () => new Promise<void>((liberar) => { liberarLock = liberar; })); } catch { /* sin Web Locks */ }
@@ -821,25 +825,44 @@ const { datos } = Astro.props;
   // misma página en versión estática y aquí se SIGUE la misma grabación (mismo gid, seq que continúa,
   // trozos en IndexedDB). La autorización (gid) se obtuvo con internet; sin internet no se crea ninguna.
   let retomando = false;
-  async function retomar(g: GrabLocal, msg: HTMLElement) {
+  /** gid que se está retomando ahora (mientras se verifica en red): subirPendientes() no lo toca. */
+  let retomandoGid: string | null = null;
+  const leerGrab = async (gid: string) => (await listarGrabs().catch(() => [] as GrabLocal[])).find((x) => x.gid === gid) ?? null;
+  async function retomar(gTarjeta: GrabLocal, msg: HTMLElement) {
     despertarAudio(); // dentro del toque (iOS)
     if (retomando || grab || modo !== 'listo') return;
-    retomando = true;
+    retomando = true; retomandoGid = gTarjeta.gid;
     msg.textContent = '';
     try {
-      if (!(await abandonada(g))) { msg.textContent = 'Esta grabación está abierta en otra pestaña de este teléfono: sigue allá.'; return; }
+      // Siempre el registro fresco de IndexedDB (la tarjeta pudo quedar vieja: otra pestaña, "No seguir", subida).
+      let g = await leerGrab(gTarjeta.gid);
+      // Revisa si sigue siendo retomable; devuelve el texto del motivo si no.
+      const motivoNo = async (x: GrabLocal | null) => !x ? 'Esta grabación ya no está pendiente en este teléfono (se subió o se descartó).'
+        : !(await abandonada(x)) ? 'Esta grabación está abierta en otra pestaña de este teléfono: sigue allá.'
+        : !esRetomable(x, true, Date.now()) ? 'Pasaron más de 3 horas desde el corte: ya no se sigue. Se sube tal cual quedó.' : '';
+      let no = await motivoNo(g);
+      if (no) { msg.textContent = no; if (!D.sinInternet && g && g.estado === 'grabando') { retomandoGid = null; subirPendientes(); } return; }
       if (!('mediaDevices' in navigator) || elegirMime() === null) { msg.textContent = 'Este navegador no puede grabar.'; return; }
       // Con internet (19 oct): antes de seguir se pregunta al sitio si la grabación sigue abierta y si el
       // consentimiento sigue vigente. Sin respuesta (red inestable) se sigue como sin internet: subida-url
       // y finalizar lo vuelven a verificar antes de aceptar audio.
       if (!D.sinInternet && !D.demo && navigator.onLine) {
         msg.textContent = 'Verificando el consentimiento…';
-        const d = decidirSeguir(await verificarSeguir(g.gid));
+        const d = decidirSeguir(await verificarSeguir(g!.gid));
         msg.textContent = '';
-        if (d === 'no_acepta') { await noSeguir(g); return; } // la subida explica qué pasó (cerrada, cancelada, otro dispositivo)
+        if (d === 'no_acepta') {
+          retomandoGid = null;
+          await noSeguir(g!.gid, 'Esa grabación ya no acepta más audio en el sitio (se cerró, se canceló o se subió desde otro dispositivo). Se sube lo grabado tal cual quedó; si hay algún problema, aparece en el aviso de grabaciones sin subir.');
+          return;
+        }
         if (d === 'sin_consentimiento') { msg.textContent = `${ultimaVerificacion?.error || 'Falta el consentimiento de grabación.'} No se sigue grabando; lo grabado sigue en este teléfono.`; return; }
         if (grab || modo !== 'listo') return;
+        // Durante la espera de red pudo cambiar (otra pestaña, plazo de 3 h): se vuelve a revisar.
+        g = await leerGrab(g!.gid);
+        no = await motivoNo(g);
+        if (no) { msg.textContent = no; return; }
       }
+      if (!g) return;
       const ult = g.segmentos[g.segmentos.length - 1];
       const tiempos = ult && ult.finMs === null ? (await trozosDe(g.gid, ult.seq)).map((t) => t.t) : [];
       cerrarSegmentoCortado(g, tiempos);
@@ -859,20 +882,21 @@ const { datos } = Astro.props;
         return;
       }
       activarGrabacion(g, `${etiquetaSesion(g)} · continuación`, g.ruido, true);
-      ofrecidas = []; $('gr-retomar-red').hidden = true; $('gr-retomar-red').textContent = '';
+      ofrecidas = []; vaciarRetomarRed();
       anunciar('Grabando de nuevo.');
-    } finally { retomando = false; }
+    } finally { retomando = false; retomandoGid = null; }
   }
   // La página sin internet es pública (sin login): no muestra nombres de pacientes, solo la hora de la sesión.
   const etiquetaSesion = (g: GrabLocal) => D.sinInternet ? `Sesión de las ${horaTxt(g.inicioMs)}` : g.nombre;
   function tarjetaRetomar(g: GrabLocal, hastaMs: number, conRed = false): HTMLElement {
     const a = document.createElement('div'); a.className = 'gr-alerta gr-alerta-roja gr-pendiente'; a.setAttribute('role', 'alert');
+    a.dataset.gid = g.gid;
     const t = document.createElement('p'); t.className = 'gr-alerta-titulo';
     // Sin internet la página es pública: sin nombres. Con internet (detrás del login) se dice de quién es.
     t.textContent = conRed ? `La grabación de ${g.nombre} (sesión de las ${horaTxt(g.inicioMs)}) se cortó` : `La grabación de la sesión de las ${horaTxt(g.inicioMs)} se cortó`;
     const p = document.createElement('p');
     p.textContent = conRed
-      ? `Hay audio hasta las ${horaTxt(hastaMs)}. Toca para seguir: el resto se agrega a la misma sesión y queda una sola transcripción. Después vuelve a activar el modo avión.`
+      ? `Hay audio hasta las ${horaTxt(hastaMs)}. Toca para seguir: el resto se agrega a la misma sesión y queda una sola transcripción.${navigator.onLine ? ' Apenas vuelva a grabar, activa el modo avión.' : ''}`
       : `Hay audio hasta las ${horaTxt(hastaMs)}. Toca para seguir: el resto se agrega a la misma sesión, sin internet.`;
     const b = document.createElement('button'); b.type = 'button'; b.className = 'gr-btn gr-btn-rec gr-btn-medio';
     const dot = document.createElement('span'); dot.className = 'gr-dot'; dot.setAttribute('aria-hidden', 'true');
@@ -884,7 +908,7 @@ const { datos } = Astro.props;
       // Si Vale no sigue, todo queda como antes: se sube tal cual quedó.
       const n = document.createElement('button'); n.type = 'button'; n.className = 'gr-btn gr-btn-out gr-btn-chico'; n.style.marginTop = '8px';
       n.textContent = 'No seguir: subir lo grabado';
-      n.addEventListener('click', () => { if (!retomando && !grab) noSeguir(g); });
+      n.addEventListener('click', () => { if (!retomando && !grab) noSeguir(g.gid); });
       a.append(n);
     }
     a.append(m);
@@ -903,28 +927,67 @@ const { datos } = Astro.props;
   // ofrece no se sube; si Vale toca "No seguir", empieza otra grabación o pasan 3 h, se sube como antes.
   let ofrecidas: GrabLocal[] = [];
   let ultimaVerificacion: VerificacionSeguir | null = null;
+  /** Aviso que queda en la caja después de "No seguir" forzado por el sitio (no_acepta). */
+  let avisoRetomar = '';
+  /** Qué hay pintado (gids + red): si no cambió, no se repinta (conserva mensajes y no repite el aviso al lector). */
+  let clavePintada = '';
+  let pintadoN = 0;
+  let vence: ReturnType<typeof setTimeout> | null = null;
   async function verificarSeguir(gid: string): Promise<VerificacionSeguir | null> {
     ultimaVerificacion = null;
+    const ctl = new AbortController(); // AbortSignal.timeout no existe en Safari antiguos
+    const plazo = setTimeout(() => ctl.abort(), 8000);
     try {
-      const r = await fetch(`/api/admin/transcriptor/grabacion-finalizar?id=${encodeURIComponent(gid)}&verificar=1`, { credentials: 'same-origin', signal: AbortSignal.timeout(8000) });
+      const r = await fetch(`/api/admin/transcriptor/grabacion-finalizar?id=${encodeURIComponent(gid)}&verificar=1`, { credentials: 'same-origin', signal: ctl.signal });
       if (r.status === 401) return null; // la subida pedirá volver a entrar; no se pierde la sesión por esto
+      if (r.status === 404) return { ok: true, acepta_audio: false, puede_grabar: false }; // el sitio no la tiene: no se graba en vano
       ultimaVerificacion = await r.json();
       return ultimaVerificacion;
-    } catch { return null; }
+    } catch { return null; } finally { clearTimeout(plazo); }
   }
-  async function noSeguir(g: GrabLocal) {
-    ofrecidas = ofrecidas.filter((x) => x.gid !== g.gid);
-    g.estado = 'terminada';
-    await guardarGrab(g).catch(() => {});
+  function vaciarRetomarRed() {
+    const caja = $('gr-retomar-red'); caja.hidden = true; caja.textContent = ''; clavePintada = '';
+  }
+  async function noSeguir(gid: string, aviso = '') {
+    ofrecidas = ofrecidas.filter((x) => x.gid !== gid);
+    avisoRetomar = aviso;
+    // La tarjeta sale al tiro (si no, quedaría tocable mientras corre otra subida).
+    clavePintada = '';
+    const caja = $('gr-retomar-red');
+    for (const el of [...caja.children] as HTMLElement[]) if (el.dataset.gid === gid) el.remove();
+    pintarAvisoRetomar(caja);
+    caja.hidden = !caja.children.length;
+    // Se relee de IndexedDB: si otra pestaña la retomó, no se pisa su registro.
+    const f = await leerGrab(gid);
+    if (f && f.estado === 'grabando' && await abandonada(f)) { f.estado = 'terminada'; await guardarGrab(f).catch(() => {}); }
     subirPendientes();
+  }
+  function pintarAvisoRetomar(caja: HTMLElement) {
+    caja.querySelector('[data-aviso]')?.remove();
+    if (!avisoRetomar) return;
+    const p = document.createElement('div'); p.className = 'gr-alerta gr-alerta-ambar'; p.setAttribute('role', 'status'); p.dataset.aviso = '1';
+    p.textContent = avisoRetomar;
+    caja.append(p);
+  }
+  // Pasado el plazo (3 h desde el último latido) con la página abierta, se sube sola como antes.
+  function programarVencimiento(lista: GrabLocal[]) {
+    if (vence) { clearTimeout(vence); vence = null; }
+    if (!lista.length) return;
+    const t = Math.min(...lista.map((g) => (g.vivoMs ?? g.inicioMs) + RETOMAR_MAX_MS)) - Date.now() + 1000;
+    vence = setTimeout(() => { vence = null; subirPendientes(); }, Math.max(1000, Math.min(t, 2_000_000_000)));
   }
   async function pintarRetomarRed(lista: GrabLocal[]) {
     ofrecidas = lista;
+    programarVencimiento(lista);
     const caja = $('gr-retomar-red');
-    if (modo !== 'listo' || !lista.length) { caja.hidden = true; caja.textContent = ''; return; }
+    if (modo !== 'listo' || (!lista.length && !avisoRetomar)) { vaciarRetomarRed(); return; }
+    const clave = `${lista.map((g) => g.gid).sort().join(',')}|${navigator.onLine}|${avisoRetomar}`;
+    if (clave === clavePintada) return;
+    const n = ++pintadoN;
     const tarjetas = await Promise.all(lista.map(async (g) => tarjetaRetomar(g, await hastaDe(g), true)));
-    if (modo !== 'listo' || ofrecidas !== lista) return;
-    caja.textContent = ''; tarjetas.forEach((t) => caja.append(t)); caja.hidden = false;
+    if (modo !== 'listo' || ofrecidas !== lista || n !== pintadoN) return;
+    caja.textContent = ''; tarjetas.forEach((t) => caja.append(t)); pintarAvisoRetomar(caja);
+    caja.hidden = !caja.children.length; clavePintada = clave;
   }
   async function pintarSinInternet() {
     if (modo !== 'listo') return;
@@ -1236,6 +1299,7 @@ const { datos } = Astro.props;
       lista = [];
       const ahora = Date.now();
       for (const g of todas) {
+        if (g.gid === retomandoGid) continue; // se está verificando para seguirla: no se toca
         const d = destinoPendiente(g, g.estado === 'grabando' && await abandonada(g), ahora);
         if (d === 'subir') lista.push(g);
         else if (d === 'ofrecer_seguir') seguir.push(g); // se ofrece seguir; no se sube mientras tanto

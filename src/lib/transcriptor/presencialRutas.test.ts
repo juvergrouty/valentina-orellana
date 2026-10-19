@@ -239,7 +239,8 @@ function escenario() {
     { repo: repoWebhookSupabase(db.cliente), aai },
   );
   const audiosEnR2 = () => [...r2.objetos.keys()].filter((k) => k.startsWith(`${BUCKETS.audio}/`)).length;
-  return { db, r2, aai, claude, alertas, hoy, paciente, firma, reserva, iniciar, estado, verificar, subirYFinalizar, grab, segs, correr, webhook, audiosEnR2, cifrado };
+  const subidaUrl = (gid: string, seq: number, bytes: number) => post(rutas.subidaUrl, '/api/admin/transcriptor/subida-url', { grabacion_id: gid, seq, mime: 'audio/mp4', bytes, partes: [1], upload_id: null, reiniciar: false, offset_ms: 0, duracion_ms: 1000 });
+  return { db, r2, aai, claude, alertas, hoy, paciente, firma, reserva, iniciar, estado, verificar, subidaUrl, subirYFinalizar, grab, segs, correr, webhook, audiosEnR2, cifrado };
 }
 
 // ─── Pruebas ─────────────────────────────────────────────────────────────────
@@ -428,7 +429,11 @@ test('seguir CON internet: si retiraron el consentimiento, verificar=1 lo dice y
   const v = await e.verificar(gid);
   assert.deepEqual([v.data.ok, v.data.acepta_audio, v.data.puede_grabar, v.data.motivo], [true, true, false, 'revocado']);
   assert.match(String(v.data.error), /autorización de grabación/);
-  const fin = await e.subirYFinalizar(gid, []).catch((x) => x);
+  const sub = await e.subidaUrl(gid, 1, 2000);
+  assert.deepEqual([sub.status, sub.data.motivo], [403, 'revocado'], 'subida-url rechaza el audio del segmento que sigue');
+  const fin = await e.subirYFinalizar(gid, []);
   assert.equal(fin.status, 403, 'finalizar sigue verificando el consentimiento');
+  // Y una grabación que el sitio no tiene: verificar responde 404 (el grabador no sigue grabando en vano).
+  assert.equal((await e.verificar('00000000-0000-4000-8000-0000000000ff')).status, 404);
   assert.equal(e.grab(gid).estado, 'creada');
 });

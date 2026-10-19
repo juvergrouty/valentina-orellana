@@ -82,11 +82,25 @@ test('seguir con internet: el componente no sube lo que ofrece seguir, pregunta 
   assert.match(retomar, /cerrarSegmentoCortado\(g, tiempos\)/);
   assert.doesNotMatch(retomar, /grabacion-iniciar/);
   const no = comp.slice(comp.indexOf('async function noSeguir('), comp.indexOf('async function pintarRetomarRed('));
-  assert.match(no, /g\.estado = 'terminada';[\s\S]*subirPendientes\(\)/);
+  // Saca la tarjeta al tiro, relee de IndexedDB y no pisa una grabación que otra pestaña retomó.
+  assert.match(no, /el\.dataset\.gid === gid\) el\.remove\(\)/);
+  assert.match(no, /const f = await leerGrab\(gid\);\s*if \(f && f\.estado === 'grabando' && await abandonada\(f\)\) \{ f\.estado = 'terminada';[\s\S]*subirPendientes\(\)/);
   assert.match(comp, /No seguir: subir lo grabado/);
   // Empezar otra grabación = no seguir la cortada (se sube como antes).
   const empezar = comp.slice(comp.indexOf('async function empezarGrabacion('), comp.indexOf('function tomarLock('));
-  assert.match(empezar, /for \(const g of ofrecidas\) \{ g\.estado = 'terminada';/);
+  // ...solo después de que el micrófono abrió (activarGrabacion), releyendo de IndexedDB.
+  assert.ok(empezar.indexOf('const noSeguidas = ofrecidas') > empezar.indexOf('activarGrabacion(grab'));
+  assert.match(empezar, /const f = await leerGrab\(o\.gid\);\s*if \(f && f\.estado === 'grabando' && await abandonada\(f\)\)/);
+  // retomar relee el registro y revisa de nuevo tras la espera de red (otra pestaña, plazo de 3 h).
+  assert.match(retomar, /esRetomable\(x, true, Date\.now\(\)\)/);
+  assert.equal((retomar.match(/no = await motivoNo\(g\)/g) ?? []).length, 2);
+  assert.match(subir, /if \(g\.gid === retomandoGid\) continue;/);
+  // 404 = el sitio no la tiene: no se sigue grabando en vano. Plazo propio (Safari antiguo sin AbortSignal.timeout).
+  assert.match(ver, /r\.status === 404\) return \{ ok: true, acepta_audio: false/);
+  assert.doesNotMatch(ver, /signal: AbortSignal\.timeout/);
+  // Con la página abierta, al vencer las 3 h se sube sola; y no se repinta lo mismo (conserva mensajes).
+  assert.match(comp, /function programarVencimiento\(/);
+  assert.match(comp, /if \(clave === clavePintada\) return;/);
   // La página sin internet (pública) sigue sin nombres de pacientes en la tarjeta.
   assert.match(comp, /conRed \? `La grabación de \$\{g\.nombre\}/);
   assert.match(comp, /tarjetaRetomar\(g, hasta\)\)/);

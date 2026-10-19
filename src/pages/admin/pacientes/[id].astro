@@ -98,7 +98,8 @@ const pendientesTodos = calcularPendientes({
   pasosEnviadosAt: 'steps_sent_at' in patient ? (patient.steps_sent_at ?? null) : undefined,
   tieneSesiones: patientBookings.some((b) => b.status !== 'cancelled'),
   faltanDatos, hrefInfo: `/admin/pacientes/${id}?tab=info`,
-  // Ronda 2: sin fecha de nacimiento no se graba (presencial ni robot). Se avisa en toda ficha activa.
+  // Falta la fecha de nacimiento: desde el 18 oct NO bloquea la grabación (solo si es de un menor de 18).
+  // Se avisa en toda ficha activa para tener la ficha al día.
   faltaNacimiento: patient.active !== false && !String(patient.birthdate ?? '').trim(),
 });
 const gestionados = demo ? [] : await leerGestionados(supabase, id!);

@@ -48,7 +48,7 @@ test('1: la página estática no lleva datos de pacientes y no puede crear graba
   // Retomar sigue la MISMA grabación: no llama a grabacion-iniciar.
   const retomar = comp.slice(comp.indexOf('async function retomar('), comp.indexOf('function tarjetaRetomar('));
   assert.doesNotMatch(retomar, /grabacion-iniciar|postJson|fetch\(/);
-  assert.match(retomar, /abandonada\(g\)/);
+  assert.match(retomar, /abandonada\(x\)/); // registro releído de IndexedDB (19 oct)
 });
 
 // ─── 2. Menores: fecha de nacimiento obligatoria (presencial y robot) ────────
