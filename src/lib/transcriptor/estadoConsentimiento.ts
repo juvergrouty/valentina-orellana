@@ -106,7 +106,8 @@ export async function estadosConsentimientoEnBase(fichas: FichaMinima[], cliente
       .map((s) => [String(s.id), { type: s.type ?? null, name: s.name ?? null }]));
     const idsPareja = [...servicios.entries()].filter(([id]) => esReservaPareja({ service_id: id }, servicios)).map(([id]) => id);
     const filtro = ['session_type.like.pareja*', 'custom_title.ilike.*pareja*', ...(idsPareja.length ? [`service_id.in.(${idsPareja.join(',')})`] : [])].join(',');
-    const { data: bks, error: eb } = await c.from('bookings').select('patient_email, session_type, service_id, custom_title').or(filtro).limit(5000);
+    // status: esReservaPareja no cuenta las anuladas ni las vencidas (19 oct 2026).
+    const { data: bks, error: eb } = await c.from('bookings').select('patient_email, session_type, service_id, custom_title, status').or(filtro).limit(5000);
     if (eb) throw eb;
     for (const b of (bks ?? []) as (ReservaMinima & { patient_email?: string | null })[]) {
       if (!esReservaPareja(b, servicios)) continue;

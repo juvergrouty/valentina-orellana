@@ -13,6 +13,7 @@ import { avisosImpuestos, type MesImpuestos } from './impuestos';
 import { cobrosProximos, type CobroProximo } from './cobrosProximos';
 import { avisosEncuadrado, type AvisosEncuadrado } from './encuadrado';
 import { contarCorreosFallidos } from './correosAutomaticos';
+import { avisosPagosPorDevolver, type PagoPorDevolver } from './pagosPorDevolver';
 
 // Avisos del panel (antes calculados dentro de AdminLayout.astro). Salen a
 // este archivo (14 oct 2026) para que el Inicio (/admin) los use en su lista
@@ -108,7 +109,7 @@ function mensajeCumpleanos(nombre: string): string {
 }
 
 
-export type { BoletaAlert, ConsentAlert, BlockedDayAlert, ComprobanteAlert, AvisoTarifa, AvisoSalud, AvisosBox, MesImpuestos, CobroProximo, AvisosEncuadrado };
+export type { BoletaAlert, ConsentAlert, BlockedDayAlert, ComprobanteAlert, AvisoTarifa, AvisoSalud, AvisosBox, MesImpuestos, CobroProximo, AvisosEncuadrado, PagoPorDevolver };
 
 export type AvisosPanel = {
   newErrorCount: number;
@@ -129,10 +130,13 @@ export type AvisosPanel = {
   encuadrado: AvisosEncuadrado | null;
   // Correos automáticos que fallaron desde la última vez que se miró la pestaña.
   correosFallidos: number;
+  // Sesiones pagadas que se anularon o vencieron, hasta "Resuelto" (19 oct 2026).
+  // null = no se pudo revisar (el panel lo dice en vez de callar).
+  pagosPorDevolver: PagoPorDevolver[] | null;
 };
 
 export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
-  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado, correosFallidos] = await Promise.all([
+  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado, correosFallidos, pagosPorDevolver] = await Promise.all([
     // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
     // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
     contarErroresNuevos().catch(() => 0),
@@ -167,6 +171,9 @@ export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
     avisosEncuadrado().catch((): AvisosEncuadrado | null => null),
     // Correos automáticos que no se pudieron enviar (16 oct 2026, ver src/lib/correosAutomaticos.ts).
     contarCorreosFallidos().catch(() => 0),
+    // Pago por devolver o reagendar: sesión pagada que se anuló o venció, hasta que
+    // Valentina aprieta "Resuelto" (19 oct 2026, ver src/lib/pagosPorDevolver.ts).
+    avisosPagosPorDevolver().catch((): PagoPorDevolver[] | null => null),
   ]);
-  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado, correosFallidos };
+  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado, correosFallidos, pagosPorDevolver };
 }

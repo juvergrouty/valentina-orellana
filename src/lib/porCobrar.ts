@@ -37,7 +37,7 @@ export type SesionSinPagar = {
 export type SesionPorCobrar = SesionSinPagar;
 export type SesionAdeudada = SesionSinPagar;
 
-const COLUMNAS = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, mp_preference_id, created_at, notes, status, paid_at, debt_voided, created_by_admin';
+const COLUMNAS = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, mp_preference_id, created_at, notes, status, paid_at, debt_voided, created_by_admin, payment_method';
 
 async function sinPagar(desde?: string): Promise<SesionSinPagar[]> {
   let q = supabase

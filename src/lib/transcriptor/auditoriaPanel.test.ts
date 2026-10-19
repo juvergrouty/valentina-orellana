@@ -97,8 +97,8 @@ test('ficha: reserva vencida = "Vencida", sin cobro ni correos; sin costo sin "E
   const f = leer('src/pages/admin/pacientes/[id].astro');
   assert.match(f, /const isCancelled = b\.status === 'cancelled' \|\| b\.status === 'expired';/);
   assert.match(f, /b\.status === 'expired' \? \(b\.paid_at \? 'Vencida · pago por devolver o reagendar' : 'Vencida \(no se pagó\)'\)/);
-  // Vencida pero pagada por Flow tarde (hora ocupada): el pago sigue a la vista para devolverlo.
-  assert.match(f, /\(!isCancelled \|\| \(b\.status === 'expired' && isPaid\)\) && <span class=\{`badge \$\{payBadgeClass\}`\}>/);
+  // Vencida pero pagada por Flow tarde (hora ocupada), o anulada ya pagada (decisión del 19 oct): el pago sigue a la vista para devolverlo.
+  assert.match(f, /\(!isCancelled \|\| isPaid\) && <span class=\{`badge \$\{payBadgeClass\}`\}>/);
   assert.match(f, /\) : isPaid && \(b\.amount \?\? 0\) > 0 \? \(\s*<button type="button" class="btn btn-outline btn-sm bol-emitir"/);
   assert.match(f, /tieneSesiones: patientBookings\.some\(\(b\) => b\.status !== 'cancelled' && b\.status !== 'expired' && b\.session_date !== '2099-12-31'\)/);
 });

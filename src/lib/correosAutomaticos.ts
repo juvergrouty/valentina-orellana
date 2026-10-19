@@ -17,6 +17,7 @@ export const TIPOS_CORREO: Record<string, string> = {
   'email/link-pago': 'Link de pago',
   'email/saldo-pendiente': 'Saldo pendiente',
   'email/sesion-actualizada': 'Sesión reagendada o cambiada',
+  'email/hora-anulada': 'Hora anulada (aviso a la paciente)',
   'email/reserva-liberada': 'Hora liberada (no pagó)',
   'email/reseña': 'Solicitud de reseña',
   'email/evaluación': 'Evaluación post-sesión',

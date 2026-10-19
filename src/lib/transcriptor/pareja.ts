@@ -21,7 +21,18 @@ export function personaDe(f: { persona?: number | null }): Persona {
   return Number(f.persona) === 2 ? 2 : 1;
 }
 
-export interface ReservaMinima { session_type?: string | null; service_id?: string | null; custom_title?: string | null }
+export interface ReservaMinima { session_type?: string | null; service_id?: string | null; custom_title?: string | null; status?: string | null }
+
+/**
+ * ¿Esta reserva cuenta para decidir si la ficha es de pareja? (decisión de Vale, 19 oct 2026) Solo una
+ * reserva vigente (por pagar o confirmada) o ya realizada (pagada/confirmada en el pasado). Las ANULADAS
+ * (cancelled) y las VENCIDAS (expired: reserva web que no se pagó) no cuentan: una pareja que reservó y
+ * anuló no convierte la ficha en "de pareja". Sin estado (datos antiguos o de prueba) cuenta, como antes.
+ */
+export function reservaCuentaParaPareja(b: Pick<ReservaMinima, 'status'>): boolean {
+  const st = String(b.status ?? '');
+  return st !== 'cancelled' && st !== 'expired';
+}
 
 /** Lo que se sabe del servicio reservado: su tipo (services_catalog.type) o tipo y nombre. */
 export type InfoServicio = string | null | undefined | { type?: string | null; name?: string | null };
@@ -34,9 +45,11 @@ export function nombreDicePareja(nombre: unknown): boolean {
 /**
  * ¿Esta reserva es de pareja? ÚNICA regla (la usan fichaEsParejaEnBase → grabar, link de la pareja y
  * ficha): session_type 'pareja-*', servicio reservado de tipo 'pareja', o el nombre de la sesión
- * (custom_title) o del servicio reservado contiene "pareja".
+ * (custom_title) o del servicio reservado contiene "pareja". Y la reserva tiene que contar
+ * (reservaCuentaParaPareja: no anulada ni vencida, 19 oct 2026).
  */
 export function esReservaPareja(b: ReservaMinima, servicios: ReadonlyMap<string, InfoServicio>): boolean {
+  if (!reservaCuentaParaPareja(b)) return false;
   if (String(b.session_type ?? '').startsWith('pareja')) return true;
   if (nombreDicePareja(b.custom_title)) return true;
   const sid = String(b.service_id ?? '');
@@ -56,10 +69,11 @@ export async function reservasDeFicha(c: SupabaseClient, email: string | null | 
   const correo = String(email ?? '').trim();
   const tipoServicio = new Map<string, InfoServicio>();
   if (!correo) return { reservas: [], tipoServicio };
-  const { data, error } = await c.from('bookings').select('session_type, service_id, custom_title')
+  const { data, error } = await c.from('bookings').select('session_type, service_id, custom_title, status')
     .ilike('patient_email', correo.replace(/[\\%_]/g, (m) => `\\${m}`)).limit(500);
   if (error) throw new Error(`pareja: no se pudieron leer las reservas (${error.message})`);
-  const reservas = (data ?? []) as ReservaMinima[];
+  // Solo las reservas que cuentan (sin anuladas ni vencidas, 19 oct 2026): así tampoco sus session_type.
+  const reservas = ((data ?? []) as ReservaMinima[]).filter(reservaCuentaParaPareja);
   const ids = [...new Set(reservas.map((b) => String(b.service_id ?? '')).filter(Boolean))];
   if (ids.length) {
     const { data: svcs, error: es } = await c.from('services_catalog').select('id, type, name').in('id', ids);

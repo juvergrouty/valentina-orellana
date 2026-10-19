@@ -2,6 +2,8 @@
 import { claveCierre } from '../../lib/blockedDayAlerts';
 import { URL_SII } from '../../lib/impuestos';
 import { limite24h, HORAS_AVISO_COBRO } from '../../lib/cobrosProximos';
+import { ETIQUETA_PAGO_EN_CONSULTA } from '../../lib/pagoEnConsulta';
+import { textoPagoPorDevolver } from '../../lib/pagosPorDevolver';
 import { cargarAvisosPanel, type AvisosPanel } from '../../lib/avisosPanel';
 import { avisoPasskey } from '../../lib/passkey/servidor';
 
@@ -23,7 +25,7 @@ const path = current ?? '';
 
 // Avisos: ver src/lib/avisosPanel.ts. Si la página ya los cargó (el Inicio
 // los usa en su lista "Para hacer"), llegan por props y no se consultan de nuevo.
-const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado, correosFallidos }
+const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado, correosFallidos, pagosPorDevolver }
   = avisosPrecargados ?? await cargarAvisosPanel(Astro.url.origin);
 // Passkey (16 oct 2026): franja para registrarla / hacerla obligatoria (src/lib/passkey/servidor.ts).
 const passkeyAviso = current === '/admin/seguridad' ? null : await avisoPasskey(Astro.cookies.get('vo_admin_token')?.value);
@@ -37,7 +39,7 @@ const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'ju
 const fechaFeriado = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return `${DIAS_LARGOS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d} de ${MESES_LARGOS[m - 1]}`; };
 // Vuelta al mismo lugar sin el "?error=…" de un intento fallido anterior
 // (si no, el aviso de error seguía después de reintentar con éxito).
-const urlVuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); return u.pathname + u.search; })();
+const urlVuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); if (u.searchParams.get('saved') === 'anulada') { u.searchParams.delete('saved'); u.searchParams.delete('correo'); } return u.pathname + u.search; })();
 const fmtSesion = (d: string | null) => d ? d.split('-').reverse().join('-') : '';
 
 const navMain = [
@@ -485,6 +487,8 @@ body {
 }
 .badge-confirmed { color: #15803d; border-color: #86efac; background: #f0fdf4; }
 .badge-pending   { color: #92400e; border-color: #fcd34d; background: #fffbeb; }
+/* Paga en consulta (19 oct 2026): distinto de "Por pagar" (no se cobra por link ni vence). */
+.badge-consulta  { color: #78350f; border-color: #b45309; border-style: dashed; background: #fef3c7; }
 .badge-cancelled { color: var(--enc-text-3); border-color: var(--enc-border); background: var(--enc-body-bg); }
 /* Indicador de consentimiento (IndicadorConsentimiento.astro; agenda.astro y Grabador.astro usan las mismas clases). */
 .ic { display: inline-block; max-width: 100%; font-size: 0.78rem; font-weight: 600; line-height: 1.4;
@@ -912,6 +916,34 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
         ✕ No se pudo guardar el cambio de tarifa. El aviso sigue igual: intenta de nuevo.
       </div>
     )}
+    {Astro.url.searchParams.get('error')?.startsWith('pago_resuelto_') && (
+      <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        {Astro.url.searchParams.get('error') === 'pago_resuelto_no_aplica'
+          ? '✕ Esa sesión ya no figura como pago por devolver (quizás se reactivó). Recarga la página.'
+          : '✕ No se pudo guardar "Resuelto". El aviso sigue igual: intenta de nuevo.'}
+      </div>
+    )}
+    {/* Pago por devolver o reagendar (19 oct 2026, ver src/lib/pagosPorDevolver.ts): sesión pagada que se
+        anuló o venció. Queda hasta "Resuelto", que no borra ni cambia la reserva. */}
+    {!ocultarAvisosDeInicio && (pagosPorDevolver === null || pagosPorDevolver.length > 0) && (
+      <div role="status" id="pagos-devolver-alert" style="background:#7c2d12;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
+        {pagosPorDevolver === null && <p style="margin:0;">⚠ No se pudieron revisar las sesiones pagadas que se anularon. Recarga en un rato.</p>}
+        <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:0.4rem;">
+          {(pagosPorDevolver ?? []).map(p => (
+            <li style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
+              <span>💸 <strong>Pago por devolver o reagendar:</strong> {textoPagoPorDevolver(p).replace(/^Pago por devolver o reagendar: /, '')}{p.estado === 'expired' ? ' (pagó después de vencer la reserva)' : ''}</span>
+              <a href={p.href} style="background:#fff;color:#7c2d12;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;text-decoration:none;">Ver sesión</a>
+              <form method="POST" action="/api/admin/pago-resuelto" style="display:inline;">
+                <input type="hidden" name="id" value={p.id} />
+                <input type="hidden" name="redirect" value={urlVuelta} />
+                <button type="submit" style="background:transparent;color:#fff;border:1px solid #fff;border-radius:4px;padding:0.15rem 0.6rem;font-size:0.78rem;font-weight:700;cursor:pointer;"
+                  onclick="return confirm('¿Marcar como resuelto? (ya devolviste el pago o la pasaste a otra hora). El aviso desaparece; la sesión y su pago no cambian.')">Resuelto</button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
     {Astro.url.searchParams.get('error') === 'impuestos_guardar' && (
       <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
         ✕ No se pudo guardar "Ya lo hice" de los impuestos. El aviso sigue igual: intenta de nuevo.
@@ -991,10 +1023,13 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
             <li style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
               <span>
                 <strong>{c.paciente}</strong> · {fechaFeriado(c.fecha)} a las <strong>{c.hora}</strong> · {c.presencial ? 'presencial' : 'online'} · {clp(c.monto)}
-                {c.presencial && <> · si no paga, mueve el box antes del {limite24h(c.fecha, c.hora)}</>}
+                {c.enConsulta && <> · <strong>{ETIQUETA_PAGO_EN_CONSULTA}</strong>: cóbrale en la sesión y márcala pagada</>}
+                {!c.enConsulta && c.presencial && <> · si no paga, mueve el box antes del {limite24h(c.fecha, c.hora)}</>}
                 {c.sinLink && <> · no tiene link de pago: cóbrale por transferencia (o en la consulta si es presencial) y márcala pagada en su sesión</>}
               </span>
-              {c.waUrl
+              {c.enConsulta
+                ? null
+                : c.waUrl
                 ? <a href={c.waUrl} target="_blank" rel="noopener" data-cobro-wa={c.id} style="background:#fff;color:#8a5a1f;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;text-decoration:none;">{c.sinLink ? 'Escribirle por WhatsApp' : 'Enviar link por WhatsApp'}</a>
                 : <span style="font-size:0.78rem;opacity:0.85;">(sin teléfono válido)</span>}
               <span data-cobro-enviado={c.id} hidden style="font-size:0.78rem;opacity:0.9;">✓ WhatsApp abierto</span>

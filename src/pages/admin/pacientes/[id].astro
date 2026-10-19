@@ -10,6 +10,7 @@ import { URL_CONFIRMAR_PASSKEY } from '../../../lib/transcriptor/acceso';
 import { cargarNotasFicha, ENTRADAS_INICIALES } from '../../../lib/transcriptor/fichaNotas';
 import { fichaDemo } from '../../../lib/transcriptor/pruebas/fichaDemo';
 import { prepararPareja } from '../../../lib/transcriptor/fichaConsentimientos';
+import { esPagoEnConsulta, ETIQUETA_PAGO_EN_CONSULTA } from '../../../lib/pagoEnConsulta';
 import { calcularPendientes, leerGestionados, separarPendientes, ID_PANEL_PAREJA, ID_PANEL_PROPIO } from '../../../lib/transcriptor/pendientes';
 import ConsentimientosFicha from '../../../components/admin/ConsentimientosFicha.astro';
 import IndicadorConsentimiento from '../../../components/admin/IndicadorConsentimiento.astro';
@@ -431,8 +432,10 @@ const formatCLP = (n: number) =>
             // debiera esa sesión — una sesión cancelada no se cobra, punto.
             // Una reserva vencida tampoco: no se cobra, no se confirma ni se recuerda (auditoría 19 oct 2026).
             const isCancelled = b.status === 'cancelled' || b.status === 'expired';
-            const payBadgeClass = isVoided ? 'badge-cancelled' : isPaid ? 'badge-confirmed' : 'badge-pending';
-            const payBadgeLabel = isVoided ? 'Deuda anulada' : isPaid ? (b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado') : 'Por pagar';
+            // Paga en consulta (19 oct 2026, ver src/lib/pagoEnConsulta.ts): no es "por pagar con link".
+            const enConsulta = esPagoEnConsulta(b);
+            const payBadgeClass = isVoided ? 'badge-cancelled' : isPaid ? 'badge-confirmed' : enConsulta ? 'badge-pending badge-consulta' : 'badge-pending';
+            const payBadgeLabel = isVoided ? 'Deuda anulada' : isPaid ? (b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado') : enConsulta ? ETIQUETA_PAGO_EN_CONSULTA : 'Por pagar';
             return (
               <div id={`s-${b.id}`} class="card anclado" style="padding:0;overflow:hidden;">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;gap:1rem;flex-wrap:wrap;">
@@ -456,8 +459,9 @@ const formatCLP = (n: number) =>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                     </button>
                     <span class={`badge ${badgeClass}`}>{badgeLabel}</span>
-                    {/* Vencida y pagada (Flow pagó tarde y la hora ya estaba tomada): se muestra el pago para devolverlo. */}
-                    {(!isCancelled || (b.status === 'expired' && isPaid)) && <span class={`badge ${payBadgeClass}`}>{payBadgeLabel}</span>}
+                    {/* Vencida o anulada y pagada (Flow pagó tarde, o se anuló una hora ya pagada): se muestra el pago
+                        para devolverlo o reagendar (aviso "Pago por devolver o reagendar", 19 oct 2026). */}
+                    {(!isCancelled || isPaid) && <span class={`badge ${payBadgeClass}`}>{payBadgeLabel}</span>}
                     {iaPorBooking.has(b.id) && (
                       <a href={`${redirectBase}?tab=notas#ia-${iaPorBooking.get(b.id)!.g.id}`} class="badge ia-badge-sesion"
                         title="Esta sesión se grabó. Ver el resumen automático en Notas clínicas.">

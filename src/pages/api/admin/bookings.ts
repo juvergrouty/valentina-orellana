@@ -17,6 +17,8 @@ import { chocaConOtraSesion } from '../../../lib/disponibilidad';
 import { limpiarRut, rutValido, RUT_EXTRANJERO_SII } from '../../../lib/rut';
 
 import { rutaInterna } from '../../../lib/rutaInterna';
+import { anularReserva, quiereAvisar } from '../../../lib/anularReserva';
+import { MARCA_PAGO_EN_CONSULTA } from '../../../lib/pagoEnConsulta';
 
 export const prerender = false;
 
@@ -317,15 +319,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   }
 
   // ── Cancelar reserva ────────────────────────────────────────────────────────
+  // "Avisar a la paciente por correo" (notify_patient) viene DESMARCADA por defecto: solo si Vale la
+  // marca sale el correo de anulación (decisión del 19 oct 2026, ver src/lib/anularReserva.ts).
   if (action === 'cancel') {
     const id = form.get('id')?.toString();
     if (!id) return redirect(dest);
-    // Si la base no la canceló, NO se borra el evento de Google (8 oct 2026):
-    // antes la sesión seguía activa (ocupando la hora) pero sin evento.
-    const { error: cancelErr } = await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', id);
-    if (cancelErr) return redirect(conParam(dest) + 'error=cancelar&detail=' + encodeURIComponent(cancelErr.message.slice(0, 200)));
-    try { await deleteBookingFromCalendar(id); } catch (e) { console.error('[cancel] gcal:', e); }
-    return redirect(dest);
+    const r = await anularReserva(id, { avisar: quiereAvisar(form.get('notify_patient')) });
+    if (!r.ok) return redirect(conParam(dest) + 'error=cancelar&detail=' + encodeURIComponent(r.error.slice(0, 200)));
+    return redirect(conParam(dest) + 'saved=anulada&correo=' + r.correo);
   }
 
   // ── Reagendar reserva ───────────────────────────────────────────────────────
@@ -724,8 +725,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         patient_email:  finalEmail,
         patient_phone:  finalPhone,
         patient_rut:    finalRut || null,
+        // Pago en consulta: marca para que no se trate como hora por pagar con link (19 oct 2026, ver pagoEnConsulta.ts).
         notes:          (payment_mode === 'free' && montoNormalSesion(creadas) > 0
                           ? [notesText, `${MARCA_MONTO_SIN_COSTO} ${montoNormalSesion(creadas)}`].filter(Boolean).join('\n')
+                          : payment_mode === 'manual'
+                          ? [notesText, MARCA_PAGO_EN_CONSULTA].filter(Boolean).join('\n')
                           : notesText) || null,
         status:         payment_mode === 'link' ? 'pending_payment' : 'confirmed',
         payment_method: payment_mode === 'link' ? 'flow' : 'manual',

@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { frasePlazoPago, AVISO_REAGENDAR } from '../../lib/cobrosProximos';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
 import { sesionesPorCobrar } from '../../lib/porCobrar';
+import { esPagoEnConsulta, ETIQUETA_PAGO_EN_CONSULTA } from '../../lib/pagoEnConsulta';
 
 // "Por cobrar" (distinto de "deuda", ver /admin/deudas): sesiones que TODAVÍA
 // no ocurren y siguen sin pagar. No es dinero que se deba — es dinero que
@@ -121,7 +122,9 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
                 ? `Hola ${firstName}, te recuerdo el link de pago pendiente${plazo}: ${payUrl}${extraPres}`
                 : `Hola ${firstName}, te recuerdo el link de pago para tu sesión (${formatCLP(b.amount)})${plazo}: ${payUrl}${extraPres}`
             ) : '';
-            const waUrl = payUrl && waNumber.length >= 10 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
+            // Paga en consulta (19 oct 2026): sin link de pago ni plazo de 24 h; se cobra en la sesión.
+            const enConsulta = esPagoEnConsulta(b);
+            const waUrl = !enConsulta && payUrl && waNumber.length >= 10 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
             return (
               <tr>
                 <td>
@@ -134,6 +137,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
                 <td style="font-size:0.8rem;color:var(--stone);">{formatDate(b.created_at?.slice(0,10) ?? b.session_date)}</td>
                 <td style="white-space:nowrap;">
                   {/* Igual que Encuadrado: dos íconos directos, sin desplegable. */}
+                  {enConsulta && <span class="badge badge-consulta">{ETIQUETA_PAGO_EN_CONSULTA}</span>}
                   {waUrl && (
                     <a href={waUrl} target="_blank" title="Enviar por WhatsApp" class="icon-btn"
                       style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:#25D366;border-radius:6px;color:white;margin-right:0.35rem;">
@@ -142,13 +146,13 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
                       </svg>
                     </a>
                   )}
-                  {patientId && b.patient_email && (
+                  {!enConsulta && patientId && b.patient_email && (
                     <button type="button" class="btn-send-debt-email icon-btn" data-patient={patientId} title="Enviar por correo"
                       style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:var(--ink);border-radius:6px;color:white;border:none;cursor:pointer;">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
                     </button>
                   )}
-                  {!waUrl && !(patientId && b.patient_email) && (
+                  {!enConsulta && !waUrl && !(patientId && b.patient_email) && (
                     <span style="font-size:0.75rem;color:var(--stone);">Sin link guardado</span>
                   )}
                 </td>

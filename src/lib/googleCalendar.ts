@@ -181,14 +181,16 @@ export async function listCalendars(accessToken: string) {
   }));
 }
 
-/** Elimina un evento del calendario */
+/** Elimina un evento del calendario. Siempre SIN aviso de Google a los invitados (sendUpdates=none,
+ *  que es también lo que hace Google si no se indica): al anular una hora, el único aviso a la paciente
+ *  es el correo propio, y solo si Vale marca "Avisar a la paciente por correo" (19 oct 2026). */
 export async function deleteCalendarEvent(
   accessToken: string,
   calendarId: string,
   eventId: string,
 ): Promise<void> {
   const res = await fetch(
-    `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
+    `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}?sendUpdates=none`,
     { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } }
   );
   // 410 (Gone) = ya estaba eliminado en Google Calendar — no es una falla real.
