@@ -44,7 +44,8 @@ export const ORDEN: TareaPago[] = ['calendario', 'confirmacion', 'aviso_admin', 
  * "pasos" se agrega aparte, una vez por correo por pago.
  */
 export function tareasDePago(esNueva: boolean): TareaPago[] {
-  return esNueva ? ['confirmacion', 'aviso_admin', 'calendario', 'boleta'] : ['boleta', 'calendario_pagado'];
+  // 'calendario' primero (crea el Meet): también en el camino directo de flow/confirm.ts, que usa este orden.
+  return esNueva ? ['calendario', 'confirmacion', 'aviso_admin', 'boleta'] : ['boleta', 'calendario_pagado'];
 }
 
 /** ¿La sesión es de hoy en adelante (hora de Chile)? El cobro sin fecha (2099) cuenta como vigente. */

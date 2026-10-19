@@ -432,7 +432,13 @@ test('paciente: el evento de Google Calendar no lleva el enlace propio (ubicaci�
   assert.ok(!/urlSesion|enlaceParaSesion|enlaceValeSesion|lineaEntrarCalendario/.test(cal));
   // Eventos del 18–19 oct con el enlace propio: se limpian al reagendar y al mandar el recordatorio.
   assert.match(cuerpo(cal, 'rescheduleBookingInCalendar'), /limpiarEnlacePropioDelEvento/);
-  assert.match(fuente('pages/api/cron/reminders.ts'), /limpiarEnlacePropioDelEvento\(b\.id, b\.google_event_id\)/);
+  // Al pagar (se invita a la paciente) se limpia antes de invitarla.
+  const pagado = cuerpo(cal, 'markBookingPaidInCalendar');
+  assert.ok(pagado.indexOf('limpiarEnlacePropioDelEvento') > 0 && pagado.indexOf('limpiarEnlacePropioDelEvento') < pagado.indexOf('setCalendarEventPaidState('));
+  // Cron: una vez por reserva online, fuera del bloque del correo (aunque no tenga correo o recordatorio).
+  const rem = fuente('pages/api/cron/reminders.ts');
+  assert.match(rem, /limpiarEnlacePropioDelEvento\(b\.id, b\.google_event_id\)/);
+  assert.ok(rem.indexOf('limpiarEnlacePropioDelEvento(b.id') < rem.indexOf('doEmail: {'), 'la limpieza no depende del correo');
   const enlace = urlSesion(randomUUID(), S)!;
   assert.ok(traeEnlacePropio(enlace) && traeEnlacePropio(`Online · ${enlace}`));
   assert.ok(!traeEnlacePropio(MEET) && !traeEnlacePropio('') && !traeEnlacePropio(null));
@@ -484,6 +490,7 @@ test('Vale: panel (Ingresar, Copiar mi enlace, calendario, sala online) usa el e
 test('orden de envíos: el evento de Calendar (crea el Meet) va antes de la confirmación', () => {
   const t = fuente('lib/tareasEnvio.ts');
   assert.match(t, /ORDEN: TareaPago\[\] = \['calendario', 'confirmacion', 'aviso_admin'/);
+  assert.match(t, /esNueva \? \['calendario', 'confirmacion', 'aviso_admin', 'boleta'\]/); // camino directo de flow/confirm
   const cm = fuente('pages/api/bookings/confirm-manual.ts');
   assert.ok(cm.indexOf('syncBookingToCalendar(') < cm.indexOf('sendConfirmationToClient(emailData)'));
 });

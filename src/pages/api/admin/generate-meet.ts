@@ -54,8 +54,8 @@ export const POST: APIRoute = async ({ request }) => {
       await logError('calendar/meet', 'No se pudo agregar el Meet a un evento existente', { bookingId: id, error: e instanceof Error ? e.message : String(e) });
     }
   }
-  // enlace: el enlace propio de la sesión (/sesion/<código>, 18 oct 2026). El panel lo usa para entrar,
-  // copiar y mandar por WhatsApp: abre este mismo Meet y manda el robot de notas.
+  // enlace: el enlace propio de la sesión (/sesion/<código>, 18 oct 2026), SOLO para Vale (Ingresar y
+  // «Copiar mi enlace»): abre este mismo Meet y llama al asistente de notas. Al paciente va meetLink.
   return json({ ok: true, meetLink, enlace: meetLink ? enlaceParaSesion(id, meetLink) : null });
 };
 

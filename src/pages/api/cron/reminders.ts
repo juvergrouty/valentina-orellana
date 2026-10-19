@@ -107,6 +107,17 @@ export const GET: APIRoute = async ({ request }) => {
     // misma ejecución, la segunda escritura no debe pisar la marca que dejó la primera.
     let liveNotes = b.notes ?? '';
 
+    // Online: el evento de Calendar (que la paciente ve) queda solo con el Meet directo si era de los que
+    // llevaron el enlace propio /sesion/ (18–19 oct 2026). Una sola vez por reserva (registro único, se
+    // reintenta si falló), haya o no recordatorio por correo. Mejor esfuerzo: nunca frena los recordatorios.
+    if (String(b.session_type ?? '').includes('online') && b.google_event_id) {
+      const tareaLimpiar = 'recordatorio-limpiar-enlace-propio';
+      if (await reservarEnvioUnico(b.id, tareaLimpiar)) {
+        const ok = await limpiarEnlacePropioDelEvento(b.id, b.google_event_id);
+        await terminarEnvioUnico(b.id, tareaLimpiar, ok);
+      }
+    }
+
     // ── Recordatorio por correo (ventana configurable, default 24h) ──────────
     doEmail: {
       if (!emailRemindersOn) { skipped++; break doEmail; }
@@ -128,12 +139,6 @@ export const GET: APIRoute = async ({ request }) => {
       if (b.service_id) {
         const { data: svc } = await supabase.from('services_catalog').select('name').eq('id', b.service_id).maybeSingle();
         serviceName = svc?.name;
-      }
-
-      // Online: el evento de Calendar (que la paciente ve) queda solo con el Meet directo si era de los que
-      // llevaron el enlace propio /sesion/ (18–19 oct 2026). Una vez por sesión; mejor esfuerzo.
-      if (String(b.session_type ?? '').includes('online') && b.google_event_id) {
-        await limpiarEnlacePropioDelEvento(b.id, b.google_event_id);
       }
 
       const res = await sendReminderEmail({

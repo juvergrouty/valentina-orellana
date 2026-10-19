@@ -133,6 +133,7 @@ export async function meetDeEventoCalendario(googleEventId: string): Promise<str
  * descripción (que la paciente ve como invitada). Esto los deja solo con el Meet directo: ubicación = Meet
  * del evento (o vacía) y descripción sin la línea "Entrar a la sesión: …/sesion/…". Sin aviso a la invitada
  * (sendUpdates=none). Solo escribe si el evento trae el enlace propio. Mejor esfuerzo: nunca lanza.
+ * true = quedó bien (limpio o no había nada que limpiar); false = falló y conviene reintentar.
  */
 export async function limpiarEnlacePropioDelEvento(
   bookingId: string,
@@ -141,12 +142,13 @@ export async function limpiarEnlacePropioDelEvento(
 ): Promise<boolean> {
   try {
     const a = auth ?? (await getValidAccessToken());
-    if (!a) return false;
+    if (!a) return true; // sin Google conectado no hay evento que limpiar
     const url = `${CALENDAR_API_EVENTOS}/${encodeURIComponent(a.calendarId)}/events/${encodeURIComponent(googleEventId)}`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${a.token}` }, signal: AbortSignal.timeout(5000) });
-    if (!res.ok) return false;
+    if (res.status === 404 || res.status === 410) return true; // evento borrado: nada que limpiar
+    if (!res.ok) throw new Error(`GET ${res.status}`);
     const ev = (await res.json()) as { location?: string; description?: string; hangoutLink?: string };
-    if (!traeEnlacePropio(ev.location) && !traeEnlacePropio(ev.description)) return false;
+    if (!traeEnlacePropio(ev.location) && !traeEnlacePropio(ev.description)) return true;
     const meet = normalizarMeet(ev.hangoutLink);
     const body: Record<string, string> = {};
     if (traeEnlacePropio(ev.location)) body.location = meet ?? '';
@@ -288,10 +290,15 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
 export async function markBookingPaidInCalendar(bookingId: string, paid: boolean, opts: { invitar?: boolean } = {}): Promise<boolean> {
   // true = quedó hecho (o no hay evento/Google que actualizar); false = falló y conviene reintentar.
   try {
-    const { data: booking } = await supabase.from('bookings').select('google_event_id, patient_email').eq('id', bookingId).single();
+    const { data: booking } = await supabase.from('bookings').select('google_event_id, patient_email, session_type').eq('id', bookingId).single();
     if (!booking?.google_event_id) return true;
     const auth = await getValidAccessToken();
     if (!auth) return true;
+    // Online: al pagar se invita a la paciente; antes, el evento queda solo con el Meet directo (por si es
+    // de los que llevaron el enlace propio /sesion/ el 18–19 oct 2026).
+    if (paid && String(booking.session_type ?? '').includes('online')) {
+      await limpiarEnlacePropioDelEvento(bookingId, booking.google_event_id, auth);
+    }
     await setCalendarEventPaidState(auth.token, auth.calendarId, booking.google_event_id, paid, paid && opts.invitar !== false ? (booking.patient_email || undefined) : undefined);
     return true;
   } catch (e) {
