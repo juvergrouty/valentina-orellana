@@ -21,7 +21,10 @@ if (filtro === 'inactivos') query = query.eq('active', false);
 const qLimpio = q.replace(/[,()%_*\\]/g, ' ').trim();
 if (qLimpio) query = query.or(`name.ilike.%${qLimpio}%,email.ilike.%${qLimpio}%,phone.ilike.%${qLimpio}%,rut.ilike.%${qLimpio}%`);
 
-const { data: patients } = await query;
+const { data: pacientesLeidos } = await query;
+// "Eliminados": "Eliminar paciente" la archiva (active=false), así que queda en Inactivos. Antes esta
+// pestaña no filtraba y mostraba a TODOS los pacientes bajo "Eliminados (0)" (auditoría 19 oct 2026).
+const patients = filtro === 'eliminados' ? [] : pacientesLeidos;
 
 // Conteos para los tabs
 const [{ count: countAll }, { count: countActive }, { count: countInactive }] = await Promise.all([
@@ -134,7 +137,7 @@ const TABS = [
     <!-- Tabla -->
     <div class="pac-table-scroll">
       {!patients?.length ? (
-        <p class="pac-empty">{q ? `Sin resultados para "${q}"` : 'No hay pacientes aún.'}</p>
+        <p class="pac-empty">{filtro === 'eliminados' ? 'Los pacientes eliminados quedan en la pestaña Inactivos.' : q ? `Sin resultados para "${q}"` : 'No hay pacientes aún.'}</p>
       ) : (
         <table class="pac-table">
           <thead>

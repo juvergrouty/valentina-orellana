@@ -37,7 +37,7 @@ const prefillJson = JSON.stringify(prefill);
 // Historial de cobros manuales (últimos 30)
 const { data: cobros } = await supabase
   .from('bookings')
-  .select('id, patient_name, patient_email, patient_phone, session_type, amount, status, created_at')
+  .select('id, patient_name, patient_email, patient_phone, session_type, amount, status, created_at, paid_at, debt_voided')
   .like('notes', 'Cobro manual%')
   .order('created_at', { ascending: false })
   .limit(30);
@@ -278,10 +278,14 @@ const servicesJson  = JSON.stringify(services  ?? []);
                       </td>
                       <td style="font-weight:600;font-size:0.88rem;white-space:nowrap;">{formatCLP(c.amount)}</td>
                       <td>
-                        {c.status === 'confirmed' ? (
-                          <span class="badge badge-confirmed">Pagado</span>
-                        ) : c.status === 'cancelled' ? (
+                        {/* Según el pago real (paid_at), no el estado: "Anular pago" deja la reserva
+                            confirmada sin pago y antes seguía diciendo "Pagado" (auditoría 19 oct 2026). */}
+                        {c.status === 'cancelled' ? (
                           <span class="badge badge-cancelled">Cancelado</span>
+                        ) : c.paid_at ? (
+                          <span class="badge badge-confirmed">Pagado</span>
+                        ) : c.debt_voided ? (
+                          <span class="badge badge-cancelled">Anulado</span>
                         ) : (
                           <span class="badge badge-pending">Pendiente</span>
                         )}

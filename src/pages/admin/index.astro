@@ -122,7 +122,8 @@ const sesiones: Sesion[] = reservas.filter((b) => b.session_date !== '2099-12-31
   online: String(b.session_type ?? '').includes('online'),
   tipo: TIPOS[b.session_type] ?? b.session_type,
   // El pago se lee de paid_at (no del estado de la reserva): igual que el calendario.
-  pago: b.paid_at ? 'pagada' : b.debt_voided ? 'anulada' : (Number(b.amount) > 0 ? 'por-pagar' : 'sin-cobro'),
+  // Sin costo (obra social): queda con paid_at pero $0; antes salía "pagada" (auditoría 19 oct 2026).
+  pago: b.paid_at ? (Number(b.amount) > 0 ? 'pagada' : 'sin-cobro') : b.debt_voided ? 'anulada' : (Number(b.amount) > 0 ? 'por-pagar' : 'sin-cobro'),
   href: `/admin/agenda?booking=${b.id}`,
 }));
 {
@@ -219,7 +220,7 @@ for (const c of cobros ?? []) {
     clave: `${plazo}T${c.hora}`,
     chip: vencido ? `sesión ${cuando(c.fecha, c.hora)}` : `pago vence ${cuando(plazo, c.hora)}`,
     titulo: `Cobrar a ${c.paciente}`,
-    detalle: `${c.presencial ? 'Presencial' : 'Online'} · ${clp(c.monto)}${c.presencial ? ' · si no paga, mueve el box' : ''}${c.sinLink ? ' · sin link de pago: cóbrale desde su sesión' : ''}`,
+    detalle: `${c.presencial ? 'Presencial' : 'Online'} · ${clp(c.monto)}${c.presencial ? ' · si no paga, mueve el box' : ''}${c.sinLink ? ' · sin link de pago: cóbrale por transferencia (o en la consulta si es presencial) y márcala pagada' : ''}`,
     href: `/admin/agenda?booking=${c.id}&accion=cobrar`,
     accion: { tipo: 'wa', url: c.waUrl, id: c.id },
   });
@@ -384,7 +385,7 @@ for (const b of recientesRes.data ?? []) {
 const origenes = [...porCanal.entries()].sort((a, b) => b[1].n - a[1].n);
 
 const chevron = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>';
-const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-pagar': 'por pagar', 'anulada': 'deuda anulada', 'sin-cobro': 'sin cobro', 'externa': 'Encuadrado' };
+const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-pagar': 'por pagar', 'anulada': 'deuda anulada', 'sin-cobro': 'sin costo', 'externa': 'Encuadrado' };
 ---
 
 <AdminLayout title="Inicio" current="/admin" avisos={avisos} ocultarAvisosDeInicio>

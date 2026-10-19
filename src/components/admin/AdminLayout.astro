@@ -992,10 +992,10 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
               <span>
                 <strong>{c.paciente}</strong> · {fechaFeriado(c.fecha)} a las <strong>{c.hora}</strong> · {c.presencial ? 'presencial' : 'online'} · {clp(c.monto)}
                 {c.presencial && <> · si no paga, mueve el box antes del {limite24h(c.fecha, c.hora)}</>}
-                {c.sinLink && <> · no tiene link de pago: cóbrale desde su sesión en el calendario</>}
+                {c.sinLink && <> · no tiene link de pago: cóbrale por transferencia (o en la consulta si es presencial) y márcala pagada en su sesión</>}
               </span>
               {c.waUrl
-                ? <a href={c.waUrl} target="_blank" rel="noopener" data-cobro-wa={c.id} style="background:#fff;color:#8a5a1f;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;text-decoration:none;">Enviar link por WhatsApp</a>
+                ? <a href={c.waUrl} target="_blank" rel="noopener" data-cobro-wa={c.id} style="background:#fff;color:#8a5a1f;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;text-decoration:none;">{c.sinLink ? 'Escribirle por WhatsApp' : 'Enviar link por WhatsApp'}</a>
                 : <span style="font-size:0.78rem;opacity:0.85;">(sin teléfono válido)</span>}
               <span data-cobro-enviado={c.id} hidden style="font-size:0.78rem;opacity:0.9;">✓ WhatsApp abierto</span>
             </li>

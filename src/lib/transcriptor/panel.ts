@@ -456,9 +456,10 @@ export function armarHistorial<N extends NotaHistorial, T extends TarjetaHistori
     if (e.reserva) return;
     e.reserva = r; e.hora = (r.session_time ?? '').slice(0, 5); e.sessionType = r.session_type ?? null;
   };
-  // Reservas que ya ocurrieron (o de hoy), no canceladas: se puede escribir su evolución.
+  // Reservas que ya ocurrieron (o de hoy), no canceladas ni vencidas (una reserva web que no se
+  // pagó nunca fue sesión; auditoría 19 oct 2026): se puede escribir su evolución.
   for (const r of p.reservas) {
-    if (r.status === 'cancelled' || r.session_date === '2099-12-31' || r.session_date > p.hoy) continue;
+    if (r.status === 'cancelled' || r.status === 'expired' || r.session_date === '2099-12-31' || r.session_date > p.hoy) continue;
     conReserva(entrada(`b:${r.id}`, r.session_date), r);
   }
   for (const t of p.tarjetas) {

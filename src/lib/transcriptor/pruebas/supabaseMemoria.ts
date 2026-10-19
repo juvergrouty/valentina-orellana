@@ -105,6 +105,8 @@ class Consulta implements PromiseLike<Resp> {
   is(k: string, v: null | boolean) { this.filtros.push((f) => val(f, k) === v); return this; }
   not(k: string, op: string, v: unknown) {
     if (op === 'is' && v === null) this.filtros.push((f) => val(f, k) !== null);
+    // not('col','in','(a,b)') como PostgREST (añadido en la auditoría del 19 oct: antes no filtraba nada).
+    else if (op === 'in') { const l = String(v).replace(/^\(|\)$/g, '').split(',').map((x) => x.trim()); this.filtros.push((f) => !l.includes(String(val(f, k)))); }
     else this.filtros.push((f) => val(f, k) !== v);
     return this;
   }

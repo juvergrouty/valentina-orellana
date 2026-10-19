@@ -32,9 +32,11 @@ export const POST: APIRoute = async ({ request, url }) => {
   if (action === 'confirmation' || action === 'reminder') {
     if (!bookingId) return json({ ok: false, error: 'Falta la sesión (booking_id).' }, 400);
     const { data: b } = await supabase.from('bookings')
-      .select('patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, paid_at, payment_note')
+      .select('patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, payment_method, service_id, paid_at, payment_note, status')
       .eq('id', bookingId).maybeSingle();
     if (!b) return json({ ok: false, error: 'Sesión no encontrada.' }, 404);
+    // Nunca confirmar ni recordar una hora anulada o vencida (auditoría 19 oct 2026): la hora ya se liberó.
+    if (b.status === 'cancelled' || b.status === 'expired') return json({ ok: false, error: b.status === 'cancelled' ? 'Esta sesión está anulada: no se envía.' : 'Esta reserva venció sin pagarse: no se envía.' }, 400);
     if (!b.patient_email) return json({ ok: false, error: 'La sesión no tiene correo del paciente.' }, 400);
 
     let serviceName: string | undefined;

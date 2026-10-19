@@ -111,6 +111,13 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
     if (error) return { ok: false, error: error.message };
     if (!b) return { ok: true, descartada: true, nota: 'la reserva ya no existe' };
     if (!b.paid_at) return { ok: true, descartada: true, nota: 'la reserva ya no figura pagada' };
+    // Hora anulada (o vencida) mientras el envío esperaba su reintento (auditoría 19 oct 2026):
+    // no se confirma, no se avisa "Nueva reserva" ni se crea el evento por una hora que ya no existe.
+    // La boleta sigue (el pago se recibió; qué hacer con él lo decide Vale) y Pasos también: va por
+    // pago y ese pago puede cubrir otras sesiones vigentes (sendStepsOnFirstPayment ya cuenta solo las vigentes).
+    if ((b.status === 'cancelled' || b.status === 'expired') && ['confirmacion', 'aviso_admin', 'calendario', 'calendario_pagado'].includes(tarea)) {
+      return { ok: true, descartada: true, nota: 'la reserva está anulada' };
+    }
     const sinFecha = String(b.session_date) === '2099-12-31'; // cobro manual sin fecha: no hay sesión que confirmar
     const llave = `${bookingId}:${nombre}`;
 

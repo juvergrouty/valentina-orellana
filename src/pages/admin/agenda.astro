@@ -70,19 +70,21 @@ async function fetchBookings() {
   // propio nivel de degradación para que, si aún no se aplicó esa migración,
   // el resto de las columnas (ya en uso en producción) no se vean afectadas.
   const colsWithTitle = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, review_email_enabled, patient_rut, paid_at, payment_note, debt_voided, no_show, custom_title';
+  // Sin vencidas (auditoría 19 oct 2026): una reserva web que no se pagó ya liberó la hora y
+  // borró su evento; antes seguía en el calendario como bloque amarillo "Por pagar".
   const res = await supabase.from('bookings').select(colsWithTitle)
     .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
-    .neq('status', 'cancelled').order('session_time');
+    .not('status', 'in', '(cancelled,expired)').order('session_time');
   if (res.error?.code === '42703') {
     const cols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id, reminder_email_enabled, review_email_enabled, patient_rut, paid_at, payment_note, debt_voided, no_show';
     const res2 = await supabase.from('bookings').select(cols)
       .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
-      .neq('status', 'cancelled').order('session_time');
+      .not('status', 'in', '(cancelled,expired)').order('session_time');
     if (res2.error?.code === '42703') {
       const fallbackCols = 'id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, status, amount, duration_min, notes, service_id, payment_method, google_event_id, mp_preference_id';
       return supabase.from('bookings').select(fallbackCols)
         .gte('session_date', weekStartStr).lte('session_date', weekEndStr)
-        .neq('status', 'cancelled').order('session_time');
+        .not('status', 'in', '(cancelled,expired)').order('session_time');
     }
     return res2;
   }

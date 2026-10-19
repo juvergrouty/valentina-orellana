@@ -181,12 +181,19 @@ export async function getConsentAlerts(): Promise<ConsentAlert[]> {
   const [{ data: patients, error: pErr }, { data: consents, error: cErr }, { data: reservas, error: bErr }] = await Promise.all([
     supabase.from('patients').select('id, name, email').eq('active', true).order('name'),
     supabase.from('consents').select('*').not('patient_id', 'is', null),
-    supabase.from('bookings').select('patient_email').not('status', 'in', '(cancelled,expired)').limit(20000), // tope explícito: PostgREST corta en 1000 sin avisar
+    supabase.from('bookings').select('patient_email, patient_name').not('status', 'in', '(cancelled,expired)').limit(20000), // tope explícito: PostgREST corta en 1000 sin avisar
   ]);
   // Si la tabla aún no existe (migración sin correr) no avisar en falso a todos.
   if (pErr || cErr) return [];
   // Si falla leer las reservas, se avisa como antes (mejor de más que de menos).
   const vigentes = bErr ? null : new Set((reservas ?? []).map((r: { patient_email: string | null }) => String(r.patient_email ?? '').trim().toLowerCase()).filter(Boolean));
+  // Ficha SIN correo (se agenda con "Pago en consulta" y la reserva queda con correo vacío): se
+  // reconoce por el nombre de sus reservas sin correo. Antes del arreglo no se le avisaba nunca
+  // aunque tuviera horas (auditoría 19 oct 2026).
+  const nombreClave = (n: unknown) => String(n ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const vigentesSinCorreo = new Set((reservas ?? [])
+    .filter((r: { patient_email: string | null }) => !String(r.patient_email ?? '').trim())
+    .map((r: { patient_name: string | null }) => nombreClave(r.patient_name)).filter(Boolean));
   const porPaciente = new Map<string, ConsentRow[]>();
   for (const c of (consents ?? []) as ConsentRow[]) {
     const l = porPaciente.get(c.patient_id!) ?? [];
@@ -196,7 +203,8 @@ export async function getConsentAlerts(): Promise<ConsentAlert[]> {
   for (const p of patients ?? []) {
     const rows = porPaciente.get(p.id) ?? [];
     if (vigente(rows)) continue;
-    if (vigentes && !tieneSesionVigente((p as { email?: string | null }).email, vigentes)) continue;
+    const correo = String((p as { email?: string | null }).email ?? '').trim();
+    if (vigentes && (correo ? !tieneSesionVigente(correo, vigentes) : !vigentesSinCorreo.has(nombreClave(p.name)))) continue;
     const enviado = rows.filter(r => !r.signed_at && r.sent_at && personaConsent(r) === 1).map(r => r.sent_at!).sort().pop() ?? null;
     alerts.push({ patientId: p.id, name: p.name, sentAt: enviado });
   }

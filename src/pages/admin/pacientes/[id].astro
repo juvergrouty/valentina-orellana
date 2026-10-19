@@ -103,7 +103,8 @@ const pendientesTodos = calcularPendientes({
   nombrePareja: pareja.estado.retirada ? String(pareja.estado.retirada.signer_name ?? '') : null,
   retiroPareja: pareja.estado.retirada ? String(pareja.estado.retirada.revoked_at ?? '') : null,
   pasosEnviadosAt: 'steps_sent_at' in patient ? (patient.steps_sent_at ?? null) : undefined,
-  tieneSesiones: patientBookings.some((b) => b.status !== 'cancelled'),
+  // Solo sesiones vigentes con fecha: una reserva web vencida o un cobro manual no piden Pasos (auditoría 19 oct 2026).
+  tieneSesiones: patientBookings.some((b) => b.status !== 'cancelled' && b.status !== 'expired' && b.session_date !== '2099-12-31'),
   faltanDatos, hrefInfo: `/admin/pacientes/${id}?tab=info`,
   // Falta la fecha de nacimiento: desde el 18 oct NO bloquea la grabación (solo si es de un menor de 18).
   // Se avisa en toda ficha activa para tener la ficha al día.
@@ -407,8 +408,9 @@ const formatCLP = (n: number) =>
         <div style="display:flex;flex-direction:column;gap:0.75rem;">
           {patientBookings.map((b, i) => {
             const nota = notesByBooking[b.id] ?? notesByDate[b.session_date] ?? null;
-            const badgeClass = b.status === 'confirmed' ? 'badge-confirmed' : b.status === 'cancelled' ? 'badge-cancelled' : 'badge-pending';
-            const badgeLabel = b.status === 'confirmed' ? 'Confirmada' : b.status === 'cancelled' ? 'Cancelada' : 'Pendiente';
+            const badgeClass = b.status === 'confirmed' ? 'badge-confirmed' : (b.status === 'cancelled' || b.status === 'expired') ? 'badge-cancelled' : 'badge-pending';
+            // Vencida = reserva web que no se pagó: la hora se liberó (auditoría 19 oct 2026; antes decía "Pendiente").
+            const badgeLabel = b.status === 'confirmed' ? 'Confirmada' : b.status === 'cancelled' ? 'Cancelada' : b.status === 'expired' ? (b.paid_at ? 'Vencida · pago por devolver o reagendar' : 'Vencida (no se pagó)') : 'Pendiente';
             // Toma la ÚLTIMA línea "Boleta Folio N..." (por si se anuló y se
             // volvió a emitir) — mismo criterio que ya usa el panel del
             // calendario, para que ambas pantallas muestren lo mismo.
@@ -427,7 +429,8 @@ const formatCLP = (n: number) =>
             // CORREGIDO: una reserva cancelada mostraba igual el badge "Por
             // pagar" y los botones de cobro/boleta, como si todavía se le
             // debiera esa sesión — una sesión cancelada no se cobra, punto.
-            const isCancelled = b.status === 'cancelled';
+            // Una reserva vencida tampoco: no se cobra, no se confirma ni se recuerda (auditoría 19 oct 2026).
+            const isCancelled = b.status === 'cancelled' || b.status === 'expired';
             const payBadgeClass = isVoided ? 'badge-cancelled' : isPaid ? 'badge-confirmed' : 'badge-pending';
             const payBadgeLabel = isVoided ? 'Deuda anulada' : isPaid ? (b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado') : 'Por pagar';
             return (
@@ -453,7 +456,8 @@ const formatCLP = (n: number) =>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                     </button>
                     <span class={`badge ${badgeClass}`}>{badgeLabel}</span>
-                    {!isCancelled && <span class={`badge ${payBadgeClass}`}>{payBadgeLabel}</span>}
+                    {/* Vencida y pagada (Flow pagó tarde y la hora ya estaba tomada): se muestra el pago para devolverlo. */}
+                    {(!isCancelled || (b.status === 'expired' && isPaid)) && <span class={`badge ${payBadgeClass}`}>{payBadgeLabel}</span>}
                     {iaPorBooking.has(b.id) && (
                       <a href={`${redirectBase}?tab=notas#ia-${iaPorBooking.get(b.id)!.g.id}`} class="badge ia-badge-sesion"
                         title="Esta sesión se grabó. Ver el resumen automático en Notas clínicas.">
@@ -500,7 +504,7 @@ const formatCLP = (n: number) =>
                       </>
                     ) : boletaProgramada ? (
                       <span class="badge badge-pending" title="La boleta se emite el día de la sesión, con esa fecha.">🗓 Boleta el {b.session_date.slice(8, 10)}-{b.session_date.slice(5, 7)}</span>
-                    ) : isPaid ? (
+                    ) : isPaid && (b.amount ?? 0) > 0 ? (
                       <button type="button" class="btn btn-outline btn-sm bol-emitir" data-bid={b.id} data-rut={patient.rut ?? (sinRutFicha ? '44444446-0' : '')}>
                         Emitir boleta
                       </button>

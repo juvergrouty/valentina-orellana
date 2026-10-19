@@ -14,6 +14,8 @@ test('historial: una entrada por sesión (reserva + nota + grabación), por book
     { id: 'b2', session_date: '2026-10-08', session_time: '16:00:00', session_type: 'pareja-online', status: 'confirmed' },
     { id: 'b3', session_date: '2026-10-01', session_time: '10:00:00', session_type: 'online', status: 'cancelled' },
     { id: 'b4', session_date: '2026-12-01', session_time: '10:00:00', session_type: 'online', status: 'confirmed' },
+    // Reserva web vencida sin pagar (auditoría 19 oct): nunca fue sesión, no pide evolución.
+    { id: 'b5', session_date: '2026-10-12', session_time: '11:00:00', session_type: 'online', status: 'expired' },
   ];
   const notas = [
     { id: 'n1', booking_id: 'b1', session_date: '2026-10-15', session_type: 'presencial' },
