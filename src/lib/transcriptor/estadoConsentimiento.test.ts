@@ -121,3 +121,19 @@ test('el indicador está en la lista, la ficha, la agenda (bloques y paneles), e
   assert.doesNotMatch(grabador, /estadoConsentimiento'/);
   assert.doesNotMatch(leer('./etiquetaConsentimiento.ts'), /^import /m);
 });
+
+test('en lote: si fallan las señales de pareja, nadie sale "firmado" (pero lo que falta se sigue mostrando)', async () => {
+  const db = new SupabaseMemoria();
+  db.tabla('consents').push(
+    { ...fila({ signer_name: 'Camila Rojas' }), patient_id: 'p-ok' },
+    { ...fila({ signed_at: null }), patient_id: 'p-sin' },
+  );
+  const cliente = {
+    from: (tabla: string) => tabla === 'services_catalog'
+      ? { select: async () => ({ data: null, error: { message: 'caída' } }) }
+      : db.from(tabla),
+  };
+  const m = await estadosConsentimientoEnBase([{ id: 'p-ok', name: 'Camila Rojas' }, { id: 'p-sin', name: 'Sofía Paz' }], cliente as never);
+  assert.equal(m.has('p-ok'), false);
+  assert.equal(m.get('p-sin'), 'sin_firma');
+});

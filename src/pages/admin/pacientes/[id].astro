@@ -81,7 +81,8 @@ const pareja = await prepararPareja({
 
 // Indicador de la cabecera (pedido de Vale, 19 oct): misma regla de la lista, la agenda y el grabador.
 const estadoConsent = estadoConsentimiento({ filas: filasConsent, fichaPareja: pareja.esPareja, rut: patient.rut ?? null, nombre: patient.name });
-const panelEnvioConsent = estadoConsent === 'sin_firma' ? ID_PANEL_PROPIO : estadoConsent === 'falta_pareja' ? ID_PANEL_PAREJA : null;
+// Solo se abre un panel de envío que existe en el bloque Consentimientos; si no, el enlace va a #consentimiento.
+const panelEnvioConsent = estadoConsent === 'sin_firma' && !consentimiento ? ID_PANEL_PROPIO : estadoConsent === 'falta_pareja' && pareja.falta ? ID_PANEL_PAREJA : null;
 
 // Datos mínimos de la ficha (Valentina, 4 oct 2026): se avisa si faltan (en la franja Pendientes).
 const sinRutFicha = patient?.sin_rut === true && !patient?.rut;

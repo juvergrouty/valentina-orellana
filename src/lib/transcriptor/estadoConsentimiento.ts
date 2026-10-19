@@ -75,8 +75,8 @@ async function db(cliente?: SupabaseClient): Promise<SupabaseClient> {
 /**
  * Estado del consentimiento de varias fichas con pocas consultas (consents de esas fichas, reservas que
  * dicen "pareja", servicios y grabaciones de pareja). Lanza si no se pueden leer los consentimientos
- * (quien llama decide: las páginas no muestran el indicador antes que mostrar uno falso). Si fallan solo
- * las señales de pareja, se usa lo que dicen las firmas y el nombre (como el respaldo de la ficha).
+ * (quien llama decide: las páginas no muestran el indicador antes que mostrar uno falso). Si fallan las
+ * señales de pareja, nunca se dice "firmado" (esa ficha queda sin estado); lo que falta se sigue mostrando.
  */
 export async function estadosConsentimientoEnBase(fichas: FichaMinima[], cliente?: SupabaseClient): Promise<Map<string, EstadoConsentimiento>> {
   const out = new Map<string, EstadoConsentimiento>();
@@ -98,6 +98,7 @@ export async function estadosConsentimientoEnBase(fichas: FichaMinima[], cliente
   const correosPareja = new Set<string>();
   const sessionTypesPor = new Map<string, string[]>();
   const grabPareja = new Set<string>();
+  let senalesOk = true;
   try {
     const { data: svcs, error: es } = await c.from('services_catalog').select('id, type, name');
     if (es) throw es;
@@ -118,7 +119,10 @@ export async function estadosConsentimientoEnBase(fichas: FichaMinima[], cliente
     if (eg) throw eg;
     for (const g of (gs ?? []) as { patient_id?: string | null }[]) if (g.patient_id) grabPareja.add(String(g.patient_id));
   } catch (e) {
-    console.warn('[estadoConsentimiento] señales de pareja:', e instanceof Error ? e.message : e);
+    // Sin las señales de pareja no se puede decir "firmado" (el grabador también bloquea): esas fichas quedan
+    // sin estado (sin indicador). Lo que falta igual se muestra (no depende de si es pareja).
+    senalesOk = false;
+    console.warn('[estadoConsentimiento] señales de pareja:', e instanceof Error ? e.message : (e as { message?: string })?.message ?? e);
   }
 
   for (const f of unicas) {
@@ -128,7 +132,9 @@ export async function estadosConsentimientoEnBase(fichas: FichaMinima[], cliente
       sessionTypes: sessionTypesPor.get(correo) ?? [], servicioPareja: !!correo && correosPareja.has(correo),
       tiposGrabaciones: grabPareja.has(f.id) ? ['pareja'] : [], filas, nombre: f.name,
     });
-    out.set(f.id, estadoConsentimiento({ filas, fichaPareja, rut: f.rut, nombre: f.name }));
+    const estado = estadoConsentimiento({ filas, fichaPareja, rut: f.rut, nombre: f.name });
+    if (estado === 'firmado' && !senalesOk) continue;
+    out.set(f.id, estado);
   }
   return out;
 }

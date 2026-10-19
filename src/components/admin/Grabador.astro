@@ -285,6 +285,7 @@ const { datos } = Astro.props;
   .gr-opcion .ic span { font-size:inherit; color:inherit; }
   .gr-opcion .ic .ic-icono, .gr-indicador .ic .ic-icono { color:#fff; font-size:11px; }
   .gr-indicador { margin-top:8px; }
+  .gr-opcion .ic { display:inline-block; }
   .gr-alerta { border-radius:8px; padding:12px 14px; font-size:15px; }
   .gr-alerta-ambar { background:var(--gr-amber-soft); border:1px solid #fcd34d; color:var(--gr-amber); }
   .gr-alerta-roja { background:#fef2f2; border:1px solid #fca5a5; color:var(--gr-red); }
@@ -452,7 +453,7 @@ const { datos } = Astro.props;
   function chipConsent(estado: string | null | undefined, patientId: string | null = null): HTMLElement | null {
     const texto = etiquetaConsentimiento(estado);
     if (!texto) return null;
-    const chip = document.createElement('div');
+    const chip = document.createElement('span'); // span: va dentro de botones (.gr-opcion)
     chip.className = claseConsentimiento(estado);
     chip.dataset.consentEstado = String(estado);
     const ico = document.createElement('span'); ico.className = 'ic-icono'; ico.setAttribute('aria-hidden', 'true'); ico.textContent = '!';

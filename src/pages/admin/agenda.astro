@@ -180,7 +180,10 @@ patientList.forEach((p: { id: string; email: string | null; rut: string | null }
 //    consentimiento firmado"). Todas las fichas (también archivadas) para reconocer a quien tiene sesión;
 //    el estado sale de estadoConsentimiento.ts (misma regla de la ficha y del grabador). ──
 type FichaConsent = { id: string; name: string; email: string | null; rut: string | null; active: boolean | null };
-const fichasConsent: FichaConsent[] = ((await supabase.from('patients').select('id, name, email, rut, active').limit(5000)).data ?? []) as FichaConsent[];
+const resFichasConsent = await supabase.from('patients').select('id, name, email, rut, active').limit(5000);
+// Si no se pueden leer las fichas, no se muestra el indicador (no se inventa un "sin consentimiento").
+const fichasConsentOk = !resFichasConsent.error;
+const fichasConsent: FichaConsent[] = (resFichasConsent.data ?? []) as FichaConsent[];
 const fichaPorCorreo = new Map<string, FichaConsent>();
 for (const f of fichasConsent) {
   const k = String(f.email ?? '').trim().toLowerCase();
@@ -274,10 +277,11 @@ const idsConConsent = new Set<string>();
 for (const b of bookings) { const f = fichaPorCorreo.get(String(b.patient_email ?? '').trim().toLowerCase()); if (f) idsConConsent.add(f.id); }
 for (const lista of Object.values(gcalByDate)) for (const g of lista) if (g.pid) idsConConsent.add(g.pid);
 const estadoConsentPorFicha = await estadosConsentimientoSeguro(fichasConsent.filter((f) => idsConConsent.has(f.id)));
-/** Ficha y estado de una reserva. Sin ficha → sin consentimiento firmado (la firma vive en la ficha). */
+/** Ficha y estado de una reserva. Sin ficha vinculada por correo → sin indicador (igual que el grabador,
+ *  que dice "Sin ficha asociada"): no se afirma que falte la firma si la ficha puede tener otro correo. */
 function consentDeReserva(b: Record<string, any>): { pid: string; estado: EstadoConsentimiento | null } {
-  const f = fichaPorCorreo.get(String(b.patient_email ?? '').trim().toLowerCase());
-  if (!f) return { pid: '', estado: 'sin_firma' };
+  const f = fichasConsentOk ? fichaPorCorreo.get(String(b.patient_email ?? '').trim().toLowerCase()) : undefined;
+  if (!f) return { pid: '', estado: null };
   return { pid: f.id, estado: estadoConsentPorFicha.get(f.id) ?? null };
 }
 const tituloConsent = (e: EstadoConsentimiento | null | undefined) => (e && e !== 'firmado' ? ETIQUETA_CONSENTIMIENTO[e] : '');
@@ -718,7 +722,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}${tituloConsent(cs.estado) ? ` · ${tituloConsent(cs.estado)}` : ''}`}
               >
-                <span class="ev-time">{b.session_time.slice(0, 5)}{tituloConsent(cs.estado) && <span class={`ev-consent ${cs.estado === 'sin_grabacion' ? 'ev-consent-aviso' : ''}`} aria-label={tituloConsent(cs.estado)}>!</span>}</span>
+                <span class="ev-time">{b.session_time.slice(0, 5)}{tituloConsent(cs.estado) && <span class={`ev-consent ${cs.estado === 'sin_grabacion' ? 'ev-consent-aviso' : ''}`} role="img" aria-label={tituloConsent(cs.estado)}>!</span>}</span>
                 <span class="ev-name">{b.patient_name}</span>
                 {(b.duration_min ?? 50) > 35 && <span class="ev-type">{svcLabel(b)}</span>}
               </div>
@@ -730,7 +734,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
                 data-consent-estado={g.grabar && ce ? ce : undefined} data-ficha={g.grabar && g.pid ? g.pid : undefined}
                 role={g.grabar ? 'button' : undefined} tabindex={g.grabar ? 0 : undefined}
                 style={evStyle(g.time, g.dur)} title={`${g.title} · ${g.time} (Google Calendar)${tituloConsent(ce) ? ` · ${tituloConsent(ce)}` : ''}`}>
-                <span class="ev-time">{g.time}{tituloConsent(ce) && <span class={`ev-consent ${ce === 'sin_grabacion' ? 'ev-consent-aviso' : ''}`} aria-label={tituloConsent(ce)}>!</span>}</span>
+                <span class="ev-time">{g.time}{tituloConsent(ce) && <span class={`ev-consent ${ce === 'sin_grabacion' ? 'ev-consent-aviso' : ''}`} role="img" aria-label={tituloConsent(ce)}>!</span>}</span>
                 <span class="ev-name">{g.title}</span>
                 {g.dur > 35 && <span class="ev-type">Google Calendar</span>}
               </div>

@@ -55,14 +55,19 @@ if (events.length) {
     type F = { id: string; name: string; email: string | null; rut: string | null; active: boolean | null };
     const { data } = await supabase.from('patients').select('id, name, email, rut, active').limit(5000);
     const fichas = (data ?? []) as F[];
-    const porCorreo = new Map(fichas.filter((f) => f.email).map((f) => [String(f.email).trim().toLowerCase(), f]));
+    // Con correos repetidos manda la ficha activa (igual que la agenda).
+    const porCorreo = new Map<string, F>();
+    for (const f of fichas) {
+      const k = String(f.email ?? '').trim().toLowerCase();
+      if (k && (!porCorreo.has(k) || (f.active !== false && porCorreo.get(k)!.active === false))) porCorreo.set(k, f);
+    }
     const fichaDe = (ev: any): F | null => {
       for (const a of (ev.attendees ?? []) as { email?: string }[]) {
         const f = porCorreo.get(String(a.email ?? '').trim().toLowerCase());
         if (f) return f;
       }
       const titulo = String(ev.summary ?? '');
-      if (!/sesi[oó]n/i.test(titulo)) return null;
+      if (!/sesi[oó]n/i.test(titulo) && !/encuadrado\.com\/reagendar/i.test(String(ev.description ?? ''))) return null;
       const nombre = pacienteDeTitulo(titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, ''));
       const coinciden = nombre ? fichas.filter((f) => f.active !== false && mismaPersona(f.name, nombre)) : [];
       return coinciden.length === 1 ? coinciden[0] : null;

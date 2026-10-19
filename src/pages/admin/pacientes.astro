@@ -157,7 +157,7 @@ const TABS = [
                   <td>
                     <span class="pac-name">{p.name}</span>
                     {p.rut && <span class="pac-rut">{p.rut}</span>}
-                    <IndicadorConsentimiento estado={estadoConsent.get(p.id)} compacto />
+                    <IndicadorConsentimiento estado={estadoConsent.get(p.id)} patientId={p.id} enlace compacto />
                   </td>
                   <td class="pac-muted">{fmtDate(st.last) || '—'}</td>
                   <td class="pac-muted">{fmtDate(st.next) || '—'}</td>
