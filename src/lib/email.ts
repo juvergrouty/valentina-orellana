@@ -8,6 +8,7 @@ import { frasePlazoPago, AVISO_REAGENDAR } from './cobrosProximos';
 import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
 import { asuntoAnulacion, htmlAnulacion, textoAnulacion, type DatosAnulacion } from './correoAnulacion';
+import { cierreFirmaHtml } from './firmaCorreo';
 import { bloqueEntrarSesion, enlacePacienteSesion, enlaceValeSesion, filaEnlaceVale, meetDeNotas, normalizarMeet } from './enlaceSesion';
 
 // Inicialización perezosa — no falla si la key no está configurada
@@ -36,6 +37,11 @@ const FROM = `${FROM_NAME} <${FROM_ADDR}>`;
 const LOGO_HEADER = `<img src="https://www.valentinaorellana.cl/firma/v.png" width="44" height="44" alt="Ps. Valentina Orellana" style="display:block;border:0;width:44px;height:44px;margin:0 0 1.25rem;">`;
 
 const PATIENT_REPLY_TO = 'Ps. Valentina Orellana <consulta@valentinaorellana.cl>';
+
+// Cierre de TODOS los correos a pacientes (pedido de Vale, 19 oct 2026): "Un saludo," + su firma de
+// Gmail (src/lib/firmaCorreo.ts) y, debajo en letra chica, el registro de la Superintendencia.
+// Los avisos internos a Vale no lo llevan.
+const CIERRE_PACIENTE = cierreFirmaHtml({ registro: true });
 
 // Respaldo si el setting `notification_email` no está configurado — el correo
 // real de Valentina, NUNCA una dirección de terceros. Preferible a omitir el
@@ -252,10 +258,7 @@ ${enlace ? bloqueEntrarSesion(enlace) : ''}
           Escribir por WhatsApp
         </a>
 ${avisoV2 ? avisoV2.html : ''}
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>
     `;
   const res = await client.emails.send({
@@ -340,10 +343,7 @@ ${enlace ? bloqueEntrarSesion(enlace) : ''}
                   letter-spacing:0.1em;text-transform:uppercase;">
           Escribir por WhatsApp
         </a>
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>
     `,
   });
@@ -436,10 +436,7 @@ export async function sendPaymentLinkEmail(opts: {
         <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#9B9485;margin-top:1rem;">
           Tu reserva queda confirmada una vez procesado el pago.
         </p>
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>
     `,
   });
@@ -483,10 +480,7 @@ export async function sendDebtReminderEmail(opts: {
                   letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
           Ver y pagar mi saldo
         </a>
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>
     `,
   });
@@ -556,10 +550,7 @@ ${enlace ? bloqueEntrarSesion(enlace) : ''}
                   letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
           Escribir por WhatsApp
         </a>
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>
     `,
   }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
@@ -627,10 +618,7 @@ export async function sendPendingExpiredEmail(data: {
                   letter-spacing:0.1em;text-transform:uppercase;border:1px solid #576352;border-radius:4px;">
           Escribir por WhatsApp
         </a>
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>
     `,
   });
@@ -672,10 +660,7 @@ export async function sendReviewRequestEmail(opts: {
                   letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
           Dejar mi reseña en Google
         </a>
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>
     `,
   });
@@ -725,10 +710,7 @@ export async function sendEvaluationEmail(opts: {
           Tu evaluación me ayuda a acompañarte mejor en el proceso.
         </p>
         ${formBlock}
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>
     `,
   });
@@ -797,9 +779,8 @@ export function stepsEmailHtml(opts: { patientName: string; clinicAddress?: stri
       <tr><td class="pad" align="center" style="padding:20px 32px 40px;">
         <p style="margin:0;font-family:'Inter',Arial,sans-serif;font-size:12px;color:#6B6860;">Revisa también las <a href="${SITE}/condiciones" style="color:#6B6860;">condiciones del servicio y la política de privacidad</a>.</p>
       </td></tr>
-      <tr><td class="pad" style="background:#1A1A18;padding:28px 32px;">
-        <p style="margin:0 0 4px;font-family:'Domine',Georgia,serif;font-size:17px;color:#FAF7F4;">Ps. Valentina Orellana</p>
-        <p style="margin:0;font-family:'Inter',Arial,sans-serif;font-size:12px;color:rgba(250,247,244,0.5);">Psicóloga · Reg. Superintendencia de Salud N° 360070 · Santiago, Chile</p>
+      <tr><td class="pad" style="padding:4px 32px 40px;border-top:1px solid #DDD8CF;">
+        ${CIERRE_PACIENTE}
       </td></tr>
     </table>
   </td></tr>
@@ -858,10 +839,7 @@ export async function sendBoletaEmail(opts: {
           Puedes usar este documento para solicitar el <strong>reembolso en tu Isapre o en tu seguro complementario de salud</strong>,
           según tu plan.
         </p>
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>`,
     attachments: [{ filename: `boleta-${opts.folio ?? 'honorarios'}.pdf`, content: opts.pdfBase64 }],
   });
@@ -892,10 +870,7 @@ export async function sendBulkEmail(
         ${LOGO_HEADER}
         <p style="font-size:0.9rem;color:#6B6860;margin-bottom:1.5rem;">Hola ${escapeHtml(r.name)},</p>
         <div style="font-size:0.92rem;line-height:1.7;color:#1A1A18;">${bodyHtml}</div>
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
         ${r.pixelId ? `<img src="https://www.valentinaorellana.cl/api/abierto/${r.pixelId}.gif" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;" />` : ''}
       </div>`;
     try {
@@ -1156,10 +1131,7 @@ export async function sendConsentLinkEmail(opts: {
                   letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
           Leer y firmar
         </a>
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>
     `,
   }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
@@ -1196,6 +1168,7 @@ export async function sendConsentSignedCopy(opts: {
         <p style="margin-bottom:0.25rem;"><strong>Autorizaciones marcadas:</strong></p>
         <ul style="margin:0 0 1.25rem 1.1rem;">${opts.marcadas.map(m => `<li>${escapeHtml(m)}</li>`).join('')}</ul>
         <pre style="white-space:pre-wrap;font-family:inherit;color:#6B6860;border-top:1px solid #DDD8CF;padding-top:1rem;">${escapeHtml(opts.plainText)}</pre>
+        ${cierreFirmaHtml()}
       </div>
     `,
   });
@@ -1356,10 +1329,7 @@ export async function sendVitrinaConfirmation(data: VitrinaEmailData, opts: { id
           Escribir por WhatsApp
         </a>
 
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        ${CIERRE_PACIENTE}
       </div>
     `,
   }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
