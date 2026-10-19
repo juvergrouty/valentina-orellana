@@ -188,14 +188,15 @@ test('2. correo de anulación: solo avisa que la sesión fue anulada (decisión 
   const d = { patient_name: 'Ana Pérez', session_date: '2026-10-22', session_time: '18:00:00' };
   assert.equal(correo.asuntoAnulacion(d), 'Tu sesión del jueves 22 de octubre fue anulada — Ps. Valentina Orellana');
   const t = correo.textoAnulacion(d);
-  assert.equal(t, 'Hola Ana, te escribo para avisarte que tu sesión del jueves 22 de octubre a las 18:00 fue anulada.\n\nUn saludo,\nValentina');
+  assert.match(t, /^Hola Ana, te escribo para avisarte que tu sesión del jueves 22 de octubre a las 18:00 fue anulada\.\n\nUn saludo,\n\n--\nValentina Orellana\nPsicóloga · Adultos y parejas/);
   for (const v of [{ ...d, pagada: true }, { ...d, sinCosto: true }]) {
     assert.equal(correo.textoAnulacion(v), t, 'el texto no cambia por pago o sin costo');
-    assert.doesNotMatch(correo.htmlAnulacion(v), /\/agenda|wa\.me|devuelv|pagad/);
+    assert.doesNotMatch(correo.htmlAnulacion(v), /devuelv|pagad|Elegir un nuevo horario/);
   }
   const h = correo.htmlAnulacion({ ...d, patient_name: '<b>Ana</b> Pérez' });
   assert.match(h, /&lt;b&gt;Ana&lt;\/b&gt;/);
-  assert.doesNotMatch(h, /<a /, 'sin botones ni enlaces');
+  assert.match(h, /firma\/sello\.png/, 'lleva la firma de Gmail de Vale');
+  assert.doesNotMatch(h, /Elegir un nuevo horario|Escribir por WhatsApp/, 'sin botones');
 });
 
 // ─── 3. Pago en consulta ─────────────────────────────────────────────────────

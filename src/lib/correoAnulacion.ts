@@ -8,6 +8,9 @@ const SITIO = 'https://www.valentinaorellana.cl';
 export const URL_AGENDA_PACIENTE = `${SITIO}/agenda`;
 const LOGO = `<img src="${SITIO}/firma/v.png" width="44" height="44" alt="Ps. Valentina Orellana" style="display:block;border:0;width:44px;height:44px;margin:0 0 1.25rem;">`;
 
+// Firma idéntica a la de Gmail de Vale (copiada del HTML de un correo enviado desde consulta@, 9 oct 2026).
+export const FIRMA_GMAIL = `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;color:#2e332a;margin-top:0.5rem;"><tbody><tr><td style="padding:0 10px 0 0;vertical-align:middle;width:84px"><img src="${SITIO}/firma/sello.png" width="84" height="84" alt="Valentina Orellana" style="display:block;border:0;width:84px;height:84px"></td><td style="padding:0 0 0 10px;border-left:2px solid #f5a623;vertical-align:middle;font-family:Arial,Helvetica,sans-serif;"><div style="font-family:Georgia,'Times New Roman',serif;font-size:16px;font-weight:bold;color:#576352;line-height:1.3">Valentina Orellana</div><div style="font-size:11px;color:rgb(139,138,128);line-height:1.5">Psicóloga · Adultos y parejas</div><div style="font-size:12px;line-height:1.6"><a href="https://wa.me/56972735696" style="color:rgb(87,99,82);font-weight:bold">WhatsApp</a> <span style="color:#f5a623">·</span> <a href="${SITIO}" style="color:rgb(87,99,82);font-weight:bold">valentinaorellana.cl</a></div><div style="font-size:11px;color:rgb(139,138,128);line-height:1.5">Presencial en Las Condes · Online</div><div style="font-size:12px;line-height:1.6"><a href="${SITIO}/agenda" style="color:rgb(87,99,82);font-weight:bold">Agenda tu hora</a></div></td></tr></tbody></table>`;
+
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
@@ -47,7 +50,7 @@ export function textoAnulacion(d: DatosAnulacion): string {
   const hora = String(d.session_time).slice(0, 5);
   return [
     `Hola ${primerNombre(d.patient_name)}, te escribo para avisarte que tu sesión del ${fechaAnulacion(d.session_date)} a las ${hora} fue anulada.`,
-    'Un saludo,\nValentina',
+    'Un saludo,\n\n--\nValentina Orellana\nPsicóloga · Adultos y parejas\nWhatsApp https://wa.me/56972735696 · valentinaorellana.cl\nPresencial en Las Condes · Online\nAgenda tu hora https://www.valentinaorellana.cl/agenda',
   ].join('\n\n');
 }
 
@@ -61,11 +64,8 @@ export function htmlAnulacion(d: DatosAnulacion): string {
           Hola ${escapar(primerNombre(d.patient_name))}, te escribo para avisarte que tu sesión del
           <strong>${escapar(fechaAnulacion(d.session_date))} a las ${hora}</strong> fue anulada.
         </p>
-        <p style="font-family:'Inter',sans-serif;font-size:0.9rem;color:#1A1A18;line-height:1.6;margin-top:1.5rem;">Un saludo,<br>Valentina</p>
-        <p style="font-family:'Inter',sans-serif;font-size:0.75rem;color:#6B6860;margin-top:2rem;
-                  padding-top:1.5rem;border-top:1px solid #DDD8CF;">
-          Ps. Valentina Orellana · Psicóloga · Reg. Superintendencia de Salud N° 360070
-        </p>
+        <p style="font-family:'Inter',sans-serif;font-size:0.9rem;color:#1A1A18;line-height:1.6;margin:1.5rem 0 1rem;">Un saludo,</p>
+        ${FIRMA_GMAIL}
       </div>
     `;
 }
