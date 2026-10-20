@@ -6,6 +6,7 @@ import { lineaEntrarWhatsApp, normalizarMeet } from '../../../lib/enlaceSesion';
 import { upsertPatientFromBooking } from '../../../lib/patients';
 import { chocaConOtraSesion } from '../../../lib/disponibilidad';
 import { tagBookingsWithPaymentToken, totalACobrarPorEmail } from '../../../lib/debt';
+import { FORMAS_DE_PAGO } from '../../../lib/cobrosProximos';
 
 export const prerender = false;
 
@@ -212,7 +213,7 @@ export const POST: APIRoute = async ({ request }) => {
     const meetPaciente = normalizarMeet(meetLink);
     const meetLine     = lineaEntrarWhatsApp(meetPaciente);
 
-    const waMessage = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n${modalityLine}${dateLine}💰 ${incluyeOtras ? `Total a pagar: $${amountFmt} CLP\nIncluye otras sesiones que tienes pendientes de pago.` : `$${amountFmt} CLP`}\n\n💳 Enlace de pago: ${paymentUrl}${meetLine}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
+    const waMessage = `Hola ${firstName} 👋 Te comparto el enlace de pago para tu sesión:\n\n*${description}*\n${modalityLine}${dateLine}💰 ${incluyeOtras ? `Total a pagar: $${amountFmt} CLP\nIncluye otras sesiones que tienes pendientes de pago.` : `$${amountFmt} CLP`}\n\n💳 Enlace de pago: ${paymentUrl}${patientId ? `\n${FORMAS_DE_PAGO}` : ''}${meetLine}\n\nCualquier consulta, escríbeme. ¡Hasta pronto! 🌿`;
 
     const whatsappUrl = waPhone.length >= 10
       ? `https://wa.me/${waPhone}?text=${encodeURIComponent(waMessage)}`

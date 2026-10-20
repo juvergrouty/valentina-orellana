@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 import { logEmail, logError, logInfo } from './logger';
 import { stepsItems, STEPS_INTRO } from './stepsContent';
 import { todayCL, hoursUntilSessionCL } from './dateUtils';
-import { frasePlazoPago, AVISO_REAGENDAR } from './cobrosProximos';
+import { frasePlazoPago, AVISO_REAGENDAR, FORMAS_DE_PAGO } from './cobrosProximos';
 import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
 import { asuntoAnulacion, htmlAnulacion, textoAnulacion, type DatosAnulacion } from './correoAnulacion';
@@ -435,6 +435,7 @@ export async function sendPaymentLinkEmail(opts: {
                   letter-spacing:0.1em;text-transform:uppercase;border-radius:4px;">
           Pagar mi sesión
         </a>
+        ${/\/pagar\//.test(opts.paymentUrl) ? `<p style="font-family:'Inter',sans-serif;font-size:0.85rem;color:#6B6860;margin-top:1rem;">${FORMAS_DE_PAGO}</p>` : ''}
         <p style="font-family:'Inter',sans-serif;font-size:0.78rem;color:#9B9485;margin-top:1rem;">
           Tu reserva queda confirmada una vez procesado el pago.
         </p>
@@ -473,8 +474,8 @@ export async function sendDebtReminderEmail(opts: {
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Tienes un saldo pendiente</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
           Hola ${escapeHtml(opts.patientName)}, tienes un saldo pendiente de ${formatCLP(opts.amount)}
-          por ${opts.sessionsCount} sesión${opts.sessionsCount === 1 ? '' : 'es'} anterior${opts.sessionsCount === 1 ? '' : 'es'}.
-          Puedes revisar el detalle y pagarlo con el siguiente enlace seguro.
+          por ${opts.sessionsCount} sesión${opts.sessionsCount === 1 ? '' : 'es'}.
+          Puedes revisar el detalle y pagarlo con el siguiente enlace seguro. ${FORMAS_DE_PAGO}
         </p>
         <a href="${opts.payUrl}"
            style="display:inline-block;background:#576352;color:white;padding:0.85rem 1.75rem;

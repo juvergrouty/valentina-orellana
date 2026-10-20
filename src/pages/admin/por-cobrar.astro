@@ -2,7 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
-import { frasePlazoPago, AVISO_REAGENDAR } from '../../lib/cobrosProximos';
+import { frasePlazoPago, AVISO_REAGENDAR, FORMAS_DE_PAGO } from '../../lib/cobrosProximos';
 import { hoursUntilSessionCL } from '../../lib/dateUtils';
 import { sesionesPorCobrar } from '../../lib/porCobrar';
 import { esPagoEnConsulta, ETIQUETA_PAGO_EN_CONSULTA } from '../../lib/pagoEnConsulta';
@@ -119,7 +119,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
             const extraPres = plazo ? `\n${AVISO_REAGENDAR}` : '';
             const waMsg = payUrl ? encodeURIComponent(
               patientId
-                ? `Hola ${firstName}, te recuerdo el link de pago pendiente${plazo}: ${payUrl}${extraPres}`
+                ? `Hola ${firstName}, te recuerdo el link de pago pendiente${plazo}: ${payUrl}\n${FORMAS_DE_PAGO}${extraPres}`
                 : `Hola ${firstName}, te recuerdo el link de pago para tu sesión (${formatCLP(b.amount)})${plazo}: ${payUrl}${extraPres}`
             ) : '';
             // Paga en consulta (19 oct 2026): sin link de pago ni plazo de 24 h; se cobra en la sesión.

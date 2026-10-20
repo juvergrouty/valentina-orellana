@@ -30,15 +30,21 @@ export function frasePlazoPago(fecha: string, hora: string): string {
  *  2026): forma el hábito de pagar a tiempo. Dicho con suavidad, sin sonar a multa. */
 export const AVISO_REAGENDAR = 'Si no alcanzas a pagar dentro de ese plazo, te escribo para que busquemos otro horario.';
 
+/** Formas de pago del link combinado /pagar/<ficha> (Vale, 20 oct 2026: "que salga Flow y
+ *  transferencia"). Va en el correo y el WhatsApp del link; no con el link directo de Flow de respaldo,
+ *  que no ofrece transferencia. El script de la agenda (Cobrar) repite el mismo texto. */
+export const FORMAS_DE_PAGO = 'Puedes pagar con tarjeta por Flow o por transferencia subiendo el comprobante.';
+const conFormasDePago = (url: string) => (/\/pagar\//.test(url) ? `\n${FORMAS_DE_PAGO}` : '');
+
 /** Mensaje de WhatsApp con el link de pago (el mismo texto que usaba
  *  Valentina a mano). Sin fecha de sesión, solo el link. */
 export function mensajeLinkPago(nombre: string, url: string, fecha?: string | null, hora?: string | null): string {
   const primerNombre = (nombre || '').trim().split(/\s+/)[0] || '';
   const saludo = primerNombre ? `Hola ${primerNombre} 👋` : 'Hola 👋';
   if (fecha && hora && /^\d{4}-\d{2}-\d{2}$/.test(fecha) && hoursUntilSessionCL(fecha, hora.slice(0, 5)) > 0) {
-    return `${saludo} Te comparto el link de pago, ${frasePlazoPago(fecha, hora)}: ${url}\n${AVISO_REAGENDAR}`;
+    return `${saludo} Te comparto el link de pago, ${frasePlazoPago(fecha, hora)}: ${url}${conFormasDePago(url)}\n${AVISO_REAGENDAR}`;
   }
-  return `${saludo} Te comparto el link de pago: ${url}`;
+  return `${saludo} Te comparto el link de pago: ${url}${conFormasDePago(url)}`;
 }
 
 export const HORAS_AVISO_COBRO = 32;

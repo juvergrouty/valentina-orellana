@@ -532,6 +532,17 @@ const formatCLP = (n: number) =>
                       <>
                         <button type="button" class="btn btn-outline btn-sm"
                           onclick={`toggleNota('pay-${i}')`}>💰 Marcar pagado</button>
+                        {/* "Paga en consulta" → link de pago (20 oct 2026, ver src/lib/consultaALink.ts): quita la marca y
+                            abre la sesión en la agenda con "💳 Cobrar" desplegado para mandarle el link. */}
+                        {enConsulta && (
+                          <form method="POST" action="/api/admin/bookings" style="margin:0;display:inline;"
+                            onsubmit="return confirm('¿Cambiar esta sesión a link de pago?\n\nDeja de ser «Paga en consulta» y queda como hora por pagar (con el plazo de 24 h antes de la sesión). No cambia la fecha, la hora ni el monto, y no se le envía nada todavía: después se abre la sesión en la agenda con «Cobrar» para que le mandes el link por WhatsApp o correo.')">
+                            <input type="hidden" name="action" value="consulta_a_link" />
+                            <input type="hidden" name="id" value={b.id} />
+                            <input type="hidden" name="redirect" value={`/admin/agenda?booking=${b.id}`} />
+                            <button type="submit" class="btn btn-outline btn-sm">💳 Cambiar a link de pago</button>
+                          </form>
+                        )}
                         {/* Separado de "Marcar pagado" (auditoría 15 oct 2026): a la derecha de la fila, para no apretarlo por error. Pide confirmación. */}
                         <button type="button" class="btn btn-outline btn-sm btn-void-debt" data-bid={b.id}
                           style="color:var(--stone);margin-left:auto;order:99;">Anular deuda</button>

@@ -21,6 +21,7 @@ import { limpiarRut, rutValido, RUT_EXTRANJERO_SII } from '../../../lib/rut';
 import { rutaInterna } from '../../../lib/rutaInterna';
 import { anularReserva, quiereAvisar } from '../../../lib/anularReserva';
 import { MARCA_PAGO_EN_CONSULTA } from '../../../lib/pagoEnConsulta';
+import { cambiarConsultaALink } from '../../../lib/consultaALink';
 
 export const prerender = false;
 
@@ -268,6 +269,20 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     });
     if (!res.sent) return redirect(sep('error=email_failed&detail=' + encodeURIComponent(res.reason ?? '')));
     return redirect(sep('debt_email_sent=1'));
+  }
+
+  // ── Cambiar "Paga en consulta" a link de pago (20 oct 2026, ver consultaALink.ts) ──
+  // Solo quita la marca: fecha, hora y monto quedan igual. Vuelve a la agenda con la sesión abierta y
+  // el menú "💳 Cobrar" desplegado, para mandarle enseguida el link por WhatsApp o correo.
+  if (action === 'consulta_a_link') {
+    const id = form.get('id')?.toString();
+    if (!id) return redirect(conParam(dest) + 'error=a_link_no_encontrada');
+    const r = await cambiarConsultaALink(id);
+    if (!r.ok) {
+      return redirect(conParam(dest) + 'error=' + (r.error === 'guardar' ? 'guardar_reserva&detail=' + encodeURIComponent((r.detalle ?? '').slice(0, 200)) : 'a_link_' + r.error));
+    }
+    const conSesion = /[?&]booking=/.test(dest) ? dest : conParam(dest) + 'booking=' + encodeURIComponent(id);
+    return redirect(conParam(conSesion) + 'saved=a-link&accion=cobrar');
   }
 
   // ── Anular deuda ─────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import Layout from '../../layouts/BaseLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { getTotalOwedByEmail, manualChargeLabel } from '../../lib/debt';
 import { comprobanteEnRevision } from '../../lib/comprobantes';
+import { FORMAS_DE_PAGO } from '../../lib/cobrosProximos';
 
 // Página pública (sin login) que el paciente abre desde el link que Valentina
 // le manda por WhatsApp/email. A diferencia de un link de pago con monto fijo,
@@ -111,7 +112,7 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
       <>
         <p class="label text-stone mb-1">Hola {patient.name.split(' ')[0]}</p>
         <h1 class="font-heading text-2xl md:text-3xl mb-2">Sesiones por pagar</h1>
-        <p class="text-stone text-sm mb-8">Revisa y paga las sesiones que tienes con Ps. Valentina Orellana.</p>
+        <p class="text-stone text-sm mb-8">Revisa y paga las sesiones que tienes con Ps. Valentina Orellana. {FORMAS_DE_PAGO}</p>
         {enRevision.length > 0 && (
           <p class="text-sm bg-sand border border-dust rounded-lg px-4 py-3 mb-6">Ya recibí tu comprobante de transferencia por {formatCLP(totalRevision)} y lo estoy revisando. Esas sesiones no aparecen abajo.</p>
         )}

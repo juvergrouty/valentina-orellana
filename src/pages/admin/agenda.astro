@@ -569,6 +569,15 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       {errorParam === 'email_failed' && (
         <div class="cal-error-banner">⚠ No se pudo enviar el correo{errorDetail ? `: ${errorDetail}` : ''}.</div>
       )}
+      {Astro.url.searchParams.get('saved') === 'a-link' && (
+        <div class="cal-error-banner" role="status" style="background:#f0fdf4;border-color:#86efac;color:#15803d;">✓ Listo: la sesión ya no es "Paga en consulta" y quedó por pagar con link (misma fecha, hora y monto). Envíale el link desde "💳 Cobrar" en la sesión: puede pagar con tarjeta por Flow o por transferencia subiendo el comprobante.</div>
+      )}
+      {errorParam === 'a_link_no_en_consulta' && (
+        <div class="cal-error-banner">⚠ Esa sesión ya no está como "Paga en consulta" (puede que ya esté pagada, anulada o cambiada). No se cambió nada: recarga para ver su estado.</div>
+      )}
+      {errorParam === 'a_link_no_encontrada' && (
+        <div class="cal-error-banner">⚠ No se encontró esa sesión. No se cambió nada.</div>
+      )}
       {Astro.url.searchParams.get('debt_email_sent') === '1' && (
         <div class="cal-error-banner" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;">✓ Link de pago enviado por correo al paciente.</div>
       )}
@@ -1406,6 +1415,17 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           <form method="POST" action="/api/admin/bookings" id="sp-paylink-mail-form" style="margin:0;display:none;">
             <input type="hidden" name="action" value="send_debt_email">
             <input type="hidden" name="patient_id" id="sp-paylink-mail-patient">
+            <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
+          </form>
+        </div>
+        <!-- "Paga en consulta" → link de pago (20 oct 2026, ver src/lib/consultaALink.ts): quita la marca
+             y vuelve con "💳 Cobrar" abierto para mandarle el link (mismo flujo que una hora por pagar). -->
+        <div id="sp-a-link-box" style="display:none;margin-top:0.6rem;">
+          <button type="button" id="sp-btn-a-link" class="btn btn-outline btn-sm">💳 Cambiar a link de pago</button>
+          <p style="font-size:0.72rem;color:var(--stone);margin:0.3rem 0 0;">Deja de ser "Paga en consulta" y queda por pagar con link. No cambia la fecha, la hora ni el monto.</p>
+          <form method="POST" action="/api/admin/bookings" id="sp-a-link-form" style="margin:0;display:none;">
+            <input type="hidden" name="action" value="consulta_a_link">
+            <input type="hidden" name="id" id="sp-a-link-id">
             <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
           </form>
         </div>
@@ -3040,16 +3060,19 @@ function openSessionDetail(b) {
     const payUrl = b.patient_id ? `${window.location.origin}/pagar/${b.patient_id}` : `${flowCheckoutBase}?token=${b.mp_preference_id}`;
     // Plazo de pago: 24 horas antes de la sesión (Valentina, 14 oct 2026). Mismo
     // texto que mensajeLinkPago() en src/lib/cobrosProximos.ts.
+    // Formas de pago (20 oct 2026, FORMAS_DE_PAGO en cobrosProximos.ts): solo con el link /pagar, que
+    // ofrece las dos; el link directo de Flow de respaldo no tiene transferencia.
+    const formasPago = b.patient_id ? '\nPuedes pagar con tarjeta por Flow o por transferencia subiendo el comprobante.' : '';
     const payMsg = (() => {
       const saludo = `Hola ${b.patient_name.split(' ')[0]} 👋`;
       const hora = String(b.session_time ?? '').slice(0, 5);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(b.session_date ?? '') || !/^\d{2}:\d{2}$/.test(hora)) return `${saludo} Te comparto el link de pago: ${payUrl}`;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(b.session_date ?? '') || !/^\d{2}:\d{2}$/.test(hora)) return `${saludo} Te comparto el link de pago: ${payUrl}${formasPago}`;
       const [y, m, d] = b.session_date.split('-').map(Number);
       const [hh, mi] = hora.split(':').map(Number);
       // Horas que faltan, con la hora de Chile (el navegador puede estar en otra zona).
       const ahoraCL = new Date(new Date().toLocaleString('sv-SE', { timeZone: 'America/Santiago' }).replace(' ', 'T'));
       const faltan = (new Date(y, m - 1, d, hh, mi).getTime() - ahoraCL.getTime()) / 3600000;
-      if (faltan <= 0) return `${saludo} Te comparto el link de pago: ${payUrl}`;
+      if (faltan <= 0) return `${saludo} Te comparto el link de pago: ${payUrl}${formasPago}`;
       const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
       const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
       const cuando = `${dias[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d} de ${meses[m - 1]} a las ${hora}`;
@@ -3057,7 +3080,7 @@ function openSessionDetail(b) {
       const extra = '\nSi no alcanzas a pagar dentro de ese plazo, te escribo para que busquemos otro horario.';
       return (faltan < 24
         ? `${saludo} Te comparto el link de pago, el cual debe quedar confirmado antes de tu sesión del ${cuando}: ${payUrl}`
-        : `${saludo} Te comparto el link de pago, el cual debe quedar confirmado con un plazo máximo de 24 horas antes de tu sesión del ${cuando}: ${payUrl}`) + extra;
+        : `${saludo} Te comparto el link de pago, el cual debe quedar confirmado con un plazo máximo de 24 horas antes de tu sesión del ${cuando}: ${payUrl}`) + formasPago + extra;
     })();
     const waPayBtn = document.getElementById('sp-paylink-wa');
     if (waPhone.length >= 10) {
@@ -3086,6 +3109,9 @@ function openSessionDetail(b) {
     paylinkBox.style.display = 'none';
   }
   document.getElementById('sp-cobrar-menu').style.display = 'none';
+  // "Cambiar a link de pago": solo en una hora "Paga en consulta" vigente y sin pagar (pago_en_consulta ya lo exige).
+  document.getElementById('sp-a-link-box').style.display = (b.pago_en_consulta && !isPaid && !isVoided) ? 'block' : 'none';
+  document.getElementById('sp-a-link-id').value = b.id;
 
   // Recordatorio automático (interruptor por reserva)
   const remEmail = document.getElementById('sp-rem-email');
@@ -3345,6 +3371,15 @@ document.addEventListener('click', (e) => {
   const menu = document.getElementById('sp-cobrar-menu');
   if (menu && menu.style.display !== 'none' && !e.target.closest('#sp-paylink-box')) {
     menu.style.display = 'none';
+  }
+});
+
+// ── "Paga en consulta" → link de pago ─────────────────────────────────────────
+document.getElementById('sp-btn-a-link')?.addEventListener('click', () => {
+  if (confirm('¿Cambiar esta sesión a link de pago?\n\nDeja de ser "Paga en consulta" y queda como hora por pagar (con el plazo de 24 h antes de la sesión). No cambia la fecha, la hora ni el monto, y no se le envía nada todavía: después se abre "Cobrar" para que le mandes el link por WhatsApp o correo.')) {
+    const btn = document.getElementById('sp-btn-a-link');
+    btn.textContent = 'Guardando…'; btn.disabled = true;
+    document.getElementById('sp-a-link-form').submit();
   }
 });
 

@@ -4,6 +4,7 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { upsertPatientFromBooking } from '../../lib/patients';
 import { sesionesQueTeDeben, sesionesPorCobrar } from '../../lib/porCobrar';
+import { FORMAS_DE_PAGO } from '../../lib/cobrosProximos';
 
 // Se arma desde la URL real de la petición (no desde PUBLIC_SITE_URL): esa
 // variable de entorno en Vercel resultó estar apuntando al dominio de Vercel
@@ -214,7 +215,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
               const proximas = d.email ? proximasPorEmail[d.email.toLowerCase()] : undefined;
               const waMsg = encodeURIComponent(
                 payUrl
-                  ? `Hola ${firstName}, tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores.${proximas ? ` El link incluye también ${proximas.n === 1 ? 'tu próxima sesión' : 'tus próximas sesiones'} sin pagar (${formatCLP(proximas.total)}).` : ''} Puedes revisarlo y pagarlo aquí: ${payUrl}`
+                  ? `Hola ${firstName}, tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores.${proximas ? ` El link incluye también ${proximas.n === 1 ? 'tu próxima sesión' : 'tus próximas sesiones'} sin pagar (${formatCLP(proximas.total)}).` : ''} Puedes revisarlo y pagarlo aquí: ${payUrl}\n${FORMAS_DE_PAGO}`
                   : `Hola ${firstName}, te escribo de la consulta de Ps. Valentina Orellana — tienes un saldo pendiente de ${formatCLP(d.total)} por sesiones anteriores. ¿Me confirmas cuándo podrías regularizarlo?`
               );
               const waUrl = waNumber.length >= 10 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
