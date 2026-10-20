@@ -1592,6 +1592,8 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
           // boleta_failed: el pago SÍ quedó registrado; solo falló la boleta
           // (queda en el aviso rojo de boletas y se reintenta si fue el SII).
           if (err === 'boleta_failed') errores.push(`pago confirmado, pero la boleta no se emitió: ${q.get('detail') ?? ''}`);
+          // boleta_reintento: quedó en la cola de envíos y se reintenta sola cada 5 min (20 oct 2026).
+          else if (err === 'boleta_reintento') errores.push(`pago confirmado; la boleta no salió todavía y se reintenta sola cada 5 minutos${q.get('detail') ? ` (${q.get('detail')})` : ''}`);
           else if (!res.ok || err) errores.push(q.get('detail') || err || `HTTP ${res.status}`);
         } catch { errores.push('error de conexión'); }
       }

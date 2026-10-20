@@ -157,7 +157,14 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
   {/* Cualquier otro error (ej. al marcar pagado) también se ve (8 oct 2026): antes volvía sin aviso. */}
   {errorParam && !['patient_no_email', 'no_debt', 'email_failed', 'anular_deuda', 'tarifa_guardar', 'rebote_guardar', 'feriado'].includes(errorParam) && (
     <div class="card" style="background:#fef2f2;border-color:#fecaca;color:#dc2626;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
-      ⚠ {errorParam === 'boleta_failed' ? 'El pago se registró, pero la boleta NO se emitió' : 'No se pudo guardar el cambio'}{errorDetail ? `: ${errorDetail}` : ''}{errorParam === 'boleta_failed' ? '.' : ' — intenta de nuevo.'}
+      ⚠ {errorParam === 'boleta_failed' ? 'El pago se registró, pero la boleta NO se emitió'
+        : errorParam === 'boleta_reintento' ? 'El pago se registró, pero la boleta no salió todavía (quedó en la cola: se reintenta sola cada 5 minutos y, si no sale, te aparece un aviso en el panel)'
+        : 'No se pudo guardar el cambio'}{errorDetail ? `: ${errorDetail}` : ''}{errorParam === 'boleta_failed' || errorParam === 'boleta_reintento' ? '.' : ' — intenta de nuevo.'}
+    </div>
+  )}
+  {Astro.url.searchParams.get('boleta') === 'emitida' && (
+    <div class="card" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;padding:0.85rem 1.2rem;margin-bottom:1rem;font-size:0.85rem;">
+      ✓ Pago registrado y boleta emitida. Se le envía a la paciente por correo (si el envío falla, se reintenta solo).
     </div>
   )}
   {porCobrar === null && !errorLectura && (
@@ -290,10 +297,12 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
                                     <option value="Otro">Otro</option>
                                   </select>
                                 </div>
-                                <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;cursor:pointer;">
-                                  <input type="checkbox" name="emitir_boleta" />
-                                  Emitir y enviar boleta
-                                </label>
+                                {(b.amount ?? 0) > 0 && (
+                                  <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;cursor:pointer;">
+                                    <input type="checkbox" name="emitir_boleta" checked />
+                                    Emitir y enviar boleta
+                                  </label>
+                                )}
                                 <button type="submit" class="btn btn-dark btn-sm">✓ Marcar como pagado</button>
                               </form>
                             </div>

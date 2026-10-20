@@ -14,6 +14,7 @@ import { urlSesion } from '../../lib/enlaceSesion';
 import { mensajeLinkPago } from '../../lib/cobrosProximos';
 import { estadosConsentimientoSeguro, ETIQUETA_CONSENTIMIENTO, type EstadoConsentimiento } from '../../lib/transcriptor/estadoConsentimiento';
 import { esPagoEnConsulta, ETIQUETA_PAGO_EN_CONSULTA } from '../../lib/pagoEnConsulta';
+import { carrilesDelDia } from '../../lib/horaLibre';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
 // ?w=abc daba NaN y la página se caía al armar las fechas (8 oct 2026): si no es un número, semana actual.
@@ -318,6 +319,15 @@ type BRow = (typeof bookings)[number];
 
 const byDate: Record<string, BRow[]> = {};
 bookings.forEach(b => { (byDate[b.session_date] ??= []).push(b); });
+// Sesiones que se cruzan (hora libre, 20 oct 2026): lado a lado, ninguna tapa a otra.
+const carril = new Map<string, { i: number; n: number }>();
+for (const filas of Object.values(byDate)) {
+  for (const [id, c] of carrilesDelDia(filas.filter(b => !['cancelled', 'expired'].includes(b.status)).map(b => ({ id: b.id, session_time: String(b.session_time), duration_min: b.duration_min ?? null })))) carril.set(id, c);
+}
+const carrilStyle = (id: string) => {
+  const c = carril.get(id);
+  return c && c.n > 1 ? `;left:calc(2px + (100% - 4px) * ${c.i} / ${c.n});right:auto;width:calc((100% - 4px) / ${c.n} - 2px)` : '';
+};
 
 // Horas abiertas solo para un día (horasExtra.ts): se pintan siempre, en el
 // color del servicio (o neutro si son para un grupo), con borde punteado. Si
@@ -417,7 +427,25 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
     <!-- ── Toolbar ──────────────────────────────────────────────────────── -->
     <div class="cal-toolbar">
       {errorParam === 'conflict' && (
-        <div class="cal-error-banner">⚠ Conflicto de horario — elige otro.</div>
+        <div class="cal-error-banner">⚠ Conflicto de horario: se cruza con otra sesión y no se guardó el cambio.</div>
+      )}
+      {errorParam === 'cruce' && (
+        <div class="cal-error-banner">⚠ Esa hora se cruza con otra sesión y no se guardó. Vuelve a intentarlo: el panel te mostrará con cuál se cruza y podrás agendarla igual.</div>
+      )}
+      {(errorParam === 'cruce_bloqueado' || Astro.url.searchParams.get('cruce_bloqueado')) && (
+        <div class="cal-error-banner">⚠ {errorParam === 'cruce_bloqueado' ? 'No se guardó' : 'Algunas sesiones del pack no se guardaron'}: elegiste agendar igual una hora que se cruza con otra sesión, pero la base de datos todavía no permite sesiones cruzadas (falta aplicar la actualización 0026). Elige otra hora por ahora.</div>
+      )}
+      {errorParam === 'hora_invalida' && (
+        <div class="cal-error-banner">⚠ Falta la fecha o la hora (o no es válida). No se cambió nada.</div>
+      )}
+      {Astro.url.searchParams.get('boleta') === 'emitida' && (
+        <div class="cal-error-banner" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;">✓ Pago registrado y boleta emitida. Se le envía a la paciente por correo (si el envío falla, se reintenta solo).</div>
+      )}
+      {Astro.url.searchParams.get('boleta') === 'programada' && (
+        <div class="cal-error-banner" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d;">✓ Pago registrado. La boleta se emitirá automáticamente el día de la sesión.</div>
+      )}
+      {errorParam === 'boleta_reintento' && (
+        <div class="cal-error-banner">⚠ El pago se registró, pero la boleta no salió todavía{errorDetail ? ` (${errorDetail})` : ''}. Quedó en la cola: se reintenta sola cada 5 minutos y, si no sale, te aparece un aviso en el panel.</div>
       )}
       {(Astro.url.searchParams.get('saved') === 'hora-quitada-dia' || Astro.url.searchParams.get('saved') === 'hora-quitada-semanal') && (
         <div class="cal-error-banner" style="background:#f0fdf4;border-color:#86efac;color:#15803d;display:flex;align-items:center;gap:0.5rem;">
@@ -526,7 +554,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
         <div class="cal-error-banner">⚠ Falta ejecutar la migración de base de datos pendiente antes de poder usar esto (columnas de pago).</div>
       )}
       {errorParam === 'boleta_failed' && (
-        <div class="cal-error-banner">⚠ El pago se registró, pero la boleta NO se emitió{errorDetail ? `: ${errorDetail}` : ''}. Emítela manualmente desde el calendario.</div>
+        <div class="cal-error-banner">⚠ El pago se registró, pero la boleta NO se emitió{errorDetail ? `: ${errorDetail}` : ''}.{/emite la boleta desde la sesión/i.test(errorDetail ?? '') ? '' : ' Emítela manualmente desde la sesión.'}</div>
       )}
       {/* Sesión futura pagada por adelantado: la boleta sale sola ese día (8 oct 2026). */}
       {boletaProgramadaOk && (
@@ -703,7 +731,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
                 data-date={b.session_date}
                 data-time={String(b.session_time ?? '').slice(0, 5)}
                 data-status={b.status}
-                style={`${evStyle(b.session_time, b.duration_min)};--svcbg:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bg};--svcbd:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bd}`}
+                style={`${evStyle(b.session_time, b.duration_min)}${carrilStyle(b.id)};--svcbg:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bg};--svcbd:${(b.service_id && svcColor[b.service_id] ? svcColor[b.service_id] : NEUTRAL_COLOR).bd}`}
                 data-booking={JSON.stringify({
                   id: b.id,
                   patient_name:   b.patient_name,
@@ -920,7 +948,8 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           </div>
           <div class="bp-field">
             <label>Hora</label>
-            <input type="time" name="session_time" id="bp-time" required step="300">
+            <input type="time" name="session_time" id="bp-time" required step="60">
+            <input type="hidden" name="forzar_cruce" value="">
           </div>
         </div>
 
@@ -1395,8 +1424,8 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
               </select>
             </div>
             <input type="hidden" name="rut" id="sp-mark-paid-rut" value="">
-            <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;cursor:pointer;">
-              <input type="checkbox" name="emitir_boleta" id="sp-mark-paid-boleta">
+            <label id="sp-mark-paid-boleta-wrap" style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;cursor:pointer;">
+              <input type="checkbox" name="emitir_boleta" id="sp-mark-paid-boleta" checked>
               Emitir y enviar boleta al confirmar
             </label>
             <button type="submit" class="sp-btn-confirm">✓ Marcar como pagado</button>
@@ -1503,8 +1532,9 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           Reagendar sesión
         </button>
         <div id="sp-rsc-form" style="display:none;margin-top:0.75rem;">
-          <form method="POST" action="/api/admin/bookings" style="margin:0;display:flex;flex-direction:column;gap:0.6rem;">
+          <form method="POST" action="/api/admin/bookings" id="sp-rsc-formulario" style="margin:0;display:flex;flex-direction:column;gap:0.6rem;">
             <input type="hidden" name="action" value="reschedule">
+            <input type="hidden" name="forzar_cruce" value="">
             <input type="hidden" name="id" id="sp-rsc-id">
             <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
             <div class="bp-field-row">
@@ -1514,7 +1544,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
               </div>
               <div class="bp-field">
                 <label style="font-size:0.68rem;">Nueva hora</label>
-                <input type="time" name="session_time" id="sp-rsc-time" required step="900">
+                <input type="time" name="session_time" id="sp-rsc-time" required step="60">
               </div>
             </div>
             <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;cursor:pointer;">
@@ -2426,6 +2456,62 @@ document.getElementById('bp-form')?.addEventListener('submit', (e) => {
   if (!val('bp-pcomuna')) faltan.push('comuna');
   if (faltan.length) { e.preventDefault(); e.stopImmediatePropagation(); alert('Para crear la paciente falta: ' + faltan.join(', ') + '.'); }
 }, true);
+// Hora libre (Valentina, 20 oct 2026): el panel acepta cualquier minuto (7:53).
+// Antes de enviar pregunta al servidor si la hora queda fuera de su horario o
+// se cruza con otra sesión; si es así lo AVISA y ella decide agendar igual
+// (forzar_cruce=1). Si la revisión falla, se envía igual: el servidor sigue
+// sin dejar cruces que ella no haya aceptado.
+function revisarHoraAntes(form, params, verbo) {
+  form.addEventListener('submit', async (e) => {
+    if (form.dataset.horaRevisada === '1') { delete form.dataset.horaRevisada; return; }
+    const p = params();
+    if (!p.date || !p.time) return; // el navegador ya pide los campos obligatorios
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const forzar = form.querySelector('input[name="forzar_cruce"]');
+    if (forzar) forzar.value = '';
+    const btn = form.querySelector('button[type="submit"]');
+    const textoBtn = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'Revisando la hora…'; }
+    let r = null;
+    try {
+      const res = await fetch('/api/admin/revisar-hora?' + new URLSearchParams(p).toString(), { credentials: 'same-origin', signal: AbortSignal.timeout(8000) });
+      if (res.ok) r = await res.json();
+    } catch (err) { /* sin revisión: el servidor igual protege los cruces */ }
+    if (btn) { btn.disabled = false; btn.textContent = textoBtn; }
+    if (r?.ok && r.avisos?.length) {
+      const msg = 'Atención:\n\n• ' + r.avisos.join('\n• ') + `\n\n¿${verbo} igual a las ${r.hora}?`;
+      if (!confirm(msg)) return;
+      if (forzar && r.hayCruce) forzar.value = '1';
+    }
+    form.dataset.horaRevisada = '1';
+    form.requestSubmit();
+    // Si el navegador no lo envió (campo inválido), la próxima vez se vuelve a revisar.
+    setTimeout(() => { delete form.dataset.horaRevisada; }, 0);
+  }, true);
+}
+{
+  const bpForm = document.getElementById('bp-form');
+  if (bpForm) revisarHoraAntes(bpForm, () => {
+    const svc = document.getElementById('bp-service-sel');
+    // La modalidad solo cuenta si el servicio admite ambas (fila visible).
+    const mod = document.getElementById('bp-modality-row')?.style.display !== 'none'
+      ? bpForm.querySelector('input[name="modality_choice"]:checked') : null;
+    return {
+      date: document.getElementById('bp-date')?.value || '',
+      time: document.getElementById('bp-time')?.value || '',
+      service_id: svc?.value || '',
+      modality: mod?.value || '',
+      sessions: document.getElementById('bp-sessions')?.value || '1',
+    };
+  }, 'Agendar');
+  const rscForm = document.getElementById('sp-rsc-formulario');
+  if (rscForm) revisarHoraAntes(rscForm, () => ({
+    date: document.getElementById('sp-rsc-date')?.value || '',
+    time: document.getElementById('sp-rsc-time')?.value || '',
+    excluir: document.getElementById('sp-rsc-id')?.value || '',
+  }), 'Reagendar');
+}
 // Un solo envío (13 oct 2026): agendar con link de pago tarda ~6 s (paciente,
 // reserva, link de Flow y correo). Sin aviso, Valentina apretó de nuevo; el
 // segundo envío chocó con la reserva recién creada y la página mostró "todos
@@ -3027,6 +3113,10 @@ function openSessionDetail(b) {
   document.getElementById('sp-void-debt-id').value  = b.id;
   document.getElementById('sp-sin-costo-id').value  = b.id;
   document.getElementById('sp-mark-paid-rut').value = b.patient_rut || '';
+  // Boleta al marcar pagado (20 oct 2026): marcada por defecto; sin boleta si la sesión es de $0.
+  const boletaChk = document.getElementById('sp-mark-paid-boleta');
+  boletaChk.checked = (b.amount ?? 0) > 0;
+  document.getElementById('sp-mark-paid-boleta-wrap').style.display = (b.amount ?? 0) > 0 ? 'flex' : 'none';
 
   // "Anular pago" — deshacer un "Marcar como pagado" hecho por error.
   document.getElementById('sp-unmark-paid-box').style.display = (isPaid && !isVoided) ? 'block' : 'none';

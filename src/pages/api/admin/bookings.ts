@@ -11,7 +11,9 @@ import { quitarLineasNotas, agregarLineaNotas, MARCA_PROGRAMADA } from '../../..
 import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { logWarn } from '../../../lib/logger';
-import { encolarTareas } from '../../../lib/tareasEnvio';
+import { encolarTareas, encolarYEjecutar, pagoDelPanel } from '../../../lib/tareasEnvio';
+import { normalizarHora, debeEmitirBoleta, avisoBoletaPanel } from '../../../lib/horaLibre';
+import { folioVigente } from '../../../lib/apigateway';
 import { todayCL } from '../../../lib/dateUtils';
 import { chocaConOtraSesion } from '../../../lib/disponibilidad';
 import { limpiarRut, rutValido, RUT_EXTRANJERO_SII } from '../../../lib/rut';
@@ -40,6 +42,11 @@ async function pasosSinCosto(p: { patient_name?: string | null; patient_email?: 
   // su reintento no choca con uno anterior ya descartado.
   if (!ok && bookingIds[0]) await encolarTareas(bookingIds[0], ['pasos'], `sincosto-${Date.now()}`);
 }
+
+// Sesiones que se cruzan agendadas a propósito por Valentina (aviso + "agendar
+// igual"). La columna la agrega la migración 0026; sin ella la base de datos
+// sigue rechazando cualquier cruce y el panel lo explica (20 oct 2026).
+const CRUCE_PERMITIDO = 'cruce_permitido';
 
 export const POST: APIRoute = async ({ request, redirect }) => {
   const form   = await request.formData();
@@ -146,8 +153,6 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // calendario en verde, Pasos a seguir y consentimiento si es el primero),
     // con monto $0 y nunca boleta.
     const sinCosto = medio === SIN_COSTO;
-    const emitir = !sinCosto && form.get('emitir_boleta') === 'on';
-    const rut    = form.get('rut')?.toString()?.trim();
     if (!id) return redirect(dest);
 
     // Estado antes de pagar: una reserva que esperaba pago (pending_payment)
@@ -160,6 +165,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Una sesión ya pagada (ej. pagó por Flow con el panel abierto) nunca se
     // pasa a $0: se perdería ese ingreso y no cuadraría con su boleta.
     if (sinCosto && previa?.paid_at) return redirect(conParam(dest) + 'error=ya_pagada');
+    // Boleta (20 oct 2026, "la agendé con Pago en consulta y al marcarla pagada
+    // tiene que salir la boleta"): la casilla viene marcada por defecto en los
+    // tres formularios; antes venía desmarcada y, sin marcarla, no salía nada.
+    const emitir = debeEmitirBoleta({ medio, casillaMarcada: form.get('emitir_boleta') === 'on', monto: previa?.amount });
 
     let { error } = await supabase.from('bookings')
       // Si ya estaba pagada (ej. reintento tras un error de boleta), se conserva
@@ -207,25 +216,26 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       } catch (e) { console.error('[mark_paid] confirmación:', e); }
     }
 
-    // "Pasos a seguir" (y el consentimiento) automático si es el primer pago del paciente.
-    if (pagada && sinCosto) await pasosSinCosto({ ...pagada, rut: pagada.patient_rut }, [id]);
-    else if (pagada) await sendStepsOnFirstPayment({ ...pagada, rut: pagada.patient_rut }, [id]);
-
+    // Boleta y "Pasos a seguir" + consentimiento (si es su primer pago) por la
+    // MISMA cola de envíos que un pago con Flow (tareasEnvio.ts): se intentan
+    // ya y, si algo falla (SII lento, correo), el cron los reintenta cada 5 min
+    // sin duplicar nunca. Antes la boleta se emitía directo (y solo si se
+    // marcaba la casilla) y "Pasos" se perdía si el correo fallaba.
+    const { data: tras } = await supabase.from('bookings').select('paid_at').eq('id', id).maybeSingle();
+    const pago = pagoDelPanel(tras?.paid_at);
+    let avisoBoleta = '';
     if (emitir) {
-      try {
-        const boletaRes = await emitBoletaParaReserva(id, { rutOverride: rut, enviarEmail: true, rutDesdePanel: !!rut && form.get('rut_editado') === '1' });
-        // Sesión futura pagada por adelantado: la boleta sale sola el día de la
-        // sesión; se avisa en la pantalla, sin error (8 oct 2026).
-        if (boletaRes.programada && boletaRes.fechaProgramada) {
-          return redirect(conParam(dest) + 'boleta_programada=' + encodeURIComponent(boletaRes.fechaProgramada));
-        }
-        if (!boletaRes.ok) {
-          await logWarn('boleta/marcar-pagado', `Boleta no emitida al marcar como pagado: ${boletaRes.error}`, { bookingId: id, error: boletaRes.error });
-          return redirect(conParam(dest) + 'error=boleta_failed&detail=' + encodeURIComponent(boletaRes.error ?? ''));
-        }
-      } catch (e) { console.error('[mark_paid] boleta:', e); }
+      let r: Awaited<ReturnType<typeof encolarYEjecutar>> = null;
+      try { r = await encolarYEjecutar(id, 'boleta', pago); } catch (e) { console.error('[mark_paid] boleta:', e); }
+      const { data: conBoleta } = await supabase.from('bookings').select('notes').eq('id', id).maybeSingle();
+      // Si no salió, el envío de la cola ya lo deja en los avisos de boletas del panel (sin duplicarlo aquí).
+      avisoBoleta = avisoBoletaPanel(r, folioVigente(conBoleta?.notes ?? null)?.folio ?? null);
     }
-    return redirect(dest);
+    if (pagada && sinCosto) await pasosSinCosto({ ...pagada, rut: pagada.patient_rut }, [id]);
+    else if (pagada) {
+      try { await encolarYEjecutar(id, 'pasos', pago); } catch (e) { console.error('[mark_paid] pasos:', e); }
+    }
+    return redirect(avisoBoleta ? conParam(dest) + avisoBoleta : dest);
   }
 
   // ── Enviar el link de "Cobrar todo" al paciente por correo ───────────────────
@@ -336,18 +346,28 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   if (action === 'reschedule') {
     const id            = form.get('id')?.toString();
     const session_date  = form.get('session_date')?.toString() ?? '';
-    const session_time  = form.get('session_time')?.toString() ?? '';
+    // Cualquier minuto (20 oct 2026): "07:53" vale igual que "07:50".
+    const session_time  = normalizarHora(form.get('session_time')?.toString()) ?? '';
     const notifyPatient = form.get('notify_patient') === 'on';
+    // Valentina ya vio el aviso "se cruza con…" y eligió reagendar igual.
+    const forzarCruce   = form.get('forzar_cruce') === '1';
 
-    if (!id || !session_date || !session_time) return redirect(dest);
+    if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(session_date) || !session_time) return redirect(conParam(dest) + 'error=hora_invalida');
 
     const { data: booking } = await supabase.from('bookings').select('*').eq('id', id).single();
     // ¿La hora nueva se cruza con otra sesión? (con su duración, sin contar esta misma)
+    // Fuera de su horario no se revisa: desde el panel ella puede agendar a cualquier hora.
     const conflict = await chocaConOtraSesion(session_date, session_time, booking?.duration_min ?? 50, id);
-    if (conflict) return redirect(conParam(dest) + 'error=conflict');
+    // error=cruce (no "conflict"): el banner invita a reintentar y agendar igual con el aviso.
+    if (conflict && !forzarCruce) return redirect(conParam(dest) + 'error=cruce');
 
-    const { error: updErr } = await supabase.from('bookings').update({ session_date, session_time }).eq('id', id);
+    // Cruce aceptado → fuera de la regla "sin cruces" de la base; si una sesión que
+    // estaba cruzada se mueve a una hora libre, vuelve a quedar protegida.
+    const marcaCruce = conflict ? { [CRUCE_PERMITIDO]: true } : booking?.[CRUCE_PERMITIDO] === true ? { [CRUCE_PERMITIDO]: false } : {};
+    const { error: updErr } = await supabase.from('bookings')
+      .update({ session_date, session_time, ...marcaCruce }).eq('id', id);
     // Si no se guardó, no se toca el calendario ni se avisa a la paciente.
+    if (conflict && (updErr?.code === '42703' || updErr?.code === '23505' || updErr?.code === '23P01')) return redirect(conParam(dest) + 'error=cruce_bloqueado');
     if (updErr?.code === '23505' || updErr?.code === '23P01') return redirect(conParam(dest) + 'error=conflict');
     if (updErr) return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(updErr.message.slice(0, 200)));
     // Nueva fecha: se borran las marcas de recordatorio para que le llegue uno para la fecha nueva.
@@ -443,7 +463,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // mismo control que "reagendar". No aplica a cobros sin fecha (2099) ni a
     // sesiones canceladas/vencidas, que no ocupan horario.
     const ocupaHorario = booking.session_date !== '2099-12-31' && !['cancelled', 'expired'].includes(booking.status);
-    if (cambiaDuracion && ocupaHorario) {
+    // Una sesión que Valentina ya agendó cruzada a propósito (cruce_permitido) no se frena aquí.
+    if (cambiaDuracion && ocupaHorario && booking[CRUCE_PERMITIDO] !== true) {
       const conflict = await chocaConOtraSesion(booking.session_date, String(booking.session_time).slice(0, 5), Number(durNueva), id);
       if (conflict) return redirect(conParam(dest) + 'error=conflict');
     }
@@ -572,7 +593,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const service_id      = form.get('service_id')?.toString() ?? '';
     const patient_id      = form.get('patient_id')?.toString() ?? '';
     const session_date    = form.get('session_date')?.toString() ?? '';
-    const session_time    = form.get('session_time')?.toString() ?? '';
+    // Cualquier minuto (20 oct 2026): "07:53" vale igual que "07:50".
+    const session_time    = normalizarHora(form.get('session_time')?.toString()) ?? '';
+    // Valentina ya vio el aviso "se cruza con…" y eligió agendar igual.
+    const forzarCruce     = form.get('forzar_cruce') === '1';
     const sessions_raw    = parseInt(form.get('sessions_count')?.toString() ?? '1');
     const sessions_count  = Math.min(Math.max(isNaN(sessions_raw) ? 1 : sessions_raw, 1), 52);
     const modality_choice = form.get('modality_choice')?.toString() ?? 'presencial';
@@ -693,6 +717,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
     const bookingIds: string[] = [];
     let conflictCount = 0;
+    let cruceBloqueado = false;
     let lastInsertError: string | null = null;
 
     // Fechas del pack y cuáles chocan con otra sesión (considera la duración).
@@ -712,7 +737,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       // reservas a la misma hora.
       const conflict = await chocaConOtraSesion(bDate, session_time, durMin);
 
-      if (conflict) { conflictCount++; continue; } // Skip slots with conflicts (pack continues)
+      // Sin "agendar igual": la que choca se salta (el pack sigue) y se avisa.
+      if (conflict && !forzarCruce) { conflictCount++; continue; }
       // El resto de la división va en la primera sesión que SÍ se crea.
       const montoSesion = perSessionBase + (creadas === 0 ? remainder : 0);
 
@@ -742,10 +768,16 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         whatsapp_reminder_enabled: remWhatsappOn,
         evaluation_email_enabled: evalEmailOn,
         review_email_enabled:     reviewEmailOn,
+        // Cruce aceptado por Valentina: queda fuera de la regla "sin cruces" de la base (migración 0026).
+        ...(conflict ? { [CRUCE_PERMITIDO]: true } : {}),
       };
 
       // Try to insert, degrade gracefully if optional columns missing
       let { data: booking, error: insErr } = await supabase.from('bookings').insert(payload).select().single();
+      // Cruce aceptado pero la base aún no lo permite (falta la migración 0026): se salta y se explica.
+      if (conflict && (insErr?.code === '42703' || insErr?.code === '23505' || insErr?.code === '23P01')) {
+        cruceBloqueado = true; conflictCount++; continue;
+      }
       if (insErr?.code === '42703') {
         const { service_id: _s, duration_min: _d, created_by_admin: _c,
                 whatsapp_reminder_enabled: _w, evaluation_email_enabled: _e,
@@ -775,11 +807,13 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     }
 
     // Lo que realmente se cobra: la suma de las sesiones creadas.
-    const avisoPack = conflictCount > 0 && bookingIds.length > 0 ? `&pack_creadas=${bookingIds.length}&pack_saltadas=${conflictCount}` : '';
+    const avisoPack = (conflictCount > 0 && bookingIds.length > 0 ? `&pack_creadas=${bookingIds.length}&pack_saltadas=${conflictCount}` : '')
+      + (cruceBloqueado && bookingIds.length > 0 ? '&cruce_bloqueado=1' : '');
     if (bookingIds.length === 0) {
       if (lastInsertError) {
         return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(lastInsertError.slice(0, 200)));
       }
+      if (cruceBloqueado) return redirect(conParam(dest) + 'error=cruce_bloqueado');
       if (conflictCount > 0) {
         return redirect(conParam(dest) + 'error=slot_conflict');
       }

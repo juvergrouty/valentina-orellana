@@ -25,6 +25,8 @@ import { syncBookingToCalendar, markBookingPaidInCalendar } from './syncCalendar
 import { sendStepsOnFirstPayment, upsertPatientFromBooking, fichaDesdePrimerPago } from './patients';
 import { emitBoletaParaReserva } from './apigateway';
 import { todayCL } from './dateUtils';
+import { esPagoDelPanel } from './horaLibre';
+export { pagoDelPanel } from './horaLibre';
 
 // calendario_pagado: pago de una sesión que ya estaba agendada (deuda o sesión
 // ya pasada): el evento existente pasa de rojo "Por pagar" a pagado (8 oct 2026).
@@ -190,8 +192,10 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
         return (await markBookingPaidInCalendar(bookingId, true, { invitar })) ? { ok: true } : { ok: false, error: 'no se pudo marcar pagado en el calendario' };
       }
       case 'boleta': {
-        // Interruptor "Emitir la boleta automáticamente" del servicio.
-        if (b.service_id) {
+        // Interruptor "Emitir la boleta automáticamente" del servicio. No aplica
+        // cuando Valentina marcó el pago en el panel con "Emitir y enviar boleta"
+        // (pago "panel-…"): ahí lo pidió ella explícitamente (20 oct 2026).
+        if (b.service_id && !esPagoDelPanel(nombre)) {
           const { data: svcB } = await supabase.from('services_catalog').select('boleta_auto').eq('id', b.service_id).maybeSingle();
           if (svcB?.boleta_auto === false) {
             await logWarn('flow/boleta-automatica', 'Boleta no emitida automáticamente: el servicio tiene apagado "Emitir la boleta automáticamente". Emítela desde el calendario.', { bookingId });
@@ -208,7 +212,7 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
           const esFaltaRut = (res.error ?? '').toLowerCase().includes('rut');
           await logWarn('flow/boleta-automatica', esFaltaRut
             ? `Boleta no emitida: falta el RUT de ${b.patient_name} (${b.patient_email}). Agrégalo en su ficha y emite la boleta manualmente desde el calendario.`
-            : `Boleta no emitida automáticamente: ${res.error}`,
+            : esPagoDelPanel(nombre) ? `Boleta no emitida al marcar como pagado: ${res.error}` : `Boleta no emitida automáticamente: ${res.error}`,
             { bookingId, patientEmail: b.patient_email, error: res.error });
         }
         // Un error pasajero (no la falta de RUT) se reintenta: emitBoletaParaReserva
@@ -228,6 +232,31 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/**
+ * Registra UN envío en la cola y lo intenta de inmediato (Marcar como pagado
+ * en el panel, 20 oct 2026). Si falla, queda en la cola y el cron lo reintenta
+ * cada 5 min, igual que tras un pago con Flow. Devuelve el resultado del intento
+ * (null = otro proceso lo tiene tomado o se registró pero no se alcanzó a tomar).
+ * Si la cola no responde, se intenta directo (como el respaldo de flow/confirm).
+ */
+export async function encolarYEjecutar(bookingId: string, tarea: TareaPago, pago: string): Promise<Resultado | null> {
+  const nombre = nombreTarea(tarea, pago);
+  if (!(await encolarTareas(bookingId, [tarea], pago))) return await ejecutarTarea(bookingId, nombre);
+  const { data } = await supabase.from('tareas_envio')
+    .select('id, booking_id, tarea, estado, intentos, tomada_en, ultimo_error')
+    .eq('booking_id', bookingId).eq('tarea', nombre).maybeSingle();
+  const f = data as (Fila & { ultimo_error: string | null }) | null;
+  if (!f) return null;
+  // Ya resuelto antes (mismo pago): se informa lo que pasó, sin repetirlo.
+  if (f.estado === 'hecha') return { ok: true, nota: f.ultimo_error ?? undefined };
+  if (f.estado === 'descartada') return { ok: true, descartada: true, nota: f.ultimo_error ?? undefined };
+  if (f.intentos >= MAX_INTENTOS) return { ok: false, error: `se agotaron los reintentos${f.ultimo_error ? ` (${f.ultimo_error})` : ''}` };
+  if (!(await tomar(f))) return null;
+  const r = await ejecutarTarea(bookingId, nombre);
+  await cerrar(f, r);
+  return r;
 }
 
 /**
