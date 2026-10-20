@@ -575,6 +575,9 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
       {errorParam === 'a_link_no_en_consulta' && (
         <div class="cal-error-banner">⚠ Esa sesión ya no está como "Paga en consulta" (puede que ya esté pagada, anulada o cambiada). No se cambió nada: recarga para ver su estado.</div>
       )}
+      {errorParam === 'a_link_sin_correo' && (
+        <div class="cal-error-banner">⚠ Esa sesión no tiene correo de la paciente, así que no hay link de pago que mandarle. No se cambió nada: agrega su correo en la ficha o cóbrale en la consulta.</div>
+      )}
       {errorParam === 'a_link_no_encontrada' && (
         <div class="cal-error-banner">⚠ No se encontró esa sesión. No se cambió nada.</div>
       )}
@@ -3110,7 +3113,8 @@ function openSessionDetail(b) {
   }
   document.getElementById('sp-cobrar-menu').style.display = 'none';
   // "Cambiar a link de pago": solo en una hora "Paga en consulta" vigente y sin pagar (pago_en_consulta ya lo exige).
-  document.getElementById('sp-a-link-box').style.display = (b.pago_en_consulta && !isPaid && !isVoided) ? 'block' : 'none';
+  // Sin correo no hay link /pagar que mandar (consultaALink.ts lo rechaza): no se ofrece.
+  document.getElementById('sp-a-link-box').style.display = (b.pago_en_consulta && !isPaid && !isVoided && b.patient_email) ? 'block' : 'none';
   document.getElementById('sp-a-link-id').value = b.id;
 
   // Recordatorio automático (interruptor por reserva)

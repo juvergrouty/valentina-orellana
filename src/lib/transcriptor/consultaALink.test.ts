@@ -117,6 +117,10 @@ test('cambiar a link: no toca horas pagadas, anuladas, canceladas, sin marca o i
     assert.equal(db.tabla('bookings').find((b) => b.id === id)!.notes, antes, `${id}: notas intactas`);
   }
   assert.deepEqual(await cal.cambiarConsultaALink('no-existe'), { ok: false, error: 'no_encontrada' });
+  // Sin correo no hay link /pagar: no se quita la marca (si no, quedaría "Por pagar" sin "Cobrar").
+  db.tabla('bookings').push(reserva({ id: 'sin-correo', patient_email: '' }));
+  assert.deepEqual(await cal.cambiarConsultaALink('sin-correo'), { ok: false, error: 'sin_correo' });
+  assert.equal(db.tabla('bookings').find((b) => b.id === 'sin-correo')!.notes, 'Viene derivada\nPagoEnConsulta');
   assert.equal(db.tabla('admin_logs').filter((l) => l.context === 'agenda/consulta-a-link').length, 0);
 });
 
@@ -167,7 +171,7 @@ test('panel: botón en la sesión y en la ficha, acción del servidor y vuelta c
   const a = leer('src/pages/admin/agenda.astro');
   assert.match(a, /id="sp-btn-a-link"[^>]*>💳 Cambiar a link de pago</);
   assert.match(a, /name="action" value="consulta_a_link"/);
-  assert.match(a, /getElementById\('sp-a-link-box'\)\.style\.display = \(b\.pago_en_consulta && !isPaid && !isVoided\)/);
+  assert.match(a, /getElementById\('sp-a-link-box'\)\.style\.display = \(b\.pago_en_consulta && !isPaid && !isVoided && b\.patient_email\)/);
   assert.match(a, /if \(confirm\('¿Cambiar esta sesión a link de pago\?/);
   // "Cobrar" sigue siendo el único envío y se ofrece en cuanto deja de ser "Paga en consulta".
   assert.match(a, /const canSendPaylink = !isPaid && !isVoided && !b\.pago_en_consulta/);
@@ -176,7 +180,7 @@ test('panel: botón en la sesión y en la ficha, acción del servidor y vuelta c
   assert.ok(a.includes("'\\nPuedes pagar con tarjeta por Flow o por transferencia subiendo el comprobante.'"), 'WhatsApp de Cobrar = FORMAS_DE_PAGO');
 
   const f = leer('src/pages/admin/pacientes/[id].astro');
-  assert.match(f, /\{enConsulta && \(\s*<form method="POST" action="\/api\/admin\/bookings"[\s\S]{0,700}value="consulta_a_link"[\s\S]{0,200}value=\{`\/admin\/agenda\?booking=\$\{b\.id\}`\}/);
+  assert.match(f, /\{enConsulta && b\.patient_email && \(\s*<form method="POST" action="\/api\/admin\/bookings"[\s\S]{0,700}value="consulta_a_link"[\s\S]{0,200}value=\{`\/admin\/agenda\?booking=\$\{b\.id\}`\}/);
   assert.match(f, /onsubmit="return confirm\('¿Cambiar esta sesión a link de pago\?/);
 });
 

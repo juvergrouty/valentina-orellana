@@ -11,7 +11,7 @@ import { esPagoEnConsulta, MARCA_PAGO_EN_CONSULTA } from './pagoEnConsulta';
 
 export type ResultadoALink =
   | { ok: true; patientId: string | null }
-  | { ok: false; error: 'no_encontrada' | 'no_en_consulta' | 'guardar'; detalle?: string };
+  | { ok: false; error: 'no_encontrada' | 'no_en_consulta' | 'sin_correo' | 'guardar'; detalle?: string };
 
 /** Notas sin la línea de la marca (exacta, como la reconoce tieneMarcaPagoEnConsulta). */
 export function notasSinMarcaConsulta(notes: string): string {
@@ -25,12 +25,16 @@ export async function cambiarConsultaALink(id: string): Promise<ResultadoALink> 
   if (!b) return { ok: false, error: 'no_encontrada' };
   // Solo una hora vigente, sin pagar ni anular y con la marca (si ya se cambió, no se repite).
   if (!esPagoEnConsulta(b)) return { ok: false, error: 'no_en_consulta' };
+  // Sin correo no hay ficha ni link /pagar que mandar: no se quita la marca (quedaría "Por pagar" sin Cobrar).
+  if (!String(b.patient_email ?? '').trim() || !String(b.patient_name ?? '').trim()) return { ok: false, error: 'sin_correo' };
 
   const r = await cambiarNotas(id, (n) => {
     const nuevo = notasSinMarcaConsulta(n);
     return nuevo === n ? null : nuevo;
   });
-  if (!r.ok && !r.aborted) return { ok: false, error: 'guardar', detalle: r.error };
+  // aborted = otra petición ya quitó la marca entre la lectura y la escritura: no se registra dos veces.
+  if (r.aborted) return { ok: false, error: 'no_en_consulta' };
+  if (!r.ok) return { ok: false, error: 'guardar', detalle: r.error };
 
   // El link /pagar/<id> necesita la ficha: se asegura (solo completa datos vacíos de una ficha existente).
   let patientId: string | null = null;

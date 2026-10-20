@@ -277,11 +277,12 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   if (action === 'consulta_a_link') {
     const id = form.get('id')?.toString();
     if (!id) return redirect(conParam(dest) + 'error=a_link_no_encontrada');
+    // Con la sesión en la dirección, la agenda vuelve a abrir su panel (también si hubo error).
+    const conSesion = /[?&]booking=/.test(dest) ? dest : conParam(dest) + 'booking=' + encodeURIComponent(id);
     const r = await cambiarConsultaALink(id);
     if (!r.ok) {
-      return redirect(conParam(dest) + 'error=' + (r.error === 'guardar' ? 'guardar_reserva&detail=' + encodeURIComponent((r.detalle ?? '').slice(0, 200)) : 'a_link_' + r.error));
+      return redirect(conParam(conSesion) + 'error=' + (r.error === 'guardar' ? 'guardar_reserva&detail=' + encodeURIComponent((r.detalle ?? '').slice(0, 200)) : 'a_link_' + r.error));
     }
-    const conSesion = /[?&]booking=/.test(dest) ? dest : conParam(dest) + 'booking=' + encodeURIComponent(id);
     return redirect(conParam(conSesion) + 'saved=a-link&accion=cobrar');
   }
 
