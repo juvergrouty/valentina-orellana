@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { limpiarRut, rutValido } from '../../../lib/rut';
+import { normalizarComuna } from '../../../data/comunas';
 import { rutaInterna } from '../../../lib/rutaInterna';
 import { esEvolucionDesdeResumen } from '../../../lib/transcriptor/panel';
 
@@ -33,7 +34,7 @@ export const POST: APIRoute = async ({ request }) => {
     rut:              sinRut ? null : (g('rut') ? limpiarRut(g('rut')) : null),
     birthdate:        g('birthdate') || null,
     address:          g('address') || null,
-    comuna:           g('comuna') || null,
+    comuna:           normalizarComuna(g('comuna')) ?? (g('comuna') || null),
     emergency_name:   g('emergency_name') || null,
     emergency_phone:  normalizarTelefono(g('emergency_phone')) ?? (g('emergency_phone') || null),
     notes:            g('notes') || null,

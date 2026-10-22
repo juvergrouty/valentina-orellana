@@ -8,6 +8,9 @@
 //   ordenando solo (9 1234 5678). Se guarda como +<código><número>.
 //   Si está mal escrito no deja guardar.
 // - RUT (input[data-rut]): se van poniendo solos los puntos y el guion.
+// - Comuna (input[data-comuna]): se elige de la lista oficial de comunas y se
+//   corrige sola ("las condes, metropolitana…" → "Las Condes"). Si no está en
+//   la lista no deja guardar, salvo pacientes sin RUT (pueden vivir fuera).
 ---
 <style is:global>
   .cc-sugerencias { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
@@ -32,6 +35,7 @@
 <script>
   import { normalizarTelefono, sugerenciasCorreo, correccionCorreo } from '../lib/contacto';
   import { PAISES, PAIS_DEFECTO, bandera, paisDeNumero, formatearNacional, type Pais } from '../data/paises';
+  import { COMUNAS, normalizarComuna } from '../data/comunas';
 
   // Se inserta después del aviso de error propio del campo (si lo tiene), para
   // no cambiar el "nextElementSibling" que usan los formularios existentes.
@@ -268,10 +272,54 @@
     input.addEventListener('input', () => reformatear(input, formatearRut(input.value), /[0-9kK]/));
   }
 
+  // ─── Comuna: lista oficial (21 oct 2026) ───────────────────────────────────
+  // El autocompletar del navegador escribía "Las Condes, Metropolitana de
+  // Santiago" y el SII rechazaba la boleta. El servidor también la limpia.
+  function listaComunas(): string {
+    const id = 'cc-comunas';
+    if (!document.getElementById(id)) {
+      const dl = document.createElement('datalist');
+      dl.id = id;
+      for (const c of COMUNAS) { const o = document.createElement('option'); o.value = c; dl.appendChild(o); }
+      document.body.appendChild(dl);
+    }
+    return id;
+  }
+  function prepararComuna(input: HTMLInputElement) {
+    if (input.dataset.ccListo) return;
+    input.dataset.ccListo = '1';
+    input.setAttribute('list', listaComunas());
+    input.placeholder ||= 'Escribe y elige de la lista';
+    const aviso = document.createElement('p');
+    aviso.className = 'cc-aviso';
+    aviso.hidden = true;
+    aviso.textContent = 'Elige la comuna de la lista (por ejemplo: Las Condes).';
+    insertarDespues(input, aviso);
+    const sinRut = () => !!input.form?.querySelector<HTMLInputElement>('input[name=sin_rut], #sin_rut')?.checked;
+    const revisar = (): boolean => {
+      const v = input.value.trim();
+      const n = normalizarComuna(v);
+      if (n) { if (n !== input.value) input.value = n; aviso.hidden = true; return true; }
+      // Vacía: la revisa el propio formulario (obligatoria o no). Una comuna
+      // antigua sin tocar no traba guardar otros datos de la ficha.
+      const ok = !v || sinRut() || input.value === input.defaultValue;
+      aviso.hidden = ok;
+      return ok;
+    };
+    input.addEventListener('input', () => { if (!aviso.hidden) aviso.hidden = true; });
+    input.addEventListener('change', revisar);
+    input.addEventListener('blur', revisar);
+    input.form?.addEventListener('submit', (e) => {
+      if (input.offsetParent === null || input.disabled) return;
+      if (!revisar()) { e.preventDefault(); e.stopImmediatePropagation(); input.focus(); }
+    }, true);
+  }
+
   function preparar() {
     document.querySelectorAll<HTMLInputElement>('input[type=email]:not([data-sin-sugerencias])').forEach(prepararCorreo);
     document.querySelectorAll<HTMLInputElement>('input[data-validar-telefono]').forEach(prepararTelefono);
     document.querySelectorAll<HTMLInputElement>('input[data-rut]').forEach(prepararRut);
+    document.querySelectorAll<HTMLInputElement>('input[data-comuna]').forEach(prepararComuna);
   }
   preparar();
   // Formularios que se arman después (modales del panel).

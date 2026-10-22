@@ -5,6 +5,7 @@ import { todayCL } from './dateUtils';
 import { logError, logWarn } from './logger';
 import { upsertPatientFromBooking } from './patients';
 import { RUT_EXTRANJERO_SII, rutValido, limpiarRut } from './rut';
+import { normalizarComuna } from '../data/comunas';
 
 /**
  * Integración con API Gateway (apigateway.cl) — Boletas de Honorarios Electrónicas (BHE).
@@ -698,10 +699,18 @@ export async function emitBoletaParaReserva(
     return { ok: false, error: candado.error ?? 'No se pudo preparar la emisión.' };
   }
 
+  // Comuna (21 oct 2026): apigateway.cl rechaza (400) la boleta si no reconoce
+  // la comuna ("Las Condes, Metropolitana de Santiago"). Se manda el nombre
+  // oficial; si no se reconoce, se manda vacía (como antes del 4 oct 2026,
+  // cuando el SII aceptaba las boletas sin comuna) y queda el aviso en logs.
+  const comunaFicha = (p?.comuna ?? '').trim();
+  const comunaSii = normalizarComuna(comunaFicha) ?? '';
+  if (comunaFicha && !comunaSii) await logWarn('boleta/comuna', `Comuna no reconocida en la ficha ("${comunaFicha}"): la boleta sale sin comuna`, { bookingId }).catch(() => {});
+
   try {
     const result = await emitirBHE({
       fecha,
-      receptor: { rut: normalizeRut(rutRaw), razonSocial: usaDatosReserva ? b.patient_name : (p?.name ?? b.patient_name), direccion: p?.address ?? '', comuna: p?.comuna ?? '' },
+      receptor: { rut: normalizeRut(rutRaw), razonSocial: usaDatosReserva ? b.patient_name : (p?.name ?? b.patient_name), direccion: p?.address ?? '', comuna: comunaSii },
       detalle:  [{ nombre: glosaConFecha(glosa, b.session_date), monto: b.amount }],
     }, cfg) as { data?: { Encabezado?: { IdDoc?: { Folio?: number } } } };
 

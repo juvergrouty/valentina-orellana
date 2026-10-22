@@ -3,6 +3,7 @@ import { logError } from './logger';
 import { sendStepsEmail, sendConsentLinkEmail } from './email';
 import { getOrCreatePendingConsent, consentUrl, vigente, type ConsentRow } from './consent';
 import { limpiarRut, RUT_EXTRANJERO_SII } from './rut';
+import { normalizarComuna } from '../data/comunas';
 
 // Crea o actualiza la ficha del paciente en `patients` a partir de los datos
 // de una reserva. Se llama cada vez que una reserva pasa a `confirmed` —
@@ -45,6 +46,8 @@ export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizar
   const rut = esGenerico ? '' : (b.rut?.trim() ?? '');
   const sinRut = b.sin_rut === true || esGenerico;
   const t = (v: string | null | undefined) => v?.trim() || '';
+  // Comuna con el nombre oficial si se reconoce ("Las Condes, Metropolitana…" → "Las Condes").
+  const comuna = normalizarComuna(b.comuna) ?? t(b.comuna);
 
   try {
     const { data: existing } = await supabase
@@ -85,7 +88,7 @@ export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizar
         if (t(b.emergency_phone)) cambios.emergency_phone = t(b.emergency_phone);
         if (t(b.birthdate)) cambios.birthdate = t(b.birthdate);
         if ('comuna' in existing) {
-          if (t(b.comuna)) cambios.comuna = t(b.comuna);
+          if (comuna) cambios.comuna = comuna;
           if (t(b.doc_numero)) {
             cambios.doc_numero = t(b.doc_numero);
             cambios.doc_tipo = t(b.doc_tipo) || null;
@@ -103,7 +106,7 @@ export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizar
       if (!existing.emergency_phone?.trim() && t(b.emergency_phone)) cambios.emergency_phone = t(b.emergency_phone);
       if (!existing.birthdate && t(b.birthdate)) cambios.birthdate = t(b.birthdate);
       if ('comuna' in existing) {
-        if (!existing.comuna?.trim() && t(b.comuna)) cambios.comuna = t(b.comuna);
+        if (!existing.comuna?.trim() && comuna) cambios.comuna = comuna;
         if (sinRut && !existing.rut?.trim() && !existing.sin_rut) cambios.sin_rut = true;
         if (!existing.doc_numero?.trim() && t(b.doc_numero)) {
           cambios.doc_numero = t(b.doc_numero);
@@ -123,7 +126,7 @@ export async function upsertPatientFromBooking(b: DatosFicha, opts: { actualizar
         emergency_name:  t(b.emergency_name) || null,
         emergency_phone: t(b.emergency_phone) || null,
         birthdate:       t(b.birthdate) || null,
-        comuna:          t(b.comuna) || null,
+        comuna:          comuna || null,
         sin_rut:         sinRut,
         doc_tipo:        sinRut ? (t(b.doc_tipo) || null) : null,
         doc_numero:      sinRut ? (t(b.doc_numero) || null) : null,
