@@ -22,23 +22,37 @@ const CLAVE_SETTING = 'google_ads_csv_clave';
 type Toque = { gclid?: string; ts?: number };
 type OrigenGuardado = { first?: Toque | null; last?: Toque | null } | null;
 
-const GCLID = /^[A-Za-z0-9_-]+$/;
+// Un GCLID real tiene decenas de caracteres. Los valores cortos o de prueba
+// ("TEST_…", "ejemplo") que alguien pegue en la URL no se mandan: Google los
+// rechaza como "Unparseable gclid" y ensucian el diagnóstico (22 oct 2026).
+const GCLID = /^[A-Za-z0-9_-]{20,}$/;
+const GCLID_PRUEBA = /^(test|prueba|ejemplo)/i;
 const DIA = 86400e3;
+
+/** Desfase de Chile en ese instante ("-03:00" en verano, "-04:00" en invierno). */
+function desfaseChile(ms: number): string {
+  const gmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Santiago', timeZoneName: 'longOffset' })
+    .formatToParts(new Date(ms)).find(p => p.type === 'timeZoneName')?.value ?? 'GMT-03:00';
+  return gmt === 'GMT' ? '+00:00' : gmt.replace('GMT', '');
+}
+
 // Hora de Chile con su desfase explícito ("2026-10-14 15:30:00-03:00"): el Gestor
 // de Datos de Google lee la primera fila como encabezado, así que la zona horaria
 // va en cada fecha y no en una línea "Parameters:TimeZone" aparte.
 function enChile(ms: number): string {
-  const d = new Date(ms);
-  const local = d.toLocaleString('sv-SE', { timeZone: 'America/Santiago' });
-  const gmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Santiago', timeZoneName: 'longOffset' })
-    .formatToParts(d).find(p => p.type === 'timeZoneName')?.value ?? 'GMT-03:00';
-  const desfase = gmt === 'GMT' ? '+00:00' : gmt.replace('GMT', '');
-  return local + desfase;
+  return new Date(ms).toLocaleString('sv-SE', { timeZone: 'America/Santiago' }) + desfaseChile(ms);
+}
+
+/** Mediodía en Chile de una fecha "AAAA-MM-DD", con el desfase que corresponde a ese día. */
+function mediodiaChile(fecha: string): number {
+  const ref = Date.parse(`${fecha}T16:00:00Z`);
+  if (!Number.isFinite(ref)) return NaN; // fecha inválida: se pierde esa fila, no el archivo entero
+  return new Date(`${fecha}T12:00:00${desfaseChile(ref)}`).getTime();
 }
 
 /** Toque con GCLID válido (el último clic de anuncio manda; si no, el primero). */
 function toqueConClic(o: OrigenGuardado): Toque | null {
-  for (const t of [o?.last, o?.first]) if (t?.gclid && GCLID.test(t.gclid)) return t;
+  for (const t of [o?.last, o?.first]) if (t?.gclid && GCLID.test(t.gclid) && !GCLID_PRUEBA.test(t.gclid)) return t;
   return null;
 }
 
@@ -122,7 +136,8 @@ export async function csvConversiones(): Promise<string> {
     const toque = toqueConClic((c?.data ?? null) as OrigenGuardado);
     if (!toque || filas.has(toque.gclid!)) continue;
     const pago = (p.data ?? {}) as { monto?: number; fecha?: string };
-    const pagoMs = new Date(`${pago.fecha ?? new Date().toISOString().slice(0, 10)}T12:00:00-03:00`).getTime();
+    const hoyChile = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Santiago' });
+    const pagoMs = mediodiaChile(pago.fecha ?? hoyChile);
     const clicMs = c ? new Date(c.created_at as string).getTime() : toque.ts;
     const hora = horaConversion(pagoMs, clicMs, ahora);
     if (hora) filas.set(toque.gclid!, [toque.gclid, NOMBRE_CONVERSION, hora, String(pago.monto ?? 0), 'CLP'].join(','));
