@@ -5,12 +5,12 @@ import { pricingPlans } from '../../../data/services';
 import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar, markBookingDebtVoidedInCalendar } from '../../../lib/syncCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
-import { getTotalOwedByEmail, tagBookingsWithPaymentToken, totalACobrarPorEmail } from '../../../lib/debt';
+import { getTotalOwedByEmail, tagBookingsWithPaymentToken, totalACobrarPorEmail, tomarCobroReservaWeb } from '../../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { quitarLineasNotas, agregarLineaNotas, MARCA_PROGRAMADA } from '../../../lib/apigateway';
 import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
-import { logWarn } from '../../../lib/logger';
+import { logWarn, logInfo, logError } from '../../../lib/logger';
 import { encolarTareas, encolarYEjecutar, pagoDelPanel } from '../../../lib/tareasEnvio';
 import { normalizarHora, debeEmitirBoleta, avisoBoletaPanel } from '../../../lib/horaLibre';
 import { folioVigente } from '../../../lib/apigateway';
@@ -243,6 +243,21 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   // Respaldo de "Cobrar todo" en /admin/deudas cuando el paciente no tiene
   // teléfono para WhatsApp. Antes ese botón simplemente abría /pagar/[id] en la
   // pestaña de la propia admin — el link nunca llegaba al paciente.
+  // ── "Cobrar" sobre una reserva web sin pagar (ver tomarCobroReservaWeb en debt.ts) ──
+  // La llama la agenda al apretar "💳 Cobrar", antes de mostrar WhatsApp/correo. Responde JSON.
+  if (action === 'tomar_cobro') {
+    const id = form.get('id')?.toString() ?? '';
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    try {
+      const tomada = await tomarCobroReservaWeb(id);
+      if (tomada) await logInfo('bookings/tomar-cobro', 'Reserva web sin pagar pasada a cobro con link desde "Cobrar"', { bookingId: id });
+      return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+    } catch (e) {
+      await logError('bookings/tomar-cobro', 'No se pudo preparar el cobro de la reserva web', { bookingId: id, error: e instanceof Error ? e.message : String(e) });
+      return new Response(JSON.stringify({ ok: false }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   if (action === 'send_debt_email') {
     // dest puede venir sin "?" propio (ej. "/admin/deudas") — a diferencia de
     // otras acciones de este archivo, cuyo redirect siempre trae uno (ej.

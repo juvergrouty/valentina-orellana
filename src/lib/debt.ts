@@ -45,6 +45,21 @@ export function esCobrable(b: Cobrable): boolean {
   return b.status === 'pending_payment' && (b.created_by_admin === true || notas.includes('ComprobanteTransferencia'));
 }
 
+// "Cobrar" sobre una reserva web que aún espera su pago (28 oct 2026, caso
+// Pedro Navarro): Valentina decide cobrarla con su link, así que pasa a ser
+// suya (created_by_admin). Desde ahí cuenta para "Cobrar" y /pagar (antes el
+// link decía "No tienes pagos pendientes") y no se libera sola a los 30 min.
+// Solo toca una reserva pendiente, sin pagar y que no sea ya suya.
+export async function tomarCobroReservaWeb(id: string): Promise<boolean> {
+  const { data, error } = await supabase.from('bookings')
+    .update({ created_by_admin: true })
+    .eq('id', id).eq('status', 'pending_payment').is('paid_at', null)
+    .or('created_by_admin.is.null,created_by_admin.eq.false')
+    .select('id');
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
 export async function getPendingDebtByEmail(email: string): Promise<DebtBooking[]> {
   const { data } = await supabase
     .from('bookings')

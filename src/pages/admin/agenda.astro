@@ -2916,6 +2916,7 @@ document.getElementById('session-panel')?.addEventListener('submit', (e) => {
 
 function openSessionDetail(b) {
   window.__currentSessionBookingId = b.id;
+  window.__currentSessionBooking = b;
   document.getElementById('sp-service').textContent = b.service_label || b.session_type;
 
   // sessionConfirmed: la CITA está agendada/confirmada (no cancelada, no en
@@ -3366,10 +3367,39 @@ document.querySelectorAll('.sp-steps-send').forEach(btn => btn.addEventListener(
 }));
 
 // ── Menú "Cobrar" (WhatsApp / correo) ─────────────────────────────────────────
-document.getElementById('sp-cobrar-toggle')?.addEventListener('click', (e) => {
+// Reserva web que aún espera su pago: antes de mostrar el menú se pasa a cobro
+// con link (api/admin/bookings, action=tomar_cobro), para que /pagar la incluya
+// y no se libere sola. Para las demás no cambia nada (28 oct 2026).
+document.getElementById('sp-cobrar-toggle')?.addEventListener('click', async (e) => {
   e.stopPropagation();
+  const toggle = e.currentTarget;
   const menu = document.getElementById('sp-cobrar-menu');
-  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  if (menu.style.display !== 'none') { menu.style.display = 'none'; return; }
+  const b = window.__currentSessionBooking;
+  const id = b?.id;
+  if (b && b.status === 'pending_payment' && !b.paid_at && !window.__cobroTomado?.[id]) {
+    const texto = toggle.textContent;
+    toggle.disabled = true;
+    toggle.textContent = 'Preparando link…';
+    try {
+      const fd = new FormData();
+      fd.append('action', 'tomar_cobro');
+      fd.append('id', id);
+      const r = await fetch('/api/admin/bookings', { method: 'POST', body: fd, credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({ ok: false }));
+      if (!r.ok || !j.ok) throw new Error('tomar_cobro');
+      (window.__cobroTomado ??= {})[id] = true;
+    } catch {
+      alert('No se pudo preparar el link de pago. Intenta de nuevo en unos segundos.');
+      return;
+    } finally {
+      toggle.disabled = false;
+      toggle.textContent = texto;
+    }
+    // Si mientras tanto se abrió otra sesión, no se despliega el menú sobre esa.
+    if (window.__currentSessionBookingId !== id) return;
+  }
+  menu.style.display = 'block';
 });
 document.addEventListener('click', (e) => {
   const menu = document.getElementById('sp-cobrar-menu');
