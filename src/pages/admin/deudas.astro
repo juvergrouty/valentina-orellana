@@ -187,7 +187,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
       <input type="text" id="debt-search" placeholder="Buscar por nombre..." autocomplete="off"
         style="max-width:320px;margin-bottom:1rem;" />
 
-      <div class="card" style="padding:0;overflow:hidden;">
+      <div class="card tabla-cobro" style="padding:0;">
         <table>
           <thead>
             <tr>
@@ -325,6 +325,15 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
 </AdminLayout>
 
 <style>
+  /* Celular (28 oct 2026): la tabla se desliza hacia el lado y la columna de
+     acciones (WhatsApp, correo) queda fija a la derecha; antes quedaba cortada. */
+  .tabla-cobro { overflow-x: auto; }
+  @media (max-width: 768px) {
+    .tabla-cobro > table > thead > tr > th:last-child,
+    .tabla-cobro > table > tbody > tr > td:last-child:not([colspan]) {
+      position: sticky; right: 0; background: white; box-shadow: -6px 0 6px -6px rgba(0,0,0,.18);
+    }
+  }
   /* Feedback táctil en los íconos de acción — antes no tenían ningún estado de
      hover/click, se sentían "muertos" al presionarlos. */
   .icon-btn { transition: transform .08s ease-out, filter .08s ease-out, opacity .1s; }
@@ -332,7 +341,8 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
   .icon-btn:active { transform: scale(0.9); filter: brightness(0.85); }
   /* Enlace directo desde el Inicio del panel (#p-<paciente>): fila resaltada. */
   .debt-row { scroll-margin-top: 72px; }
-  .debt-row:target td { background: #eef0ff; }
+  .debt-row:target td,
+  .tabla-cobro > table > tbody > tr.debt-row:target > td:last-child:not([colspan]) { background: #eef0ff; }
 </style>
 
 <script>

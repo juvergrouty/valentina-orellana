@@ -135,7 +135,7 @@ const TABS = [
     </div>
 
     <!-- Tabla -->
-    <div class="pac-table-scroll">
+    <div class="pac-table-scroll tabla-cobro">
       {!patients?.length ? (
         <p class="pac-empty">{filtro === 'eliminados' ? 'Los pacientes eliminados quedan en la pestaña Inactivos.' : q ? `Sin resultados para "${q}"` : 'No hay pacientes aún.'}</p>
       ) : (
@@ -348,6 +348,14 @@ const TABS = [
 
 /* Tabla */
 .pac-table-scroll { flex: 1; min-height: 0; overflow: auto; }
+/* Celular (28 oct 2026): la columna de acciones (agendar, WhatsApp, más) queda fija a la derecha
+   mientras el resto de la tabla se desliza; antes quedaba fuera de la pantalla. */
+@media (max-width: 768px) {
+  .tabla-cobro > table > thead > tr > th:last-child { right: 0; z-index: 6; box-shadow: -6px 0 6px -6px rgba(0,0,0,.18); }
+  .tabla-cobro > table > tbody > tr > td:last-child:not([colspan]) {
+    position: sticky; right: 0; z-index: 1; background: white; box-shadow: -6px 0 6px -6px rgba(0,0,0,.18);
+  }
+}
 .pac-table { width: 100%; border-collapse: collapse; }
 .pac-table thead th {
   position: sticky; top: 0; z-index: 5; background: #f9fafb;

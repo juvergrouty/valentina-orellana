@@ -91,7 +91,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
       <p style="color:var(--stone);font-size:0.9rem;">{errorLectura ? 'Sin datos por ahora.' : 'No hay sesiones por cobrar. 🎉'}</p>
     </div>
   ) : (
-    <div class="card" style="padding:0;overflow:hidden;">
+    <div class="card tabla-cobro" style="padding:0;">
       <table>
         <thead>
           <tr>
@@ -167,6 +167,15 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
 </AdminLayout>
 
 <style>
+  /* Celular (28 oct 2026): la tabla se desliza hacia el lado y la columna de
+     acciones (WhatsApp, correo) queda fija a la derecha; antes quedaba cortada. */
+  .tabla-cobro { overflow-x: auto; }
+  @media (max-width: 768px) {
+    .tabla-cobro > table > thead > tr > th:last-child,
+    .tabla-cobro > table > tbody > tr > td:last-child:not([colspan]) {
+      position: sticky; right: 0; background: white; box-shadow: -6px 0 6px -6px rgba(0,0,0,.18);
+    }
+  }
   .icon-btn { transition: transform .08s ease-out, filter .08s ease-out, opacity .1s; }
   .icon-btn:hover { filter: brightness(1.1); }
   .icon-btn:active { transform: scale(0.9); filter: brightness(0.85); }
