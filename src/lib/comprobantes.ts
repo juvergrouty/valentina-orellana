@@ -64,3 +64,35 @@ export async function getComprobanteAlerts(): Promise<ComprobanteAlert[]> {
     .map(({ email, ...a }) => ({ ...a, fichaId: fichaDe.get(email) }))
     .sort((x, y) => x.subidoEl.localeCompare(y.subidoEl));
 }
+
+// Transferencia confirmada sola al subir el comprobante (28 oct 2026, Valentina:
+// "que se le mande todo, pero que en el Inicio me haga un recordatorio para
+// revisar manualmente el pago"). La sesión queda pagada y recibe todos los
+// envíos al instante; el Inicio pide revisar el banco hasta "Ya la revisé".
+// Marcas en bookings.notes: `TransferenciaPorRevisar <iso> <ruta>` y, al revisar,
+// `TransferenciaRevisada <iso>`.
+export const MARCA_TRANSFERENCIA_POR_REVISAR = 'TransferenciaPorRevisar';
+export const MARCA_TRANSFERENCIA_REVISADA = 'TransferenciaRevisada';
+
+/** Transferencias ya confirmadas solas que Valentina todavía no revisa en su banco (agrupadas por comprobante). */
+export async function getTransferenciasPorRevisar(): Promise<ComprobanteAlert[]> {
+  const { data: rows, error } = await supabase
+    .from('bookings')
+    .select('id, patient_name, amount, notes')
+    .ilike('notes', `%${MARCA_TRANSFERENCIA_POR_REVISAR}%`)
+    .not('notes', 'ilike', `%${MARCA_TRANSFERENCIA_REVISADA}%`)
+    .not('paid_at', 'is', null) // tras "Anular pago" vuelve a "por confirmar" (getComprobanteAlerts)
+    .like('mp_payment_id', 'transferencia-%') // solo las confirmadas solas; "Confirmar pago" a mano ya es la revisión
+    .limit(100);
+  if (error) throw new Error(error.message);
+  const porArchivo = new Map<string, ComprobanteAlert>();
+  for (const b of rows ?? []) {
+    const m = String(b.notes ?? '').match(new RegExp(`${MARCA_TRANSFERENCIA_POR_REVISAR} (\\S+) (\\S+)`));
+    if (!m) continue;
+    const a = porArchivo.get(m[2]) ?? { path: m[2], subidoEl: m[1], patientName: b.patient_name ?? '(sin nombre)', total: 0, bookingIds: [] };
+    a.total += b.amount ?? 0;
+    a.bookingIds.push(b.id);
+    porArchivo.set(m[2], a);
+  }
+  return [...porArchivo.values()].sort((x, y) => x.subidoEl.localeCompare(y.subidoEl));
+}

@@ -152,7 +152,8 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
         session_date:   b.session_date,
         session_time:   String(b.session_time ?? '').slice(0, 5),
         amount:         b.amount,
-        payment_method: 'flow',
+        // Transferencia confirmada al subir el comprobante (28 oct 2026, comprobante-transferencia.ts).
+        payment_method: /transfer/i.test(String(b.payment_note ?? '')) ? 'transferencia' : 'flow',
         booking_id:     b.id,
         service_name:   serviceName,
         is_new_patient: (pagadasAntes ?? 0) === 0,
@@ -347,7 +348,7 @@ async function barrerPagosSinTareas(): Promise<void> {
 
   const { data: pagadas, error } = await supabase.from('bookings')
     .select('id, patient_name, patient_email, patient_phone, patient_rut, session_date, status, mp_payment_id, created_by_admin, notes')
-    .eq('payment_note', 'Flow')
+    .in('payment_note', ['Flow', 'Transferencia']) // Transferencia: confirmada al subir el comprobante (mp_payment_id "transferencia-…")
     .not('mp_payment_id', 'is', null)
     .gte('paid_at', desde).lt('paid_at', hasta)
     .not('status', 'in', '(cancelled,expired)')

@@ -5,7 +5,7 @@ import { getBlockedDayAlerts, resumenDiaCompleto, leerCierresOk, claveCierre, ty
 import { feriadosPorDecidir, type FeriadoEstado } from './feriados';
 import { corregirPrefijoInvitacionesUnaVez } from './syncCalendar';
 import { leerRebotes, type Rebote } from './rebotes';
-import { getComprobanteAlerts, type ComprobanteAlert } from './comprobantes';
+import { getComprobanteAlerts, getTransferenciasPorRevisar, type ComprobanteAlert } from './comprobantes';
 import { avisosCambioTarifa, type AvisoTarifa } from './cambiosTarifa';
 import { avisosSalud, type AvisoSalud } from './saludSitio';
 import { avisosBoxCala, type AvisosBox } from './boxCala';
@@ -115,6 +115,8 @@ export type AvisosPanel = {
   boletaAlerts: BoletaAlert[];
   consentAlerts: ConsentAlert[];
   comprobanteAlerts: ComprobanteAlert[];
+  // Transferencias confirmadas solas, por revisar en el banco (28 oct 2026). null = no se pudo revisar.
+  transferenciasPorRevisar: ComprobanteAlert[] | null;
   blockedDayAlerts: BlockedDayAlert[];
   feriadoAlerts: FeriadoAviso[];
   google: 'ok' | 'desconectado' | 'fallando';
@@ -133,7 +135,7 @@ export type AvisosPanel = {
 };
 
 export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
-  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver] = await Promise.all([
+  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar] = await Promise.all([
     // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
     // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
     contarErroresNuevos().catch(() => 0),
@@ -168,6 +170,8 @@ export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
     // Pago por devolver o reagendar: sesión pagada que se anuló o venció, hasta que
     // Valentina aprieta "Resuelto" (19 oct 2026, ver src/lib/pagosPorDevolver.ts).
     avisosPagosPorDevolver().catch((): PagoPorDevolver[] | null => null),
+    // Transferencias confirmadas solas al subir el comprobante: revisar el banco (28 oct 2026, ver comprobantes.ts).
+    getTransferenciasPorRevisar().catch((): ComprobanteAlert[] | null => null),
   ]);
-  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver };
+  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar };
 }

@@ -944,6 +944,11 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
         </ul>
       </div>
     )}
+    {Astro.url.searchParams.get('error') === 'transferencia_guardar' && (
+      <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        ✕ No se pudo guardar "Ya la revisé" de la transferencia. La tarea sigue igual: intenta de nuevo.
+      </div>
+    )}
     {Astro.url.searchParams.get('error') === 'impuestos_guardar' && (
       <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
         ✕ No se pudo guardar "Ya lo hice" de los impuestos. El aviso sigue igual: intenta de nuevo.

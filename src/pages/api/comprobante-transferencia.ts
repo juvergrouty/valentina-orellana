@@ -3,15 +3,21 @@ import { supabase } from '../../lib/supabase';
 import { getTotalOwedByEmail, manualChargeLabel } from '../../lib/debt';
 import { sendTransferReceiptAdmin, ADMIN_EMAIL_FALLBACK } from '../../lib/email';
 import { agregarLineaNotas } from '../../lib/apigateway';
-import { BUCKET_COMPROBANTES, MARCA_COMPROBANTE, comprobanteEnRevision } from '../../lib/comprobantes';
+import { BUCKET_COMPROBANTES, MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, comprobanteEnRevision } from '../../lib/comprobantes';
+import { encolarTareas, procesarTareas, ejecutarTarea, nombreTarea, tareasDePago, sesionVigente, type TareaPago } from '../../lib/tareasEnvio';
+import { upsertPatientFromBooking, fichaDesdePrimerPago } from '../../lib/patients';
 import { logError, logInfo } from '../../lib/logger';
 
 export const prerender = false;
 
 // POST /api/comprobante-transferencia — la paciente sube el comprobante desde
-// /pagar/[id]. Solo se GUARDA y se AVISA: las sesiones quedan "por confirmar"
-// hasta que Valentina apriete "Confirmar pago" en el panel (ver
-// src/lib/comprobantes.ts). Nada se marca pagado aquí.
+// /pagar/[id]. Desde el 28 oct 2026 (Valentina: "que se le mande todo, pero que
+// en el Inicio me haga un recordatorio para revisar manualmente el pago") las
+// sesiones quedan PAGADAS al instante ("Transferencia") con los mismos envíos que
+// un pago con Flow (confirmación con Meet, calendario, boleta, Pasos y
+// consentimiento), y el Inicio pide revisar el banco (TransferenciaPorRevisar,
+// ver src/lib/comprobantes.ts). Si no se puede confirmar, queda como antes:
+// "por confirmar" hasta que Valentina apriete "Confirmar pago".
 
 const MAX_SIZE = 4 * 1024 * 1024; // el cuerpo de una petición en Vercel admite hasta 4,5 MB
 const TIPOS: Record<string, string> = {
@@ -89,6 +95,55 @@ export const POST: APIRoute = async ({ request }) => {
   for (const b of pending) await agregarLineaNotas(b.id, `${MARCA_COMPROBANTE} ${iso} ${path}`);
   await logInfo('transferencia', `Comprobante de transferencia por confirmar: ${patient.name}`, { patientId, ids: pending.map(b => b.id), total, path });
 
+  // Se confirma al instante: pagada, con todos los envíos (misma cola que Flow).
+  // La marca "por revisar en el banco" va ANTES de pagar: si la función se corta,
+  // la tarea del Inicio aparece igual, y el barrido del cron (tareasEnvio.ts,
+  // por mp_payment_id) recupera los envíos que no alcanzaron a registrarse.
+  let confirmadas = 0;
+  try {
+    const ids = pending.map(b => b.id);
+    for (const id of ids) await agregarLineaNotas(id, `${MARCA_TRANSFERENCIA_POR_REVISAR} ${iso} ${path}`);
+    const { data: antes } = await supabase.from('bookings').select('id, status, session_date').in('id', ids);
+    const pago = `transferencia-${Date.parse(iso)}`;
+    const datosPago = { status: 'confirmed', paid_at: iso, payment_note: 'Transferencia', mp_payment_id: pago };
+    let { data: pagadas, error: payErr } = await supabase.from('bookings')
+      .update(datosPago).in('id', ids).is('paid_at', null).select();
+    // Una sesión choca con otra reserva: se confirman una por una (igual que Flow); la que choca queda por confirmar a mano.
+    if (payErr?.code === '23P01' || payErr?.code === '23505') {
+      const ok: any[] = [];
+      for (const id of ids) {
+        const r = await supabase.from('bookings').update(datosPago).eq('id', id).is('paid_at', null).select();
+        if (!r.error) ok.push(...(r.data ?? []));
+        else await logError('transferencia/confirmar', 'Una sesión de la transferencia choca con otra reserva: queda para confirmar a mano', { patientId, bookingId: id, error: r.error.message });
+      }
+      pagadas = ok; payErr = null;
+    }
+    if (payErr) throw new Error(payErr.message);
+    let conPasos = false;
+    const enCola: string[] = [];
+    const sinCola: { id: string; t: TareaPago[] }[] = [];
+    for (const r of pagadas ?? []) {
+      const previa = (antes ?? []).find((a: { id: string }) => a.id === r.id);
+      const t: TareaPago[] = tareasDePago(previa?.status === 'pending_payment' && sesionVigente(previa.session_date));
+      if (!conPasos) { conPasos = true; t.push('pasos'); }
+      if (await encolarTareas(r.id, t, pago)) enCola.push(r.id); else sinCola.push({ id: r.id, t });
+    }
+    confirmadas = (pagadas ?? []).length;
+    const idsPagadas = (pagadas ?? []).map((r: { id: string }) => r.id);
+    for (const r of pagadas ?? []) {
+      await upsertPatientFromBooking({ patient_name: r.patient_name, patient_email: r.patient_email, patient_phone: r.patient_phone, rut: r.patient_rut }).catch(console.error);
+      await fichaDesdePrimerPago(r, idsPagadas).catch(console.error);
+    }
+    const plazo = Date.now() + 20_000;
+    if (enCola.length) await procesarTareas({ bookingIds: enCola, hastaMs: plazo });
+    // Respaldo si no se pudo registrar (igual que Flow); las llaves de idempotencia evitan duplicar.
+    for (const { id, t } of sinCola) for (const tarea of t) if (Date.now() < plazo) await ejecutarTarea(id, nombreTarea(tarea, pago));
+    if (confirmadas) await logInfo('transferencia/confirmada', `Transferencia de ${patient.name} confirmada al subir el comprobante; queda por revisar en el banco`, { patientId, ids: idsPagadas, total });
+  } catch (e) {
+    // No se pudo confirmar: queda "por confirmar" como antes (aviso del panel y "Confirmar pago").
+    await logError('transferencia/confirmar', 'No se pudo confirmar sola la transferencia; queda para confirmar a mano', { patientId, error: e instanceof Error ? e.message : String(e) });
+  }
+
   // Correo a Valentina con el comprobante adjunto.
   const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
   const site = new URL(request.url).origin;
@@ -107,5 +162,5 @@ export const POST: APIRoute = async ({ request }) => {
   });
   if (!r.sent) await logError('transferencia/aviso', 'No se pudo enviar a Valentina el correo del comprobante', { patientId, error: r.reason });
 
-  return json({ ok: true });
+  return json({ ok: true, confirmada: confirmadas > 0 });
 };

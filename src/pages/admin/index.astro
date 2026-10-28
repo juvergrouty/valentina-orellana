@@ -213,7 +213,7 @@ type Tarea = {
 };
 const vuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); return u.pathname + u.search; })();
 const tareas: Tarea[] = [];
-const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos, pagosPorDevolver } = avisos;
+const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos, pagosPorDevolver, transferenciasPorRevisar } = avisos;
 
 // Pago por devolver o reagendar (19 oct 2026, ver src/lib/pagosPorDevolver.ts): queda hasta "Resuelto".
 for (const p of pagosPorDevolver ?? []) {
@@ -278,6 +278,21 @@ for (const b of box.pendientes) {
 }
 if (box.error) {
   tareas.push({ clave: ahoraClave, chip: 'revisar', titulo: 'No se pudo revisar tu calendario para los boxes', detalle: 'Recarga en un rato; mientras, revisa tus horas presenciales en Google Calendar.', href: null });
+}
+// Transferencia confirmada sola al subir el comprobante (28 oct 2026): el paciente ya recibió todo;
+// falta que Valentina vea el dinero en su banco. Si no llegó: en la sesión, "Anular pago".
+for (const a of transferenciasPorRevisar ?? []) {
+  tareas.push({
+    clave: claveCL(a.subidoEl),
+    chip: `transferencia ${cuando(claveCL(a.subidoEl).slice(0, 10), claveCL(a.subidoEl).slice(11, 16))}`,
+    titulo: `Revisar en tu banco la transferencia de ${a.patientName}`,
+    detalle: `${clp(a.total)} · ya le llegó la confirmación · toca para ver el comprobante; si no llegó, en la sesión usa «Anular pago»`,
+    href: `/api/admin/comprobante?b=${a.bookingIds[0]}`, externo: true,
+    accion: { tipo: 'form', action: '/api/admin/transferencia-revisada', campos: { ids: a.bookingIds.join(','), redirect: vuelta }, texto: 'Ya la revisé' },
+  });
+}
+if (transferenciasPorRevisar === null) {
+  tareas.push({ clave: ahoraClave, chip: 'revisar', titulo: 'No se pudieron revisar las transferencias recibidas', detalle: 'Recarga en un rato.', href: null });
 }
 for (const a of comprobanteAlerts) {
   tareas.push({

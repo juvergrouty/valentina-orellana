@@ -1042,7 +1042,7 @@ export async function sendNotificationToAdmin(data: BookingEmailData, adminEmail
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Hora</td>
               <td style="padding:0.35rem 0;font-weight:600;font-size:1rem;">${String(data.session_time).slice(0, 5)}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Método de pago</td>
-              <td style="padding:0.35rem 0;">${data.payment_method === 'manual' ? '💵 Pago en consulta' : data.payment_method === 'sin_costo' ? '🤝 Sin costo' : '💳 Flow'}</td></tr>
+              <td style="padding:0.35rem 0;">${data.payment_method === 'manual' ? '💵 Pago en consulta' : data.payment_method === 'sin_costo' ? '🤝 Sin costo' : data.payment_method === 'transferencia' ? '🏦 Transferencia' : '💳 Flow'}</td></tr>
           <tr><td style="padding:0.35rem 0;color:#6B6860;">Monto</td>
               <td style="padding:0.35rem 0;font-weight:500;">${formatCLP(data.amount)}</td></tr>
           ${filaEnlaceVale(enlaceVale)}
