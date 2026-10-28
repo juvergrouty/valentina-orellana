@@ -305,7 +305,7 @@ export interface FilaReservaBot {
 /**
  * ¿La reserva es una sesión que de verdad va a ocurrir? Pagada (confirmed) o agendada por Vale con
  * link de pago (pending_payment + created_by_admin: su evento ya está en Calendar con Meet y la sesión
- * se hace aunque el pago llegue después; mismo criterio que encuadrado.ts esReal y debt.ts). Una reserva
+ * se hace aunque el pago llegue después; mismo criterio que debt.ts). Una reserva
  * web sin pagar no tiene evento en Calendar y se libera sola.
  */
 export function reservaVaAOcurrir(b: Pick<FilaReservaBot, 'status' | 'created_by_admin'>): boolean {

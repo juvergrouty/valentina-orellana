@@ -213,7 +213,7 @@ type Tarea = {
 };
 const vuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); return u.pathname + u.search; })();
 const tareas: Tarea[] = [];
-const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos, encuadrado, pagosPorDevolver } = avisos;
+const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos, pagosPorDevolver } = avisos;
 
 // Pago por devolver o reagendar (19 oct 2026, ver src/lib/pagosPorDevolver.ts): queda hasta "Resuelto".
 for (const p of pagosPorDevolver ?? []) {
@@ -339,42 +339,6 @@ for (const i of impuestos) {
     href: URL_SII, externo: true,
     accion: { tipo: 'form', action: '/api/admin/impuestos-ok', campos: { mes: i.mes, redirect: vuelta }, texto: 'Ya lo hice' },
   });
-}
-// Encuadrado (transcriptor): cada sesión nueva, movida o anulada aquí se pasa
-// a mano allá; "Listo" la saca de la lista (15 oct 2026, ver src/lib/encuadrado.ts).
-const URL_ENCUADRADO = 'https://app.encuadrado.com';
-for (const e of encuadrado?.eliminar ?? []) {
-  tareas.push({
-    clave: `${e.fecha}T${e.hora}`,
-    chip: `antes de ${cuando(e.fecha, e.hora)}`,
-    titulo: `Eliminar en Encuadrado la sesión de ${e.paciente}`,
-    detalle: `${fechaLarga(e.fecha)} a las ${e.hora} · se anuló aquí`,
-    href: URL_ENCUADRADO, externo: true,
-    accion: { tipo: 'form', action: '/api/admin/encuadrado', campos: { id: e.id, accion: 'eliminado', redirect: vuelta }, texto: 'Listo' },
-  });
-}
-for (const r of encuadrado?.reagendar ?? []) {
-  tareas.push({
-    clave: `${r.fecha}T${r.hora}`,
-    chip: `antes de ${cuando(r.fecha, r.hora)}`,
-    titulo: `Reagendar en Encuadrado a ${r.paciente}`,
-    detalle: `${fechaLarga(r.antes.fecha)} ${r.antes.hora} → ${fechaLarga(r.fecha)} ${r.hora} · ${r.tipo}`,
-    href: URL_ENCUADRADO, externo: true,
-    accion: { tipo: 'form', action: '/api/admin/encuadrado', campos: { id: r.id, accion: 'listo', fecha: r.fecha, hora: r.hora, redirect: vuelta }, texto: 'Listo' },
-  });
-}
-for (const a of encuadrado?.agendar ?? []) {
-  tareas.push({
-    clave: `${a.fecha}T${a.hora}`,
-    chip: `antes de ${cuando(a.fecha, a.hora)}`,
-    titulo: `Agendar en Encuadrado a ${a.paciente}`,
-    detalle: `${fechaLarga(a.fecha)} a las ${a.hora} · ${a.tipo} · para el transcriptor`,
-    href: URL_ENCUADRADO, externo: true,
-    accion: { tipo: 'form', action: '/api/admin/encuadrado', campos: { id: a.id, accion: 'listo', fecha: a.fecha, hora: a.hora, redirect: vuelta }, texto: 'Listo' },
-  });
-}
-if (encuadrado === null) {
-  tareas.push({ clave: ahoraClave, chip: 'revisar', titulo: 'No se pudo revisar qué falta pasar a Encuadrado', detalle: 'Recarga en un rato; mientras, revisa tus sesiones nuevas o movidas.', href: null });
 }
 for (const a of consentAlerts) {
   tareas.push({

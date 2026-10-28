@@ -15,7 +15,7 @@ interface Props {
   avisos?: AvisosPanel;
   // En el Inicio (/admin) la lista "Para hacer" ya muestra estos avisos con su
   // acción: se ocultan las franjas repetidas (cobros, box, comprobantes,
-  // boletas, consentimientos, rebotes, tarifas, impuestos y Encuadrado). En las demás
+  // boletas, consentimientos, rebotes, tarifas e impuestos). En las demás
   // páginas siguen igual.
   ocultarAvisosDeInicio?: boolean;
 }
@@ -25,7 +25,7 @@ const path = current ?? '';
 
 // Avisos: ver src/lib/avisosPanel.ts. Si la página ya los cargó (el Inicio
 // los usa en su lista "Para hacer"), llegan por props y no se consultan de nuevo.
-const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, encuadrado, correosFallidos, pagosPorDevolver }
+const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver }
   = avisosPrecargados ?? await cargarAvisosPanel(Astro.url.origin);
 // Passkey (16 oct 2026): franja para registrarla / hacerla obligatoria (src/lib/passkey/servidor.ts).
 const passkeyAviso = current === '/admin/seguridad' ? null : await avisoPasskey(Astro.cookies.get('vo_admin_token')?.value);
@@ -971,11 +971,6 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
         ✕ No se pudo guardar el OK del cierre. El aviso sigue igual: intenta de nuevo.
       </div>
     )}
-    {Astro.url.searchParams.get('error') === 'encuadrado_guardar' && (
-      <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
-        ✕ No se pudo guardar el "Listo" de Encuadrado. El aviso sigue igual: intenta de nuevo.
-      </div>
-    )}
     {Astro.url.searchParams.get('error') === 'box_guardar' && (
       <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
         ✕ No se pudo guardar lo del box en Espacio Cala. El aviso sigue igual: intenta de nuevo.
@@ -1044,53 +1039,6 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
         <a href="/admin/comunicaciones?tab=automaticos&solo=errores" style="color:#fff;font-weight:700;text-decoration:underline;">Ver cuáles</a>
       </div>
     )}
-    {!ocultarAvisosDeInicio && (encuadrado === null || encuadrado.agendar.length > 0 || encuadrado.reagendar.length > 0 || encuadrado.eliminar.length > 0) && (
-      <div role="status" id="encuadrado-alert" style="background:#4b5a72;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
-        <p style="font-weight:700;margin:0 0 0.35rem;">🎙️ Encuadrado (transcriptor) · <a href="https://app.encuadrado.com" target="_blank" rel="noopener" style="color:#fff;text-decoration:underline;">abrir Encuadrado</a></p>
-        {encuadrado === null && <p style="margin:0;">⚠ No se pudo revisar qué falta pasar a Encuadrado. Recarga en un rato; mientras, revisa tus sesiones nuevas o movidas.</p>}
-        {encuadrado && (
-          <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:0.4rem;">
-            {encuadrado.eliminar.map(e => (
-              <li style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
-                <span>✕ <strong>Elimina</strong> en Encuadrado la sesión de <strong>{e.paciente}</strong> del {fechaLarga(e.fecha)} a las {e.hora}: se anuló aquí.</span>
-                <form method="POST" action="/api/admin/encuadrado" style="display:inline;">
-                  <input type="hidden" name="id" value={e.id} />
-                  <input type="hidden" name="accion" value="eliminado" />
-                  <input type="hidden" name="redirect" value={urlVuelta} />
-                  <button type="submit" style="background:#fff;color:#4b5a72;border:none;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;cursor:pointer;">Listo</button>
-                </form>
-              </li>
-            ))}
-            {encuadrado.reagendar.map(r => (
-              <li style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
-                <span>↻ <strong>Reagenda</strong> en Encuadrado a <a href={`/admin/agenda?booking=${r.id}`} style="color:#fff;font-weight:700;text-decoration:underline;">{r.paciente}</a>: del {fechaLarga(r.antes.fecha)} a las {r.antes.hora} → <strong>{fechaLarga(r.fecha)} a las {r.hora}</strong> ({r.tipo.toLowerCase()}).</span>
-                <form method="POST" action="/api/admin/encuadrado" style="display:inline;">
-                  <input type="hidden" name="id" value={r.id} />
-                  <input type="hidden" name="accion" value="listo" />
-                  <input type="hidden" name="fecha" value={r.fecha} />
-                  <input type="hidden" name="hora" value={r.hora} />
-                  <input type="hidden" name="redirect" value={urlVuelta} />
-                  <button type="submit" style="background:#fff;color:#4b5a72;border:none;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;cursor:pointer;">Listo</button>
-                </form>
-              </li>
-            ))}
-            {encuadrado.agendar.map(a => (
-              <li style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
-                <span>＋ <strong>Agenda</strong> en Encuadrado a <a href={`/admin/agenda?booking=${a.id}`} style="color:#fff;font-weight:700;text-decoration:underline;">{a.paciente}</a>: {fechaLarga(a.fecha)} a las <strong>{a.hora}</strong> ({a.tipo.toLowerCase()}), para que corra el transcriptor.</span>
-                <form method="POST" action="/api/admin/encuadrado" style="display:inline;">
-                  <input type="hidden" name="id" value={a.id} />
-                  <input type="hidden" name="accion" value="listo" />
-                  <input type="hidden" name="fecha" value={a.fecha} />
-                  <input type="hidden" name="hora" value={a.hora} />
-                  <input type="hidden" name="redirect" value={urlVuelta} />
-                  <button type="submit" style="background:#fff;color:#4b5a72;border:none;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;cursor:pointer;">Listo</button>
-                </form>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    )}
     {!ocultarAvisosDeInicio && (box.pendientes.length > 0 || box.liberar.length > 0 || box.error) && (
       <div role="status" id="box-cala-alert" style="background:#3f5a6b;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
         <p style="font-weight:700;margin:0 0 0.35rem;">🏢 Box en Espacio Cala · <a href="https://espaciocala.cl" target="_blank" rel="noopener" style="color:#fff;text-decoration:underline;">abrir espaciocala.cl</a></p>
@@ -1134,7 +1082,7 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
                 {/* Fecha ya cumplida sin haberle avisado: urgente (8 oct 2026). */}
                 {t.fase === 'avisar' && t.atrasado && <>⚠ <strong>Urgente:</strong> falta avisarle a <strong>{t.nombre}</strong> que su tarifa {t.anterior ? `pasó de ${clp(t.anterior)} a` : 'subió a'} <strong>{clp(t.nuevo)}</strong>: ya rige desde el {fechaLarga(t.desde)} y todavía no se le ha avisado. Avísale antes de cobrarle el monto nuevo.</>}
                 {t.fase === 'proxima' && <>Desde el {fechaLarga(t.desde)} rige la tarifa nueva de <strong>{t.nombre}</strong>: <strong>{clp(t.nuevo)}</strong>{t.anterior ? ` (antes ${clp(t.anterior)})` : ''}. Las sesiones que le agendes desde ahora para esa fecha en adelante van con el monto nuevo.</>}
-                {t.fase === 'vigente' && <>Desde el {fechaLarga(t.desde)} rige la tarifa nueva de <strong>{t.nombre}</strong>: <strong>{clp(t.nuevo)}</strong>{t.anterior ? ` (antes ${clp(t.anterior)})` : ''}. Al agendarle (aquí o en Encuadrado) usa el monto nuevo.</>}
+                {t.fase === 'vigente' && <>Desde el {fechaLarga(t.desde)} rige la tarifa nueva de <strong>{t.nombre}</strong>: <strong>{clp(t.nuevo)}</strong>{t.anterior ? ` (antes ${clp(t.anterior)})` : ''}. Al agendarle usa el monto nuevo.</>}
                 {t.sesionesConMontoAntiguo > 0 && <> ⚠ Tiene {t.sesionesConMontoAntiguo} {t.sesionesConMontoAntiguo === 1 ? 'sesión agendada' : 'sesiones agendadas'} desde esa fecha con el monto antiguo: cámbiale el monto.</>}
               </span>
               {t.fase !== 'proxima' && (

@@ -10,8 +10,8 @@ import { logInfo } from './logger';
 //
 // "Resuelto" NO borra ni cambia la reserva (ni su pago ni su boleta): solo deja
 // un registro en settings ("pago_devolver_ok:<id de reserva>" → cuándo, desde
-// qué sesión del panel, IP y navegador), igual que "Ya lo hice" de impuestos y
-// "Listo" de Encuadrado. Sin migración. Además queda una línea en /admin/logs.
+// qué sesión del panel, IP y navegador), igual que "Ya lo hice" de impuestos.
+// Sin migración. Además queda una línea en /admin/logs.
 export const PREFIJO_RESUELTO = 'pago_devolver_ok:';
 const SIN_FECHA = '2099-12-31'; // cobro manual sin sesión
 const SIN_COSTO = 'Sin costo';

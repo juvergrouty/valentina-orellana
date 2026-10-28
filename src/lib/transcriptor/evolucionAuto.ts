@@ -49,7 +49,7 @@ export function normalizarCorreo(c: string | null | undefined): string {
   return String(c ?? '').trim().toLowerCase();
 }
 
-/** Reserva "sin fecha" (cobro manual, ver lib/encuadrado.ts): no es una sesión con evolución. */
+/** Reserva "sin fecha" (cobro manual sin sesión): no es una sesión con evolución. */
 const FECHA_SIN_SESION = '2099-12-31';
 
 export async function autollenarEvolucion(p: {
