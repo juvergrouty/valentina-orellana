@@ -29,41 +29,61 @@ export function manualChargeLabel(notes: string | null | undefined): string | nu
 // (auditoría 15 oct 2026: antes había tres reglas distintas y los totales no
 // cuadraban entre páginas). Se cobra si no está pagada ni anulada, tiene monto
 // y es una sesión de verdad: confirmada, agendada por Valentina (aunque espere
-// el pago) o con comprobante de transferencia. NO se cobra:
-// - una reserva web recién apartada sin pagar (la paciente está pagando en su
-//   pestaña de Flow; si no paga, vence sola a los 30 min);
+// el pago), con comprobante de transferencia o una reserva web que todavía
+// guarda su hora (28 oct 2026, caso Pedro Navarro: Valentina prefiere que
+// siempre se pueda cobrar; un pago doble lo devuelve ella). NO se cobra:
+// - una reserva web que ya pasó los 30 min sin pagar: su hora ya se ofrece a
+//   otras pacientes (disponibilidad.ts) y se libera sola (expireBooking.ts);
 // - una que Flow ya informó como pagada (PagoSinAviso: solo falta su aviso).
+export const RESERVA_WEB_RETENIDA_MS = 30 * 60 * 1000; // mismo plazo que expireBooking.ts
 export type Cobrable = {
   status: string; paid_at?: string | null; debt_voided?: boolean | null; amount?: number | null;
-  created_by_admin?: boolean | null; notes?: string | null;
+  created_by_admin?: boolean | null; notes?: string | null; created_at?: string | null;
 };
 export function esCobrable(b: Cobrable): boolean {
   if (b.paid_at || b.debt_voided === true || !((b.amount ?? 0) > 0)) return false;
   const notas = b.notes ?? '';
   if (notas.includes('PagoSinAviso')) return false;
   if (b.status === 'confirmed') return true;
-  return b.status === 'pending_payment' && (b.created_by_admin === true || notas.includes('ComprobanteTransferencia'));
+  if (b.status !== 'pending_payment') return false;
+  if (b.created_by_admin === true || notas.includes('ComprobanteTransferencia')) return true;
+  const creada = Date.parse(String(b.created_at ?? ''));
+  return Number.isFinite(creada) && Date.now() - creada < RESERVA_WEB_RETENIDA_MS;
 }
 
 // "Cobrar" sobre una reserva web que aún espera su pago (28 oct 2026, caso
 // Pedro Navarro): Valentina decide cobrarla con su link, así que pasa a ser
-// suya (created_by_admin). Desde ahí cuenta para "Cobrar" y /pagar (antes el
-// link decía "No tienes pagos pendientes") y no se libera sola a los 30 min.
-// Solo toca una reserva pendiente, sin pagar y que no sea ya suya.
-export async function tomarCobroReservaWeb(id: string): Promise<boolean> {
-  const { data, error } = await supabase.from('bookings')
+// suya (created_by_admin) y ya no se libera sola a los 30 min (expireBooking.ts)
+// mientras la paciente paga ese link. Solo toca reservas pendientes, sin pagar,
+// que no sean ya suyas y que todavía guarden su hora (menos de 30 min): nunca
+// revive una hora que ya se ofrece a otras. Queda la marca MARCA_COBRO_TOMADO
+// para que su primer pago siga completando la ficha (fichaDesdePrimerPago).
+// Por id (botones de una sesión) o por correo (link /pagar por correo).
+export const MARCA_COBRO_TOMADO = 'CobroTomado';
+async function tomarCobros(filtro: { id?: string; email?: string }): Promise<string[]> {
+  let q = supabase.from('bookings')
     .update({ created_by_admin: true })
-    .eq('id', id).eq('status', 'pending_payment').is('paid_at', null)
+    .eq('status', 'pending_payment').is('paid_at', null)
     .or('created_by_admin.is.null,created_by_admin.eq.false')
-    .select('id');
+    .gte('created_at', new Date(Date.now() - RESERVA_WEB_RETENIDA_MS).toISOString());
+  q = filtro.id ? q.eq('id', filtro.id) : q.eq('patient_email', String(filtro.email).toLowerCase());
+  const { data, error } = await q.select('id');
   if (error) throw new Error(error.message);
-  return (data ?? []).length > 0;
+  const ids = (data ?? []).map((r: { id: string }) => r.id);
+  await Promise.all(ids.map((id) => agregarLineaNotas(id, `${MARCA_COBRO_TOMADO} ${new Date().toISOString()}`)));
+  return ids;
+}
+export async function tomarCobroReservaWeb(id: string): Promise<boolean> {
+  return (await tomarCobros({ id })).length > 0;
+}
+export async function tomarCobrosWebPorEmail(email: string): Promise<void> {
+  await tomarCobros({ email });
 }
 
 export async function getPendingDebtByEmail(email: string): Promise<DebtBooking[]> {
   const { data } = await supabase
     .from('bookings')
-    .select('id, session_type, session_date, session_time, amount, notes, status, paid_at, debt_voided, created_by_admin')
+    .select('id, session_type, session_date, session_time, amount, notes, status, paid_at, debt_voided, created_by_admin, created_at')
     .eq('patient_email', email.toLowerCase())
     .eq('status', 'confirmed')
     .is('paid_at', null)
@@ -100,7 +120,7 @@ export async function getTotalOwedByEmail(email: string): Promise<DebtBooking[]>
     getPendingDebtByEmail(email),
     supabase
       .from('bookings')
-      .select('id, session_type, session_date, session_time, amount, notes, status, paid_at, debt_voided, created_by_admin')
+      .select('id, session_type, session_date, session_time, amount, notes, status, paid_at, debt_voided, created_by_admin, created_at')
       .eq('patient_email', email.toLowerCase())
       .eq('status', 'pending_payment')
       // Antes se excluían acá los cobros manuales (session_date='2099-12-31'):
@@ -111,8 +131,7 @@ export async function getTotalOwedByEmail(email: string): Promise<DebtBooking[]>
       // descripción real (ver manualChargeLabel) en vez de un tipo de sesión.
       .gt('amount', 0)
       .order('session_date', { ascending: true })
-      // Sin reservas web recién apartadas ni pagadas sin aviso (esCobrable):
-      // antes el link /pagar las arrastraba y se podía cobrar dos veces.
+      // Sin las que Flow ya informó pagadas (esCobrable).
       .then(r => (r.data ?? []).filter(esCobrable).map(({ status: _s, paid_at: _p, debt_voided: _d, created_by_admin: _c, ...b }) => b)),
   ]);
   return [...deuda, ...porCobrar].sort((a, b) => a.session_date.localeCompare(b.session_date));

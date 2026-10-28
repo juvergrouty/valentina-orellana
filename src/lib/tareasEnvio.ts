@@ -346,7 +346,7 @@ async function barrerPagosSinTareas(): Promise<void> {
   const hasta = new Date(Date.now() - 2 * 60_000).toISOString();
 
   const { data: pagadas, error } = await supabase.from('bookings')
-    .select('id, patient_name, patient_email, patient_phone, patient_rut, session_date, status, mp_payment_id, created_by_admin')
+    .select('id, patient_name, patient_email, patient_phone, patient_rut, session_date, status, mp_payment_id, created_by_admin, notes')
     .eq('payment_note', 'Flow')
     .not('mp_payment_id', 'is', null)
     .gte('paid_at', desde).lt('paid_at', hasta)

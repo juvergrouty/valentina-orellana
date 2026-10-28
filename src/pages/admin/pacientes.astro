@@ -36,7 +36,7 @@ const [{ count: countAll }, { count: countActive }, { count: countInactive }] = 
 // ── Reservas (para última/próxima sesión y cobros) ─────────────────────────
 const { data: bookings } = await supabase
   .from('bookings')
-  .select('patient_email, session_date, session_time, status, amount, paid_at, debt_voided, created_by_admin, notes')
+  .select('patient_email, session_date, session_time, status, amount, paid_at, debt_voided, created_by_admin, notes, created_at')
   .not('status', 'in', '(cancelled,expired)');
 
 type Stat = { last: string | null; next: string | null; due: number };
@@ -48,8 +48,8 @@ const statByEmail: Record<string, Stat> = {};
   // Total por cobrar: misma regla que Inicio, Deudas y Finanzas (esCobrable,
   // auditoría 15 oct 2026), sumando lo que ya se debe y lo agendado sin pagar.
   if (esCobrable(b)) s.due += b.amount ?? 0;
-  // Sin cobros manuales sin fecha ni reservas web sin pagar en última/próxima.
-  if (b.session_date === '2099-12-31' || (b.status === 'pending_payment' && !esCobrable(b))) return;
+  // Sin cobros manuales sin fecha en última/próxima.
+  if (b.session_date === '2099-12-31') return;
   // Una sesión de hoy que aún no empieza es la "próxima", no la "última".
   if (sesionYaEmpezo(b.session_date, b.session_time)) {
     if (!s.last || b.session_date > s.last) s.last = b.session_date;

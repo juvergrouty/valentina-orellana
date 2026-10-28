@@ -178,8 +178,10 @@ export async function fichaDesdePrimerPago(b: {
   patient_phone?: string | null;
   patient_rut?: string | null;
   created_by_admin?: boolean | null;
+  notes?: string | null;
 }, idsDeEstePago: string[]): Promise<void> {
-  if (b.created_by_admin) return;
+  // Una reserva web que Valentina tomó con "Cobrar" (CobroTomado, ver debt.ts) sigue siendo de la paciente.
+  if (b.created_by_admin && !(b.notes ?? '').includes('CobroTomado')) return;
   const email = b.patient_email?.trim().toLowerCase();
   if (!email || !b.patient_name?.trim()) return;
   const otras = await tieneSesionesPagadas(email, idsDeEstePago);

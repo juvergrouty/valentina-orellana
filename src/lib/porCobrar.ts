@@ -51,7 +51,7 @@ async function sinPagar(desde?: string): Promise<SesionSinPagar[]> {
   const { data, error } = await q.order('session_date', { ascending: true }).order('session_time', { ascending: true });
   if (error) throw new Error(error.message);
   // Misma regla que Finanzas, Pacientes y /pagar (src/lib/debt.ts, esCobrable):
-  // sin reservas web recién apartadas ni las que Flow ya informó pagadas.
+  // sin las que Flow ya informó pagadas.
   return ((data ?? []) as (SesionSinPagar & Cobrable)[]).filter(esCobrable);
 }
 

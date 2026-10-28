@@ -20,7 +20,7 @@ const SIN_FECHA = '2099-12-31'; // cobros manuales sin fecha de sesión
 // abandonada queda 'expired' y no es ni ingreso ni deuda).
 const { data: all } = await supabase
   .from('bookings')
-  .select('id, patient_name, patient_email, amount, status, payment_method, payment_note, session_type, session_date, session_time, paid_at, debt_voided, custom_title, notes, created_by_admin')
+  .select('id, patient_name, patient_email, amount, status, payment_method, payment_note, session_type, session_date, session_time, paid_at, debt_voided, custom_title, notes, created_by_admin, created_at')
   .not('status', 'in', '(cancelled,expired)');
 const bookings = all ?? [];
 

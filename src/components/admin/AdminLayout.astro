@@ -1218,6 +1218,20 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   </div>
 <CamposContacto />
 <script>
+  // Botones de cobro por WhatsApp (Por cobrar, Inicio): la reserva web sin pagar
+  // pasa a cobro con link para que no se libere sola mientras la paciente paga
+  // (28 oct 2026, ver tomarCobroReservaWeb en src/lib/debt.ts). Para las demás no hace nada.
+  document.addEventListener('click', (e) => {
+    const el = (e.target as HTMLElement | null)?.closest<HTMLElement>('[data-tomar-cobro]');
+    const id = el?.dataset.tomarCobro;
+    if (!id) return;
+    const fd = new FormData();
+    fd.append('action', 'tomar_cobro');
+    fd.append('id', id);
+    fetch('/api/admin/bookings', { method: 'POST', body: fd, credentials: 'same-origin', keepalive: true }).catch(() => {});
+  });
+</script>
+<script>
   // Aviso de cobros: marca "✓ WhatsApp abierto" en este navegador para saber a
   // quién ya se le escribió. El aviso sigue hasta que la sesión quede pagada.
   const clave = (id: string) => `cobro_wa:${id}`;

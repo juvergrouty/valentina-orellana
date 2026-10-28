@@ -1997,7 +1997,6 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 .cal-scroll.colors-on .cal-event.ev-pay-consulta { background: #fef3c7 !important; }
 .cal-scroll.colors-on .cal-event,
 .cal-scroll.colors-on .cal-event .ev-time { color: #1f2937 !important; }
-.cal-event.svc-hidden { display: none !important; }
 
 /* ── Mobile: calendario navegable con scroll horizontal ─────────────────── */
 @media (max-width: 768px) {
@@ -2094,14 +2093,16 @@ document.addEventListener('click', (e) => {
     try { localStorage.setItem('vo_colors_on', colorsToggle.checked ? '1' : '0'); } catch (e) {}
   });
 
-  // ── Filtro por servicio: oculta citas Y franjas del overlay de otros servicios ─
+  // ── Filtro por servicio: oculta las franjas del overlay de otros servicios ─
   // Varios servicios a la vez: sin ninguno marcado = todos. Las horas abiertas
-  // para un grupo (sin servicio puntual) se muestran siempre.
+  // para un grupo (sin servicio puntual) se muestran siempre. Las sesiones
+  // agendadas NUNCA se ocultan (28 oct 2026: la sesión pagada de Rafael, de
+  // pareja, no se veía porque el filtro guardado solo tenía los individuales).
   const svcAll = document.getElementById('svc-all');
   const svcCbs = Array.from(document.querySelectorAll('.svc-cb'));
   function applySvcFilter(ids) {
     const set = new Set(ids);
-    document.querySelectorAll('.cal-event, .avail-block, .extra-block').forEach((el) => {
+    document.querySelectorAll('.avail-block, .extra-block').forEach((el) => {
       const grupo = el.classList.contains('extra-block') && !el.dataset.svc;
       el.classList.toggle('svc-hidden', set.size > 0 && !grupo && !set.has(el.dataset.svc));
     });
@@ -2874,6 +2875,14 @@ document.getElementById('session-panel')?.addEventListener('submit', (e) => {
       const toggle = document.getElementById('sp-cobrar-toggle');
       const menu = document.getElementById('sp-cobrar-menu');
       if (toggle && menu && toggle.getClientRects().length > 0) {
+        // Igual que al apretar "Cobrar": la reserva web sin pagar queda asegurada.
+        if (window.__currentSessionBooking?.status === 'pending_payment') {
+          const fd = new FormData();
+          fd.append('action', 'tomar_cobro');
+          fd.append('id', abierto);
+          fetch('/api/admin/bookings', { method: 'POST', body: fd, credentials: 'same-origin', keepalive: true }).catch(() => {});
+          (window.__cobroTomado ??= {})[abierto] = true;
+        }
         menu.style.display = 'block';
         setTimeout(() => toggle.scrollIntoView({ block: 'center' }), 250);
       }

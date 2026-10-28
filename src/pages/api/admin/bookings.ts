@@ -5,7 +5,7 @@ import { pricingPlans } from '../../../data/services';
 import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar, markBookingDebtVoidedInCalendar } from '../../../lib/syncCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
-import { getTotalOwedByEmail, tagBookingsWithPaymentToken, totalACobrarPorEmail, tomarCobroReservaWeb } from '../../../lib/debt';
+import { getTotalOwedByEmail, tagBookingsWithPaymentToken, totalACobrarPorEmail, tomarCobroReservaWeb, tomarCobrosWebPorEmail } from '../../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
 import { quitarLineasNotas, agregarLineaNotas, MARCA_PROGRAMADA } from '../../../lib/apigateway';
 import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
@@ -244,7 +244,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   // teléfono para WhatsApp. Antes ese botón simplemente abría /pagar/[id] en la
   // pestaña de la propia admin — el link nunca llegaba al paciente.
   // ── "Cobrar" sobre una reserva web sin pagar (ver tomarCobroReservaWeb en debt.ts) ──
-  // La llama la agenda al apretar "💳 Cobrar", antes de mostrar WhatsApp/correo. Responde JSON.
+  // La llaman la agenda al apretar "💳 Cobrar" y los botones de WhatsApp con data-tomar-cobro
+  // (Por cobrar, Inicio). Responde JSON.
   if (action === 'tomar_cobro') {
     const id = form.get('id')?.toString() ?? '';
     if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -270,6 +271,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const { data: patient } = await supabase.from('patients').select('id, name, email').eq('id', patientId).maybeSingle();
     if (!patient?.email) return redirect(sep('error=patient_no_email'));
 
+    // Sus reservas web sin pagar quedan aseguradas: no se liberan mientras paga este link.
+    try { await tomarCobrosWebPorEmail(patient.email); }
+    catch (e) { await logError('bookings/tomar-cobro', 'No se pudieron asegurar las reservas web antes del correo de cobro', { patientId, error: e instanceof Error ? e.message : String(e) }); }
     const debt = await getTotalOwedByEmail(patient.email);
     if (!debt.length) return redirect(sep('error=no_debt'));
 

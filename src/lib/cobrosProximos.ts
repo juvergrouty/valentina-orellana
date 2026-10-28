@@ -69,7 +69,7 @@ export async function cobrosProximos(origen: string): Promise<CobroProximo[]> {
   const desde = new Date(hoy.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10);
   const hasta = new Date(hoy.getTime() + 3 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const { data, error } = await supabase.from('bookings')
-    .select('id, patient_name, patient_email, patient_phone, session_date, session_time, session_type, amount, status, paid_at, debt_voided, no_show, mp_preference_id, created_by_admin, notes, payment_method')
+    .select('id, patient_name, patient_email, patient_phone, session_date, session_time, session_type, amount, status, paid_at, debt_voided, no_show, mp_preference_id, created_by_admin, notes, payment_method, created_at')
     .gte('session_date', desde).lte('session_date', hasta)
     .is('paid_at', null)
     .not('status', 'in', '(cancelled,expired)');
@@ -78,10 +78,12 @@ export async function cobrosProximos(origen: string): Promise<CobroProximo[]> {
   const { esCobrable } = await import('./debt');
 
   const filas = (data ?? []).filter((b) => {
-    // Misma regla única de cobro (esCobrable, auditoría 19 oct 2026): sin reservas web que la paciente
-    // está pagando en Flow ni las que Flow ya informó pagadas (PagoSinAviso). Tampoco las que ya
+    // Misma regla única de cobro (esCobrable, auditoría 19 oct 2026): sin las que Flow ya informó
+    // pagadas (PagoSinAviso). Tampoco las que ya
     // tienen comprobante de transferencia por confirmar: eso es "Confirmar transferencia", no "Cobrar".
     if (!esCobrable(b) || comprobanteEnRevision(b.notes) || b.no_show || !b.session_time) return false;
+    // Reserva web que la paciente está pagando en Flow (sin "Cobrar" aún): no se pide cobrarle; si no paga, se libera sola.
+    if (b.status === 'pending_payment' && !b.created_by_admin) return false;
     const h = hoursUntilSessionCL(b.session_date, String(b.session_time).slice(0, 5));
     return h > 0 && h <= HORAS_AVISO_COBRO;
   });

@@ -489,7 +489,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
                         <div class="ini-tarea-accion">
                           {t.accion.tipo === 'wa' && (t.accion.url
                             ? <>
-                                <a href={t.accion.url} target="_blank" rel="noopener" data-cobro-wa={t.accion.id} class="btn ini-btn ini-btn-wa">WhatsApp</a>
+                                <a href={t.accion.url} target="_blank" rel="noopener" data-cobro-wa={t.accion.id} data-tomar-cobro={t.accion.id} class="btn ini-btn ini-btn-wa">WhatsApp</a>
                                 <span data-cobro-enviado={t.accion.id} hidden class="ini-hecho">✓ abierto</span>
                               </>
                             : <span class="ini-hecho">sin teléfono válido</span>)}
