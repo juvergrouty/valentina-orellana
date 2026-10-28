@@ -14,7 +14,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   try {
     if (!ids.length) throw new Error('sin sesiones');
     const iso = new Date().toISOString();
-    await Promise.all(ids.map((id) => agregarLineaNotas(id, `${MARCA_TRANSFERENCIA_REVISADA} ${iso}`)));
+    const ok = await Promise.all(ids.map((id) => agregarLineaNotas(id, `${MARCA_TRANSFERENCIA_REVISADA} ${iso}`)));
+    if (ok.includes(false)) throw new Error('no se guardó');
   } catch {
     return redirect(destino + (destino.includes('?') ? '&' : '?') + 'error=transferencia_guardar', 303);
   }

@@ -2,12 +2,13 @@ import type { APIRoute } from 'astro';
 import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
-import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar, markBookingDebtVoidedInCalendar } from '../../../lib/syncCalendar';
+import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar, markBookingDebtVoidedInCalendar, getValidAccessToken } from '../../../lib/syncCalendar';
+import { agregarMeetAEvento } from '../../../lib/googleCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
 import { getTotalOwedByEmail, tagBookingsWithPaymentToken, totalACobrarPorEmail, tomarCobroReservaWeb, tomarCobrosWebPorEmail } from '../../../lib/debt';
 import { createPaymentOrder, FLOW_URLS } from '../../../lib/flow';
-import { quitarLineasNotas, agregarLineaNotas, MARCA_PROGRAMADA } from '../../../lib/apigateway';
+import { quitarLineasNotas, agregarLineaNotas, cambiarNotas, MARCA_PROGRAMADA } from '../../../lib/apigateway';
 import { upsertPatientFromBooking, sendStepsOnFirstPayment } from '../../../lib/patients';
 import { sendWhatsappTemplate } from '../../../lib/whatsapp';
 import { logWarn, logInfo, logError } from '../../../lib/logger';
@@ -22,6 +23,7 @@ import { rutaInterna } from '../../../lib/rutaInterna';
 import { anularReserva, quiereAvisar } from '../../../lib/anularReserva';
 import { MARCA_PAGO_EN_CONSULTA } from '../../../lib/pagoEnConsulta';
 import { cambiarConsultaALink } from '../../../lib/consultaALink';
+import { MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA } from '../../../lib/comprobantes';
 
 export const prerender = false;
 
@@ -252,7 +254,13 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     try {
       const tomada = await tomarCobroReservaWeb(id);
       if (tomada) await logInfo('bookings/tomar-cobro', 'Reserva web sin pagar pasada a cobro con link desde "Cobrar"', { bookingId: id });
-      return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+      // Reserva web que ya pasó sus 30 min sin pagar: su hora ya se ofrece a otras y el link no la cobraría.
+      let vencida = false;
+      if (!tomada) {
+        const { data: r } = await supabase.from('bookings').select('status, paid_at, created_by_admin, notes').eq('id', id).maybeSingle();
+        vencida = !!r && r.status === 'pending_payment' && !r.paid_at && !r.created_by_admin && !/ComprobanteTransferencia|PagoSinAviso/.test(r.notes ?? '');
+      }
+      return new Response(JSON.stringify({ ok: true, vencida }), { headers: { 'Content-Type': 'application/json' } });
     } catch (e) {
       await logError('bookings/tomar-cobro', 'No se pudo preparar el cobro de la reserva web', { bookingId: id, error: e instanceof Error ? e.message : String(e) });
       return new Response(JSON.stringify({ ok: false }), { status: 500, headers: { 'Content-Type': 'application/json' } });
@@ -330,7 +338,10 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Deshacer un "Sin costo" (17 oct 2026): la sesión vuelve al monto que tenía
     // antes (guardado en notes); si quedara en $0 no aparecería nunca como deuda.
     const cambios: Record<string, unknown> = { paid_at: null, payment_note: null };
-    const { data: antes } = await supabase.from('bookings').select('payment_note, amount, notes').eq('id', id).maybeSingle();
+    const { data: antes } = await supabase.from('bookings').select('payment_note, amount, notes, mp_payment_id').eq('id', id).maybeSingle();
+    // Transferencia que no llegó (28 oct 2026): sin el número de pago "transferencia-…" la tarea
+    // "Revisar en tu banco" no vuelve si después se confirma a mano.
+    if (String(antes?.mp_payment_id ?? '').startsWith('transferencia-')) cambios.mp_payment_id = null;
     const montoAntes = new RegExp(`^${MARCA_MONTO_SIN_COSTO} (\\d+)$`, 'm').exec(antes?.notes ?? '');
     const restaurarMonto = antes?.payment_note === SIN_COSTO && !(antes.amount > 0) && !!montoAntes;
     if (restaurarMonto) cambios.amount = parseInt(montoAntes![1]);
@@ -346,6 +357,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Sin pago no hay boleta programada (8 oct 2026): si se vuelve a marcar
     // pagada, se decide de nuevo con "Emitir boleta".
     await quitarLineasNotas(id, [MARCA_PROGRAMADA]);
+    // Comprobante de transferencia (28 oct 2026): si no llegó el dinero y se anula el pago, la paciente
+    // tiene que poder pagar de nuevo; con la marca, /pagar le decía para siempre "lo estoy revisando".
+    await quitarLineasNotas(id, [MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA]);
     return redirect(dest);
   }
 
@@ -524,6 +538,21 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         // Mismo criterio que el correo de abajo: solo se avisa si la sesión sigue vigente y es de hoy en adelante.
         const avisarCal = !['cancelled', 'expired'].includes(booking.status) && booking.session_date >= todayCL();
         try { await rescheduleBookingInCalendar(id, booking.session_date, String(booking.session_time).slice(0, 5), Number(durNueva), avisarCal); } catch (e) { console.error('[change_service] calendar duración:', e); }
+      }
+      // Pasó de presencial a online (auditoría 28 oct 2026): el evento no tenía Meet y el correo de abajo
+      // dice que el link está en la invitación. Se agrega igual que "Ingresar a Google Meet" (generate-meet.ts).
+      const tieneMeet = /(?:^|\n)\s*Meet: https:\/\/meet\.google\.com\//.test(booking.notes ?? '');
+      if (!wasOnline && sessionType.includes('online') && !tieneMeet && booking.session_date !== '2099-12-31') {
+        try {
+          const auth = await getValidAccessToken();
+          const link = auth ? await agregarMeetAEvento(auth.token, auth.calendarId, booking.google_event_id) : null;
+          if (link) await cambiarNotas(id, (n) => {
+            const sinMeet = n.split('\n').filter(l => !/^\s*Meet:/.test(l)).join('\n').trim();
+            return `${sinMeet ? sinMeet + '\n' : ''}Meet: ${link}`;
+          });
+        } catch (e) {
+          await logWarn('admin/cambiar-servicio', 'La sesión pasó a online pero no se pudo agregar el Meet; usa «Ingresar a Google Meet» en la sesión', { bookingId: id, error: e instanceof Error ? e.message : String(e) });
+        }
       }
     }
 

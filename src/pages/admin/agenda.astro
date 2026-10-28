@@ -3397,6 +3397,10 @@ document.getElementById('sp-cobrar-toggle')?.addEventListener('click', async (e)
       const r = await fetch('/api/admin/bookings', { method: 'POST', body: fd, credentials: 'same-origin' });
       const j = await r.json().catch(() => ({ ok: false }));
       if (!r.ok || !j.ok) throw new Error('tomar_cobro');
+      if (j.vencida) {
+        alert('Esta reserva web pasó 30 minutos sin pagar y su hora ya se ofrece a otras personas, así que el link no la cobraría. Anúlala y agéndala de nuevo desde «+ Agendar sesión» con link de pago.');
+        return;
+      }
       (window.__cobroTomado ??= {})[id] = true;
     } catch {
       alert('No se pudo preparar el link de pago. Intenta de nuevo en unos segundos.');

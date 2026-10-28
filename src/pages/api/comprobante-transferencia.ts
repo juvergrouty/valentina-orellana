@@ -107,12 +107,12 @@ export const POST: APIRoute = async ({ request }) => {
     const pago = `transferencia-${Date.parse(iso)}`;
     const datosPago = { status: 'confirmed', paid_at: iso, payment_note: 'Transferencia', mp_payment_id: pago };
     let { data: pagadas, error: payErr } = await supabase.from('bookings')
-      .update(datosPago).in('id', ids).is('paid_at', null).select();
+      .update(datosPago).in('id', ids).is('paid_at', null).in('status', ['confirmed', 'pending_payment']).select();
     // Una sesión choca con otra reserva: se confirman una por una (igual que Flow); la que choca queda por confirmar a mano.
     if (payErr?.code === '23P01' || payErr?.code === '23505') {
       const ok: any[] = [];
       for (const id of ids) {
-        const r = await supabase.from('bookings').update(datosPago).eq('id', id).is('paid_at', null).select();
+        const r = await supabase.from('bookings').update(datosPago).eq('id', id).is('paid_at', null).in('status', ['confirmed', 'pending_payment']).select();
         if (!r.error) ok.push(...(r.data ?? []));
         else await logError('transferencia/confirmar', 'Una sesión de la transferencia choca con otra reserva: queda para confirmar a mano', { patientId, bookingId: id, error: r.error.message });
       }

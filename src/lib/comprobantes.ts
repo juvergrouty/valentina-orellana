@@ -81,7 +81,7 @@ export async function getTransferenciasPorRevisar(): Promise<ComprobanteAlert[]>
     .select('id, patient_name, amount, notes')
     .ilike('notes', `%${MARCA_TRANSFERENCIA_POR_REVISAR}%`)
     .not('notes', 'ilike', `%${MARCA_TRANSFERENCIA_REVISADA}%`)
-    .not('paid_at', 'is', null) // tras "Anular pago" vuelve a "por confirmar" (getComprobanteAlerts)
+    .not('paid_at', 'is', null) // tras "Anular pago" desaparece (y se quitan las marcas: la paciente puede volver a pagar)
     .like('mp_payment_id', 'transferencia-%') // solo las confirmadas solas; "Confirmar pago" a mano ya es la revisión
     .limit(100);
   if (error) throw new Error(error.message);

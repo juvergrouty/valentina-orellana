@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 import { agregarLineaNotas } from './apigateway';
 import { comprobanteEnRevision } from './comprobantes';
+import { esPagoEnConsulta } from './pagoEnConsulta';
+import { hoursUntilSessionCL } from './dateUtils';
 
 // "Deuda real" = misma definición usada en el calendario (agenda.astro, evClass)
 // y en /admin/deudas: reserva CONFIRMADA (la sesión se dio o se va a dar) sin
@@ -131,10 +133,17 @@ export async function getTotalOwedByEmail(email: string): Promise<DebtBooking[]>
       // descripción real (ver manualChargeLabel) en vez de un tipo de sesión.
       .gt('amount', 0)
       .order('session_date', { ascending: true })
-      // Sin las que Flow ya informó pagadas (esCobrable).
-      .then(r => (r.data ?? []).filter(esCobrable).map(({ status: _s, paid_at: _p, debt_voided: _d, created_by_admin: _c, ...b }) => b)),
+      // Sin las que Flow ya informó pagadas (esCobrable) ni reservas web que Valentina no ha
+      // asegurado con "Cobrar" (auditoría 28 oct 2026): pagadas por este link sin plazo, podían
+      // pagarse después de que la hora se liberara. Esas siguen en Por cobrar y Pacientes.
+      .then(r => (r.data ?? []).filter((b) => esCobrable(b) && (b.created_by_admin === true || /ComprobanteTransferencia/.test(b.notes ?? '')))
+        .map(({ status: _s, paid_at: _p, debt_voided: _d, created_by_admin: _c, ...b }) => b)),
   ]);
-  return [...deuda, ...porCobrar].sort((a, b) => a.session_date.localeCompare(b.session_date));
+  // "Paga en consulta" (19 oct 2026, pagoEnConsulta.ts) que aún no ocurre: se cobra en la sesión, no en el
+  // link (auditoría 28 oct 2026: el link /pagar la sumaba). Si la sesión ya pasó sin pagar, sí es deuda.
+  const enConsultaFutura = (b: DebtBooking & { payment_method?: string | null; status?: string }) =>
+    esPagoEnConsulta(b) && !!b.session_time && b.session_date !== '2099-12-31' && hoursUntilSessionCL(b.session_date, String(b.session_time).slice(0, 5)) > 0;
+  return [...deuda, ...porCobrar].filter((b) => !enConsultaFutura(b)).sort((a, b) => a.session_date.localeCompare(b.session_date));
 }
 
 /** Monto que /pagar/[id] le cobra HOY a la paciente: todo lo que debe

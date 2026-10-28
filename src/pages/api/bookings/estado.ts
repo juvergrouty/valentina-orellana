@@ -20,12 +20,14 @@ export const GET: APIRoute = async ({ url }) => {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ estado: 'vencida' });
 
   const { data: b, error } = await supabase.from('bookings')
-    .select('status, created_at, session_date, session_time, duration_min, notes')
+    .select('status, created_at, session_date, session_time, duration_min, notes, created_by_admin')
     .eq('id', id).maybeSingle();
   if (error) return json({ estado: 'ok' });
   if (!b) return json({ estado: 'vencida' });
   if (b.status === 'confirmed') return json({ estado: 'ok' }); // ya pagada (otra pestaña)
   if (/PagoSinAviso|ComprobanteTransferencia/.test(b.notes ?? '')) return json({ estado: 'ok' }); // pago en curso/revisión
+  // Valentina la aseguró con "Cobrar" (o la agendó ella): sigue guardada aunque pase el plazo (28 oct 2026).
+  if (b.status === 'pending_payment' && b.created_by_admin) return json({ estado: 'ok' });
 
   const vigente = b.status === 'pending_payment' && Date.now() - new Date(b.created_at).getTime() < PLAZO_MS;
   if (vigente) return json({ estado: 'ok' });
