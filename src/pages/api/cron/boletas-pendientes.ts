@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { cronAutorizado } from '../../../lib/cronAuth';
 import { supabase } from '../../../lib/supabase';
 import { procesarTareas } from '../../../lib/tareasEnvio';
+import { reintentarCalendarioPendiente } from '../../../lib/syncCalendar';
 import { registrarLatido, revisarSaludSiToca } from '../../../lib/saludSitio';
 import { enviarBoletaDeReserva, emitBoletaParaReserva, folioVigente, MARCA_PENDIENTE, MARCA_PENDIENTE_EMISION, MARCA_PROGRAMADA, quitarLineasNotas } from '../../../lib/apigateway';
 import { logWarn } from '../../../lib/logger';
@@ -31,6 +32,8 @@ export const GET: APIRoute = async ({ request }) => {
   await registrarLatido();
   await revisarSaludSiToca();
   const envios = await procesarTareas({ hastaMs: Date.now() + 25_000 });
+  // Eventos de Google Calendar que no se pudieron borrar o mover al anular/reagendar (28 oct 2026).
+  await reintentarCalendarioPendiente();
 
   const { data: rows, error } = await supabase
     .from('bookings').select('id, notes').ilike('notes', `%${MARCA_PENDIENTE}%`)

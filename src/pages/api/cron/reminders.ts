@@ -127,7 +127,8 @@ export const GET: APIRoute = async ({ request }) => {
       // Solo el día anterior, desde la hora de la sesión (acotada a 8:00–21:00) hasta las 21:00.
       if (b.session_date !== manana) { skipped++; break doEmail; }
       const objetivoCorreo = Math.min(Math.max(minutosDe(time), CORREO_DESDE), CORREO_HASTA);
-      if (ahoraMin < objetivoCorreo || ahoraMin > CORREO_HASTA + 10) { skipped++; break doEmail; }
+      // Hasta las 21:50: si la tarea automática falla un rato, el recordatorio igual alcanza a salir (28 oct 2026).
+      if (ahoraMin < objetivoCorreo || ahoraMin > CORREO_HASTA + 50) { skipped++; break doEmail; }
 
       // Registro "una sola vez" por sesión y hora (si se reagenda, la hora
       // nueva tiene su propio recordatorio). Si la marca en notas no se pudo
@@ -177,7 +178,7 @@ export const GET: APIRoute = async ({ request }) => {
       const nocheAnterior = objetivoWa > minutosDe(time) - 60; // ni 1 h antes alcanza desde las 7:00
       if (nocheAnterior) {
         // Sesión muy temprano: la noche anterior a las 21:00 ("de mañana a las…").
-        if (b.session_date !== manana || ahoraMin < WA_NOCHE_ANTERIOR || ahoraMin > WA_NOCHE_ANTERIOR + 30) { waSkipped++; break doWhatsapp; }
+        if (b.session_date !== manana || ahoraMin < WA_NOCHE_ANTERIOR || ahoraMin > WA_NOCHE_ANTERIOR + 50) { waSkipped++; break doWhatsapp; }
       } else {
         // Mismo día: 4 h antes, nunca antes de las 7:00.
         if (b.session_date !== today || ahoraMin < objetivoWa) { waSkipped++; break doWhatsapp; }
