@@ -25,7 +25,7 @@ import { tieneSesionVigente } from './transcriptor/etiquetaConsentimiento';
 // v4 (17 oct 2026, aprobada por Valentina): versión corta por capas
 // (docs/transcriptor/14-consentimiento-corto.md). La capa 1 es este texto; el
 // detalle (proveedores con país, plazos de copias temporales, derechos uno por
-// uno, grabación y pareja) vive en /condiciones#privacidad (versión 5). La v2 y
+// uno, grabación y pareja) vive en /condiciones#privacidad (versión 6). La v2 y
 // la v3 (y la v1, decisión de Vale del 19 oct) siguen vigentes para quienes ya
 // firmaron: su texto queda en su text_snapshot, y con accept_recording = true
 // siguen habilitando grabar.
