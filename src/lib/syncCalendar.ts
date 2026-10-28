@@ -6,7 +6,7 @@
 
 import { supabase } from './supabase';
 import { quitarPrefijoSiHayInvitados, refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle, setCalendarEventPaidState, setCalendarEventVoided, UNPAID_PREFIX } from './googleCalendar';
-import { logError } from './logger';
+import { logError, logWarn } from './logger';
 import { cambiarNotas } from './apigateway';
 import { ESTACIONAMIENTO } from '../data/consulta';
 import { normalizarMeet, quitarLineaEnlacePropio, traeEnlacePropio } from './enlaceSesion';
@@ -79,9 +79,13 @@ async function registrarPendienteCalendario(bookingId: string, accion: Pendiente
     { key: PREFIJO_PENDIENTE + bookingId, value: JSON.stringify(valor), updated_at: new Date().toISOString() },
     { onConflict: 'key' },
   );
-  await logError(accion === 'borrar' ? 'calendar/eliminar' : 'calendar/reagendar',
-    `No se pudo ${accion === 'borrar' ? 'eliminar' : 'mover'} el evento de Google Calendar${e ? '' : '; se reintenta solo cada 5 minutos'}`,
-    { bookingId, error, ...(e ? { errorPendiente: e.message } : {}) });
+  // Mientras se reintenta solo es una advertencia (sin la franja roja del panel, 28 oct 2026: "si se
+  // arregla deben desaparecer"). La franja sale solo si se agotan los reintentos o si ni siquiera
+  // se pudo dejar pendiente.
+  const ctx = accion === 'borrar' ? 'calendar/eliminar' : 'calendar/reagendar';
+  const verbo = accion === 'borrar' ? 'eliminar' : 'mover';
+  if (e) await logError(ctx, `No se pudo ${verbo} el evento de Google Calendar: revísalo a mano en tu calendario`, { bookingId, error, errorPendiente: e.message });
+  else await logWarn(ctx, `No se pudo ${verbo} el evento de Google Calendar; se reintenta solo cada 5 minutos`, { bookingId, error });
 }
 
 // Borrar nunca avisa por Google (decisión de Vale, 19 oct 2026: el correo de anulación es el único aviso).
@@ -128,7 +132,9 @@ export async function reintentarCalendarioPendiente(): Promise<{ hechos: number;
             `No se pudo ${p.accion === 'borrar' ? 'borrar' : 'mover'} en Google Calendar una sesión tras ${intentos} intentos: revisa ese evento a mano en tu calendario.`,
             { bookingId, error: e instanceof Error ? e.message : String(e) });
         } else {
-          await supabase.from('settings').update({ value: JSON.stringify({ ...p, intentos }), updated_at: new Date().toISOString() }).eq('key', f.key);
+          const { error: errInt } = await supabase.from('settings').update({ value: JSON.stringify({ ...p, intentos }), updated_at: new Date().toISOString() }).eq('key', f.key);
+          // Si ni el contador se puede guardar, nunca llegaría al aviso final: se avisa ya.
+          if (errInt) await logError('calendar/pendiente-agotado', `No se pudo ${p.accion === 'borrar' ? 'borrar' : 'mover'} en Google Calendar una sesión y tampoco registrar el reintento: revisa ese evento a mano en tu calendario.`, { bookingId, error: errInt.message });
           pendientes++;
         }
       }
