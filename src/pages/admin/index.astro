@@ -7,6 +7,7 @@ import { cargarAvisosPanel } from '../../lib/avisosPanel';
 import { sesionesPorCobrar, sesionesQueTeDeben } from '../../lib/porCobrar';
 import { getValidAccessToken } from '../../lib/syncCalendar';
 import { pacienteDeTitulo } from '../../lib/boxCala';
+import { mismaPersona as mismaPersonaNombre } from '../../lib/mismaPersona';
 import { URL_SII } from '../../lib/impuestos';
 import { ETIQUETA_PAGO_EN_CONSULTA, esPagoEnConsulta } from '../../lib/pagoEnConsulta';
 import { textoPagoPorDevolver } from '../../lib/pagosPorDevolver';
@@ -84,6 +85,7 @@ async function teDeben(): Promise<{ personas: number; total: number }> {
 type Reserva = {
   id: string; patient_name: string; session_type: string; session_date: string; session_time: string;
   status: string; amount: number | null; duration_min: number | null; paid_at: string | null; debt_voided: boolean | null;
+  patient_email?: string | null;
 };
 
 const hace90 = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
@@ -92,7 +94,7 @@ const [avisos, reservasRes, google, porCobrar, deben, recientesRes] = await Prom
   // Sesiones desde el lunes de la semana del día mirado hasta 7 días después
   // (o el domingo, lo que llegue más lejos). Sin canceladas NI vencidas.
   supabase.from('bookings')
-    .select('id, patient_name, session_type, session_date, session_time, status, amount, duration_min, paid_at, debt_voided, notes, payment_method')
+    .select('id, patient_name, patient_email, session_type, session_date, session_time, status, amount, duration_min, paid_at, debt_voided, notes, payment_method')
     .gte('session_date', lunes).lte('session_date', hasta)
     .not('status', 'in', '(cancelled,expired)')
     .order('session_date').order('session_time'),
@@ -110,6 +112,8 @@ const reservas = (reservasRes.data ?? []) as Reserva[];
 type Sesion = {
   id: string | null; fecha: string; hora: string; dur: number; paciente: string;
   online: boolean; tipo: string; pago: 'pagada' | 'por-pagar' | 'en-consulta' | 'anulada' | 'sin-cobro' | 'externa'; href: string;
+  email?: string | null;
+  fichaId?: string | null; // ficha del paciente (para "Preparar" en las sesiones del día)
 };
 const TIPOS: Record<string, string> = {
   'online': 'Individual online', 'presencial': 'Individual presencial',
@@ -127,6 +131,7 @@ const sesiones: Sesion[] = reservas.filter((b) => b.session_date !== '2099-12-31
   // Sin costo (obra social): queda con paid_at pero $0; antes salía "pagada" (auditoría 19 oct 2026).
   pago: b.paid_at ? (Number(b.amount) > 0 ? 'pagada' : 'sin-cobro') : b.debt_voided ? 'anulada' : (Number(b.amount) > 0 ? (esPagoEnConsulta(b) ? 'en-consulta' : 'por-pagar') : 'sin-cobro'),
   href: `/admin/agenda?booking=${b.id}`,
+  email: b.patient_email ?? null,
 }));
 {
   // Una misma sesión puede estar dos veces: evento de la página y de Encuadrado
@@ -154,6 +159,25 @@ const sesiones: Sesion[] = reservas.filter((b) => b.session_date !== '2099-12-31
   sesiones.sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
 }
 const delDia = sesiones.filter((s) => s.fecha === dia);
+// "Preparar" (29 oct 2026): cada sesión del día lleva a la ficha de su paciente con el asistente
+// preparando la sesión. Ficha por correo (reservas del sitio) o, si no, por nombre (eventos de
+// Google/Encuadrado), solo si hay UNA ficha que calce: ante la duda no se ofrece el botón.
+if (delDia.length) {
+  const { data: fichas } = await supabase.from('patients').select('id, name, email');
+  // Por nombre (solo eventos de Google, sin correo): mismo primer nombre Y al menos un apellido en común;
+  // un evento que diga solo "Luis" no abre la ficha de "Luis Medina" (auditoría 29 oct 2026).
+  const palabras = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-zñ ]/g, ' ').split(/\s+/).filter((w) => w.length > 1);
+  const conApellidoComun = (a: string, b: string) => {
+    const x = palabras(a), y = palabras(b);
+    return x.length > 1 && y.length > 1 && mismaPersonaNombre(a, b) && x.slice(1).some((w) => y.slice(1).includes(w));
+  };
+  for (const s of delDia) {
+    const candidatas = s.email
+      ? (fichas ?? []).filter((f) => String(f.email ?? '').toLowerCase() === s.email!.toLowerCase())
+      : (fichas ?? []).filter((f) => f.name && conApellidoComun(String(f.name), s.paciente));
+    s.fichaId = candidatas.length === 1 ? (candidatas[0].id as string) : null;
+  }
+}
 const semana = sesiones.filter((s) => s.fecha >= lunes && s.fecha <= domingo);
 const proximas = sesiones.filter((s) => s.fecha > dia && s.fecha <= fin7);
 const proximasPorDia = [...proximas.reduce((m, s) => m.set(s.fecha, [...(m.get(s.fecha) ?? []), s]), new Map<string, Sesion[]>())];
@@ -550,7 +574,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
         ) : (
           <ul class="ini-sesiones">
             {delDia.map((s) => (
-              <li>
+              <li class="ini-sesion-fila">
                 <a href={s.href} class="ini-sesion">
                   <span class="ini-sesion-hora">{s.hora}</span>
                   <span class="ini-tarea-txt">
@@ -560,6 +584,9 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
                   <span class={`ini-pago ini-pago-${s.pago}`}>{PAGO_TXT[s.pago]}</span>
                   <span class="ini-chev" set:html={chevron}></span>
                 </a>
+                {s.fichaId && (
+                  <a href={`/admin/pacientes/${s.fichaId}?tab=notas&preparar=1`} class="ini-preparar" title={`Tareas, temas pendientes y sugerencias para la sesión de ${s.paciente}`}>✦ Preparar</a>
+                )}
               </li>
             ))}
           </ul>
@@ -690,6 +717,11 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
   .ini-mas summary::-webkit-details-marker { display: none; }
   .ini-mas[open] summary .ini-mas-abrir, .ini-mas:not([open]) summary .ini-mas-cerrar { display: none; }
 
+  .ini-sesion-fila { display: flex; align-items: center; gap: 0.4rem; border-top: 1px solid var(--enc-border-2); }
+  .ini-sesiones > li.ini-sesion-fila:first-child { border-top: none; }
+  .ini-sesion-fila > .ini-sesion { flex: 1; min-width: 0; border-top: none; }
+  .ini-preparar { flex-shrink: 0; font-size: 0.78rem; font-weight: 600; color: #4b3f2f; background: var(--enc-body-bg); border: 1px solid var(--enc-border-2); border-radius: 99px; padding: 0.35rem 0.7rem; text-decoration: none; white-space: nowrap; min-height: 36px; display: inline-flex; align-items: center; }
+  .ini-preparar:hover { border-color: #A8906C; }
   .ini-sesion { display: flex; align-items: center; gap: 0.7rem; min-height: 48px; padding: 0.45rem 0.25rem; text-decoration: none; color: inherit; border-top: 1px solid var(--enc-border-2); border-radius: 8px; }
   .ini-sesion-hora { font-weight: 700; font-size: 0.95rem; width: 3rem; flex-shrink: 0; }
 

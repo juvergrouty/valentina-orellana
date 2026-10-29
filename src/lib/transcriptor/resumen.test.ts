@@ -435,6 +435,24 @@ test('prompt de pregunta: reglas fijas, sesiones en orden con fecha, bloque en c
   assert.deepEqual(p.omitidas, []);
 });
 
+test('prompt de pregunta con notas de la terapeuta: van con fecha y origen; sin sesiones también responde', () => {
+  const notas = [
+    { fecha: null, texto: 'Motivo: ansiedad laboral.', origen: 'general' as const },
+    { fecha: '2026-10-05', texto: 'Habló de su hermana; retomar.', origen: 'terapeuta' as const },
+  ];
+  const p = armarPromptPregunta({ pregunta: 'Prepárame la próxima sesión', instrucciones: null, sesiones: SESIONES, notas });
+  const c = p.messages[0].content as Anthropic.TextBlockParam[];
+  assert.match(c[0].text, /<notas_de_la_terapeuta>/);
+  assert.match(c[0].text, /<nota fecha="5 oct 2026" origen="terapeuta">\nHabló de su hermana; retomar\.\n<\/nota>/);
+  assert.ok(c[0].text.indexOf('origen="general"') < c[0].text.indexOf('origen="terapeuta"'));
+  assert.equal(p.notasIncluidas, 2);
+  assert.match(PARTE_FIJA_PREGUNTAS, /notas clínicas que ella escribió/);
+  assert.match(PARTE_FIJA_PREGUNTAS, /nunca propongas técnicas, ejercicios, intervenciones ni tratamientos/);
+  const soloNotas = armarPromptPregunta({ pregunta: '¿Qué quedó pendiente?', instrucciones: null, sesiones: [], notas });
+  assert.equal(soloNotas.notasIncluidas, 2);
+  assert.throws(() => armarPromptPregunta({ pregunta: 'x', instrucciones: null, sesiones: [], notas: [] }));
+});
+
 test('ajustarContexto: con poco presupuesto degrada primero la más antigua a resumen, luego omite', () => {
   const corto = '### Tareas y acuerdos\n- Camila: anotar en el celular.';
   const ses: SesionParaPregunta[] = [

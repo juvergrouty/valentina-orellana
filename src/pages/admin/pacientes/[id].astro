@@ -196,6 +196,8 @@ const notesByDate: Record<string, any> = {};
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 
+// "Preparar próxima sesión" (29 oct 2026): chip del asistente y botón "Preparar" del Inicio (?preparar=1).
+const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que quedaron y lo acordado para trabajar, un resumen breve de lo último conversado y de cómo ha evolucionado, y temas que mencionó y no se han vuelto a abordar (como sugerencias para mi criterio), todo con fecha.';
 ---
 
 <AdminLayout title={patient.name} current="/admin/pacientes">
@@ -748,15 +750,16 @@ const formatCLP = (n: number) =>
       </div>
 
       <aside class="notas-lateral">
-        {ia.tarjetas.length > 0 && (
+        {(ia.tarjetas.length > 0 || notes.length > 0 || !!String(patient.notes ?? '').trim()) && (
           <section class="card ia-preguntar" id="preguntar-ia" data-patient-id={patient.id}
             data-sesiones={JSON.stringify(ia.consultables.map((t) => ({ id: t.g.id, fecha: fechaCorta(t.g.session_date) })))}>
             <p class="ia-preg-titulo"><span aria-hidden="true">✦</span> Preguntar a la IA</p>
-            <p class="ia-sub" style="margin-bottom:0.85rem;">Sobre las sesiones grabadas de {patient.name}</p>
-            {ia.consultables.length ? (
+            <p class="ia-sub" style="margin-bottom:0.85rem;">Sobre las sesiones grabadas y tus notas clínicas de {patient.name}</p>
+            {(ia.consultables.length > 0 || notes.length > 0 || !!String(patient.notes ?? '').trim()) ? (
               <div style="display:flex;flex-direction:column;gap:0.6rem;">
                 <div class="ia-chips" aria-label="Sugerencias rápidas">
                   {[
+                    ['Preparar próxima sesión', PREGUNTA_PREPARAR_SESION],
                     ['Resumir las últimas sesiones', 'Resume en pocas líneas lo más importante de las últimas sesiones, con fecha.'],
                     ['¿Qué tareas quedaron?', '¿Qué tareas quedaron pendientes y de qué sesión son?'],
                     ['¿Qué trabajar hoy?', '¿Qué quedó para trabajar en la próxima sesión?'],
@@ -768,7 +771,7 @@ const formatCLP = (n: number) =>
                 <div>
                   <label class="label" for="ia-alcance" style="display:block;margin-bottom:0.3rem;">Sesiones</label>
                   <select id="ia-alcance">
-                    <option value="todas">Todas las sesiones ({ia.consultables.length})</option>
+                    <option value="todas">{ia.consultables.length ? `Todas las sesiones (${ia.consultables.length}) y tus notas` : 'Tus notas clínicas'}</option>
                     {ia.consultables.length > 1 && <option value="ultima">Solo la última</option>}
                     {ia.consultables.map((t) => <option value={t.g.id}>Sesión del {fechaCorta(t.g.session_date)}</option>)}
                   </select>
@@ -1704,6 +1707,21 @@ const formatCLP = (n: number) =>
   const caja = document.getElementById('preguntar-ia');
   const btn = document.getElementById('ia-preguntar-btn') as HTMLButtonElement | null;
   if (caja && btn) {
+    // Botón "Preparar" del Inicio (?preparar=1, 29 oct 2026): pregunta sola la preparación de la sesión
+    // (con todas las sesiones y notas) y la deja a la vista. Se quita de la dirección para no repetirla al recargar.
+    if (new URLSearchParams(location.search).get('preparar') === '1') {
+      setTimeout(() => {
+        const chip = document.querySelector<HTMLButtonElement>('.ia-chip');
+        const area = document.getElementById('ia-pregunta') as HTMLTextAreaElement | null;
+        const alc = document.getElementById('ia-alcance') as HTMLSelectElement | null;
+        if (!chip || !area) return;
+        if (alc) alc.value = 'todas';
+        area.value = chip.dataset.pregunta ?? '';
+        caja.scrollIntoView({ block: 'start' });
+        btn.click();
+        const u = new URL(location.href); u.searchParams.delete('preparar'); history.replaceState(null, '', u.pathname + u.search + u.hash);
+      }, 0);
+    }
     const sesiones: { id: string; fecha: string }[] = JSON.parse(caja.dataset.sesiones || '[]');
     const pidIA = caja.dataset.patientId ?? '';
     const estado = document.getElementById('ia-preg-estado')!;
@@ -1745,7 +1763,7 @@ const formatCLP = (n: number) =>
       btn.disabled = true;
       box.hidden = true;
       estado.style.color = '';
-      estado.textContent = `Buscando en ${ids ? ids.length : sesiones.length} ${(ids ? ids.length : sesiones.length) === 1 ? 'sesión' : 'sesiones'}…`;
+      estado.textContent = ids ? `Buscando en ${ids.length} ${ids.length === 1 ? 'sesión' : 'sesiones'}…` : (sesiones.length ? `Buscando en ${sesiones.length} ${sesiones.length === 1 ? 'sesión' : 'sesiones'} y tus notas…` : 'Buscando en tus notas…');
       try {
         const d = await postPanel('/api/admin/transcriptor/preguntar', { patient_id: pidIA, pregunta, ...(ids ? { grabacion_ids: ids } : {}) });
         if (!d.ok) throw new Error(d.error ?? 'No se pudo responder ahora. Intenta de nuevo en un minuto.');
@@ -1754,6 +1772,7 @@ const formatCLP = (n: number) =>
         const omitidas = (d.omitidas as { fecha: string }[] | undefined) ?? [];
         const notas: string[] = [];
         if (citadas.length) notas.push(`Leyó ${citadas.length} ${citadas.length === 1 ? 'sesión' : 'sesiones'}.`);
+        if (Number(d.notas_usadas) > 0) notas.push(`Usó ${d.notas_usadas} ${Number(d.notas_usadas) === 1 ? 'nota tuya' : 'notas tuyas'}.`);
         if (omitidas.length) notas.push(`No alcanzaron a entrar: ${omitidas.map((o) => o.fecha).join(', ')}.`);
         if (Number(d.lectura_fallida) > 0) notas.push('Alguna transcripción no se pudo leer; se usó su resumen si lo había.');
         extra.textContent = notas.join(' ');

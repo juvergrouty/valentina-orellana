@@ -21,8 +21,9 @@ import { consultarResumenes, conTextoResumen, tieneTexto, type FilaArchivo } fro
 import { ErrorClaude, clasificarError } from '../../../../lib/transcriptor/claude';
 import {
   SIN_RESPUESTA, cargarInstrucciones, fechaLegible, plantillaDesdeTipo, responderPregunta,
-  type SesionParaPregunta,
+  type SesionParaPregunta, type NotaParaPregunta,
 } from '../../../../lib/transcriptor/resumen';
+import { esEvolucionDesdeResumen } from '../../../../lib/transcriptor/panel';
 import {
   MODELO_PREGUNTAS, ROTULO_RESPUESTA,
   type Almacenamiento, type Cifrado, type ContextoCifrado, type TranscripcionClara, type TipoSesion, type PausaGrabacion,
@@ -82,10 +83,13 @@ export const POST: APIRoute = async (ctx) => {
   }
 
   // Grabaciones: SOLO de este paciente (nunca mezclar pacientes).
-  let q = supabase.from('grabaciones').select('id, patient_id, session_date, tipo, pausas, excluir_ia_at').eq('patient_id', patientId);
+  let q = supabase.from('grabaciones').select('id, patient_id, booking_id, session_date, tipo, pausas, excluir_ia_at').eq('patient_id', patientId);
   if (pedidas) q = q.in('id', pedidas);
-  const { data: grabaciones, error: eg } = await q.order('session_date', { ascending: true }).limit(MAX_SESIONES);
+  // Las MÁS RECIENTES primero (hasta MAX_SESIONES) y luego en orden cronológico: antes, con más de 40
+  // grabaciones, quedaban fuera justo las últimas (auditoría 29 oct 2026).
+  const { data: recientes, error: eg } = await q.order('session_date', { ascending: false }).limit(MAX_SESIONES);
   if (eg) return json({ ok: false, error: 'No se pudieron leer las sesiones.' }, 500);
+  const grabaciones = [...(recientes ?? [])].reverse();
   if (pedidas && (grabaciones?.length ?? 0) !== pedidas.length) {
     await auditar('vale', 'preguntar', { patientId, request, clientAddress, resultado: 'denegado', detalle: { motivo: 'grabacion_de_otro_paciente_o_inexistente', pedidas: pedidas.length } });
     return json({ ok: false, error: 'Alguna sesión no pertenece a esta ficha.' }, 400);
@@ -97,10 +101,24 @@ export const POST: APIRoute = async (ctx) => {
   }
   const permitidas = (grabaciones ?? []).filter((g) => !g.excluir_ia_at);
   const ids = permitidas.map((g) => g.id as string);
-  if (!ids.length) return json({ ok: false, error: excluidas.length ? 'Las sesiones de esta ficha están excluidas de las preguntas a la IA.' : 'Esta ficha no tiene sesiones grabadas.' }, 404);
+
+  // Notas clínicas escritas por Vale (29 oct 2026): session_notes vigentes + notas generales de la ficha.
+  // Solo al preguntar por toda la ficha (si elige sesiones puntuales, solo esas). Aquí solo se CUENTAN;
+  // el texto se lee después de la bitácora (como el resto del contenido clínico).
+  let hayNotas = false;
+  if (!pedidas) {
+    const [{ count, error: en }, { count: conGenerales, error: ef }] = await Promise.all([
+      supabase.from('session_notes').select('id', { count: 'exact', head: true }).eq('patient_id', patientId).is('deleted_at', null),
+      supabase.from('patients').select('id', { count: 'exact', head: true }).eq('id', patientId).not('notes', 'is', null).neq('notes', ''),
+    ]);
+    if (en || ef) return json({ ok: false, error: 'No se pudieron leer tus notas clínicas.' }, 500);
+    hayNotas = (count ?? 0) > 0 || (conGenerales ?? 0) > 0;
+  }
+  if (!ids.length && !hayNotas) return json({ ok: false, error: excluidas.length ? 'Las sesiones de esta ficha están excluidas de las preguntas a la IA.' : 'Esta ficha no tiene sesiones grabadas ni notas clínicas.' }, 404);
 
   const [{ data: transcripciones, error: et }, { data: resumenes }] = await Promise.all([
-    supabase.from('transcripciones').select('id, grabacion_id, r2_key').in('grabacion_id', ids).is('deleted_at', null),
+    // Sin grabaciones (solo notas) no se consulta nada: un .in() vacío.
+    supabase.from('transcripciones').select('id, grabacion_id, r2_key').in('grabacion_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']).is('deleted_at', null),
     // 86-revisión M2: sin 0020 se lee igual (sin columnas de archivo).
     consultarResumenes<FilaArchivo[]>((cols) => supabase.from('resumenes_ia').select(`id, grabacion_id, version, contenido, contenido_cifrado${cols}`).in('grabacion_id', ids)
       .eq('estado', 'listo').is('oculto_at', null).order('version', { ascending: false })),
@@ -116,19 +134,44 @@ export const POST: APIRoute = async (ctx) => {
   }
   const resPorGrab = new Map<string, string>();
   const usables = permitidas.filter((g) => trPorGrab.has(g.id as string) || resFilaPorGrab.has(g.id as string));
-  if (!usables.length) return json({ ok: false, error: 'Aún no hay transcripciones listas para esta ficha.' }, 404);
+  if (!usables.length && !hayNotas) return json({ ok: false, error: 'Aún no hay transcripciones listas ni notas clínicas en esta ficha.' }, 404);
 
-  const p1 = trPorGrab.size ? await cargarP1() : null;
+  const p1 = await cargarP1(); // también sin transcripciones: el historial de la pregunta se guarda cifrado
   if (trPorGrab.size && !p1) return json({ ok: false, error: 'El almacenamiento cifrado aún no está configurado.' }, 503);
 
   // Bitácora ANTES de tocar contenido clínico. Sin texto de la pregunta.
   try {
     await auditarObligatorio('vale', 'preguntar', {
       patientId, request, clientAddress,
-      detalle: { sesiones: usables.length, largo: pregunta.length, modelo: MODELO_PREGUNTAS },
+      detalle: { sesiones: usables.length, con_notas: hayNotas, largo: pregunta.length, modelo: MODELO_PREGUNTAS },
     });
   } catch {
     return json({ ok: false, error: 'No se pudo registrar el acceso en la bitácora; por seguridad no se responde.' }, 503);
+  }
+
+  // Notas de la terapeuta: nunca las de una sesión excluida de la IA a pedido del paciente (misma reserva o fecha).
+  let notas: NotaParaPregunta[] = [];
+  if (hayNotas) {
+    // Exclusiones de TODA la ficha (no solo de las grabaciones leídas arriba, que tienen tope).
+    const { data: todasExcluidas, error: ex } = await supabase.from('grabaciones').select('booking_id, session_date')
+      .eq('patient_id', patientId).not('excluir_ia_at', 'is', null);
+    if (ex) return json({ ok: false, error: 'No se pudieron leer tus notas clínicas.' }, 500);
+    const reservasExcluidas = new Set((todasExcluidas ?? []).map((g) => g.booking_id as string | null).filter(Boolean) as string[]);
+    const fechasExcluidas = new Set((todasExcluidas ?? []).map((g) => String(g.session_date)));
+    const [{ data: filasNotas, error: en }, { data: ficha, error: ef }] = await Promise.all([
+      supabase.from('session_notes').select('booking_id, session_date, content').eq('patient_id', patientId).is('deleted_at', null).order('session_date', { ascending: true }).limit(300),
+      supabase.from('patients').select('notes').eq('id', patientId).maybeSingle(),
+    ]);
+    if (en || ef) return json({ ok: false, error: 'No se pudieron leer tus notas clínicas.' }, 500);
+    notas = (filasNotas ?? [])
+      .filter((n) => String(n.content ?? '').trim())
+      .filter((n) => !(n.booking_id && reservasExcluidas.has(n.booking_id as string)) && !fechasExcluidas.has(String(n.session_date)))
+      .map((n) => ({
+        fecha: n.session_date ? String(n.session_date).slice(0, 10) : null,
+        texto: String(n.content),
+        origen: esEvolucionDesdeResumen(String(n.content)) ? 'basada_en_resumen_ia' as const : 'terapeuta' as const,
+      }));
+    if (String(ficha?.notes ?? '').trim()) notas.unshift({ fecha: null, texto: String(ficha!.notes), origen: 'general' });
   }
 
   // Descifrar resúmenes (H7) y transcripciones (las que fallen quedan con su resumen, si existe).
@@ -158,7 +201,7 @@ export const POST: APIRoute = async (ctx) => {
     });
     grabDeSesion.push(gid);
   }
-  if (!sesiones.length) return json({ ok: false, error: 'No se pudieron leer las transcripciones.' }, 502);
+  if (!sesiones.length && !notas.length) return json({ ok: false, error: 'No se pudieron leer las transcripciones.' }, 502);
 
   const id = crypto.randomUUID();
   const ctxPregunta: ContextoCifrado = { claveObjeto: `preguntas_ia/${id}/pregunta`, tipo: 'pregunta' };
@@ -168,7 +211,7 @@ export const POST: APIRoute = async (ctx) => {
   try { instrucciones = (await cargarInstrucciones('preguntas')).texto; } catch { /* se usa el texto por defecto */ }
 
   try {
-    const r = await responderPregunta({ pregunta, instrucciones, sesiones });
+    const r = await responderPregunta({ pregunta, instrucciones, sesiones, notas });
     const usadas = r.incluidas.map((x) => grabDeSesion[x.indice]);
 
     if (p1) {
@@ -205,6 +248,7 @@ export const POST: APIRoute = async (ctx) => {
       sin_respuesta: r.respuesta.startsWith(SIN_RESPUESTA),
       sesiones: r.incluidas.map((x) => ({ grabacion_id: grabDeSesion[x.indice], fecha: fechaLegible(x.fecha), fuente: x.fuente })),
       omitidas: r.omitidas.map((i) => ({ grabacion_id: grabDeSesion[i], fecha: fechaLegible(sesiones[i].fecha) })),
+      notas_usadas: r.notasIncluidas,
       lectura_fallida: fallasLectura,
       citas_eliminadas: r.citasEliminadas,
       costo_usd: r.costoUsd,
