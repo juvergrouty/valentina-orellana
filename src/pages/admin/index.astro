@@ -159,8 +159,8 @@ const sesiones: Sesion[] = reservas.filter((b) => b.session_date !== '2099-12-31
   sesiones.sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
 }
 const delDia = sesiones.filter((s) => s.fecha === dia);
-// "Preparar" (29 oct 2026): cada sesión del día lleva a la ficha de su paciente con el asistente
-// preparando la sesión. Ficha por correo (reservas del sitio) o, si no, por nombre (eventos de
+// "Preparar" (29 oct 2026): cada sesión del día lleva a "Para revisar hoy" de la ficha de su paciente
+// (tareas y lo que quedó para trabajar, ya generados, y su última nota: sin costo). Ficha por correo (reservas del sitio) o, si no, por nombre (eventos de
 // Google/Encuadrado), solo si hay UNA ficha que calce: ante la duda no se ofrece el botón.
 if (delDia.length) {
   const { data: fichas } = await supabase.from('patients').select('id, name, email');
@@ -585,7 +585,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
                   <span class="ini-chev" set:html={chevron}></span>
                 </a>
                 {s.fichaId && (
-                  <a href={`/admin/pacientes/${s.fichaId}?tab=notas&preparar=1`} class="ini-preparar" title={`Tareas, temas pendientes y sugerencias para la sesión de ${s.paciente}`}>✦ Preparar</a>
+                  <a href={`/admin/pacientes/${s.fichaId}?tab=notas#para-revisar`} class="ini-preparar" title={`Tareas y lo que quedó para trabajar con ${s.paciente}`}>✦ Preparar</a>
                 )}
               </li>
             ))}

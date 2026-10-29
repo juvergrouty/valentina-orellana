@@ -196,7 +196,9 @@ const notesByDate: Record<string, any> = {};
 const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 
-// "Preparar próxima sesión" (29 oct 2026): chip del asistente y botón "Preparar" del Inicio (?preparar=1).
+// "Para revisar hoy" también muestra tu última nota escrita a mano (29 oct 2026), sin usar la IA.
+const ultimaNota = (notes as { content?: string | null; session_date?: string | null }[]).find((n) => String(n.content ?? '').trim()) ?? null;
+// "Preparar próxima sesión" con IA (29 oct 2026): opcional, desde "Para revisar hoy" o el chip del asistente.
 const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que quedaron y lo acordado para trabajar, un resumen breve de lo último conversado y de cómo ha evolucionado, y temas que mencionó y no se han vuelto a abordar (como sugerencias para mi criterio), todo con fecha.';
 ---
 
@@ -669,21 +671,35 @@ const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que que
       <div class="hist" id="historial" data-patient-id={patient.id} data-demo={demoIA ? '1' : undefined}>
         <!-- "Para revisar hoy" (decisión B): lo que quedó para esta sesión. Sale del último resumen automático
              (anexo IA, no revisado). -->
-        {ia.paraHoy && (
-          <section class="card hoy" aria-labelledby="hoy-titulo">
+        {(ia.paraHoy || ultimaNota) && (
+          <section class="card hoy" id="para-revisar" aria-labelledby="hoy-titulo">
             <div class="hoy-cab">
               <p id="hoy-titulo" class="hoy-titulo"><span aria-hidden="true">✦</span> Para revisar hoy</p>
-              <a class="hoy-link" href={`#ia-${ia.paraHoy.grabacionId}`} data-ir-ia={ia.paraHoy.grabacionId}>Ver la sesión del {fechaCorta(ia.paraHoy.fecha)}</a>
+              {ia.paraHoy && <a class="hoy-link" href={`#ia-${ia.paraHoy.grabacionId}`} data-ir-ia={ia.paraHoy.grabacionId}>Ver la sesión del {fechaCorta(ia.paraHoy.fecha)}</a>}
             </div>
-            <div class="hoy-cuerpo">
-              {ia.paraHoyCols.map((c) => (
-                <div class="ia-cuerpo">
-                  <h4>{c.titulo}</h4>
-                  <Fragment set:html={c.html} />
-                </div>
-              ))}
-            </div>
-            <p class="hoy-aviso">Del resumen automático (IA) de la sesión del {fechaLarga(ia.paraHoy.fecha)} · no revisado: verifica con tu nota.</p>
+            {ia.paraHoy && (
+              <div class="hoy-cuerpo">
+                {ia.paraHoyCols.map((c) => (
+                  <div class="ia-cuerpo">
+                    <h4>{c.titulo}</h4>
+                    <Fragment set:html={c.html} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {ia.paraHoy && <p class="hoy-aviso">Del resumen automático (IA) de la sesión del {fechaLarga(ia.paraHoy.fecha)} · no revisado: verifica con tu nota.</p>}
+            {ultimaNota && (
+              <div class="hoy-nota">
+                <h4>Tu última nota{ultimaNota.session_date ? ` · ${fechaLarga(String(ultimaNota.session_date).slice(0, 10))}` : ''}</h4>
+                <p>{String(ultimaNota.content).trim()}</p>
+              </div>
+            )}
+            {(ia.consultables.length > 0 || notes.length > 0 || !!String(patient.notes ?? '').trim()) && (
+              <div class="hoy-ia">
+                <button type="button" class="btn btn-outline btn-sm" data-preparar-ia>✦ Buscar temas no abordados con IA</button>
+                <span class="hoy-aviso">Opcional: revisa todas las sesiones y tus notas (cerca de $10 por consulta).</span>
+              </div>
+            )}
           </section>
         )}
 
@@ -1039,6 +1055,11 @@ const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que que
   .hoy-cuerpo { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); column-gap: 1.5rem; }
   .hoy-cuerpo h4 { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--stone); font-weight: 600; margin: 0.7rem 0 0.2rem; }
   .hoy-aviso { font-size: 0.74rem; color: var(--stone); margin-top: 0.5rem; }
+  .hoy-nota { margin-top: 0.8rem; }
+  .hoy-nota h4 { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--stone); font-weight: 600; margin: 0 0 0.2rem; }
+  .hoy-nota p { white-space: pre-line; font-size: 0.86rem; max-height: 12rem; overflow: auto; }
+  .hoy-ia { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; margin-top: 0.8rem; }
+  .hoy-ia .hoy-aviso { margin-top: 0; }
 
   /* ── Historial: sesión más reciente arriba; el resto al fondo, bajo demanda ── */
   .hist { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
@@ -1707,21 +1728,18 @@ const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que que
   const caja = document.getElementById('preguntar-ia');
   const btn = document.getElementById('ia-preguntar-btn') as HTMLButtonElement | null;
   if (caja && btn) {
-    // Botón "Preparar" del Inicio (?preparar=1, 29 oct 2026): pregunta sola la preparación de la sesión
-    // (con todas las sesiones y notas) y la deja a la vista. Se quita de la dirección para no repetirla al recargar.
-    if (new URLSearchParams(location.search).get('preparar') === '1') {
-      setTimeout(() => {
-        const chip = document.querySelector<HTMLButtonElement>('.ia-chip');
-        const area = document.getElementById('ia-pregunta') as HTMLTextAreaElement | null;
-        const alc = document.getElementById('ia-alcance') as HTMLSelectElement | null;
-        if (!chip || !area) return;
-        if (alc) alc.value = 'todas';
-        area.value = chip.dataset.pregunta ?? '';
-        caja.scrollIntoView({ block: 'start' });
-        btn.click();
-        const u = new URL(location.href); u.searchParams.delete('preparar'); history.replaceState(null, '', u.pathname + u.search + u.hash);
-      }, 0);
-    }
+    // "Buscar temas no abordados con IA" de "Para revisar hoy" (29 oct 2026): opcional y con costo, por eso
+    // solo al apretarlo. Usa la pregunta del chip "Preparar próxima sesión" sobre todas las sesiones y notas.
+    document.querySelector<HTMLButtonElement>('[data-preparar-ia]')?.addEventListener('click', () => {
+      const chip = document.querySelector<HTMLButtonElement>('.ia-chip');
+      const area = document.getElementById('ia-pregunta') as HTMLTextAreaElement | null;
+      const alc = document.getElementById('ia-alcance') as HTMLSelectElement | null;
+      if (!chip || !area) return;
+      if (alc) alc.value = 'todas';
+      area.value = chip.dataset.pregunta ?? '';
+      caja.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      btn.click();
+    });
     const sesiones: { id: string; fecha: string }[] = JSON.parse(caja.dataset.sesiones || '[]');
     const pidIA = caja.dataset.patientId ?? '';
     const estado = document.getElementById('ia-preg-estado')!;
