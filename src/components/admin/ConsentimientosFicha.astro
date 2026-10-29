@@ -53,10 +53,10 @@ const firmasPersona = (() => {
   return lista.sort((a, b) => Number(esPareja(a)) - Number(esPareja(b)));
 })();
 const esFilaPareja = (c: any) => pareja.esPareja && (pareja.estado.firma?.id === c.id || Number(c.persona ?? 1) === 2);
-// Firmó sin autorizar la grabación (o la retiró) y ahora sí quiere grabar (29 oct 2026): se le envía un
-// consentimiento nuevo (otra fila; el firmado queda intacto como evidencia). Manda la última firma de esa
-// persona (evaluarConsentimientos). Solo la persona agendada: la pareja tiene su propio link.
-const puedeReenviar = (c: any) => !esFilaPareja(c) && Number(c.persona ?? 1) !== 2 && (!c.accept_recording || !!c.recording_revoked_at);
+// Cualquier persona que firmó puede cambiar lo que autorizó (29 oct 2026, p. ej. ahora sí autoriza la
+// grabación): se le envía un consentimiento nuevo (otra fila; el firmado queda intacto como evidencia).
+// Manda la última firma de esa persona (evaluarConsentimientos). La pareja recibe su propio link (persona 2).
+const puedeReenviar = (c: any) => esFilaPareja(c) || Number(c.persona ?? 1) !== 2;
 
 // Estado de la grabación con la MISMA regla del grabador (consentimiento.ts).
 const evaluacion = evaluarConsentimientos({
@@ -65,11 +65,16 @@ const evaluacion = evaluarConsentimientos({
 });
 // Si alguien retiró la grabación, se nombra a quién (textoMotivo habla de la ficha en general).
 const quienRetiro = evaluacion.motivo === 'revocado' ? firmasPersona.find((c: any) => c.recording_revoked_at) : null;
+// Si alguien firmó sin autorizar la grabación, se nombra a esa persona (29 oct: el aviso nombraba a la
+// persona agendada aunque la que no autorizó era su pareja).
+const quienNoAutorizo = evaluacion.motivo === 'sin_consentimiento' ? firmasPersona.find((c: any) => !c.accept_recording) : null;
 const lineaGrabacion = evaluacion.puede
   ? { ok: true, texto: pareja.esPareja ? 'Grabación autorizada por las dos personas.' : 'Grabación autorizada.' }
   : { ok: false, texto: quienRetiro
     ? `No se puede grabar: ${String(quienRetiro.signer_name ?? '').trim().split(/\s+/)[0] || 'una persona'} retiró la autorización de grabación.`
-    : textoMotivo(evaluacion.motivo, patient.name) };
+    : quienNoAutorizo
+      ? `No se puede grabar: ${String(quienNoAutorizo.signer_name ?? '').trim().split(/\s+/)[0] || 'una persona'} firmó sin autorizar la grabación.`
+      : textoMotivo(evaluacion.motivo, patient.name) };
 
 // E: anexos (copia fiel del correo con el aviso v2) de las firmas de esta ficha.
 let anexos: AnexoConsentimiento[] = [];
@@ -133,10 +138,31 @@ const nombrePareja = pareja.estado.retirada ? String(pareja.estado.retirada.sign
             )}
             <button type="button" class="cf-link fp-abrir" data-panel={`fp-todo-${c.id}`}>Registrar retiro</button>
           </div>
-          {puedeReenviar(c) && (
+          {puedeReenviar(c) && esFilaPareja(c) && (
             <div class="cf-envio" id={`cf-renv-${c.id}`} hidden>
               <p class="cf-sub">
-                Si ahora quiere autorizar la grabación, firma uno nuevo y marca esa opción. Vale el último que firme; este queda en el historial.
+                Para cambiar lo que autorizó (por ejemplo, la grabación), firma uno nuevo con su mismo RUT. Vale el último que firme; este queda en el historial.
+                {pareja.estado.pendiente?.sent_at && ` Ya se le envió un link el ${fmtCL(String(pareja.estado.pendiente.sent_at))}, aún sin firmar.`}
+              </p>
+              <div class="cp-botones">
+                <button type="button" class="btn btn-dark cf-btn cf-renv-p" data-accion="pareja_whatsapp">Enviar por WhatsApp</button>
+                <button type="button" class="btn btn-outline cf-btn cf-renv-p" data-accion="pareja_link">Copiar link</button>
+                <button type="button" class="btn btn-outline cf-btn cp-correo-abrir" aria-expanded="false" aria-controls={`cp-correo-r-${c.id}`}>Enviar por correo</button>
+              </div>
+              <form class="cp-correo" id={`cp-correo-r-${c.id}`} hidden novalidate>
+                <label class="cp-label" for={`cp-correo-r-in-${c.id}`}>Correo de {pila}</label>
+                <div class="cp-correo-fila">
+                  <input id={`cp-correo-r-in-${c.id}`} class="cp-correo-in" type="email" inputmode="email" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="120" placeholder="nombre@correo.cl" value={c.signer_email ?? ''} />
+                  <button type="submit" class="btn btn-dark cp-btn cp-correo-enviar">Enviar</button>
+                </div>
+              </form>
+              <p class="cp-msg" role="status" aria-live="polite"></p>
+            </div>
+          )}
+          {puedeReenviar(c) && !esFilaPareja(c) && (
+            <div class="cf-envio" id={`cf-renv-${c.id}`} hidden>
+              <p class="cf-sub">
+                Para cambiar lo que autorizó (por ejemplo, la grabación), firma uno nuevo. Vale el último que firme; este queda en el historial.
                 {envioPendiente && ` Ya se le envió uno nuevo por ${envioPendiente.sent_via === 'email' ? 'correo' : 'WhatsApp'} el ${fmtCL(envioPendiente.sent_at!)}, aún sin firmar.`}
               </p>
               <div class="cp-botones">
@@ -464,11 +490,35 @@ const nombrePareja = pareja.estado.retirada ? String(pareja.estado.retirada.sign
 
     const abrirCorreo = t.closest<HTMLButtonElement>('.cp-correo-abrir');
     if (abrirCorreo) {
-      const f = card.querySelector<HTMLFormElement>('.cp-correo');
+      const f = document.getElementById(abrirCorreo.getAttribute('aria-controls') ?? '') as HTMLFormElement | null;
       if (!f) return;
       f.hidden = !f.hidden;
       abrirCorreo.setAttribute('aria-expanded', String(!f.hidden));
       if (!f.hidden) f.querySelector<HTMLInputElement>('input')?.focus();
+      return;
+    }
+
+    // Reenvío a la segunda persona (29 oct 2026): link nuevo para firmar otra vez (p. ej. autorizar la grabación).
+    const reenvio = t.closest<HTMLButtonElement>('.cf-renv-p');
+    if (reenvio) {
+      const panel = reenvio.closest<HTMLElement>('.cf-envio');
+      const accion = reenvio.dataset.accion;
+      // La ventana de WhatsApp se abre antes de la petición: después el navegador la bloquea.
+      const ventana = accion === 'pareja_whatsapp' ? window.open('about:blank', '_blank') : null;
+      reenvio.disabled = true;
+      try {
+        const d = await post({ action: accion, patient_id: card.dataset.patientId });
+        if (accion === 'pareja_whatsapp') {
+          if (ventana) ventana.location.href = String(d.waUrl); else window.open(String(d.waUrl), '_blank');
+          pinta(panel, 'WhatsApp abierto con el mensaje listo: elige a la persona y envía.', '#15803d');
+        } else {
+          try { await navigator.clipboard.writeText(String(d.url)); pinta(panel, 'Link copiado. Pégalo en el mensaje que quieras.', '#15803d'); }
+          catch { prompt('Copia este link:', String(d.url)); }
+        }
+      } catch (err) {
+        if (ventana) ventana.close();
+        pinta(panel, `✕ ${err instanceof Error ? err.message : 'No se pudo completar.'}`, '#dc2626');
+      } finally { reenvio.disabled = false; }
       return;
     }
 
@@ -484,19 +534,22 @@ const nombrePareja = pareja.estado.retirada ? String(pareja.estado.retirada.sign
     if (!f) return;
     e.preventDefault();
     const card = tarjeta(f);
+    // El aviso va en el panel del formulario si tiene su línea de estado (reenvío a la pareja); si no, en la tarjeta.
+    const envio = f.closest<HTMLElement>('.cf-envio');
+    const caja = envio?.querySelector('.cp-msg') ? envio : card;
     const input = f.querySelector<HTMLInputElement>('.cp-correo-in');
     const boton = f.querySelector<HTMLButtonElement>('.cp-correo-enviar');
     const correo = (input?.value ?? '').trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(correo)) { pinta(card, 'Escribe un correo válido.', '#dc2626'); input?.focus(); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(correo)) { pinta(caja, 'Escribe un correo válido.', '#dc2626'); input?.focus(); return; }
     if (boton) { boton.disabled = true; boton.textContent = 'Enviando…'; }
     try {
       await post({ action: 'pareja_email', patient_id: card?.dataset.patientId, email: correo });
-      pinta(card, `✓ Enviado a ${correo}. El correo no quedó guardado en la ficha.`, '#15803d');
+      pinta(caja, `✓ Enviado a ${correo}. El correo no quedó guardado en la ficha.`, '#15803d');
       if (input) input.value = '';
       f.hidden = true;
-      card?.querySelector('.cp-correo-abrir')?.setAttribute('aria-expanded', 'false');
+      document.querySelector(`[aria-controls="${f.id}"]`)?.setAttribute('aria-expanded', 'false');
     } catch (err) {
-      pinta(card, `✕ ${err instanceof Error ? err.message : 'No se pudo enviar.'}`, '#dc2626');
+      pinta(caja, `✕ ${err instanceof Error ? err.message : 'No se pudo enviar.'}`, '#dc2626');
     } finally {
       if (boton) { boton.disabled = false; boton.textContent = 'Enviar'; }
     }

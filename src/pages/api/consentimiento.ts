@@ -5,7 +5,7 @@ import { normalizeRut } from '../../lib/apigateway';
 import { rutValido } from '../../lib/rut';
 import { sendConsentSignedCopy } from '../../lib/email';
 import { CONSENT_OPTIONS, CONSENT_VERSION, consentContactEmail, consentPlainText, personaConsent, sha256 } from '../../lib/consent';
-import { rutYaFirmoEnFicha } from '../../lib/transcriptor/pareja';
+import { estadoPareja, rutYaFirmoEnFicha } from '../../lib/transcriptor/pareja';
 import { fichaEsParejaEnBase, identidadFirmante } from '../../lib/transcriptor/consentimiento';
 
 export const prerender = false;
@@ -62,14 +62,25 @@ export const POST: APIRoute = async ({ request }) => {
   if (esPareja2) {
     // Dos firmas de la misma persona no valen como dos (consentimiento.ts agrupa por RUT): se avisa aquí.
     const { data: otras, error: eo } = await supabase.from('consents')
-      .select('id, signed_at, signer_rut, signer_email, signer_name').eq('patient_id', consent.patient_id).neq('id', consent.id);
+      .select('*').eq('patient_id', consent.patient_id).neq('id', consent.id);
     if (eo) return json({ ok: false, error: 'No se pudo guardar tu firma. Intenta de nuevo.' }, 500);
-    if (rutYaFirmoEnFicha(rut, otras ?? [], patient?.rut)) {
+    // Su propia firma anterior (persona 2) no cuenta: puede volver a firmar, p. ej. para autorizar la
+    // grabación (29 oct 2026). La de la persona agendada sí.
+    // Parejas de antes de la 0021: su firma quedó como persona 1; estadoPareja la reconoce como de la pareja.
+    const firmaPareja = estadoPareja(otras ?? [], patient?.rut, patient?.name).firma;
+    const idPareja = firmaPareja ? identidadFirmante(firmaPareja) : null;
+    if (rutYaFirmoEnFicha(rut, (otras ?? []).filter((f) => personaConsent(f) !== 2 && (!idPareja || identidadFirmante(f) !== idPareja)), patient?.rut)) {
       return json({ ok: false, error: 'Ese RUT o documento ya firmó en esta ficha. Cada persona de la pareja firma con el suyo.' }, 409);
     }
     const e = String(body.signer_email ?? '').trim().toLowerCase().slice(0, 200);
     if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return json({ ok: false, error: 'Revisa tu correo (o déjalo en blanco).' }, 400);
     correoPareja = e || null;
+    // Firma nueva de la misma segunda persona: con el mismo RUT o documento (manda la última de cada persona).
+    const previas2 = (otras ?? []).filter((f) => f.signed_at && !f.revoked_at && personaConsent(f) === 2);
+    const nueva = identidadFirmante({ id: consent.id, signer_rut: rut, signer_email: correoPareja, signer_name: name });
+    if (previas2.length && !previas2.some((f) => identidadFirmante(f) === nueva)) {
+      return json({ ok: false, error: sinRut ? 'Usa el mismo documento con que firmaste tu consentimiento anterior.' : 'Usa el mismo RUT con que firmaste tu consentimiento anterior.' }, 409);
+    }
   }
 
   // Firma nueva de la misma paciente (p. ej. ahora autoriza la grabación, 29 oct 2026): manda la última
