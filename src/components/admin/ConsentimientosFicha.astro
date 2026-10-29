@@ -53,6 +53,10 @@ const firmasPersona = (() => {
   return lista.sort((a, b) => Number(esPareja(a)) - Number(esPareja(b)));
 })();
 const esFilaPareja = (c: any) => pareja.esPareja && (pareja.estado.firma?.id === c.id || Number(c.persona ?? 1) === 2);
+// Firmó sin autorizar la grabación (o la retiró) y ahora sí quiere grabar (29 oct 2026): se le envía un
+// consentimiento nuevo (otra fila; el firmado queda intacto como evidencia). Manda la última firma de esa
+// persona (evaluarConsentimientos). Solo la persona agendada: la pareja tiene su propio link.
+const puedeReenviar = (c: any) => !esFilaPareja(c) && Number(c.persona ?? 1) !== 2 && (!c.accept_recording || !!c.recording_revoked_at);
 
 // Estado de la grabación con la MISMA regla del grabador (consentimiento.ts).
 const evaluacion = evaluarConsentimientos({
@@ -124,8 +128,24 @@ const nombrePareja = pareja.estado.retirada ? String(pareja.estado.retirada.sign
             {c.accept_recording && !grabacionRetirada && (
               <button type="button" class="btn btn-outline cf-btn fp-abrir" data-panel={`fp-grab-${c.id}`}>Retirar solo la grabación</button>
             )}
+            {puedeReenviar(c) && (
+              <button type="button" class="btn btn-outline cf-btn cf-envio-abrir" data-panel={`cf-renv-${c.id}`} aria-expanded="false" aria-controls={`cf-renv-${c.id}`}>Enviar nuevo consentimiento</button>
+            )}
             <button type="button" class="cf-link fp-abrir" data-panel={`fp-todo-${c.id}`}>Registrar retiro</button>
           </div>
+          {puedeReenviar(c) && (
+            <div class="cf-envio" id={`cf-renv-${c.id}`} hidden>
+              <p class="cf-sub">
+                Si ahora quiere autorizar la grabación, firma uno nuevo y marca esa opción. Vale el último que firme; este queda en el historial.
+                {envioPendiente && ` Ya se le envió uno nuevo por ${envioPendiente.sent_via === 'email' ? 'correo' : 'WhatsApp'} el ${fmtCL(envioPendiente.sent_at!)}, aún sin firmar.`}
+              </p>
+              <div class="cp-botones">
+                <button type="button" class="btn btn-dark cf-btn consent-btn" data-consent-action="whatsapp" disabled={!patient.phone} title={patient.phone ? '' : 'Falta el teléfono en la ficha'}>Enviar por WhatsApp</button>
+                <button type="button" class="btn btn-outline cf-btn consent-btn" data-consent-action="link">Copiar link</button>
+                <button type="button" class="btn btn-outline cf-btn consent-btn" data-consent-action="email" disabled={!patient.email} title={patient.email ? '' : 'Falta el correo en la ficha'}>Enviar por correo</button>
+              </div>
+            </div>
+          )}
           {c.accept_recording && !grabacionRetirada && (
             <div class="fp-confirmar" id={`fp-grab-${c.id}`} hidden>
               <p class="fp-texto">Desde ahora no se graban las sesiones de {pila}. Lo ya transcrito queda en la ficha con la misma confidencialidad. Su consentimiento para la atención sigue vigente.</p>

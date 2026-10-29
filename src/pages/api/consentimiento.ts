@@ -6,6 +6,7 @@ import { rutValido } from '../../lib/rut';
 import { sendConsentSignedCopy } from '../../lib/email';
 import { CONSENT_OPTIONS, CONSENT_VERSION, consentContactEmail, consentPlainText, personaConsent, sha256 } from '../../lib/consent';
 import { rutYaFirmoEnFicha } from '../../lib/transcriptor/pareja';
+import { fichaEsParejaEnBase, identidadFirmante } from '../../lib/transcriptor/consentimiento';
 
 export const prerender = false;
 
@@ -69,6 +70,24 @@ export const POST: APIRoute = async ({ request }) => {
     const e = String(body.signer_email ?? '').trim().toLowerCase().slice(0, 200);
     if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return json({ ok: false, error: 'Revisa tu correo (o déjalo en blanco).' }, 400);
     correoPareja = e || null;
+  }
+
+  // Firma nueva de la misma paciente (p. ej. ahora autoriza la grabación, 29 oct 2026): manda la última
+  // firma de cada persona (consentimiento.ts), así que debe firmar con el mismo RUT o documento. Con otro,
+  // la firma anterior seguiría mandando y la ficha parecería de dos personas. No aplica a fichas de pareja.
+  if (!esPareja2) {
+    const { data: previas, error: ep } = await supabase.from('consents')
+      .select('*').eq('patient_id', consent.patient_id).neq('id', consent.id).not('signed_at', 'is', null);
+    if (ep) return json({ ok: false, error: 'No se pudo guardar tu firma. Intenta de nuevo.' }, 500);
+    const propias = (previas ?? []).filter((f) => personaConsent(f) === 1);
+    if (propias.length) {
+      const nueva = identidadFirmante({ id: consent.id, signer_rut: rut, signer_email: patient?.email ?? null, signer_name: name });
+      if (!propias.some((f) => identidadFirmante(f) === nueva)) {
+        let pareja = true; // si no se puede revisar, no se bloquea la firma
+        try { pareja = await fichaEsParejaEnBase(consent.patient_id, supabase); } catch { /* deja firmar */ }
+        if (!pareja) return json({ ok: false, error: sinRut ? 'Usa el mismo documento con que firmaste tu consentimiento anterior.' : 'Usa el mismo RUT con que firmaste tu consentimiento anterior.' }, 409);
+      }
+    }
   }
 
   const contactEmail = await consentContactEmail();
