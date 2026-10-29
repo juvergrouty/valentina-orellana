@@ -174,8 +174,9 @@ function escenario() {
   Object.assign(singletons.almacenamiento, almacenamiento);
   Object.assign(singletons.assemblyai, { enviar: aai.enviar.bind(aai), obtener: aai.obtener.bind(aai), borrar: aai.borrar.bind(aai) });
   const alertas: unknown[] = [];
-  // El robot no debe intervenir en lo presencial: cualquier llamada al bot falla la prueba.
-  const botProhibido = new Proxy({}, { get: (_, k) => (k === 'then' ? undefined : () => { throw new Error(`el pipeline llamó al bot (${String(k)}) con una sesión presencial`); }) });
+  // El robot no debe intervenir en lo presencial: cualquier llamada al bot falla la prueba. La única excepción
+  // es leer el calendario (el cron lo revisa cada minuto para el envío automático, 29 oct): no hay sesiones online.
+  const botProhibido = new Proxy({}, { get: (_, k) => (k === 'then' ? undefined : k === 'sesionesOnlineProximas' ? async () => [] : () => { throw new Error(`el pipeline llamó al bot (${String(k)}) con una sesión presencial`); }) });
   const pipeline = crearPipeline({
     db: db.cliente, almacenamiento, aai, bot: botProhibido as never, claude: claude.cliente, cifrado,
     puedeGrabar: (p, tipo) => evaluarEnBase(p, tipo, db.cliente),

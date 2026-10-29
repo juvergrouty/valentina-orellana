@@ -177,8 +177,12 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
         }).catch(() => null);
         if (nv) log(`audio: contexto=${nv.estado} pistas=${nv.pistas} rtc=${nv.rtc} pico=${nv.pico}`);
       }
+      // Revisión ÚNICA, al minuto de empezar a grabar: ¿Meet entrega audio? (29 oct: antes se repetía en cada
+      // vuelta y una lectura fallida contaba como 0, así que al final de una sesión que sí se grabó y
+      // se transcribió —Werner, 23 oct— llegó el aviso igual.) Si la página no responde, se reintenta.
       if (!avisoSinPistas && ahora - inicio > 60_000) {
-        const n = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.pistas()).catch(() => 0);
+        const n = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.pistas()).catch(() => null);
+        if (n !== null) avisoSinPistas = n > 0; // con audio: no se vuelve a revisar
         if (n === 0) {
           const diag = await p.evaluate(() => ({
             rtc: ((window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []).length,

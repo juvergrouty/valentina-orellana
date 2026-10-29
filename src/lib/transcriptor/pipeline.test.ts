@@ -13,7 +13,7 @@ import { procesarWebhookAssemblyAI, repoWebhookSupabase } from './assemblyai';
 import { crearBot, procesarEventoBot } from './bot';
 import { evaluarEnBase } from './consentimiento';
 import { reintentar, transicionar } from './estados';
-import { avisarSinVoz, crearPipeline, esperaTrasFallos, etiquetaSesion, MAX_GUARDADO, MAX_RESUMEN, type PipelineP6 } from './pipeline';
+import { avisarSinVoz, crearPipeline, enVentanaAutomatica, esperaTrasFallos, etiquetaSesion, fechaChile, MAX_GUARDADO, MAX_RESUMEN, type PipelineP6 } from './pipeline';
 import { PROMPT_VERSION_RESUMEN } from './resumen';
 import { leerContenidoResumen } from './resumenCifrado';
 import { HABLANTE_SIN_SEPARAR } from './hablantes';
@@ -958,9 +958,9 @@ test('r2 punto 2: sin consentimiento al empezar a grabar o al pedir URL → 403 
   assert.equal(e2.maquinas.length, 1);
 });
 
-test('Vale, 18 oct: el cron ya no manda robots por la hora; Vale abre la sesión → uno solo, también si llega tarde', async () => {
+test('Vale, 18 oct: fuera de la ventana automática el cron no manda robots; Vale abre la sesión → uno solo, también si llega tarde', async () => {
   const e = escenario();
-  const s0 = sesionOnline(e, -15); // la sesión empezó hace 15 min y Vale no ha entrado
+  const s0 = sesionOnline(e, -20); // la sesión empezó hace 20 min (fuera del envío automático) y Vale no ha entrado
   await e.correr();
   e.avanzar(1); await e.correr();
   assert.equal(e.maquinas.length, 0, 'sin Vale no hay robot');
@@ -978,6 +978,82 @@ test('Vale, 18 oct: el cron ya no manda robots por la hora; Vale abre la sesión
   assert.equal(tarde.db.tabla('grabaciones')[0].hora_fin_prevista, new Date(tarde.ahora().getTime() + 50 * 60_000).toISOString());
   const muyTarde = escenario();
   assert.equal(await abrirVale(muyTarde, sesionOnline(muyTarde, -111)), 'fuera', 'pasada 1 h del término: no');
+});
+
+test('Vale, 29 oct: el cron manda el robot solo desde 4 min antes del inicio, una sola vez, y el clic de Vale no lo duplica', async () => {
+  assert.equal(enVentanaAutomatica('2026-10-29T20:00:00Z', new Date('2026-10-29T19:55:59Z')), false);
+  assert.equal(enVentanaAutomatica('2026-10-29T20:00:00Z', new Date('2026-10-29T19:56:00Z')), true);
+  assert.equal(enVentanaAutomatica('2026-10-29T20:00:00Z', new Date('2026-10-29T20:14:59Z')), true);
+  assert.equal(enVentanaAutomatica('2026-10-29T20:00:00Z', new Date('2026-10-29T20:15:00Z')), false);
+
+  const e = escenario();
+  const s = sesionOnline(e, 6); // empieza en 6 min
+  await e.correr();
+  assert.equal(e.maquinas.length, 0, 'a 6 min del inicio todavía no');
+  e.avanzar(2); await e.correr(); // a 4 min del inicio
+  assert.equal(e.maquinas.length, 1, 'sale solo 4 min antes');
+  const g = e.db.tabla('grabaciones')[0];
+  assert.equal(g.estado, 'bot_lanzando');
+  assert.equal(g.hora_fin_prevista, s.fin, 'el término previsto es el agendado (Vale todavía no llega)');
+  assert.equal(await abrirVale(e, s), 'activo', 'el clic de Vale no manda otro');
+  e.avanzar(1); await e.correr();
+  assert.equal(e.maquinas.length, 1, 'el cron no lo repite');
+
+  // Nadie llegó (el robot espera 30 min): salió sin audio → el cron NO lo vuelve a mandar solo; el clic de Vale sí.
+  e.avanzar(30);
+  await e.db.cliente.from('grabaciones').update({ estado: 'sin_audio', nota_sistema: NOTA_NADIE_LLEGO, bot_machine_id: null, fin_at: e.ahora().toISOString() }).eq('id', g.id);
+  e.avanzar(1); await e.correr();
+  assert.equal(e.maquinas.length, 1, 'sin repetición automática');
+  assert.equal(await abrirVale(e, s), 'lanzado', 'Vale lo vuelve a traer');
+
+  // Revisión: pidió entrar antes de la hora y nadie lo admitió → el clic de Vale lo vuelve a mandar (el cron no).
+  const a = escenario();
+  const sa = sesionOnline(a, 3);
+  await a.correr();
+  const ga = a.db.tabla('grabaciones')[0];
+  await a.db.cliente.from('grabaciones').update({ estado: 'bot_no_admitido', bot_machine_id: null, fin_at: a.ahora().toISOString() }).eq('id', ga.id);
+  a.avanzar(1); await a.correr();
+  assert.equal(a.maquinas.length, 1, 'el cron no insiste');
+  a.avanzar(3);
+  assert.equal(await abrirVale(a, sa), 'lanzado', 'el clic de Vale sí');
+
+  // Revisión: la sesión se movió a otra hora después de que el robot salió sin audio → va solo a la hora nueva.
+  const m = escenario();
+  const sm = sesionOnline(m, 3);
+  await m.correr();
+  const gm = m.db.tabla('grabaciones')[0];
+  m.avanzar(30);
+  await m.db.cliente.from('grabaciones').update({ estado: 'sin_audio', nota_sistema: NOTA_NADIE_LLEGO, bot_machine_id: null, fin_at: m.ahora().toISOString() }).eq('id', gm.id);
+  sm.ev.start.dateTime = new Date(m.ahora().getTime() + 60 * 60_000).toISOString();
+  sm.ev.end.dateTime = new Date(m.ahora().getTime() + 110 * 60_000).toISOString();
+  await m.correr();
+  assert.equal(m.maquinas.length, 1, 'todavía no es la hora nueva');
+  m.avanzar(57); await m.correr();
+  assert.equal(m.maquinas.length, 2, 'a la hora nueva va solo');
+});
+
+test('Vale, 29 oct: el envío automático va solo a reservas online del sitio y espera si otro robot sigue en una llamada', async () => {
+  // Evento sin reserva del sitio (p. ej. la sala fija de Encuadrado) con la ficha del paciente: no va solo.
+  const e = escenario();
+  const p = e.paciente('Rosa Pérez', 'rosa@ejemplo.cl');
+  e.firma(p, 'Rosa Pérez', '16.666.666-6');
+  const ini = new Date(e.ahora().getTime() + 3 * 60_000).toISOString();
+  const fin = new Date(e.ahora().getTime() + 53 * 60_000).toISOString();
+  e.eventos.push({ id: 'evencuadradofijo', status: 'confirmed', start: { dateTime: ini }, end: { dateTime: fin }, hangoutLink: 'https://meet.google.com/roc-pbtw-yip', attendees: [{ email: 'rosa@ejemplo.cl' }] });
+  await e.correr();
+  assert.equal(e.maquinas.length, 0, 'sin reserva del sitio no hay envío automático');
+
+  // Sesión anterior que se alargó (su robot sigue en la llamada) → la siguiente espera; cuando sale, va sola.
+  const f = escenario();
+  const anterior = sesionOnline(f, -55);
+  assert.equal(await abrirVale(f, anterior), 'lanzado');
+  const siguiente = sesionOnline(f, 3);
+  await f.correr();
+  assert.equal(f.maquinas.length, 1, 'no se manda mientras el robot anterior sigue en la llamada');
+  await f.db.cliente.from('grabaciones').update({ estado: 'lista', bot_machine_id: null }).eq('google_event_id', anterior.eventoId);
+  f.avanzar(1); await f.correr();
+  assert.equal(f.maquinas.length, 2, 'apenas sale el anterior, va el de la sesión siguiente');
+  assert.equal(f.db.tabla('grabaciones').find((x) => x.google_event_id === siguiente.eventoId)?.estado, 'bot_lanzando');
 });
 
 test('r2 punto 7: evento movido — con robot lanzado sigue la hora nueva; si el robot ya volvió sin audio, se despacha a la hora nueva', async () => {
@@ -1173,6 +1249,17 @@ test('revisión: la vuelta de Vale cuenta un solo lanzamiento; fuera de plazo no
     alertas: { registrarAlerta: async (a) => { c.alertas.push(a); }, resolverAlertasDe: async () => {} } });
   assert.equal(await p2.despacharPorEnlace({ bookingId: sc.bookingId, googleEventId: sc.eventoId }, c.ahora()), 'sin_calendario');
   assert.ok(c.alertas.some((a) => a.clave === 'bot:calendario'));
+  // Calendar caído en el cron (29 oct): sin sesión online por empezar no se avisa; con una en la ventana
+  // automática (según la base), sí.
+  c.alertas.length = 0;
+  assert.equal(await p2.despacharBots(c.ahora()), 0);
+  assert.equal(c.alertas.length, 0, 'un corte suelto de Calendar no avisa');
+  const inicioChile = new Date(c.ahora().getTime() + 3 * 60_000);
+  const hhmm = new Intl.DateTimeFormat('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hour12: false }).format(inicioChile);
+  const b = c.db.tabla('bookings').find((x) => x.id === sc.bookingId)!;
+  Object.assign(b, { session_date: fechaChile(inicioChile), session_time: `${hhmm}:00` });
+  await p2.despacharBots(c.ahora());
+  assert.ok(c.alertas.some((a) => a.clave === 'bot:calendario'), 'con una sesión online por empezar sí avisa');
   // Antes de grabar: si Vale acorta el evento, el término previsto baja (no queda el de antes).
   const m = escenario();
   const sm = sesionOnline(m);

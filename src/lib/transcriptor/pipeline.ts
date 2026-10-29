@@ -5,10 +5,11 @@
 // Pasos (cada uno acotado por tiempo y con toma atómica por fila — estados.tomar —, así dos
 // ejecuciones solapadas nunca hacen dos veces lo mismo):
 //   1. vigilar        bots vivos después de HORA_FIN + 40 min → se apaga la máquina y se cierra la grabación.
-//   2. despacharBots  (decisión de Vale, 18 oct: "el robot entra solo cuando entro yo") el cron YA NO manda
-//                     robots por la hora del calendario. Solo sigue la hora de los robots activos (evento
-//                     movido / sesión que partió tarde), lanza los pendientes (Reintentar, fallo de Fly) y los
-//                     de REEMPLAZO tras una caída. despacharPorEnlace: el despacho de UNA sesión cuando Vale la
+//   2. despacharBots  (decisión de Vale, 29 oct: "con que entre 2 minutos antes es suficiente") el cron manda
+//                     el robot UNA vez a cada sesión online reservada en el sitio desde 4 min antes del inicio
+//                     (enVentanaAutomatica); graba solo con Vale en la llamada. Además sigue la hora de los
+//                     robots activos (evento movido / sesión que partió tarde), lanza los pendientes (Reintentar,
+//                     fallo de Fly) y los de REEMPLAZO tras una caída. despacharPorEnlace: el despacho de UNA sesión cuando Vale la
 //                     abre (botones del panel, o el enlace /sesion/<código> con la sesión del panel), en
 //                     [inicio − 30 min, fin agendado + 60 min): INSERT en bot_lanzando (google_event_id único:
 //                     solo quien inserta lanza) → lanzarBot. Atraso de Vale: ver botReconexion.ts.
@@ -63,8 +64,23 @@ export const PRESUPUESTO_RESUMEN_MS = 285_000;
 export const MIN_RESUMEN_MS = 30_000;
 /** Mínimo para empezar a guardar una transcripción (descargar, unir, cifrar, borrar). */
 export const MIN_GUARDAR_MS = 12_000;
-/** Lectura de Calendar del cron: hasta 4 min adelante (solo para seguir la hora de robots activos). */
+/** Lectura de Calendar del cron: hasta 4 min adelante (envío automático y hora de robots activos). */
 export const VENTANA_BOT_DESPUES_MS = 4 * 60_000;
+/**
+ * Envío automático (decisión de Vale, 29 oct: "con que entre 2 minutos antes es suficiente"). El robot tarda
+ * ~70 s en entrar desde que se pide (Fly 23 s + arranque 24 s + Meet 17 s, medido el 28 oct), así que el
+ * cron lo manda desde 4 min antes del inicio para que esté en la llamada ~2 min antes. Hasta 15 min después
+ * del inicio por si el cron o Calendar fallaron esos minutos. No graba hasta que Vale entra (bot/src/vigia.ts).
+ */
+export const VENTANA_AUTO_ANTES_MS = 4 * 60_000;
+export const VENTANA_AUTO_DESPUES_MS = 15 * 60_000;
+
+/** ¿El cron manda solo el robot a esta sesión ahora? [inicio − 4 min, inicio + 15 min). */
+export function enVentanaAutomatica(inicio: string, ahora: Date): boolean {
+  const i = Date.parse(inicio), t = ahora.getTime();
+  if (Number.isNaN(i)) return false;
+  return t >= i - VENTANA_AUTO_ANTES_MS && t < i + VENTANA_AUTO_DESPUES_MS;
+}
 /** r2 (punto 7): eventos empezados hasta hace 3 h se leen igual, solo para seguir su hora si Vale los mueve. */
 export const VENTANA_SINCRONIZAR_MS = 3 * 60 * 60_000;
 /**
@@ -525,11 +541,16 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
    * grabar sin decisión, falló al entrar, o faltaba el consentimiento y ahora está. Nunca si hay un robot
    * activo o si ya hay audio.
    */
-  async function despacharUna(s: SesionOnline, ahora: Date, enVentana: boolean): Promise<ResultadoDespacho> {
+  async function despacharUna(s: SesionOnline, ahora: Date, enVentana: boolean, soloNueva = false): Promise<ResultadoDespacho> {
     const { data: previa, error: e0 } = await db.from('grabaciones')
       .select('id, patient_id, estado, estado_antes_error, hora_fin_prevista, inicio_at, created_at, fin_at, updated_at, bot_token_vence_at, bot_machine_id, nota_sistema, ultimo_error')
       .eq('google_event_id', s.googleEventId).eq('origen', 'online').maybeSingle();
     if (e0) throw new Error(`grabaciones: ${e0.message}`);
+    // Envío automático: una sola vez por sesión. Si ya hubo un intento (de Vale o del cron) no se repite
+    // solo; un robot que salió porque nadie llegó vuelve cuando Vale abre la sesión. Excepción: la sesión se
+    // movió a otra hora después de ese intento (previaLiberable) → va solo a la hora nueva.
+    if (previa && soloNueva && !previaLiberable(previa as PreviaEvento, s.inicio, s.fin)) return 'existe';
+    const via = soloNueva ? 'automatico' : 'enlace_sesion';
     let v: Awaited<ReturnType<PuedeGrabar>> | null = null;
     if (previa) {
       const p = previa as PreviaEvento & Pick<Grabacion, 'hora_fin_prevista' | 'bot_token_vence_at' | 'patient_id' | 'inicio_at' | 'created_at'>;
@@ -546,7 +567,11 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       // r2 (punto 7): Vale movió o alargó el evento con el robot ya lanzado → se sigue la hora nueva.
       if (ESTADOS_BOT_ACTIVO.includes(p.estado)) { await seguirHora(p, s, ahora); return 'activo'; }
       if (!enVentana) return 'existe';
-      const porEnlaceTipo = previaReintentablePorEnlace(p);
+      // Robot que pidió entrar antes de la hora (envío automático) y quedó fuera ANTES del inicio: Vale aún no
+      // estaba para admitirlo, no fue una decisión suya → su clic lo vuelve a mandar. Un rechazo después del
+      // inicio (fin_at ≥ inicio) sí es de Vale y se respeta.
+      const pidioAntes = p.estado === 'bot_no_admitido' && Date.parse(p.fin_at ?? '') < Date.parse(s.inicio);
+      const porEnlaceTipo = previaReintentablePorEnlace(p) ?? (!soloNueva && pidioAntes ? 'liberar' : null);
       // Falló antes de entrar (Fly, Meet): lo mismo que "Reintentar" del panel, y se lanza ya.
       if (porEnlaceTipo === 'reintentar') {
         // Mismo tope de robots por grabación que la reconexión automática (botReconexion).
@@ -570,7 +595,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       const { data: liberada } = await db.from('grabaciones').update({ google_event_id: eventIdLiberado(s.googleEventId, p.id) })
         .eq('id', p.id).eq('google_event_id', s.googleEventId).select('id').maybeSingle();
       if (!liberada) return 'existe';
-      await auditar('cron', ACC.eventoMovido, { grabacionId: p.id, patientId: p.patient_id, detalle: { estado: p.estado, ...(porEnlaceTipo ? { via: 'enlace_sesion' } : {}) }, cliente: db });
+      await auditar('cron', ACC.eventoMovido, { grabacionId: p.id, patientId: p.patient_id, detalle: { estado: p.estado, ...(porEnlaceTipo || soloNueva ? { via } : {}) }, cliente: db });
     }
     if (!enVentana) return 'fuera';
     v ??= await deps.puedeGrabar(s.patientId, s.tipo);
@@ -593,7 +618,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     }
     if (!g) return 'existe';
     if (!v.puede) {
-      await auditar('cron', 'consentimiento_faltante', { grabacionId: g.id, patientId: s.patientId, resultado: 'denegado', detalle: { fase: 'bot', motivo: v.motivo, via: 'enlace_sesion' }, cliente: db });
+      await auditar('cron', 'consentimiento_faltante', { grabacionId: g.id, patientId: s.patientId, resultado: 'denegado', detalle: { fase: 'bot', motivo: v.motivo, via }, cliente: db });
       return 'sin_consentimiento';
     }
     try {
@@ -653,34 +678,69 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
     return lanzado;
   }
 
+  /**
+   * ¿Hay una reserva online del sitio dentro de la ventana automática? Se mira en la base (no en Calendar) solo
+   * cuando Calendar falló, para avisar a Vale justo cuando el envío automático la dejaría sin robot. Si la base
+   * tampoco responde, se avisa igual.
+   */
+  async function hayOnlineEnVentanaAutomatica(ahora: Date): Promise<boolean> {
+    try {
+      const fechas = [...new Set([fechaChile(new Date(ahora.getTime() - VENTANA_AUTO_DESPUES_MS)), fechaChile(new Date(ahora.getTime() + VENTANA_AUTO_ANTES_MS))])];
+      const { data, error } = await db.from('bookings').select('session_type, status, created_by_admin, session_date, session_time').in('session_date', fechas);
+      if (error) return true;
+      const { inicioChileMs } = await import('./enlaceSesionRuta');
+      const { reservaVaAOcurrir } = await import('./bot');
+      return ((data ?? []) as { session_type: string | null; status: string; created_by_admin: boolean | null; session_date: string | null; session_time: string | null }[])
+        .some((b) => {
+          const t = inicioChileMs(b.session_date, b.session_time);
+          return !Number.isNaN(t) && String(b.session_type ?? '').includes('online') && reservaVaAOcurrir(b as never)
+            && enVentanaAutomatica(new Date(t).toISOString(), ahora);
+        });
+    } catch { return true; }
+  }
+
   async function despacharBots(ahora: Date): Promise<number> {
     const aj = await ajustes();
     if (!aj.activo || !aj.botActivo) return 0;
     let n = 0;
-    // Decisión de Vale (18 oct): "el robot entra solo cuando entro yo". El cron ya no manda robots por la hora
-    // del calendario (los manda Vale al abrir la sesión: despacharPorEnlace). Aquí solo se sigue la hora de los
-    // robots activos (evento movido o alargado; sesión que partió tarde: finEfectivo), si los hay.
+    // Decisión de Vale (29 oct, cambia la del 18 oct): el robot entra SOLO ~2 min antes de cada sesión online
+    // reservada en el sitio (enVentanaAutomatica), sin esperar el clic. Sigue grabando solo con Vale en la
+    // llamada (bot/src/vigia.ts). El clic de Vale (despacharPorEnlace) sigue igual. Aquí además se sigue la
+    // hora de los robots activos (evento movido o alargado; sesión que partió tarde: finEfectivo).
     const { data: activos, error: eAct } = await db.from('grabaciones')
-      .select('id, patient_id, estado, hora_fin_prevista, inicio_at, created_at, bot_token_vence_at, google_event_id')
+      .select('id, patient_id, estado, hora_fin_prevista, inicio_at, created_at, bot_token_vence_at, bot_machine_id, google_event_id')
       .in('estado', [...ESTADOS_BOT_ACTIVO]).eq('origen', 'online').not('google_event_id', 'is', null).limit(LOTE);
     if (eAct) throw new Error(`grabaciones: ${eAct.message}`);
-    const porEvento = new Map(((activos ?? []) as (Pick<Grabacion, 'id' | 'patient_id' | 'hora_fin_prevista' | 'inicio_at' | 'created_at' | 'bot_token_vence_at'> & { google_event_id: string })[]).map((g) => [g.google_event_id, g]));
-    if (porEvento.size) {
-      let sesiones: SesionOnline[];
-      try {
-        sesiones = await deps.bot.sesionesOnlineProximas(new Date(ahora.getTime() - VENTANA_SINCRONIZAR_MS), new Date(ahora.getTime() + VENTANA_BOT_DESPUES_MS));
-      } catch (e) {
-        await alerta({
-          tipo: 'bot', clave: 'bot:calendario', accion: 'revisar',
-          titulo: 'No se pudo revisar Google Calendar para seguir la hora del asistente de notas',
-          detalle: `Si Vale movió una sesión en curso, el asistente sigue con la hora anterior hasta que se resuelva. Detalle técnico: ${msg(e)}`,
-        });
-        throw e;
-      }
-      for (const s of sesiones) {
-        if (queda() < 5_000) break;
-        const g = porEvento.get(s.googleEventId);
-        if (g) await seguirHora(g, s, ahora);
+    const listaActivos = (activos ?? []) as (Pick<Grabacion, 'id' | 'patient_id' | 'hora_fin_prevista' | 'inicio_at' | 'created_at' | 'bot_token_vence_at' | 'bot_machine_id'> & { google_event_id: string })[];
+    const porEvento = new Map(listaActivos.map((g) => [g.google_event_id, g]));
+    let sesiones: SesionOnline[] = [];
+    try {
+      sesiones = await deps.bot.sesionesOnlineProximas(new Date(ahora.getTime() - VENTANA_SINCRONIZAR_MS), new Date(ahora.getTime() + VENTANA_BOT_DESPUES_MS));
+    } catch (e) {
+      // Sin Calendar no se corta el paso: los reintentos de lanzamiento de más abajo siguen corriendo. Se avisa
+      // solo si hay un robot activo cuya hora seguir (como antes): un corte suelto de Google a cualquier hora no
+      // debe llenar el panel ni el correo; si dura, el clic de Vale (despacharPorEnlace) avisa igual.
+      if (!porEvento.size && !(await hayOnlineEnVentanaAutomatica(ahora))) console.warn('[transcriptor/pipeline] Calendar no respondió (envío automático):', msg(e));
+      else await alerta({
+        tipo: 'bot', clave: 'bot:calendario', accion: 'revisar',
+        titulo: 'No se pudo revisar Google Calendar para enviar el asistente de notas',
+        detalle: `Mientras no se resuelva, el asistente no entra solo a tus sesiones online (entra cuando tocas Ingresar) y, si moviste una sesión en curso, sigue con la hora anterior. Detalle técnico: ${msg(e)}`,
+      });
+    }
+    for (const s of sesiones) {
+      if (queda() < 5_000) break;
+      const g = porEvento.get(s.googleEventId);
+      if (g) { await seguirHora(g, s, ahora); continue; }
+      // Envío automático: solo reservas del sitio (nunca la sala fija de Encuadrado ni eventos sueltos) y solo
+      // si no hay otro robot en una llamada: la cuenta de Google del robot entra a una reunión a la vez
+      // (botCuenta.ts); si la sesión anterior se alargó, se espera al minuto siguiente (el clic de Vale sirve igual).
+      if (!s.bookingId || !enVentanaAutomatica(s.inicio, ahora)) continue;
+      if (listaActivos.some((a) => a.bot_machine_id && a.google_event_id !== s.googleEventId)) continue;
+      const r = await despacharUna(s, ahora, true, true);
+      if (r === 'lanzado') n++;
+      // Lanzado, en curso por otro proceso o pendiente de reintento: ocupa la cuenta para el resto de esta vuelta.
+      if (r === 'lanzado' || r === 'activo' || r === 'fallo') {
+        listaActivos.push({ google_event_id: s.googleEventId, bot_machine_id: 'recien_lanzado' } as (typeof listaActivos)[number]);
       }
     }
     // Reintentos de lanzamiento (Fly falló en un minuto anterior, o Vale tocó Reintentar: M3).
