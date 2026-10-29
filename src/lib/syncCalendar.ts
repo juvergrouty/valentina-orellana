@@ -62,26 +62,29 @@ export async function getValidAccessToken(): Promise<{ token: string; calendarId
   return { token, calendarId: cfg['google_calendar_id'] ?? 'primary' };
 }
 
-// ── Reintento de borrar/mover el evento (auditoría 28 oct 2026) ─────────────
+// ── Reintento de borrar/mover el evento (28 oct 2026) ────────────────────────
 // Si Google falla (o no está conectado) al anular o reagendar, antes solo
 // quedaba en el registro: la paciente seguía viendo la sesión vieja en su
-// calendario. Ahora queda pendiente en settings ("calendario_pendiente:<id>")
-// y la tarea de cada 5 min (cron/boletas-pendientes) lo reintenta con el estado
-// ACTUAL de la reserva: borra solo si sigue anulada y mueve a su fecha/hora de
-// ahora. Tras ~1 hora sin éxito queda un error visible en el panel.
+// calendario. Ahora queda pendiente en settings ("calendario_pendiente:<id>"):
+// - el panel lo muestra ARRIBA al instante (listarCalendarioPendiente, franja de
+//   AdminLayout) con "Reintentar ahora", "Ver sesión" y "Ya lo arreglé a mano"
+//   (Valentina: "que la alerta se vea arriba sí o sí … y que me dé un botón");
+// - la tarea de cada 5 min (cron/boletas-pendientes) lo reintenta en paralelo,
+//   sin límite, con el estado ACTUAL de la reserva (borra solo si sigue anulada;
+//   mueve a su fecha/hora de ahora). Al arreglarse, el pendiente se borra y la
+//   franja desaparece sola. Tras 12 intentos la franja cambia su texto.
 const PREFIJO_PENDIENTE = 'calendario_pendiente:';
-const MAX_INTENTOS_CALENDARIO = 12;
-type PendienteCalendario = { accion: 'borrar' | 'mover'; avisar: boolean; intentos: number }; // avisar: solo al mover
+const INTENTOS_PARA_REVISAR = 12; // ~1 hora: la franja pide revisarlo a mano
+type PendienteCalendario = { accion: 'borrar' | 'mover'; avisar: boolean; intentos: number; error?: string }; // avisar: solo al mover
 
 async function registrarPendienteCalendario(bookingId: string, accion: PendienteCalendario['accion'], avisar: boolean, error: string): Promise<void> {
-  const valor: PendienteCalendario = { accion, avisar, intentos: 0 };
+  const valor: PendienteCalendario = { accion, avisar, intentos: 0, error: error.slice(0, 300) };
   const { error: e } = await supabase.from('settings').upsert(
     { key: PREFIJO_PENDIENTE + bookingId, value: JSON.stringify(valor), updated_at: new Date().toISOString() },
     { onConflict: 'key' },
   );
-  // Mientras se reintenta solo es una advertencia (sin la franja roja del panel, 28 oct 2026: "si se
-  // arregla deben desaparecer"). La franja sale solo si se agotan los reintentos o si ni siquiera
-  // se pudo dejar pendiente.
+  // La franja propia (listarCalendarioPendiente) ya avisa; en el registro queda como advertencia.
+  // Si ni siquiera se pudo dejar pendiente, no habría franja: error visible (franja de errores).
   const ctx = accion === 'borrar' ? 'calendar/eliminar' : 'calendar/reagendar';
   const verbo = accion === 'borrar' ? 'eliminar' : 'mover';
   if (e) await logError(ctx, `No se pudo ${verbo} el evento de Google Calendar: revísalo a mano en tu calendario`, { bookingId, error, errorPendiente: e.message });
@@ -107,40 +110,91 @@ export async function deleteBookingFromCalendar(bookingId: string): Promise<void
   }
 }
 
-/** Reintenta lo pendiente (lo llama la tarea de cada 5 min). Nunca lanza. */
-export async function reintentarCalendarioPendiente(): Promise<{ hechos: number; pendientes: number }> {
+/** Intenta UN pendiente con el estado actual de la reserva. Si se arregla (o ya no hay nada que hacer),
+ *  borra el pendiente. Si falla, suma el intento. Nunca lanza. */
+async function intentarPendiente(bookingId: string, p: PendienteCalendario): Promise<{ ok: boolean; error?: string }> {
+  const key = PREFIJO_PENDIENTE + bookingId;
+  try {
+    const { data: b, error: errB } = await supabase.from('bookings').select('status, session_date, session_time, duration_min').eq('id', bookingId).maybeSingle();
+    if (errB) throw new Error(errB.message);
+    const anulada = !b || b.status === 'cancelled' || b.status === 'expired';
+    if (p.accion === 'borrar' && anulada) await borrarEventoAhora(bookingId);
+    else if (p.accion === 'mover' && !anulada) await moverEventoAhora(bookingId, String(b!.session_date), String(b!.session_time).slice(0, 5), b!.duration_min ?? 55, p.avisar);
+    // Si la reserva cambió de estado entretanto (p. ej. se reactivó), no hay nada que hacer.
+    await supabase.from('settings').delete().eq('key', key);
+    return { ok: true };
+  } catch (e) {
+    const error = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+    const intentos = (p.intentos ?? 0) + 1;
+    const { error: errInt } = await supabase.from('settings').update({ value: JSON.stringify({ ...p, intentos, error }), updated_at: new Date().toISOString() }).eq('key', key);
+    if (errInt) await logError('calendar/pendiente', 'No se pudo registrar el reintento de un evento de Google Calendar: revísalo a mano en tu calendario', { bookingId, error: errInt.message });
+    if (intentos === INTENTOS_PARA_REVISAR) await logWarn('calendar/pendiente', `Un evento de Google Calendar sigue sin poder ${p.accion === 'borrar' ? 'borrarse' : 'moverse'} tras ${intentos} intentos (se sigue reintentando)`, { bookingId, error });
+    return { ok: false, error };
+  }
+}
+
+/** Reintenta todo lo pendiente (lo llama la tarea de cada 5 min), hasta `hastaMs`. Nunca lanza.
+ *  Si Google no está conectado, para en el primero: los demás fallarían igual (se retoman en la próxima vuelta). */
+export async function reintentarCalendarioPendiente(opts: { hastaMs?: number } = {}): Promise<{ hechos: number; pendientes: number }> {
+  const hasta = opts.hastaMs ?? Date.now() + 20_000;
   let hechos = 0, pendientes = 0;
   try {
     const { data: filas } = await supabase.from('settings').select('key, value').like('key', `${PREFIJO_PENDIENTE}%`).limit(50);
     for (const f of filas ?? []) {
+      if (Date.now() > hasta) break;
       const bookingId = String(f.key).slice(PREFIJO_PENDIENTE.length);
       let p: PendienteCalendario;
       try { p = JSON.parse(f.value); } catch { await supabase.from('settings').delete().eq('key', f.key); continue; }
-      try {
-        const { data: b } = await supabase.from('bookings').select('status, session_date, session_time, duration_min').eq('id', bookingId).maybeSingle();
-        const anulada = !b || b.status === 'cancelled' || b.status === 'expired';
-        if (p.accion === 'borrar' && anulada) await borrarEventoAhora(bookingId);
-        else if (p.accion === 'mover' && !anulada) await moverEventoAhora(bookingId, String(b!.session_date), String(b!.session_time).slice(0, 5), b!.duration_min ?? 55, p.avisar);
-        // Si la reserva cambió de estado entretanto (p. ej. se reactivó), no hay nada que hacer.
-        await supabase.from('settings').delete().eq('key', f.key);
-        hechos++;
-      } catch (e) {
-        const intentos = (p.intentos ?? 0) + 1;
-        if (intentos >= MAX_INTENTOS_CALENDARIO) {
-          await supabase.from('settings').delete().eq('key', f.key);
-          await logError('calendar/pendiente-agotado',
-            `No se pudo ${p.accion === 'borrar' ? 'borrar' : 'mover'} en Google Calendar una sesión tras ${intentos} intentos: revisa ese evento a mano en tu calendario.`,
-            { bookingId, error: e instanceof Error ? e.message : String(e) });
-        } else {
-          const { error: errInt } = await supabase.from('settings').update({ value: JSON.stringify({ ...p, intentos }), updated_at: new Date().toISOString() }).eq('key', f.key);
-          // Si ni el contador se puede guardar, nunca llegaría al aviso final: se avisa ya.
-          if (errInt) await logError('calendar/pendiente-agotado', `No se pudo ${p.accion === 'borrar' ? 'borrar' : 'mover'} en Google Calendar una sesión y tampoco registrar el reintento: revisa ese evento a mano en tu calendario.`, { bookingId, error: errInt.message });
-          pendientes++;
-        }
-      }
+      const r = await intentarPendiente(bookingId, p);
+      if (r.ok) hechos++; else pendientes++;
+      if (!r.ok && /no está conectado/i.test(r.error ?? '')) break;
     }
   } catch (e) { console.error('[calendario pendiente]', e); }
   return { hechos, pendientes };
+}
+
+/** Botón "Reintentar ahora" de la franja del panel. */
+export async function reintentarCalendarioAhora(bookingId: string): Promise<{ ok: boolean; error?: string }> {
+  const { data: fila } = await supabase.from('settings').select('value').eq('key', PREFIJO_PENDIENTE + bookingId).maybeSingle();
+  if (!fila) return { ok: true }; // ya se había arreglado
+  let p: PendienteCalendario;
+  try { p = JSON.parse(fila.value); } catch { await supabase.from('settings').delete().eq('key', PREFIJO_PENDIENTE + bookingId); return { ok: true }; }
+  return intentarPendiente(bookingId, p);
+}
+
+/** Botón "Ya lo arreglé a mano": quita el pendiente (y la franja). */
+export async function descartarCalendarioPendiente(bookingId: string): Promise<boolean> {
+  const { error } = await supabase.from('settings').delete().eq('key', PREFIJO_PENDIENTE + bookingId);
+  return !error;
+}
+
+export type AvisoCalendario = {
+  bookingId: string; accion: 'borrar' | 'mover'; intentos: number; error: string;
+  paciente: string; fecha: string | null; hora: string | null; revisar: boolean;
+};
+
+/** Pendientes para la franja del panel (null = no se pudo revisar). */
+export async function listarCalendarioPendiente(): Promise<AvisoCalendario[] | null> {
+  const { data: filas, error } = await supabase.from('settings').select('key, value').like('key', `${PREFIJO_PENDIENTE}%`).limit(50);
+  if (error) return null;
+  const items = (filas ?? []).map((f: { key: string; value: string }) => {
+    let p: Partial<PendienteCalendario> = {};
+    try { p = JSON.parse(f.value) ?? {}; } catch { /* ilegible: igual se muestra */ }
+    return { bookingId: String(f.key).slice(PREFIJO_PENDIENTE.length), p };
+  });
+  if (!items.length) return [];
+  const { data: reservas } = await supabase.from('bookings').select('id, patient_name, session_date, session_time').in('id', items.map(i => i.bookingId));
+  const porId = new Map((reservas ?? []).map((r: { id: string }) => [r.id, r]));
+  return items.map(({ bookingId, p }) => {
+    const r = porId.get(bookingId) as { patient_name?: string | null; session_date?: string | null; session_time?: string | null } | undefined;
+    const intentos = Number(p.intentos ?? 0);
+    return {
+      bookingId, accion: p.accion === 'mover' ? 'mover' : 'borrar', intentos, error: String(p.error ?? ''),
+      paciente: String(r?.patient_name ?? '').trim() || 'una paciente',
+      fecha: r?.session_date ?? null, hora: r?.session_time ? String(r.session_time).slice(0, 5) : null,
+      revisar: intentos >= INTENTOS_PARA_REVISAR,
+    };
+  });
 }
 
 async function moverEventoAhora(bookingId: string, date: string, time: string, durationMin: number, notify: boolean): Promise<void> {
@@ -151,7 +205,12 @@ async function moverEventoAhora(bookingId: string, date: string, time: string, d
   const online = (booking.session_type ?? '').includes('online');
   if (online) await limpiarEnlacePropioDelEvento(bookingId, booking.google_event_id, auth);
   const location = online ? undefined : await direccionConsulta();
-  await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin, location, notify);
+  try {
+    await updateCalendarEventTime(auth.token, auth.calendarId, booking.google_event_id, date, time, durationMin, location, notify);
+  } catch (e) {
+    if (/\((404|410)\)/.test(e instanceof Error ? e.message : String(e))) throw new Error('El evento ya no existe en Google Calendar');
+    throw e;
+  }
 }
 
 /** Actualiza fecha/hora del evento en Google Calendar al reagendar */

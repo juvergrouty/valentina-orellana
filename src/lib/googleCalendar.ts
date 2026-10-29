@@ -193,8 +193,8 @@ export async function deleteCalendarEvent(
     `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}?sendUpdates=none`,
     { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } }
   );
-  // 410 (Gone) = ya estaba eliminado en Google Calendar — no es una falla real.
-  if (!res.ok && res.status !== 410) {
+  // 410 (Gone) / 404 (no existe) = ya no está en Google Calendar (p. ej. se borró a mano): no es una falla real.
+  if (!res.ok && res.status !== 410 && res.status !== 404) {
     throw new Error(`Google Calendar delete event failed (${res.status}): ${await res.text()}`);
   }
 }

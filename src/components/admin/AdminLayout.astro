@@ -25,7 +25,7 @@ const path = current ?? '';
 
 // Avisos: ver src/lib/avisosPanel.ts. Si la página ya los cargó (el Inicio
 // los usa en su lista "Para hacer"), llegan por props y no se consultan de nuevo.
-const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver }
+const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, calendarioPendiente }
   = avisosPrecargados ?? await cargarAvisosPanel(Astro.url.origin);
 // Passkey (16 oct 2026): franja para registrarla / hacerla obligatoria (src/lib/passkey/servidor.ts).
 const passkeyAviso = current === '/admin/seguridad' ? null : await avisoPasskey(Astro.cookies.get('vo_admin_token')?.value);
@@ -39,7 +39,7 @@ const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'ju
 const fechaFeriado = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return `${DIAS_LARGOS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d} de ${MESES_LARGOS[m - 1]}`; };
 // Vuelta al mismo lugar sin el "?error=…" de un intento fallido anterior
 // (si no, el aviso de error seguía después de reintentar con éxito).
-const urlVuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); if (u.searchParams.get('saved') === 'anulada') { u.searchParams.delete('saved'); u.searchParams.delete('correo'); } return u.pathname + u.search; })();
+const urlVuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); u.searchParams.delete('detail'); u.searchParams.delete('calendario'); if (u.searchParams.get('saved') === 'anulada') { u.searchParams.delete('saved'); u.searchParams.delete('correo'); } return u.pathname + u.search; })();
 const fmtSesion = (d: string | null) => d ? d.split('-').reverse().join('-') : '';
 
 const navMain = [
@@ -832,6 +832,48 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
 
   <!-- ── Main area ──────────────────────────────────────────────────────── -->
   <main class="enc-main">
+    {/* Google Calendar (28 oct 2026): arriba de todo y al instante, mientras el sistema lo reintenta
+        solo cada 5 min; desaparece sola cuando se arregla (ver syncCalendar.ts). */}
+    {['ok', 'quitado'].includes(Astro.url.searchParams.get('calendario') ?? '') && (
+      <div role="status" style="background:#ecfdf5;color:#065f46;border-bottom:1px solid #a7f3d0;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        ✓ {Astro.url.searchParams.get('calendario') === 'ok' ? 'Listo: Google Calendar quedó corregido.' : 'Listo: se quitó el aviso.'}
+      </div>
+    )}
+    {Astro.url.searchParams.get('error') === 'calendario_reintento' && (
+      <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        ✕ Todavía no se pudo corregir en Google Calendar{Astro.url.searchParams.get('detail') ? `: ${Astro.url.searchParams.get('detail')}` : ''}. El sistema lo sigue intentando solo; si Google está desconectado, reconéctalo en Configuración.
+      </div>
+    )}
+    {calendarioPendiente === null && (
+      <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        ⚠ No se pudo revisar si hay cambios pendientes en Google Calendar. Recarga en un rato.
+      </div>
+    )}
+    {calendarioPendiente && calendarioPendiente.length > 0 && (
+      <div role="alert" id="calendario-pendiente-alert" style="background:#b91c1c;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
+        <p style="font-weight:700;margin:0 0 0.35rem;">📅 Google Calendar: {calendarioPendiente.length === 1 ? 'hay 1 cambio que no se pudo hacer' : `hay ${calendarioPendiente.length} cambios que no se pudieron hacer`}. El sistema lo está reintentando solo cada 5 minutos.</p>
+        <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:0.4rem;">
+          {calendarioPendiente.map(c => (
+            <li style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;">
+              <span>{c.accion === 'borrar' ? 'No se pudo borrar' : 'No se pudo mover'} el evento de <strong>{c.paciente}</strong>{c.fecha && c.fecha !== '2099-12-31' ? ` · ${fechaLarga(c.fecha)}${c.hora ? ` a las ${c.hora}` : ''}` : ''}{c.revisar ? ' · No se pudo arreglar solo en más de una hora: usa «Reintentar ahora» o revísalo a mano en tu calendario.' : ''}</span>
+              <form method="POST" action="/api/admin/calendario-pendiente" style="display:inline;">
+                <input type="hidden" name="id" value={c.bookingId} />
+                <input type="hidden" name="accion" value="reintentar" />
+                <input type="hidden" name="redirect" value={urlVuelta} />
+                <button type="submit" style="background:#fff;color:#b91c1c;border:none;border-radius:4px;padding:0.2rem 0.6rem;font-size:0.78rem;font-weight:700;cursor:pointer;">Reintentar ahora</button>
+              </form>
+              <a href={c.accion === 'borrar' && c.fecha && c.fecha !== '2099-12-31' ? `/admin/agenda?fecha=${c.fecha}${c.hora ? `&hora=${c.hora}` : ''}` : `/admin/agenda?booking=${c.bookingId}`} style="color:#fff;font-weight:700;text-decoration:underline;font-size:0.8rem;">Ver sesión</a>
+              <form method="POST" action="/api/admin/calendario-pendiente" style="display:inline;">
+                <input type="hidden" name="id" value={c.bookingId} />
+                <input type="hidden" name="accion" value="descartar" />
+                <input type="hidden" name="redirect" value={urlVuelta} />
+                <button type="submit" style="background:none;color:#fff;border:1px solid rgba(255,255,255,.6);border-radius:4px;padding:0.15rem 0.5rem;font-size:0.78rem;cursor:pointer;">Ya lo arreglé a mano</button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
     <AlertasTranscriptor />
     {!ocultarAvisosDeInicio && comprobanteAlerts.length > 0 && (
       <div role="alert" id="comprobantes-alert" style="background:#1d4ed8;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">

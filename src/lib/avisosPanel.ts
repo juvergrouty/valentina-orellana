@@ -3,7 +3,7 @@ import { getBoletaAlerts, type BoletaAlert } from './boletaAlerts';
 import { getConsentAlerts, type ConsentAlert } from './consent';
 import { getBlockedDayAlerts, resumenDiaCompleto, leerCierresOk, claveCierre, type BlockedDayAlert } from './blockedDayAlerts';
 import { feriadosPorDecidir, type FeriadoEstado } from './feriados';
-import { corregirPrefijoInvitacionesUnaVez } from './syncCalendar';
+import { corregirPrefijoInvitacionesUnaVez, listarCalendarioPendiente, type AvisoCalendario } from './syncCalendar';
 import { leerRebotes, type Rebote } from './rebotes';
 import { getComprobanteAlerts, getTransferenciasPorRevisar, type ComprobanteAlert } from './comprobantes';
 import { avisosCambioTarifa, type AvisoTarifa } from './cambiosTarifa';
@@ -117,6 +117,8 @@ export type AvisosPanel = {
   comprobanteAlerts: ComprobanteAlert[];
   // Transferencias confirmadas solas, por revisar en el banco (28 oct 2026). null = no se pudo revisar.
   transferenciasPorRevisar: ComprobanteAlert[] | null;
+  // Eventos de Google Calendar que no se pudieron borrar o mover; se reintentan solos (28 oct 2026). null = no se pudo revisar.
+  calendarioPendiente: AvisoCalendario[] | null;
   blockedDayAlerts: BlockedDayAlert[];
   feriadoAlerts: FeriadoAviso[];
   google: 'ok' | 'desconectado' | 'fallando';
@@ -135,7 +137,7 @@ export type AvisosPanel = {
 };
 
 export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
-  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar] = await Promise.all([
+  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente] = await Promise.all([
     // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
     // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
     contarErroresNuevos().catch(() => 0),
@@ -172,6 +174,8 @@ export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
     avisosPagosPorDevolver().catch((): PagoPorDevolver[] | null => null),
     // Transferencias confirmadas solas al subir el comprobante: revisar el banco (28 oct 2026, ver comprobantes.ts).
     getTransferenciasPorRevisar().catch((): ComprobanteAlert[] | null => null),
+    // Google Calendar: eventos por borrar o mover que se están reintentando (28 oct 2026, ver syncCalendar.ts).
+    listarCalendarioPendiente().catch((): AvisoCalendario[] | null => null),
   ]);
-  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar };
+  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente };
 }

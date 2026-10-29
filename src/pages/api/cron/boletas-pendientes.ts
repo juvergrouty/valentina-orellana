@@ -33,7 +33,7 @@ export const GET: APIRoute = async ({ request }) => {
   await revisarSaludSiToca();
   const envios = await procesarTareas({ hastaMs: Date.now() + 25_000 });
   // Eventos de Google Calendar que no se pudieron borrar o mover al anular/reagendar (28 oct 2026).
-  await reintentarCalendarioPendiente();
+  await reintentarCalendarioPendiente({ hastaMs: Date.now() + 20_000 });
 
   const { data: rows, error } = await supabase
     .from('bookings').select('id, notes').ilike('notes', `%${MARCA_PENDIENTE}%`)
