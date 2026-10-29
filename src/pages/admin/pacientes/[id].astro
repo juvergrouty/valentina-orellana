@@ -198,8 +198,28 @@ const formatCLP = (n: number) =>
 
 // "Para revisar hoy" también muestra tu última nota escrita a mano (29 oct 2026), sin usar la IA.
 const ultimaNota = (notes as { content?: string | null; session_date?: string | null }[]).find((n) => String(n.content ?? '').trim()) ?? null;
-// "Preparar próxima sesión" con IA (29 oct 2026): opcional, desde "Para revisar hoy" o el chip del asistente.
-const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que quedaron y lo acordado para trabajar, un resumen breve de lo último conversado y de cómo ha evolucionado, y temas que mencionó y no se han vuelto a abordar (como sugerencias para mi criterio), todo con fecha.';
+// "Tarea:", "Próxima sesión:" o "Pendiente:" al inicio de una línea de tus notas (29 oct 2026): salen solas en
+// "Para revisar hoy", sin IA. Se toman de las notas desde la fecha del último resumen (o, si no hay, de la última nota).
+const RE_LINEA_NOTA = /^\s*[-•*]?\s*(tareas?|pr[oó]xima\s+sesi[oó]n|pendientes?)\s*:\s*(.+)$/i;
+const desdeNotas = (() => {
+  const conTexto = (notes as { content?: string | null; session_date?: string | null }[]).filter((n) => String(n.content ?? '').trim());
+  // Nunca más atrás de 60 días (una "Tarea:" de hace meses ya no es de esta sesión) ni notas sin fecha.
+  const hace60 = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+  const base = ia.paraHoy?.fecha ?? (conTexto[0]?.session_date ? String(conTexto[0].session_date).slice(0, 10) : '');
+  const desde = base > hace60 ? base : hace60;
+  const out: { etiqueta: string; texto: string; fecha: string }[] = [];
+  for (const n of conTexto) {
+    const fecha = String(n.session_date ?? '').slice(0, 10);
+    if (!fecha || fecha < desde) continue;
+    for (const linea of String(n.content).split('\n')) {
+      const m = RE_LINEA_NOTA.exec(linea);
+      if (!m) continue;
+      const tipo = m[1].toLowerCase();
+      out.push({ etiqueta: tipo.startsWith('tarea') ? 'Tarea' : tipo.startsWith('pendiente') ? 'Pendiente' : 'Próxima sesión', texto: m[2].trim(), fecha });
+    }
+  }
+  return out;
+})();
 ---
 
 <AdminLayout title={patient.name} current="/admin/pacientes">
@@ -671,7 +691,8 @@ const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que que
       <div class="hist" id="historial" data-patient-id={patient.id} data-demo={demoIA ? '1' : undefined}>
         <!-- "Para revisar hoy" (decisión B): lo que quedó para esta sesión. Sale del último resumen automático
              (anexo IA, no revisado). -->
-        {(ia.paraHoy || ultimaNota) && (
+        {/* Siempre está (el "✦ Preparar" del Inicio y del calendario llega aquí); si no hay nada, lo dice. */}
+        {(
           <section class="card hoy" id="para-revisar" aria-labelledby="hoy-titulo">
             <div class="hoy-cab">
               <p id="hoy-titulo" class="hoy-titulo"><span aria-hidden="true">✦</span> Para revisar hoy</p>
@@ -688,16 +709,23 @@ const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que que
               </div>
             )}
             {ia.paraHoy && <p class="hoy-aviso">Del resumen automático (IA) de la sesión del {fechaLarga(ia.paraHoy.fecha)} · no revisado: verifica con tu nota.</p>}
+            {desdeNotas.length > 0 && (
+              <div class="hoy-nota">
+                <h4>De tus notas</h4>
+                <ul>
+                  {desdeNotas.map((l) => <li><strong>{l.etiqueta}:</strong> {l.texto}{l.fecha ? ` (${fechaCorta(l.fecha)})` : ''}</li>)}
+                </ul>
+              </div>
+            )}
+            {!ia.paraHoy && !ultimaNota && (
+              <p class="hoy-aviso">{ia.bloqueadas && !ia.acceso.ok
+                ? 'Confirma tu acceso (abajo) para ver lo que quedó del resumen de la última sesión.'
+                : 'Todavía no hay nada para revisar: aparecerá aquí lo que quedó del resumen de la última sesión grabada y tus notas.'}</p>
+            )}
             {ultimaNota && (
               <div class="hoy-nota">
                 <h4>Tu última nota{ultimaNota.session_date ? ` · ${fechaLarga(String(ultimaNota.session_date).slice(0, 10))}` : ''}</h4>
                 <p>{String(ultimaNota.content).trim()}</p>
-              </div>
-            )}
-            {(ia.consultables.length > 0 || notes.length > 0 || !!String(patient.notes ?? '').trim()) && (
-              <div class="hoy-ia">
-                <button type="button" class="btn btn-outline btn-sm" data-preparar-ia>✦ Buscar temas no abordados con IA</button>
-                <span class="hoy-aviso">Opcional: revisa todas las sesiones y tus notas (cerca de $10 por consulta).</span>
               </div>
             )}
           </section>
@@ -775,7 +803,6 @@ const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que que
               <div style="display:flex;flex-direction:column;gap:0.6rem;">
                 <div class="ia-chips" aria-label="Sugerencias rápidas">
                   {[
-                    ['Preparar próxima sesión', PREGUNTA_PREPARAR_SESION],
                     ['Resumir las últimas sesiones', 'Resume en pocas líneas lo más importante de las últimas sesiones, con fecha.'],
                     ['¿Qué tareas quedaron?', '¿Qué tareas quedaron pendientes y de qué sesión son?'],
                     ['¿Qué trabajar hoy?', '¿Qué quedó para trabajar en la próxima sesión?'],
@@ -1057,9 +1084,9 @@ const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que que
   .hoy-aviso { font-size: 0.74rem; color: var(--stone); margin-top: 0.5rem; }
   .hoy-nota { margin-top: 0.8rem; }
   .hoy-nota h4 { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--stone); font-weight: 600; margin: 0 0 0.2rem; }
+  .hoy-nota ul { margin: 0; padding-left: 1.1rem; font-size: 0.86rem; }
   .hoy-nota p { white-space: pre-line; font-size: 0.86rem; max-height: 12rem; overflow: auto; }
-  .hoy-ia { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.8rem; margin-top: 0.8rem; }
-  .hoy-ia .hoy-aviso { margin-top: 0; }
+
 
   /* ── Historial: sesión más reciente arriba; el resto al fondo, bajo demanda ── */
   .hist { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
@@ -1728,18 +1755,6 @@ const PREGUNTA_PREPARAR_SESION = 'Prepárame la próxima sesión: tareas que que
   const caja = document.getElementById('preguntar-ia');
   const btn = document.getElementById('ia-preguntar-btn') as HTMLButtonElement | null;
   if (caja && btn) {
-    // "Buscar temas no abordados con IA" de "Para revisar hoy" (29 oct 2026): opcional y con costo, por eso
-    // solo al apretarlo. Usa la pregunta del chip "Preparar próxima sesión" sobre todas las sesiones y notas.
-    document.querySelector<HTMLButtonElement>('[data-preparar-ia]')?.addEventListener('click', () => {
-      const chip = document.querySelector<HTMLButtonElement>('.ia-chip');
-      const area = document.getElementById('ia-pregunta') as HTMLTextAreaElement | null;
-      const alc = document.getElementById('ia-alcance') as HTMLSelectElement | null;
-      if (!chip || !area) return;
-      if (alc) alc.value = 'todas';
-      area.value = chip.dataset.pregunta ?? '';
-      caja.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      btn.click();
-    });
     const sesiones: { id: string; fecha: string }[] = JSON.parse(caja.dataset.sesiones || '[]');
     const pidIA = caja.dataset.patientId ?? '';
     const estado = document.getElementById('ia-preg-estado')!;

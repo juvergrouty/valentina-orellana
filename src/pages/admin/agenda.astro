@@ -1352,6 +1352,10 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
           Ver ficha del paciente
         </a>
+        <a href="#" id="sp-btn-preparar" class="sp-action-row" style="display:none;">
+          <span aria-hidden="true" style="width:13px;text-align:center;">✦</span>
+          Preparar sesión
+        </a>
         <a href="#" id="sp-btn-evolucion" class="sp-action-row">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
           Escribir evolución
@@ -3028,6 +3032,11 @@ function openSessionDetail(b) {
   // en cuanto el paciente pague, o se crea a mano desde ahí).
   const evolBtn = document.getElementById('sp-btn-evolucion');
   evolBtn.href = b.patient_id ? `/admin/pacientes/${b.patient_id}?tab=notas#nueva-nota` : fichaFallback;
+
+  // "Preparar" (29 oct 2026): "Para revisar hoy" de la ficha (lo ya generado y sus notas, sin costo).
+  const prepBtn = document.getElementById('sp-btn-preparar');
+  prepBtn.href = b.patient_id ? `/admin/pacientes/${b.patient_id}?tab=notas#para-revisar` : '#';
+  prepBtn.style.display = b.patient_id ? '' : 'none';
 
   // Recordar sesión por WhatsApp (manual — abre WhatsApp con el mensaje ya armado)
   const remWaBtn = document.getElementById('sp-btn-remind-wa');
