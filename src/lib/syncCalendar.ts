@@ -5,7 +5,7 @@
  */
 
 import { supabase } from './supabase';
-import { quitarPrefijoSiHayInvitados, refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle, setCalendarEventPaidState, setCalendarEventVoided, UNPAID_PREFIX } from './googleCalendar';
+import { quitarPrefijoSiHayInvitados, refreshAccessToken, createCalendarEvent, deleteCalendarEvent, updateCalendarEventTime, updateCalendarEventTitle, setCalendarEventPaidState, setCalendarEventVoided, actualizarLugarEvento, UNPAID_PREFIX } from './googleCalendar';
 import { logError, logWarn } from './logger';
 import { cambiarNotas } from './apigateway';
 import { ESTACIONAMIENTO } from '../data/consulta';
@@ -33,6 +33,26 @@ export interface BookingForCalendar {
 async function direccionConsulta(): Promise<string | undefined> {
   const { data } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
   return data?.value?.trim() || undefined;
+}
+
+/** Descripción del evento (la misma al crearlo y al cambiar la modalidad). */
+function descripcionEvento(paciente: string, sessionLabel: string, location: string | undefined): string {
+  return `Sesión con Ps. Valentina Orellana\nPaciente: ${paciente}\nTipo: ${sessionLabel}${location ? `\nDirección: ${location}\n${ESTACIONAMIENTO}` : ''}`;
+}
+
+/** Cambio de modalidad (presencial ↔ online, 30 oct 2026): el evento queda con la ubicación y la
+ *  descripción de la modalidad nueva (online: sin dirección). Avisa a la invitada si `notify`.
+ *  Lanza si Google falla (quien llama decide). */
+export async function actualizarModalidadEnCalendario(bookingId: string, notify: boolean): Promise<void> {
+  const { data: b } = await supabase.from('bookings').select('google_event_id, session_type, patient_name').eq('id', bookingId).maybeSingle();
+  if (!b?.google_event_id) return;
+  const auth = await getValidAccessToken();
+  if (!auth) throw new Error('Google Calendar no está conectado');
+  const online = String(b.session_type ?? '').includes('online');
+  const location = online ? undefined : await direccionConsulta();
+  const sessionLabel = SESSION_LABELS[b.session_type] ?? b.session_type;
+  await actualizarLugarEvento(auth.token, auth.calendarId, b.google_event_id,
+    { location: location ?? '', description: descripcionEvento(String(b.patient_name ?? ''), sessionLabel, location) }, notify);
 }
 
 export async function getValidAccessToken(): Promise<{ token: string; calendarId: string } | null> {
@@ -379,7 +399,7 @@ export async function syncBookingToCalendar(booking: BookingForCalendar, opts: {
 
     const event = await createCalendarEvent(accessToken, {
       title:         `${sessionLabel} — ${booking.patient_name}`,
-      description:   `Sesión con Ps. Valentina Orellana\nPaciente: ${booking.patient_name}\nTipo: ${sessionLabel}${location ? `\nDirección: ${location}\n${ESTACIONAMIENTO}` : ''}`,
+      description:   descripcionEvento(booking.patient_name, sessionLabel, location),
       location,
       date:          booking.session_date,
       startTime:     booking.session_time.slice(0, 5),

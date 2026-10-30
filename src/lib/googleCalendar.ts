@@ -261,6 +261,25 @@ export async function updateCalendarEventTitle(
   }
 }
 
+/** Cambio de modalidad (30 oct 2026): ubicación ('' la quita: online) y descripción del evento, avisando
+ *  a la invitada si `notify`. Antes quedaba con la dirección de la consulta en una sesión online. */
+export async function actualizarLugarEvento(
+  accessToken: string, calendarId: string, eventId: string,
+  cambios: { location: string; description: string }, notify: boolean,
+): Promise<void> {
+  const res = await fetch(
+    `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}?sendUpdates=${notify ? 'all' : 'none'}`,
+    {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location: cambios.location, description: cambios.description }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Google Calendar update location failed (${res.status}): ${await res.text()}`);
+  }
+}
+
 /** Pasa un evento a "pagado" (quita el prefijo y lo pone en verde; si se indica el
  *  correo del paciente y aún no es invitado, lo invita) o de vuelta a "por
  *  pagar". Solo hace la llamada de escritura si algo realmente cambia. */

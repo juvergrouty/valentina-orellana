@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
-import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar, markBookingDebtVoidedInCalendar, getValidAccessToken } from '../../../lib/syncCalendar';
+import { syncBookingToCalendar, markBookingPaidInCalendar, deleteBookingFromCalendar, rescheduleBookingInCalendar, retitleBookingInCalendar, markBookingDebtVoidedInCalendar, getValidAccessToken, actualizarModalidadEnCalendario } from '../../../lib/syncCalendar';
 import { agregarMeetAEvento } from '../../../lib/googleCalendar';
 import { emitBoletaParaReserva } from '../../../lib/apigateway';
 import { sendConfirmationToClient, sendNotificationToAdmin, sendPaymentLinkEmail, sendDebtReminderEmail, sendSessionUpdatedEmail, ADMIN_EMAIL_FALLBACK } from '../../../lib/email';
@@ -539,6 +539,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         const avisarCal = !['cancelled', 'expired'].includes(booking.status) && booking.session_date >= todayCL();
         try { await rescheduleBookingInCalendar(id, booking.session_date, String(booking.session_time).slice(0, 5), Number(durNueva), avisarCal); } catch (e) { console.error('[change_service] calendar duración:', e); }
       }
+      // Cambió la modalidad (30 oct 2026, caso Werner: sesión online con la dirección de la consulta en la
+      // invitación): ubicación y descripción de la modalidad nueva; Google le avisa si la sesión sigue vigente.
+      const nowOnline = sessionType.includes('online');
+      if (nowOnline !== wasOnline && booking.session_date !== '2099-12-31') {
+        const avisarCal = !['cancelled', 'expired'].includes(booking.status) && booking.session_date >= todayCL();
+        try { await actualizarModalidadEnCalendario(id, avisarCal); }
+        catch (e) { await logError('admin/cambiar-servicio', 'Cambió la modalidad pero no se pudo actualizar la ubicación del evento en Google Calendar', { bookingId: id, error: e instanceof Error ? e.message : String(e) }); }
+      }
       // Pasó de presencial a online (auditoría 28 oct 2026): el evento no tenía Meet y el correo de abajo
       // dice que el link está en la invitación. Se agrega igual que "Ingresar a Google Meet" (generate-meet.ts).
       const tieneMeet = /(?:^|\n)\s*Meet: https:\/\/meet\.google\.com\//.test(booking.notes ?? '');
@@ -563,7 +571,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       try {
         await sendSessionUpdatedEmail({
           patient_name: booking.patient_name, patient_email: booking.patient_email,
-          reason: 'Se actualizó el servicio de tu sesión', session_type: sessionType,
+          // Las indicaciones (Meet o dirección) van en el correo; si cambió la modalidad, el asunto lo dice.
+          reason: sessionType.includes('online') !== wasOnline
+            ? (sessionType.includes('online') ? 'Tu sesión ahora es online' : 'Tu sesión ahora es presencial')
+            : 'Se actualizó el servicio de tu sesión',
+          session_type: sessionType,
           session_date: booking.session_date, session_time: booking.session_time,
           amount, service_name: svc.name,
           sesion_id: booking.id ?? undefined,
