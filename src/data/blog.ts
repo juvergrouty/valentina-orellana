@@ -14,6 +14,14 @@ export interface Articulo {
 
 export const articulos: Articulo[] = [
   {
+    slug: 'la-casa-de-tus-papas-como-espejo',
+    titulo: 'La casa de tus papás como espejo',
+    bajada: 'Por qué volver a la casa familiar en las fiestas destapa lo que la vida adulta nos permitió tapar, y cómo vivir esos días con más calma.',
+    categoria: 'Vínculos',
+    etiqueta: 'Familia',
+    publicado: true,
+  },
+  {
     slug: 'lo-que-haces-tambien-cambia-quien-crees-ser',
     titulo: 'Lo que haces también cambia quién crees ser',
     bajada: 'Por qué ante un mismo comentario dos personas reaccionan distinto, y cómo actuar diferente también va cambiando la idea que tenemos de nosotros.',
