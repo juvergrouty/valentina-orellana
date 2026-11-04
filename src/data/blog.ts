@@ -14,6 +14,14 @@ export interface Articulo {
 
 export const articulos: Articulo[] = [
   {
+    slug: 'cuando-su-silencio-se-siente-como-abandono',
+    titulo: 'Cuando su silencio se siente como abandono',
+    bajada: 'Por qué la demora de alguien que quieres puede sentirse como abandono, y qué tiene que ver eso con el lugar donde buscamos nuestro valor.',
+    categoria: 'Vínculos',
+    etiqueta: 'Apego',
+    publicado: true,
+  },
+  {
     slug: 'por-que-se-pelea-mas-en-vacaciones',
     titulo: 'Por qué se pelea más en vacaciones',
     bajada: 'Lo que las vacaciones dejan a la vista de una pareja cuando se cae la rutina, si funciona como equipo y cómo se comunica.',
