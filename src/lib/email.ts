@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { htmlATexto } from './htmlATexto';
 import { secreto } from './secretos';
 import { supabase } from './supabase';
 import { logEmail, logError, logInfo } from './logger';
@@ -17,7 +18,18 @@ let _resend: Resend | null = null;
 function getResend(): Resend | null {
   const key = secreto('RESEND_API_KEY'); // runtime (src/lib/secretos.ts)
   if (!key) return null;
-  if (!_resend) _resend = new Resend(key);
+  if (!_resend) {
+    _resend = new Resend(key);
+    // Todo correo va también en texto plano (4 nov 2026): solo HTML empuja a spam en Gmail.
+    const enviar = _resend.emails.send.bind(_resend.emails);
+    _resend.emails.send = ((payload: Parameters<typeof enviar>[0], ...resto: unknown[]) => {
+      const p = payload as { html?: string; text?: string };
+      if (typeof p.html === 'string' && !p.text) {
+        try { p.text = htmlATexto(p.html); } catch { /* sin versión de texto, pero el correo sale igual */ }
+      }
+      return (enviar as (...a: unknown[]) => ReturnType<typeof enviar>)(payload, ...resto);
+    }) as typeof enviar;
+  }
   return _resend;
 }
 

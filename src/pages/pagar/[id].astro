@@ -226,8 +226,8 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {
         form.innerHTML = data.confirmada
-          ? '<p class="text-sm text-center leading-relaxed"><strong>¡Listo! Recibí tu comprobante.</strong><br>Tu pago quedó registrado: en unos minutos te llegará a tu correo la confirmación con todos los detalles. No necesitas hacer nada más.</p>'
-          : '<p class="text-sm text-center leading-relaxed"><strong>¡Listo! Recibí tu comprobante.</strong><br>Apenas confirme la transferencia te llegará la boleta a tu correo. No necesitas hacer nada más.</p>';
+          ? '<p class="text-sm text-center leading-relaxed"><strong>¡Listo! Recibí tu comprobante.</strong><br>Tu pago quedó registrado: en unos minutos te llegará a tu correo la confirmación con todos los detalles. No necesitas hacer nada más. Si no ves el correo, revisa spam o la pestaña Promociones.</p>'
+          : '<p class="text-sm text-center leading-relaxed"><strong>¡Listo! Recibí tu comprobante.</strong><br>Apenas confirme la transferencia te llegará la boleta a tu correo. No necesitas hacer nada más. Si no ves el correo, revisa spam o la pestaña Promociones.</p>';
         return;
       }
       msg.textContent = data.error ?? 'No se pudo enviar el comprobante. Intenta de nuevo.';
