@@ -16,7 +16,7 @@ export const articulos: Articulo[] = [
   {
     slug: 'por-que-se-pelea-mas-en-vacaciones',
     titulo: 'Por qué se pelea más en vacaciones',
-    bajada: 'Lo que las vacaciones dejan a la vista de una pareja cuando se cae la rutina, si funcionan como equipo y cómo se comunican.',
+    bajada: 'Lo que las vacaciones dejan a la vista de una pareja cuando se cae la rutina, si funciona como equipo y cómo se comunica.',
     categoria: 'Vínculos',
     etiqueta: 'Pareja',
     publicado: true,
