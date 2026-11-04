@@ -50,11 +50,10 @@ const pasos = [
 ];
 
 const faq = [
-  { q: '¿Cuánto cuesta la terapia de pareja?', a: `Cada sesión de pareja dura 50 minutos${precioDesde ? ` y tiene un valor de ${new Set(precios).size > 1 ? 'desde ' : ''}${clp(precioDesde)}` : ''}. Se paga al reservar, en línea o por transferencia, y por cada sesión recibes una boleta de honorarios.` },
-  { q: '¿Mi Isapre me reembolsa la terapia de pareja?', a: 'Con la boleta de honorarios puedes pedir el reembolso en tu Isapre o en tu seguro complementario. El monto que te devuelven depende de tu plan, así que conviene preguntarlo antes en tu Isapre.' },
+  { q: '¿Cuánto cuesta la terapia de pareja?', a: `Cada sesión de pareja dura 50 minutos${precioDesde ? ` y tiene un valor ${new Set(precios).size > 1 ? 'desde' : 'de'} ${clp(precioDesde)}` : ''}. Se paga en línea al reservar y por cada sesión recibes una boleta de honorarios.` },
+  { q: '¿Mi Isapre me reembolsa la terapia de pareja?', a: 'Con la boleta de honorarios puedes pedir el reembolso en tu Isapre o en tu seguro complementario. En terapia de pareja la cobertura cambia mucho de un plan a otro, así que conviene consultar en tu Isapre cómo la cubre antes de empezar.' },
   { q: '¿Cuántas sesiones vamos a necesitar?', a: 'Depende de lo que traigan y de cuánto tiempo lleva instalado el problema. En las primeras sesiones conversamos qué quieren lograr y armamos un plan claro de terapia, que vamos revisando juntos a medida que avanzamos.' },
-  { q: '¿Qué pasa en la primera sesión?', a: 'Los escucho a los dos: qué los trae, cómo lo vive cada uno y qué esperan de la terapia. No se trata de decidir quién tiene la razón, sino de entender qué está pasando entre ustedes.' },
-  { q: '¿Lo que digo en la terapia es confidencial?', a: 'Sí. Todo lo que se conversa en las sesiones es confidencial, con las excepciones que establece la ley cuando hay riesgo para la vida de alguien.' },
+  { q: '¿Lo que digo en la terapia es confidencial?', a: 'Sí. Todo lo que se conversa en las sesiones es confidencial. Las únicas excepciones son un riesgo grave para la vida de alguien, la vulneración de derechos de niños, niñas o adolescentes, una orden judicial y los demás casos que establece la ley.' },
   { q: '¿Tenemos que ir los dos siempre?', a: 'Sí, las sesiones de pareja son con ambos. Si en algún momento es útil, puedo proponer alguna sesión individual dentro del proceso.' },
   { q: '¿Y si mi pareja no quiere ir?', a: 'Puedes empezar tú en terapia individual: muchas veces el cambio de uno mueve la relación completa.' },
   { q: '¿La terapia de pareja es para separarse o para seguir juntos?', a: 'Para entender qué les pasa y decidir con más claridad. A veces eso significa reencontrarse, y otras, separarse de una manera más cuidada.' },
