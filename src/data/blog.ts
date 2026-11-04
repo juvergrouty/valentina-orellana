@@ -16,7 +16,7 @@ export const articulos: Articulo[] = [
   {
     slug: 'cuando-su-silencio-se-siente-como-abandono',
     titulo: 'Cuando su silencio se siente como abandono',
-    bajada: 'Por qué la demora de alguien que quieres puede sentirse como abandono, y qué tiene que ver eso con el lugar donde buscamos nuestro valor.',
+    bajada: 'Por qué la demora de alguien que queremos puede sentirse como abandono, y qué tiene que ver eso con el lugar donde buscamos nuestro valor.',
     categoria: 'Vínculos',
     etiqueta: 'Apego',
     publicado: true,
