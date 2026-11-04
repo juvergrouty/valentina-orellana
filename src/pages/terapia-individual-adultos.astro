@@ -14,7 +14,7 @@ const { data: servicios } = await supabase
   .order('sort_order');
 
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
-const individuales = (servicios ?? []).filter(s => !(s.type === 'pareja' || /pareja/i.test(s.name)));
+const individuales = (servicios ?? []).filter(s => s.type === 'individual');
 const precios = individuales.flatMap(s => [s.price_presencial, s.price_online, s.price]).map(Number).filter(n => n > 0);
 const precioDesde = precios.length ? Math.min(...precios) : null;
 

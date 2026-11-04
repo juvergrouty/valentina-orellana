@@ -15,11 +15,11 @@ const { data: servicios } = await supabase
   .order('sort_order');
 
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
-const precioOnline = (s: { price: number | null; price_online: number | null }) => Number(s.price_online ?? s.price) || 0;
-const esPareja = (s: { type: string | null; name: string }) => s.type === 'pareja' || /pareja/i.test(s.name);
+const precioOnline = (s: { price: number | null; price_online: number | null; modality: string | null }) =>
+  Number(s.modality === 'ambos' ? (s.price_online ?? s.price) : s.price) || 0;
 const minimo = (lista: number[]) => (lista.length ? Math.min(...lista) : null);
-const precioIndividual = minimo((servicios ?? []).filter(s => !esPareja(s)).map(precioOnline).filter(n => n > 0));
-const precioPareja     = minimo((servicios ?? []).filter(esPareja).map(precioOnline).filter(n => n > 0));
+const precioIndividual = minimo((servicios ?? []).filter(s => s.type === 'individual').map(precioOnline).filter(n => n > 0));
+const precioPareja     = minimo((servicios ?? []).filter(s => s.type === 'pareja').map(precioOnline).filter(n => n > 0));
 
 const paraQuien = [
   'Vives fuera de Santiago o en una ciudad donde cuesta encontrar a alguien con quien te sientas a gusto.',
@@ -33,7 +33,7 @@ const temas = [
   { t: 'Autoexigencia y cansancio', d: 'Rendir en todo y aun así sentir que nunca es suficiente. Miramos de dónde viene esa exigencia y cómo tratarte con más cariño sin dejar de ser responsable.' },
   { t: 'Patrones que se repiten', d: 'Relaciones que terminan igual, conflictos que vuelven o decisiones que sabes que no te hacen bien. En terapia buscamos el origen de ese patrón para poder cambiarlo.' },
   { t: 'Heridas de la infancia', d: 'Experiencias tempranas de abandono, gritos, bullying o vínculos dañinos que todavía pesan en la vida adulta. Las trabajamos con cuidado y a tu ritmo.' },
-  { t: 'Terapia de pareja online', d: 'Si viven en otra ciudad o les cuesta coincidir en horario, la terapia de pareja también se puede hacer por videollamada, con los dos conectados desde el mismo lugar.' },
+  { t: 'Terapia de pareja online', d: 'Si viven en otra ciudad o les cuesta coincidir en horario, la terapia de pareja también se puede hacer por videollamada, desde un espacio privado.' },
 ];
 
 const pasos = [
@@ -43,7 +43,7 @@ const pasos = [
 ];
 
 const faq = [
-  { q: '¿La terapia online funciona igual que la presencial?', a: 'Sí. La investigación sobre psicoterapia por videollamada muestra resultados comparables a los de la terapia presencial en la mayoría de los motivos de consulta. Lo importante es la relación terapéutica y la constancia, y eso se puede construir igual a través de la pantalla.' },
+  { q: '¿La terapia online funciona igual que la presencial?', a: 'Para muchos motivos de consulta, la investigación sobre psicoterapia por videollamada muestra resultados comparables a los de la terapia presencial. Lo importante es la relación terapéutica y la constancia, y eso se puede construir igual a través de la pantalla.' },
   { q: '¿Cuánto cuesta una sesión online?', a: `Cada sesión dura 50 minutos${precioIndividual ? `. La sesión individual tiene un valor de ${clp(precioIndividual)}` : ''}${precioPareja ? ` y la de pareja de ${clp(precioPareja)}` : ''}. Se paga en línea al reservar y por cada sesión recibes una boleta de honorarios.` },
   { q: '¿Mi Isapre me reembolsa la terapia online?', a: 'Con la boleta de honorarios puedes pedir el reembolso en tu Isapre o en tu seguro complementario. El monto depende de tu plan, así que conviene preguntarlo antes en tu Isapre.' },
   { q: '¿Qué necesito para la sesión?', a: 'Un computador, tablet o celular con cámara, una conexión a internet estable y un lugar privado donde puedas hablar tranquilo o tranquila. Te recomiendo usar audífonos.' },
@@ -90,8 +90,8 @@ const jsonLd = {
     label="Terapia online · Todo Chile"
     title="Terapia online"
     description="Sesiones por videollamada para adultos y parejas, desde cualquier lugar de Chile."
-    image="/images/valentina-consultorio.webp"
-    imageMobile="/images/consulta-sala-800.webp"
+    image="/images/consulta-puerta-1600.webp"
+    imageMobile="/images/consulta-puerta-800.webp"
   />
 
   <section class="bg-sand py-16 md:py-24">
