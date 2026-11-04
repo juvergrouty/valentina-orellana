@@ -1,0 +1,200 @@
+---
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero   from '../components/sections/PageHero.astro';
+import { supabase } from '../lib/supabase';
+import { DIRECCION } from '../data/consulta';
+
+// Página de terapia individual para adultos (SEO, 4 nov 2026). Misma estructura
+// que /terapia-de-pareja-las-condes y /terapia-online.
+const { data: servicios } = await supabase
+  .from('services_catalog')
+  .select('name, type, price, price_online, price_presencial')
+  .eq('visible', true)
+  .order('sort_order');
+
+const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+const individuales = (servicios ?? []).filter(s => !(s.type === 'pareja' || /pareja/i.test(s.name)));
+const precios = individuales.flatMap(s => [s.price_presencial, s.price_online, s.price]).map(Number).filter(n => n > 0);
+const precioDesde = precios.length ? Math.min(...precios) : null;
+
+const senales = [
+  'Llevas tiempo con ansiedad, tensión o cansancio que no se van.',
+  'Te exiges tanto que nunca sientes que haces lo suficiente.',
+  'Te repites en relaciones, conflictos o decisiones que sabes que no te hacen bien.',
+  'Algo de tu historia sigue pesando, aunque haya pasado hace años.',
+  'Estás en un momento de cambio y necesitas un espacio para pensar con claridad.',
+];
+
+const temas = [
+  { t: 'Ansiedad', d: 'Pensamientos que no paran, dormir mal o sentir que algo malo va a pasar aunque todo esté bien. Trabajamos en entender qué mantiene encendida esa alerta y en recuperar la calma.' },
+  { t: 'Autoexigencia', d: 'Rendir en todo y aun así sentir que nunca es suficiente. Miramos de dónde viene esa exigencia y cómo tratarte con más cariño sin dejar de ser responsable.' },
+  { t: 'Bloqueo emocional y culpa', d: 'Cuando cuesta sentir, decir lo que necesitas o dejar de culparte por todo. En terapia buscamos qué protegió ese bloqueo y cómo soltarlo de a poco.' },
+  { t: 'Tristeza persistente', d: 'Desánimo que se instala, falta de energía o la sensación de que nada te entusiasma como antes. Lo trabajamos en profundidad, sin minimizarlo.' },
+  { t: 'Heridas de la infancia', d: 'Experiencias tempranas de abandono, gritos, abuso, bullying o vínculos dañinos que todavía afectan la vida adulta. Las trabajamos con cuidado y a tu ritmo.' },
+  { t: 'Patrones que se repiten', d: 'Relaciones que terminan igual o decisiones que se repiten. Buscamos el origen de ese patrón para que puedas elegir distinto.' },
+];
+
+const pasos = [
+  { n: '01', t: 'Escucharte', d: 'En la primera sesión me cuentas qué te trae y qué esperas. No necesitas llegar con todo ordenado.' },
+  { n: '02', t: 'Entender el origen', d: 'Miramos lo que te pasa en relación con tu historia y tus vínculos, para entender por qué se repite.' },
+  { n: '03', t: 'Cambiar con un plan', d: 'Definimos juntos un plan claro de terapia, con objetivos concretos que vamos revisando.' },
+];
+
+const faq = [
+  { q: '¿Cuánto cuesta la terapia individual?', a: `Cada sesión dura 50 minutos${precioDesde ? ` y tiene un valor ${new Set(precios).size > 1 ? 'desde' : 'de'} ${clp(precioDesde)}` : ''}. Se paga en línea al reservar y por cada sesión recibes una boleta de honorarios.` },
+  { q: '¿Mi Isapre me reembolsa las sesiones?', a: 'Con la boleta de honorarios puedes pedir el reembolso en tu Isapre o en tu seguro complementario. El monto depende de tu plan, así que conviene preguntarlo antes en tu Isapre.' },
+  { q: '¿Cuántas sesiones voy a necesitar?', a: 'Depende de lo que te trae y de cuánto tiempo lleva contigo. En las primeras sesiones definimos qué quieres lograr y armamos un plan claro de terapia, que vamos revisando juntos.' },
+  { q: '¿Atiendes presencial u online?', a: `Las dos. Presencial en ${DIRECCION.calle}, ${DIRECCION.detalle}, ${DIRECCION.comuna}, y online por Google Meet para todo Chile.` },
+  { q: '¿Lo que converso en terapia es confidencial?', a: 'Sí. Todo lo que se conversa en las sesiones es confidencial. Las únicas excepciones son un riesgo grave para la vida de alguien, la vulneración de derechos de niños, niñas o adolescentes, una orden judicial y los demás casos que establece la ley.' },
+  { q: '¿Tengo que estar en crisis para ir al psicólogo?', a: 'No. Basta con que algo te pese o que notes que un mismo patrón se repite y no logras cambiarlo. Empezar antes suele hacer el proceso más liviano.' },
+];
+
+const lecturas = [
+  { href: '/blog/tu-patron-te-protegio-de-algo', t: 'Tu patrón te protegió de algo' },
+  { href: '/blog/lo-entiendo-todo-y-aun-asi-no-cambio', t: 'Lo entiendo todo y aun así no cambio' },
+  { href: '/blog/lo-que-te-paso-te-organizo', t: 'Lo que te pasó te organizó' },
+  { href: '/blog/el-hombre-que-puede-solo', t: 'El hombre que puede solo' },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'FAQPage',
+      mainEntity: faq.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })),
+    },
+    {
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Inicio', item: 'https://www.valentinaorellana.cl/' },
+        { '@type': 'ListItem', position: 2, name: 'Servicios', item: 'https://www.valentinaorellana.cl/servicios' },
+        { '@type': 'ListItem', position: 3, name: 'Terapia individual para adultos', item: 'https://www.valentinaorellana.cl/terapia-individual-adultos' },
+      ],
+    },
+    {
+      '@type': 'Service',
+      name: 'Terapia individual para adultos',
+      serviceType: 'Psicoterapia individual para adultos',
+      url: 'https://www.valentinaorellana.cl/terapia-individual-adultos',
+      areaServed: [{ '@type': 'City', name: 'Las Condes' }, { '@type': 'Country', name: 'Chile' }],
+      provider: { '@type': 'Person', name: 'Valentina Orellana Jaramillo', url: 'https://www.valentinaorellana.cl/sobre-mi' },
+      ...(precioDesde ? { offers: { '@type': 'Offer', price: precioDesde, priceCurrency: 'CLP' } } : {}),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title="Terapia individual para adultos"
+  description={`Terapia individual para adultos: ansiedad, autoexigencia, heridas de infancia y patrones que se repiten. Presencial en Las Condes y online${precioDesde ? `, ${clp(precioDesde)}` : ''}.`}
+>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, '\\u003c')} />
+
+  <PageHero
+    label="Terapia individual · Las Condes y online"
+    title="Terapia individual para adultos"
+    description="Un espacio para entender lo que te pasa y cambiar lo que se repite."
+    image="/images/consulta-detalle-ancho-1600.webp"
+    imageMobile="/images/consulta-detalle-800.webp"
+  />
+
+  <section class="bg-sand py-16 md:py-24">
+    <div class="container-site grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-16">
+      <div class="md:col-span-5">
+        <p class="label mb-3">¿Cuándo consultar?</p>
+        <h2 class="section-title">Señales de que puede ser el momento</h2>
+      </div>
+      <ul class="md:col-span-7 space-y-4">
+        {senales.map(s => (
+          <li class="flex gap-4 border-b border-dust pb-4 body-text text-[#4a4842] font-normal"><span aria-hidden="true" class="text-forest">—</span><span>{s}</span></li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="bg-white border-t border-dust py-16 md:py-24">
+    <div class="container-site">
+      <p class="label mb-3">Qué trabajamos</p>
+      <h2 class="section-title mb-6 max-w-2xl">Lo que suelen traer los adultos a la consulta</h2>
+      <p class="body-text text-[#4a4842] font-normal mb-10 md:mb-14 max-w-3xl">
+        Soy psicóloga de adultos y parejas y trabajo con un enfoque sistémico: miro lo que te pasa en relación con tu historia, tus vínculos y el momento que estás viviendo. Estas son algunas de las situaciones que más se trabajan en terapia individual.
+      </p>
+      <ul class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+        {temas.map(t => (
+          <li class="flex gap-4">
+            <span aria-hidden="true" class="mt-2 h-2 w-2 shrink-0 rounded-full bg-gold"></span>
+            <div>
+              <h3 class="card-title text-xl mb-2">{t.t}</h3>
+              <p class="body-sm text-[#55524b] font-normal">{t.d}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="bg-warm border-y border-dust py-16 md:py-24">
+    <div class="container-site">
+      <p class="label mb-3">Cómo trabajo</p>
+      <h2 class="section-title mb-10 md:mb-14 max-w-2xl">Un proceso con dirección</h2>
+      <ol class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        {pasos.map(p => (
+          <li class="bg-white border border-dust rounded-[6px] p-7">
+            <p class="font-heading text-3xl text-gold mb-4">{p.n}</p>
+            <p class="card-title text-xl mb-3">{p.t}</p>
+            <p class="body-sm text-[#55524b] font-normal">{p.d}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section class="bg-sand py-16 md:py-24">
+    <div class="container-site grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16">
+      <div>
+        <p class="label mb-3">Primera sesión</p>
+        <h2 class="section-title mb-6">Cómo empezamos</h2>
+        <p class="body-text text-[#4a4842] font-normal mb-4">
+          Sesiones de 50 minutos, presenciales en {DIRECCION.calle}, {DIRECCION.detalle}, {DIRECCION.comuna}, u online para todo Chile.
+        </p>
+        {precioDesde && (
+          <p class="body-text text-ink font-medium mb-2">
+            {new Set(precios).size > 1 ? `Valor: desde ${clp(precioDesde)} por sesión (según modalidad).` : `Valor: ${clp(precioDesde)} por sesión.`}
+          </p>
+        )}
+        <p class="body-sm text-[#55524b] font-normal">Por cada sesión recibes boleta de honorarios para pedir reembolso en tu Isapre o seguro complementario, según tu plan.</p>
+      </div>
+      <div class="flex flex-col justify-center gap-4 md:items-start">
+        <a href="/agenda?grupo=individual" class="btn-dark justify-center" data-cta="individual_landing_agenda">Ver horarios</a>
+        <a href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20quiero%20consultar%20por%20terapia%20individual." target="_blank" rel="noopener" class="btn-outline justify-center" data-cta="individual_landing_whatsapp">Escribir por WhatsApp</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-warm border-t border-dust py-16 md:py-24">
+    <div class="container-site max-w-3xl">
+      <p class="label mb-3">Preguntas frecuentes</p>
+      <h2 class="section-title mb-8">Lo que suelen preguntarme</h2>
+      <div class="divide-y divide-dust border-y border-dust">
+        {faq.map(f => (
+          <details class="group py-5">
+            <summary class="cursor-pointer list-none flex justify-between gap-4 font-body text-base text-ink font-medium">
+              {f.q}<span aria-hidden="true" class="text-forest transition-transform group-open:rotate-45">+</span>
+            </summary>
+            <p class="body-sm text-[#55524b] font-normal mt-3">{f.a}</p>
+          </details>
+        ))}
+      </div>
+      <div class="mt-12">
+        <h2 class="card-title text-xl mb-4">Para leer antes de la primera sesión</h2>
+        <ul class="space-y-3">
+          {lecturas.map(l => (
+            <li class="flex gap-3 body-sm"><span aria-hidden="true" class="text-forest">•</span><a href={l.href} class="text-forest underline underline-offset-4 hover:text-ink">{l.t}</a></li>
+          ))}
+        </ul>
+      </div>
+      <p class="body-sm mt-8">Este espacio no atiende urgencias. Si estás en crisis, llama al *4141 (gratis, 24/7) o acude al servicio de urgencia más cercano.</p>
+    </div>
+  </section>
+</BaseLayout>

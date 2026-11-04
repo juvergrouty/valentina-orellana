@@ -80,6 +80,38 @@ const modalityLabel = (m: string) =>
 
   <PageHero label="¿En qué puedo ayudarte?" title="Servicios" image="/images/sala-espera-ancho-1600.webp" imageMobile="/images/sala-espera-800.webp" />
 
+  <!-- Introducción y enlaces a las páginas de cada tipo de terapia (SEO, 4 nov 2026):
+       la página tenía solo las tarjetas, sin texto que explicara cada servicio. -->
+  <section class="bg-white border-b border-dust py-16 md:py-20">
+    <div class="container-site">
+      <div class="max-w-3xl mb-10 md:mb-12">
+        <p class="label mb-3">Psicóloga de adultos y parejas</p>
+        <h2 class="section-title mb-6">Terapia individual, de pareja y online</h2>
+        <p class="body-text text-[#4a4842] font-normal mb-4">
+          Atiendo a adultos y parejas en mi consulta de Estoril 50, en Las Condes, y online por videollamada para todo Chile. Trabajo con un enfoque sistémico: miro lo que te pasa en relación con tu historia, tus vínculos y el momento que estás viviendo, y no solo el síntoma que te trae.
+        </p>
+        <p class="body-text text-[#4a4842] font-normal">
+          Todas las sesiones duran 50 minutos, se pagan en línea al reservar y por cada una recibes una boleta de honorarios para pedir reembolso en tu Isapre o seguro complementario, según tu plan. En la primera sesión conversamos qué te trae y armamos juntos un plan claro de terapia.
+        </p>
+      </div>
+      <ul class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        {[
+          { href: '/terapia-individual-adultos', t: 'Terapia individual', d: 'Ansiedad, autoexigencia, tristeza persistente, heridas de la infancia y patrones que se repiten.' },
+          { href: '/terapia-de-pareja-las-condes', t: 'Terapia de pareja', d: 'Peleas que se repiten, distancia emocional, infidelidad y decisiones importantes para los dos.' },
+          { href: '/terapia-online', t: 'Terapia online', d: 'Sesiones por Google Meet desde cualquier lugar de Chile, individuales o de pareja.' },
+        ].map(c => (
+          <li>
+            <a href={c.href} class="block h-full bg-sand border border-dust rounded-[6px] p-7 hover:border-forest transition-colors duration-200">
+              <p class="card-title text-xl mb-3">{c.t}</p>
+              <p class="body-sm text-[#55524b] font-normal mb-4">{c.d}</p>
+              <span class="body-sm text-forest underline underline-offset-4">Ver más</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
   <section class="py-section bg-sand">
     <div class="container-site">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-5">

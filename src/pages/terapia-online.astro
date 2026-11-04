@@ -1,0 +1,193 @@
+---
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero   from '../components/sections/PageHero.astro';
+import { supabase } from '../lib/supabase';
+
+// Página de terapia online (SEO, 4 nov 2026): quien busca "psicóloga online"
+// o "terapia online Chile" no tenía una página propia. Misma estructura que
+// /terapia-de-pareja-las-condes.
+const { data: servicios } = await supabase
+  .from('services_catalog')
+  .select('name, type, price, price_online, modality')
+  .eq('visible', true)
+  .in('modality', ['online', 'ambos'])
+  .order('sort_order');
+
+const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+const precioOnline = (s: { price: number | null; price_online: number | null }) => Number(s.price_online ?? s.price) || 0;
+const esPareja = (s: { type: string | null; name: string }) => s.type === 'pareja' || /pareja/i.test(s.name);
+const minimo = (lista: number[]) => (lista.length ? Math.min(...lista) : null);
+const precioIndividual = minimo((servicios ?? []).filter(s => !esPareja(s)).map(precioOnline).filter(n => n > 0));
+const precioPareja     = minimo((servicios ?? []).filter(esPareja).map(precioOnline).filter(n => n > 0));
+
+const paraQuien = [
+  'Vives fuera de Santiago o en una ciudad donde cuesta encontrar a alguien con quien te sientas a gusto.',
+  'Tu semana no te deja traslados: trabajo, hijos o turnos que no calzan con una consulta presencial.',
+  'Te sientes más en confianza hablando desde tu propio espacio.',
+  'Empezaste terapia presencial y por un tiempo no puedes venir a la consulta.',
+];
+
+const temas = [
+  { t: 'Ansiedad y estar siempre alerta', d: 'Pensamientos que no paran, dormir mal o sentir que algo malo va a pasar aunque todo esté bien. Trabajamos en entender qué mantiene encendida esa alerta y en cómo bajarla.' },
+  { t: 'Autoexigencia y cansancio', d: 'Rendir en todo y aun así sentir que nunca es suficiente. Miramos de dónde viene esa exigencia y cómo tratarte con más cariño sin dejar de ser responsable.' },
+  { t: 'Patrones que se repiten', d: 'Relaciones que terminan igual, conflictos que vuelven o decisiones que sabes que no te hacen bien. En terapia buscamos el origen de ese patrón para poder cambiarlo.' },
+  { t: 'Heridas de la infancia', d: 'Experiencias tempranas de abandono, gritos, bullying o vínculos dañinos que todavía pesan en la vida adulta. Las trabajamos con cuidado y a tu ritmo.' },
+  { t: 'Terapia de pareja online', d: 'Si viven en otra ciudad o les cuesta coincidir en horario, la terapia de pareja también se puede hacer por videollamada, con los dos conectados desde el mismo lugar.' },
+];
+
+const pasos = [
+  { n: '01', t: 'Reservas tu hora', d: 'Eliges día y hora en la agenda y pagas en línea. Recibes la confirmación por correo.' },
+  { n: '02', t: 'Te llega el enlace', d: 'Antes de la sesión recibes el enlace de Google Meet. No necesitas instalar nada en el computador.' },
+  { n: '03', t: 'Nos conectamos', d: 'Sesión de 50 minutos desde un lugar privado. Al final definimos juntos cómo seguir, con un plan claro de terapia.' },
+];
+
+const faq = [
+  { q: '¿La terapia online funciona igual que la presencial?', a: 'Sí. La investigación sobre psicoterapia por videollamada muestra resultados comparables a los de la terapia presencial en la mayoría de los motivos de consulta. Lo importante es la relación terapéutica y la constancia, y eso se puede construir igual a través de la pantalla.' },
+  { q: '¿Cuánto cuesta una sesión online?', a: `Cada sesión dura 50 minutos${precioIndividual ? `. La sesión individual tiene un valor de ${clp(precioIndividual)}` : ''}${precioPareja ? ` y la de pareja de ${clp(precioPareja)}` : ''}. Se paga en línea al reservar y por cada sesión recibes una boleta de honorarios.` },
+  { q: '¿Mi Isapre me reembolsa la terapia online?', a: 'Con la boleta de honorarios puedes pedir el reembolso en tu Isapre o en tu seguro complementario. El monto depende de tu plan, así que conviene preguntarlo antes en tu Isapre.' },
+  { q: '¿Qué necesito para la sesión?', a: 'Un computador, tablet o celular con cámara, una conexión a internet estable y un lugar privado donde puedas hablar tranquilo o tranquila. Te recomiendo usar audífonos.' },
+  { q: '¿Desde dónde puedo conectarme?', a: 'Desde cualquier lugar de Chile. Solo necesitas un espacio donde nadie te escuche, porque lo que conversamos es confidencial.' },
+  { q: '¿Puedo combinar sesiones online y presenciales?', a: 'Sí. Si estás en Santiago puedes alternar entre la consulta de Estoril 50, en Las Condes, y las sesiones online según lo que te acomode cada semana.' },
+  { q: '¿Y si estoy en una crisis?', a: 'La terapia online no atiende urgencias. Si estás en crisis, llama al *4141 (gratis, las 24 horas) o acude al servicio de urgencia más cercano.' },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'FAQPage',
+      mainEntity: faq.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })),
+    },
+    {
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Inicio', item: 'https://www.valentinaorellana.cl/' },
+        { '@type': 'ListItem', position: 2, name: 'Servicios', item: 'https://www.valentinaorellana.cl/servicios' },
+        { '@type': 'ListItem', position: 3, name: 'Terapia online', item: 'https://www.valentinaorellana.cl/terapia-online' },
+      ],
+    },
+    {
+      '@type': 'Service',
+      name: 'Terapia online',
+      serviceType: 'Psicoterapia online para adultos y parejas',
+      url: 'https://www.valentinaorellana.cl/terapia-online',
+      areaServed: { '@type': 'Country', name: 'Chile' },
+      provider: { '@type': 'Person', name: 'Valentina Orellana Jaramillo', url: 'https://www.valentinaorellana.cl/sobre-mi' },
+      ...(precioIndividual ? { offers: { '@type': 'Offer', price: precioIndividual, priceCurrency: 'CLP' } } : {}),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title="Psicóloga online para todo Chile"
+  description={`Terapia online por videollamada para adultos y parejas, desde cualquier lugar de Chile. Sesiones de 50 minutos${precioIndividual ? `, desde ${clp(precioIndividual)}` : ''}. Boleta para reembolso en Isapre.`}
+>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, '\\u003c')} />
+
+  <PageHero
+    label="Terapia online · Todo Chile"
+    title="Terapia online"
+    description="Sesiones por videollamada para adultos y parejas, desde cualquier lugar de Chile."
+    image="/images/valentina-consultorio.webp"
+    imageMobile="/images/consulta-sala-800.webp"
+  />
+
+  <section class="bg-sand py-16 md:py-24">
+    <div class="container-site grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-16">
+      <div class="md:col-span-5">
+        <p class="label mb-3">¿Para quién es?</p>
+        <h2 class="section-title">Terapia sin traslados, con el mismo cuidado</h2>
+      </div>
+      <div class="md:col-span-7">
+        <p class="body-text text-[#4a4842] font-normal mb-6">
+          Soy psicóloga de adultos y parejas y atiendo online a personas de todo Chile. La terapia online tiene la misma duración, la misma confidencialidad y el mismo enfoque que la presencial; lo único que cambia es que te conectas desde donde estés.
+        </p>
+        <ul class="space-y-4">
+          {paraQuien.map(s => (
+            <li class="flex gap-4 border-b border-dust pb-4 body-text text-[#4a4842] font-normal"><span aria-hidden="true" class="text-forest">—</span><span>{s}</span></li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white border-t border-dust py-16 md:py-24">
+    <div class="container-site">
+      <p class="label mb-3">Qué trabajamos</p>
+      <h2 class="section-title mb-6 max-w-2xl">Lo que suelen traer las personas a la terapia online</h2>
+      <p class="body-text text-[#4a4842] font-normal mb-10 md:mb-14 max-w-3xl">
+        Trabajo con un enfoque sistémico: miro lo que te pasa en relación con tu historia, tus vínculos y el momento que estás viviendo, en vez de tratar cada síntoma por separado.
+      </p>
+      <ul class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+        {temas.map(t => (
+          <li class="flex gap-4">
+            <span aria-hidden="true" class="mt-2 h-2 w-2 shrink-0 rounded-full bg-gold"></span>
+            <div>
+              <h3 class="card-title text-xl mb-2">{t.t}</h3>
+              <p class="body-sm text-[#55524b] font-normal">{t.d}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="bg-warm border-y border-dust py-16 md:py-24">
+    <div class="container-site">
+      <p class="label mb-3">Cómo funciona</p>
+      <h2 class="section-title mb-10 md:mb-14 max-w-2xl">Tres pasos para empezar</h2>
+      <ol class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        {pasos.map(p => (
+          <li class="bg-white border border-dust rounded-[6px] p-7">
+            <p class="font-heading text-3xl text-gold mb-4">{p.n}</p>
+            <p class="card-title text-xl mb-3">{p.t}</p>
+            <p class="body-sm text-[#55524b] font-normal">{p.d}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section class="bg-sand py-16 md:py-24">
+    <div class="container-site grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16">
+      <div>
+        <p class="label mb-3">Valores</p>
+        <h2 class="section-title mb-6">Sesiones de 50 minutos</h2>
+        {precioIndividual && <p class="body-text text-ink font-medium mb-2">Individual: {clp(precioIndividual)} por sesión.</p>}
+        {precioPareja && <p class="body-text text-ink font-medium mb-4">Pareja: {clp(precioPareja)} por sesión.</p>}
+        <p class="body-sm text-[#55524b] font-normal">Por cada sesión recibes boleta de honorarios para pedir reembolso en tu Isapre o seguro complementario, según tu plan.</p>
+      </div>
+      <div class="flex flex-col justify-center gap-4 md:items-start">
+        <a href="/agenda" class="btn-dark justify-center" data-cta="online_landing_agenda">Ver horarios</a>
+        <a href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20quiero%20consultar%20por%20terapia%20online." target="_blank" rel="noopener" class="btn-outline justify-center" data-cta="online_landing_whatsapp">Escribir por WhatsApp</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-warm border-t border-dust py-16 md:py-24">
+    <div class="container-site max-w-3xl">
+      <p class="label mb-3">Preguntas frecuentes</p>
+      <h2 class="section-title mb-8">Lo que suelen preguntarme</h2>
+      <div class="divide-y divide-dust border-y border-dust">
+        {faq.map(f => (
+          <details class="group py-5">
+            <summary class="cursor-pointer list-none flex justify-between gap-4 font-body text-base text-ink font-medium">
+              {f.q}<span aria-hidden="true" class="text-forest transition-transform group-open:rotate-45">+</span>
+            </summary>
+            <p class="body-sm text-[#55524b] font-normal mt-3">{f.a}</p>
+          </details>
+        ))}
+      </div>
+      <div class="mt-12">
+        <h2 class="card-title text-xl mb-4">También te puede servir</h2>
+        <ul class="space-y-3">
+          <li class="flex gap-3 body-sm"><span aria-hidden="true" class="text-forest">•</span><a href="/terapia-individual-adultos" class="text-forest underline underline-offset-4 hover:text-ink">Terapia individual para adultos</a></li>
+          <li class="flex gap-3 body-sm"><span aria-hidden="true" class="text-forest">•</span><a href="/terapia-de-pareja-las-condes" class="text-forest underline underline-offset-4 hover:text-ink">Terapia de pareja</a></li>
+          <li class="flex gap-3 body-sm"><span aria-hidden="true" class="text-forest">•</span><a href="/sobre-mi" class="text-forest underline underline-offset-4 hover:text-ink">Sobre mí</a></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
