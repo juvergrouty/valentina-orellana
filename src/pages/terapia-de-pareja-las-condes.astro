@@ -27,6 +27,22 @@ const senales = [
   'Están frente a una decisión grande: hijos, convivencia, separación.',
 ];
 
+const temas = [
+  { t: 'Peleas que se repiten', d: 'Cuando discuten siempre por lo mismo, casi nunca el problema es el tema de la pelea. Miramos qué se activa en cada uno y por qué la conversación termina siempre en el mismo lugar.' },
+  { t: 'Distancia emocional', d: 'Conviven, se organizan bien con la casa y los hijos, pero hace tiempo que no se sienten cerca. Trabajamos en recuperar el interés por el otro y los momentos que son solo de ustedes.' },
+  { t: 'Infidelidad y confianza rota', d: 'Después de una infidelidad aparecen la rabia, la culpa y muchas preguntas. La terapia ordena ese proceso para que puedan decidir si quieren reconstruir la relación y cómo hacerlo.' },
+  { t: 'Comunicación difícil', d: 'Uno insiste y el otro se cierra, o cada conversación importante termina en reproche. Buscamos formas de decir lo que necesitan sin herirse.' },
+  { t: 'Cambios de etapa', d: 'La llegada de un hijo, una mudanza, irse a vivir juntos, la pérdida de un trabajo o la salida de los hijos de la casa cambian el equilibrio de la pareja y suelen remover cosas que estaban guardadas.' },
+  { t: 'Decidir si seguir o separarse', d: 'Cuando no saben si quieren seguir juntos, la terapia les da un espacio para pensarlo con calma. Si deciden separarse, también se puede hacer de una manera más cuidada, sobre todo cuando hay hijos.' },
+];
+
+const lecturas = [
+  { href: '/blog/ya-no-nos-amamos', t: '¿Ya no nos amamos?' },
+  { href: '/blog/nadie-nos-ensena-a-ser-pareja', t: 'Nadie nos enseña a ser pareja' },
+  { href: '/blog/volver-a-elegirse', t: 'Volver a elegirse' },
+  { href: '/blog/por-que-se-pelea-mas-en-vacaciones', t: 'Por qué se pelea más en vacaciones' },
+];
+
 const pasos = [
   { n: '01', t: 'Escucharlos a los dos', d: 'En la primera sesión cada uno cuenta qué le pasa y qué espera. Sin buscar culpables.' },
   { n: '02', t: 'Entender el patrón', d: 'Miramos qué dinámica se repite entre ustedes y de dónde viene, desde la historia de cada uno.' },
@@ -34,6 +50,11 @@ const pasos = [
 ];
 
 const faq = [
+  { q: '¿Cuánto cuesta la terapia de pareja?', a: `Cada sesión de pareja dura 50 minutos${precioDesde ? ` y tiene un valor de ${new Set(precios).size > 1 ? 'desde ' : ''}${clp(precioDesde)}` : ''}. Se paga al reservar, en línea o por transferencia, y por cada sesión recibes una boleta de honorarios.` },
+  { q: '¿Mi Isapre me reembolsa la terapia de pareja?', a: 'Con la boleta de honorarios puedes pedir el reembolso en tu Isapre o en tu seguro complementario. El monto que te devuelven depende de tu plan, así que conviene preguntarlo antes en tu Isapre.' },
+  { q: '¿Cuántas sesiones vamos a necesitar?', a: 'Depende de lo que traigan y de cuánto tiempo lleva instalado el problema. En las primeras sesiones conversamos qué quieren lograr y armamos un plan claro de terapia, que vamos revisando juntos a medida que avanzamos.' },
+  { q: '¿Qué pasa en la primera sesión?', a: 'Los escucho a los dos: qué los trae, cómo lo vive cada uno y qué esperan de la terapia. No se trata de decidir quién tiene la razón, sino de entender qué está pasando entre ustedes.' },
+  { q: '¿Lo que digo en la terapia es confidencial?', a: 'Sí. Todo lo que se conversa en las sesiones es confidencial, con las excepciones que establece la ley cuando hay riesgo para la vida de alguien.' },
   { q: '¿Tenemos que ir los dos siempre?', a: 'Sí, las sesiones de pareja son con ambos. Si en algún momento es útil, puedo proponer alguna sesión individual dentro del proceso.' },
   { q: '¿Y si mi pareja no quiere ir?', a: 'Puedes empezar tú en terapia individual: muchas veces el cambio de uno mueve la relación completa.' },
   { q: '¿La terapia de pareja es para separarse o para seguir juntos?', a: 'Para entender qué les pasa y decidir con más claridad. A veces eso significa reencontrarse, y otras, separarse de una manera más cuidada.' },
@@ -43,8 +64,29 @@ const faq = [
 
 const jsonLd = {
   '@context': 'https://schema.org',
-  '@type': 'FAQPage',
-  mainEntity: faq.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })),
+  '@graph': [
+    {
+      '@type': 'FAQPage',
+      mainEntity: faq.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })),
+    },
+    {
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Inicio', item: 'https://www.valentinaorellana.cl/' },
+        { '@type': 'ListItem', position: 2, name: 'Servicios', item: 'https://www.valentinaorellana.cl/servicios' },
+        { '@type': 'ListItem', position: 3, name: 'Terapia de pareja', item: 'https://www.valentinaorellana.cl/terapia-de-pareja-las-condes' },
+      ],
+    },
+    {
+      '@type': 'Service',
+      name: 'Terapia de pareja',
+      serviceType: 'Terapia de pareja',
+      url: 'https://www.valentinaorellana.cl/terapia-de-pareja-las-condes',
+      areaServed: [{ '@type': 'City', name: 'Las Condes' }, { '@type': 'Country', name: 'Chile' }],
+      provider: { '@type': 'Person', name: 'Valentina Orellana Jaramillo', url: 'https://www.valentinaorellana.cl/sobre-mi' },
+      ...(precioDesde ? { offers: { '@type': 'Offer', price: precioDesde, priceCurrency: 'CLP' } } : {}),
+    },
+  ],
 };
 ---
 
@@ -71,6 +113,27 @@ const jsonLd = {
       <ul class="md:col-span-7 space-y-4">
         {senales.map(s => (
           <li class="flex gap-4 border-b border-dust pb-4 body-text text-[#4a4842] font-normal"><span aria-hidden="true" class="text-forest">—</span><span>{s}</span></li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="bg-white border-t border-dust py-16 md:py-24">
+    <div class="container-site">
+      <p class="label mb-3">Qué trabajamos</p>
+      <h2 class="section-title mb-6 max-w-2xl">Lo que suelen traer las parejas a la consulta</h2>
+      <p class="body-text text-[#4a4842] font-normal mb-10 md:mb-14 max-w-3xl">
+        Soy psicóloga de adultos y parejas y trabajo con un enfoque sistémico: en vez de buscar quién tiene la culpa, miro la relación como un sistema en que lo que hace uno provoca una respuesta en el otro. Estas son algunas de las situaciones que más se trabajan en terapia de pareja.
+      </p>
+      <ul class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+        {temas.map(t => (
+          <li class="flex gap-4">
+            <span aria-hidden="true" class="mt-2 h-2 w-2 shrink-0 rounded-full bg-gold"></span>
+            <div>
+              <h3 class="card-title text-xl mb-2">{t.t}</h3>
+              <p class="body-sm text-[#55524b] font-normal">{t.d}</p>
+            </div>
+          </li>
         ))}
       </ul>
     </div>
@@ -130,6 +193,14 @@ const jsonLd = {
             <p class="body-sm text-[#55524b] font-normal mt-3">{f.a}</p>
           </details>
         ))}
+      </div>
+      <div class="mt-12">
+        <h2 class="card-title text-xl mb-4">Para leer antes de la primera sesión</h2>
+        <ul class="space-y-3">
+          {lecturas.map(l => (
+            <li class="flex gap-3 body-sm"><span aria-hidden="true" class="text-forest">•</span><a href={l.href} class="text-forest underline underline-offset-4 hover:text-ink">{l.t}</a></li>
+          ))}
+        </ul>
       </div>
       <p class="body-sm mt-8">Este espacio no atiende urgencias. Si estás en crisis, llama al *4141 (gratis, 24/7) o acude al servicio de urgencia más cercano.</p>
     </div>

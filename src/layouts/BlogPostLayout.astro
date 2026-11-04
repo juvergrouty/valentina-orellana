@@ -43,6 +43,9 @@ const palabras = cuerpo.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).le
 const minutos = Math.max(1, Math.ceil(palabras / 200));
 const articulo = articulos.find((a) => a.slug === slug)!;
 const sigue = relacionados.map((s) => articulos.find((a) => a.slug === s)).filter(Boolean);
+// Artículos sobre pareja: enlazan a la página de terapia de pareja (SEO, 4 nov 2026).
+const DE_PAREJA = ['ya-no-nos-amamos', 'volver-a-elegirse', 'nadie-nos-ensena-a-ser-pareja', 'por-que-se-pelea-mas-en-vacaciones'];
+const esDePareja = DE_PAREJA.includes(slug);
 const jsonLd = {
   '@context': 'https://schema.org',
   '@type': 'Article',
@@ -90,6 +93,9 @@ const jsonLd = {
           <a href={`https://wa.me/56972735696?text=${encodeURIComponent(`Hola Valentina, leí "${articulo.titulo}" en tu blog y me gustaría consultarte por una sesión.`)}`}
              target="_blank" rel="noopener" class="cta-wa">o escríbeme por WhatsApp</a>
         </div>
+        {esDePareja && (
+          <p class="cta-pareja">Si lo que te pasa es con tu pareja, aquí te cuento <a href="/terapia-de-pareja-las-condes">cómo trabajo en terapia de pareja</a>.</p>
+        )}
       </aside>
 
       {sigue.length > 0 && (
@@ -119,6 +125,8 @@ const jsonLd = {
   .cta-btn { display: inline-block; background: #576352; color: #fff; padding: 14px 28px; border-radius: 999px; font-family: Inter, sans-serif; font-weight: 600; font-size: 15px; text-decoration: none; }
   .cta-btn:hover { background: #46503f; }
   .cta-wa { font-family: Inter, sans-serif; font-size: 14px; color: #576352; text-decoration: underline; text-underline-offset: 3px; }
+  .cta-pareja { font-family: Inter, sans-serif; font-size: 14px; line-height: 1.5; margin: 18px 0 0 !important; text-align: center !important; hyphens: none !important; -webkit-hyphens: none !important; color: #4a4842; }
+  .cta-pareja a { color: #576352; text-decoration: underline; text-underline-offset: 3px; }
   .hero { position: relative; height: 520px; overflow: hidden; }
   .hero img { width: 100%; height: 100%; object-fit: cover; filter: saturate(.85); }
   .hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(46,51,42,0) 40%, rgba(46,51,42,.55)); }
