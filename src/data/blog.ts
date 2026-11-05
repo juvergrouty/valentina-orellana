@@ -54,7 +54,7 @@ export const articulos: Articulo[] = [
   {
     slug: 'la-loza-de-las-visitas',
     titulo: 'La loza de las visitas',
-    seoTitulo: 'Autoestima y autoexigencia: por qué nos castigamos',
+    seoTitulo: 'Autoestima: por qué nos castigamos al fallar',
     bajada: 'Por qué guardamos lo mejor para los demás, nos castigamos al fallar y qué cambia cuando nos sentimos queridos solo por existir.',
     categoria: 'Autoestima',
     etiqueta: 'Autoestima',
@@ -81,7 +81,7 @@ export const articulos: Articulo[] = [
   {
     slug: 'nadie-nos-ensena-a-ser-pareja',
     titulo: 'Nadie nos enseña a ser pareja',
-    seoTitulo: 'Después de una ruptura: aprender a cuidar la relación',
+    seoTitulo: 'Lo que nadie nos enseña sobre ser pareja',
     bajada: 'Para quienes descubrieron, al terminar una relación importante, que nadie les enseñó a cuidarla.',
     categoria: 'Vínculos',
     etiqueta: 'Pareja',
