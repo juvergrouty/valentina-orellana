@@ -1,4 +1,5 @@
 {
+  "regions": ["pdx1"],
   "trailingSlash": false,
   "redirects": [
     { "source": "/blog/no-es-lo-que-te-paso", "destination": "/blog/lo-que-te-paso-te-organizo", "permanent": true }

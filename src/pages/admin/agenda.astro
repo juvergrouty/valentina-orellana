@@ -93,6 +93,16 @@ async function fetchBookings() {
   return res;
 }
 
+// Velocidad (5 nov 2026: la agenda tardaba ~3 s esperando 7 consultas una tras otra). Las que no dependen
+// de otras se lanzan aquí todas juntas y cada una se sigue esperando donde antes (mismos datos).
+// `adelantar` arranca la consulta ya y marca su posible error como atendido: al esperarla, falla igual que antes.
+const adelantar = <T,>(p: PromiseLike<T>): Promise<T> => { const q = Promise.resolve(p); q.catch(() => {}); return q; };
+const pAllSvcFull = adelantar(supabase.from('services_catalog').select('id, name').order('sort_order'));
+const pAvailSlots = adelantar(fetchAvailSlots());
+const pFichasConsent = adelantar(supabase.from('patients').select('id, name, email, rut, active').limit(5000));
+const pGoogleAuth = adelantar(getValidAccessToken());
+const pHorasExtra = adelantar(leerHorasExtra());
+
 const [bookingsRes, svcRes, patientRes, allSvcRes, settingsRes] = await Promise.all([
   fetchBookings(),
   supabase.from('services_catalog').select('id, name'),
@@ -121,8 +131,7 @@ const flowCheckoutBase = cfg['flow_env'] === 'production' ? 'https://www.flow.cl
 
 // TODOS los servicios (incluidos ocultos/paquetes) — para el filtro y los colores
 // del calendario. `allServices` (solo visibles) se sigue usando para agendar.
-const { data: allSvcFullRes } = await supabase
-  .from('services_catalog').select('id, name').order('sort_order');
+const { data: allSvcFullRes } = await pAllSvcFull;
 const allSvcFull = (allSvcFullRes ?? []) as Array<{ id: string; name: string }>;
 
 // Paleta de colores por servicio (para el modo "Colores por servicio" del calendario)
@@ -150,7 +159,7 @@ async function fetchAvailSlots() {
   }
   return withSvc;
 }
-const { data: availSlotsRaw } = await fetchAvailSlots();
+const { data: availSlotsRaw } = await pAvailSlots;
 type AvSlot = { id: string; start: string; min: number; svc: string; height: number };
 const availByDow: Record<number, AvSlot[]> = {};
 (availSlotsRaw ?? []).forEach((s: { id?: string; day_of_week: number; start_time: string; service_id?: string }) => {
@@ -184,7 +193,7 @@ patientList.forEach((p: { id: string; email: string | null; rut: string | null }
 //    consentimiento firmado"). Todas las fichas (también archivadas) para reconocer a quien tiene sesión;
 //    el estado sale de estadoConsentimiento.ts (misma regla de la ficha y del grabador). ──
 type FichaConsent = { id: string; name: string; email: string | null; rut: string | null; active: boolean | null };
-const resFichasConsent = await supabase.from('patients').select('id, name, email, rut, active').limit(5000);
+const resFichasConsent = await pFichasConsent;
 // Si no se pueden leer las fichas, no se muestra el indicador (no se inventa un "sin consentimiento").
 const fichasConsentOk = !resFichasConsent.error;
 const fichasConsent: FichaConsent[] = (resFichasConsent.data ?? []) as FichaConsent[];
@@ -201,7 +210,7 @@ const minutosDe = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number)
 type GEvent = { date: string; time: string; dur: number; title: string; id: string; grabar: '' | 'grabar' | 'meet'; pid: string };
 const gcalByDate: Record<string, GEvent[]> = {};
 try {
-  const auth = await getValidAccessToken();
+  const auth = await pGoogleAuth;
   if (auth) {
     const tMin = new Date(weekStart); tMin.setDate(tMin.getDate() - 1);
     const tMax = new Date(weekEnd);   tMax.setDate(tMax.getDate() + 2);
@@ -340,7 +349,7 @@ const quitadasSemana = new Set<string>();
   const fechasSemana = new Set(weekDays.map(d => d.isoDate));
   const durPorServicio = new Map((allServices as Array<{ id: string; duration_min?: number }>).map(sv => [sv.id, sv.duration_min ?? 50]));
   const GRUPO: Record<string, string> = { presencial: 'Todos los presenciales', online: 'Todos los online', ambos: 'Todos los servicios' };
-  const todasExtra = await leerHorasExtra();
+  const todasExtra = await pHorasExtra;
   for (const h of todasExtra) {
     if (h.quitar && h.servicioId) quitadasSemana.add(`${h.fecha}|${h.hora}|${h.servicioId}`);
   }

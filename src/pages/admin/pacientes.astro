@@ -21,23 +21,27 @@ if (filtro === 'inactivos') query = query.eq('active', false);
 const qLimpio = q.replace(/[,()%_*\\]/g, ' ').trim();
 if (qLimpio) query = query.or(`name.ilike.%${qLimpio}%,email.ilike.%${qLimpio}%,phone.ilike.%${qLimpio}%,rut.ilike.%${qLimpio}%`);
 
-const { data: pacientesLeidos } = await query;
+// Velocidad (5 nov 2026): la lista, los conteos y las reservas no dependen entre sí: se piden a la vez.
+const [{ data: pacientesLeidos }, conteos, { data: bookings }] = await Promise.all([
+  query,
+  Promise.all([
+    supabase.from('patients').select('*', { count: 'exact', head: true }),
+    supabase.from('patients').select('*', { count: 'exact', head: true }).eq('active', true),
+    supabase.from('patients').select('*', { count: 'exact', head: true }).eq('active', false),
+  ]),
+  supabase
+    .from('bookings')
+    .select('patient_email, session_date, session_time, status, amount, paid_at, debt_voided, created_by_admin, notes, created_at')
+    .not('status', 'in', '(cancelled,expired)'),
+]);
 // "Eliminados": "Eliminar paciente" la archiva (active=false), así que queda en Inactivos. Antes esta
 // pestaña no filtraba y mostraba a TODOS los pacientes bajo "Eliminados (0)" (auditoría 19 oct 2026).
 const patients = filtro === 'eliminados' ? [] : pacientesLeidos;
 
 // Conteos para los tabs
-const [{ count: countAll }, { count: countActive }, { count: countInactive }] = await Promise.all([
-  supabase.from('patients').select('*', { count: 'exact', head: true }),
-  supabase.from('patients').select('*', { count: 'exact', head: true }).eq('active', true),
-  supabase.from('patients').select('*', { count: 'exact', head: true }).eq('active', false),
-]);
+const [{ count: countAll }, { count: countActive }, { count: countInactive }] = conteos;
 
-// ── Reservas (para última/próxima sesión y cobros) ─────────────────────────
-const { data: bookings } = await supabase
-  .from('bookings')
-  .select('patient_email, session_date, session_time, status, amount, paid_at, debt_voided, created_by_admin, notes, created_at')
-  .not('status', 'in', '(cancelled,expired)');
+// ── Reservas (para última/próxima sesión y cobros): pedidas arriba, junto con la lista ──
 
 type Stat = { last: string | null; next: string | null; due: number };
 const statByEmail: Record<string, Stat> = {};
