@@ -96,7 +96,7 @@ const jsonLd = {
         </div>
       )}
 
-      <p class="credit">Foto de portada: {creditoPortada} / {fuentePortada}</p>
+      <p class="credit">Foto de portada: {creditoPortada}{fuentePortada ? ` / ${fuentePortada}` : ''}</p>
     </article>
   </div>
 </BaseLayout>

@@ -16,6 +16,15 @@ export interface Articulo {
 
 export const articulos: Articulo[] = [
   {
+    slug: 'manifiestas-y-sigues-en-el-mismo-lugar',
+    titulo: '¿Manifiestas año a año y sigues en el mismo lugar?',
+    seoTitulo: 'Manifestación: por qué no basta para cambiar',
+    bajada: 'Por qué decir lo que queremos no basta para crear una nueva realidad, y qué hace falta, en todos los niveles, para que el cambio sea posible.',
+    categoria: 'Patrones',
+    etiqueta: 'Identidad y cambio',
+    publicado: true,
+  },
+  {
     slug: 'cuando-su-silencio-se-siente-como-abandono',
     titulo: 'Cuando su silencio se siente como abandono',
     seoTitulo: 'Ansiedad cuando no responde: apego y abandono',
@@ -149,6 +158,7 @@ export const categorias: Categoria[] = ['Patrones', 'Trauma', 'Vínculos', 'Auto
 // tomadas del historial de git. Las usan el JSON-LD del artículo y el <lastmod>
 // del mapa del sitio. Artículo nuevo o editado: agregarlo o actualizarlo aquí.
 export const FECHAS: Record<string, [string, string]> = {
+  'manifiestas-y-sigues-en-el-mismo-lugar':      ['2026-11-05', '2026-11-05'],
   'lo-entiendo-todo-y-aun-asi-no-cambio':        ['2026-09-29', '2026-10-04'],
   'el-personaje-que-sacamos-a-pasear':           ['2026-09-29', '2026-10-04'],
   'puedo':                                       ['2026-09-29', '2026-10-04'],
