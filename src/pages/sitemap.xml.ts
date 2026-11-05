@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { articulos } from '../data/blog';
+import { articulos, FECHAS } from '../data/blog';
 
 // Se genera en cada visita (14 oct 2026; antes era estático): así /talleres y
 // sus items entran SOLO cuando la vitrina está publicada (vitrina_publica).
@@ -7,7 +7,7 @@ import { articulos } from '../data/blog';
 export const prerender = false;
 
 // Solo páginas públicas indexables (sin /admin, /api ni páginas transaccionales)
-const PAGES: { path: string; changefreq: string; priority: string }[] = [
+const PAGES: { path: string; changefreq: string; priority: string; lastmod?: string }[] = [
   { path: '',            changefreq: 'weekly',  priority: '1.0' },
   { path: 'sobre-mi',    changefreq: 'monthly', priority: '0.8' },
   { path: 'servicios',   changefreq: 'weekly',  priority: '0.9' },
@@ -20,7 +20,7 @@ const PAGES: { path: string; changefreq: string; priority: string }[] = [
   { path: 'condiciones', changefreq: 'yearly',  priority: '0.3' },
   { path: 'agenda',      changefreq: 'monthly', priority: '0.9' },
   { path: 'blog',        changefreq: 'weekly',  priority: '0.7' },
-  ...articulos.filter(a => a.publicado).map(a => ({ path: `blog/${a.slug}`, changefreq: 'monthly', priority: '0.6' })),
+  ...articulos.filter(a => a.publicado).map(a => ({ path: `blog/${a.slug}`, changefreq: 'monthly', priority: '0.6', lastmod: FECHAS[a.slug]?.[1] })),
   ];
 
 /** /talleres y sus items visibles, solo con la vitrina publicada. */
@@ -43,7 +43,7 @@ export const GET: APIRoute = async ({ site }) => {
     const base = (site?.toString() ?? 'https://www.valentinaorellana.cl/').replace(/\/$/, '');
     const urls = [...PAGES, ...(await paginasVitrina())].map(p => {
           const loc = p.path ? `${base}/${p.path}` : `${base}/`;
-          return `  <url>\n    <loc>${loc}</loc>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`;
+          return `  <url>\n    <loc>${loc}</loc>\n${p.lastmod ? `    <lastmod>${p.lastmod}</lastmod>\n` : ''}    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`;
     }).join('\n');
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>

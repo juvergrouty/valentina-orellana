@@ -1,0 +1,64 @@
+name: Avisar a Bing de páginas nuevas o cambiadas (IndexNow)
+
+# 4 nov 2026: cada push a main que toca páginas públicas avisa a Bing (y a los
+# demás buscadores que usan IndexNow) qué direcciones cambiaron, para que las
+# vuelvan a leer en horas y no en semanas. Google no usa IndexNow.
+# La clave es pública por diseño: vive en public/<clave>.txt y solo prueba que
+# el sitio es nuestro. Solo se envían direcciones que estén en el mapa del sitio.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/pages/**'
+      - 'src/data/blog.ts'
+      - 'src/layouts/BlogPostLayout.astro'
+  workflow_dispatch: {}
+
+jobs:
+  avisar:
+    runs-on: ubuntu-latest
+    env:
+      SITIO: https://www.valentinaorellana.cl
+      CLAVE: c429a18f9e83b7d59859d1b97def0c1b
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Esperar a que Vercel publique el cambio
+        run: sleep 240
+
+      - name: Armar la lista y avisar
+        run: |
+          set -euo pipefail
+          curl -sS "$SITIO/sitemap.xml" | grep -o '<loc>[^<]*</loc>' | sed -e 's#</*loc>##g' > mapa.txt
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            cp mapa.txt candidatas.txt
+          else
+            git diff --name-only HEAD~1 HEAD > cambiados.txt
+            : > candidatas.txt
+            # Cambió la plantilla o la lista del blog: todos los artículos.
+            if grep -qE '^src/(data/blog\.ts|layouts/BlogPostLayout\.astro)$' cambiados.txt; then
+              grep "$SITIO/blog/" mapa.txt >> candidatas.txt || true
+            fi
+            grep -E '^src/pages/.*\.astro$' cambiados.txt | while read -r f; do
+              ruta=${f#src/pages/}; ruta=${ruta%.astro}; ruta=${ruta%/index}; ruta=${ruta%index}
+              echo "$SITIO/$ruta" | sed 's#/$##' >> candidatas.txt
+              [ -z "$ruta" ] && echo "$SITIO/" >> candidatas.txt
+            done
+          fi
+
+          # Solo las que están en el mapa del sitio (deja fuera admin, api, etc.).
+          grep -Fxf mapa.txt candidatas.txt | sort -u > enviar.txt || true
+          if [ ! -s enviar.txt ]; then echo "Nada que avisar"; exit 0; fi
+          cat enviar.txt
+
+          lista=$(jq -R . enviar.txt | jq -s .)
+          cuerpo=$(jq -n --arg host "${SITIO#https://}" --arg key "$CLAVE" \
+            --arg loc "$SITIO/$CLAVE.txt" --argjson urls "$lista" \
+            '{host:$host, key:$key, keyLocation:$loc, urlList:$urls}')
+          codigo=$(curl -sS -o respuesta.txt -w '%{http_code}' -X POST https://api.indexnow.org/indexnow \
+            -H 'Content-Type: application/json; charset=utf-8' -d "$cuerpo")
+          echo "IndexNow respondió $codigo"; cat respuesta.txt || true
+          case "$codigo" in 200|202) ;; *) exit 1 ;; esac

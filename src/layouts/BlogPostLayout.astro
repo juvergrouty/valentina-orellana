@@ -1,6 +1,6 @@
 ---
 import BaseLayout from './BaseLayout.astro';
-import { articulos } from '../data/blog';
+import { articulos, FECHAS } from '../data/blog';
 
 interface Props {
   slug: string;
@@ -17,22 +17,6 @@ interface Props {
   modificado?: string;
 }
 
-// Fechas de publicación y última edición del texto de cada artículo, tomadas del
-// historial de git (commit que creó la página y último que la cambió). Ni
-// data/blog.ts ni las páginas tenían fecha. Artículo nuevo: agregarlo aquí o
-// pasar `publicado`/`modificado` desde su página.
-const FECHAS: Record<string, [string, string]> = {
-  'lo-entiendo-todo-y-aun-asi-no-cambio': ['2026-09-29', '2026-10-04'],
-  'el-personaje-que-sacamos-a-pasear':    ['2026-09-29', '2026-10-04'],
-  'puedo':                                ['2026-09-29', '2026-10-04'],
-  'tu-patron-te-protegio-de-algo':        ['2026-09-29', '2026-10-04'],
-  'lo-que-te-paso-te-organizo':           ['2026-09-29', '2026-10-04'],
-  'el-hombre-que-puede-solo':             ['2026-09-29', '2026-10-04'],
-  'la-loza-de-las-visitas':               ['2026-09-30', '2026-10-08'],
-  'ya-no-nos-amamos':                     ['2026-10-03', '2026-10-04'],
-  'volver-a-elegirse':                    ['2026-10-03', '2026-10-04'],
-  'nadie-nos-ensena-a-ser-pareja':        ['2026-10-17', '2026-10-17'],
-};
 
 const { slug, descripcion, imagen, imagenAlt, imagenPosicion = 'center', creditoPortada, fuentePortada = 'Unsplash', relacionados = [], publicado, modificado } = Astro.props;
 const datePublished = publicado ?? FECHAS[slug]?.[0];
@@ -66,7 +50,7 @@ const jsonLd = {
 };
 ---
 
-<BaseLayout title={articulo.titulo} description={descripcion} image={imagen} ogType="article">
+<BaseLayout title={articulo.seoTitulo ?? articulo.titulo} description={descripcion} image={imagen} ogType="article">
   <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
   <div class="post">
     <div class="hero">
