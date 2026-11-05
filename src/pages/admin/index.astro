@@ -90,7 +90,7 @@ type Reserva = {
 
 const hace90 = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 const [avisos, reservasRes, google, porCobrar, deben, recientesRes] = await Promise.all([
-  cargarAvisosPanel(Astro.url.origin),
+  cargarAvisosPanel(Astro.url.origin, ((Astro.locals as { tiemposPanel?: Record<string, number> }).tiemposPanel ??= {})),
   // Sesiones desde el lunes de la semana del día mirado hasta 7 días después
   // (o el domingo, lo que llegue más lejos). Sin canceladas NI vencidas.
   supabase.from('bookings')

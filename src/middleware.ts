@@ -128,6 +128,7 @@ async function protegerAdmin(context: APIContext, next: MiddlewareNext): Promise
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
+  (context.locals as { t0?: number }).t0 = Date.now(); // medición de tiempos del panel (AdminLayout)
   const { pathname } = context.url;
 
   // Toda respuesta de /admin/* y /api/admin/* (incluidos el login, los 401 y

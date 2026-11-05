@@ -25,10 +25,18 @@ const path = current ?? '';
 
 // Avisos: ver src/lib/avisosPanel.ts. Si la página ya los cargó (el Inicio
 // los usa en su lista "Para hacer"), llegan por props y no se consultan de nuevo.
+// Medición de tiempos (5 nov 2026): página antes del layout, cada aviso y la passkey, en ms (solo números).
+const tInicioLayout = Date.now();
+// El Inicio carga los avisos antes (index.astro) y deja sus tiempos en Astro.locals.tiemposPanel.
+const tiemposPanel: Record<string, number> = ((Astro.locals as { tiemposPanel?: Record<string, number> }).tiemposPanel ??= {});
 const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, calendarioPendiente }
-  = avisosPrecargados ?? await cargarAvisosPanel(Astro.url.origin);
+  = avisosPrecargados ?? await cargarAvisosPanel(Astro.url.origin, tiemposPanel);
 // Passkey (16 oct 2026): franja para registrarla / hacerla obligatoria (src/lib/passkey/servidor.ts).
+const tPasskey = Date.now();
 const passkeyAviso = current === '/admin/seguridad' ? null : await avisoPasskey(Astro.cookies.get('vo_admin_token')?.value);
+tiemposPanel.passkey = Date.now() - tPasskey;
+if (!avisosPrecargados) tiemposPanel.avisosTotal = tPasskey - tInicioLayout;
+{ const t0 = (Astro.locals as { t0?: number }).t0; if (t0) tiemposPanel.paginaAntesDelPanel = tInicioLayout - t0; }
 const fechaLarga = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleDateString('es-CL', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
 const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -737,6 +745,7 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
+  <meta name="tiempos-panel" content={JSON.stringify(tiemposPanel)} />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{title} · Valentina Orellana</title>
   <link rel="icon" href="/favicon.svg" />

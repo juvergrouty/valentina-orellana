@@ -136,46 +136,52 @@ export type AvisosPanel = {
   pagosPorDevolver: PagoPorDevolver[] | null;
 };
 
-export async function cargarAvisosPanel(origen: string): Promise<AvisosPanel> {
+/** Medición de tiempos (5 nov 2026: "por qué demora tanto el panel"): cuánto tarda cada aviso, en ms.
+ *  Solo números, sin datos; AdminLayout los deja en una etiqueta interna del HTML. */
+export async function cargarAvisosPanel(origen: string, tiempos?: Record<string, number>): Promise<AvisosPanel> {
+  const medir = <T,>(nombre: string, p: Promise<T>): Promise<T> => {
+    const t0 = Date.now();
+    return p.finally(() => { if (tiempos) tiempos[nombre] = Date.now() - t0; });
+  };
   const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente] = await Promise.all([
     // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
     // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
-    contarErroresNuevos().catch(() => 0),
+    medir('errores', contarErroresNuevos().catch(() => 0)),
     // Boletas con error de emisión/envío: visibles hasta que se resuelvan.
-    getBoletaAlerts().catch((): BoletaAlert[] => []),
+    medir('boletas', getBoletaAlerts().catch((): BoletaAlert[] => [])),
     // Pacientes activos sin consentimiento firmado (Ley 21.719).
-    getConsentAlerts().catch((): ConsentAlert[] => []),
+    medir('consentimientos', getConsentAlerts().catch((): ConsentAlert[] => [])),
     // Comprobantes de transferencia por confirmar (ver src/lib/comprobantes.ts).
-    getComprobanteAlerts().catch((): ComprobanteAlert[] => []),
-    avisosDiasCerrados().catch((): BlockedDayAlert[] => []),
-    avisosFeriados().catch((): FeriadoAviso[] => []),
-    estadoGoogle().catch(() => 'ok' as const),
+    medir('comprobantes', getComprobanteAlerts().catch((): ComprobanteAlert[] => [])),
+    medir('diasCerrados', avisosDiasCerrados().catch((): BlockedDayAlert[] => [])),
+    medir('feriados', avisosFeriados().catch((): FeriadoAviso[] => [])),
+    medir('google', estadoGoogle().catch(() => 'ok' as const)),
     // Corrección única de invitaciones ya enviadas con "Por pagar" (ver syncCalendar.ts).
-    corregirPrefijoInvitacionesUnaVez().catch(() => undefined),
-    cumpleanosHoy().catch((): Cumple[] => []),
-    avisosRebotes().catch((): ReboteAviso[] => []),
+    medir('prefijoInvitaciones', corregirPrefijoInvitacionesUnaVez().catch(() => undefined)),
+    medir('cumpleanos', cumpleanosHoy().catch((): Cumple[] => [])),
+    medir('rebotes', avisosRebotes().catch((): ReboteAviso[] => [])),
     // Cambios de tarifa de pacientes actuales (ver src/lib/cambiosTarifa.ts).
-    avisosCambioTarifa().catch((): AvisoTarifa[] => []),
+    medir('tarifas', avisosCambioTarifa().catch((): AvisoTarifa[] => [])),
     // Dominio, Resend, WhatsApp, Instagram, tareas automáticas y reseñas que hay
     // que renovar o reconectar para que la página no se caiga (8 oct 2026, ver src/lib/saludSitio.ts).
-    avisosSalud().catch((): AvisoSalud[] => []),
+    medir('salud', avisosSalud().catch((): AvisoSalud[] => [])),
     // Horas de box por comprar (o liberar) en Espacio Cala para cada sesión
     // presencial (12 oct 2026, ver src/lib/boxCala.ts).
-    avisosBoxCala().catch((): AvisosBox => ({ pendientes: [], liberar: [], error: true })),
+    medir('box', avisosBoxCala().catch((): AvisosBox => ({ pendientes: [], liberar: [], error: true }))),
     // Sesiones sin pagar que empiezan en las próximas 32 horas, con el WhatsApp
     // de cobro listo (14 oct 2026, ver src/lib/cobrosProximos.ts).
-    cobrosProximos(origen).catch((): CobroProximo[] | null => null),
+    medir('cobros', cobrosProximos(origen).catch((): CobroProximo[] | null => null)),
     // Pagar impuestos desde el día 16 de cada mes, hasta "Ya lo hice" (14 oct 2026, ver src/lib/impuestos.ts).
-    avisosImpuestos().catch((): MesImpuestos[] => []),
+    medir('impuestos', avisosImpuestos().catch((): MesImpuestos[] => [])),
     // Correos automáticos que no se pudieron enviar (16 oct 2026, ver src/lib/correosAutomaticos.ts).
-    contarCorreosFallidos().catch(() => 0),
+    medir('correosFallidos', contarCorreosFallidos().catch(() => 0)),
     // Pago por devolver o reagendar: sesión pagada que se anuló o venció, hasta que
     // Valentina aprieta "Resuelto" (19 oct 2026, ver src/lib/pagosPorDevolver.ts).
-    avisosPagosPorDevolver().catch((): PagoPorDevolver[] | null => null),
+    medir('pagosPorDevolver', avisosPagosPorDevolver().catch((): PagoPorDevolver[] | null => null)),
     // Transferencias confirmadas solas al subir el comprobante: revisar el banco (28 oct 2026, ver comprobantes.ts).
-    getTransferenciasPorRevisar().catch((): ComprobanteAlert[] | null => null),
+    medir('transferencias', getTransferenciasPorRevisar().catch((): ComprobanteAlert[] | null => null)),
     // Google Calendar: eventos por borrar o mover que se están reintentando (28 oct 2026, ver syncCalendar.ts).
-    listarCalendarioPendiente().catch((): AvisoCalendario[] | null => null),
+    medir('calendarioPendiente', listarCalendarioPendiente().catch((): AvisoCalendario[] | null => null)),
   ]);
   return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente };
 }
