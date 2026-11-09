@@ -29,6 +29,7 @@ import { horaFinDeRespuesta, SinConsentimientoError, Sitio, TokenRechazadoError 
 import { sanearError } from './saneo.js';
 import { estadoSesionValido, soloGoogle, type EstadoSesion } from './sesion.js';
 import { decidirInicio, listaIlegible, Vigia, type LecturaParticipantes, type MotivoFin } from './vigia.js';
+import { GuardiaSilencio } from './silencio.js';
 
 const log = (m: string) => console.log(`[bot ${new Date().toISOString()}] ${m}`);
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -47,6 +48,8 @@ interface GrabPagina {
   activas(): number[];
   pistas(): number;
   nivel(): { pico: number; estado: string };
+  diag(): { estado: string; pistas: number; rtc: number; elementos: number; mudas: number; deshabilitadas: number };
+  reenganchar(): number;
   apagar(): void;
 }
 
@@ -109,6 +112,8 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
   let sinValeDesde: number | null = null; // hay personas pero ninguna con el nombre de Vale (antes de grabar)
   let avisoSinVale = false;
   let ultimoNivel = Date.now();
+  // 9 nov 2026: silencio con personas en la reunión → reengancha el audio (min 2) y avisa a Vale (min 4).
+  const guardia = new GuardiaSilencio({ umbral: UMBRAL_VOZ, repararTras: 2, avisarTras: 4, maxReparaciones: 3 });
   let motivo: MotivoFin | null = null;
 
   try {
@@ -161,6 +166,9 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
           throw e;
         }
         inicio = Date.now();
+        // La guardia de silencio mide desde aquí (no desde la espera previa a la grabación).
+        ultimoNivel = inicio;
+        await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.nivel()).catch(() => null);
         vigia.empezoGrabacion();
         desfase = desfaseOrigen(inicio, cfg.origenMs);
         await iniciar(seq);
@@ -175,7 +183,21 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
           const g = (window as unknown as { __voGrab: GrabPagina }).__voGrab;
           return { ...g.nivel(), pistas: g.pistas(), rtc: ((window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []).length };
         }).catch(() => null);
-        if (nv) log(`audio: contexto=${nv.estado} pistas=${nv.pistas} rtc=${nv.rtc} pico=${nv.pico}`);
+        if (nv) {
+          log(`audio: contexto=${nv.estado} pistas=${nv.pistas} rtc=${nv.rtc} pico=${nv.pico} personas=${humanos.length}`);
+          const accion = guardia.observar(nv.pico, humanos.length);
+          if (accion !== 'nada') {
+            const d = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.diag()).catch(() => null);
+            const txt = d ? `contexto=${d.estado} pistas=${d.pistas} rtc=${d.rtc} elementos=${d.elementos} mudas=${d.mudas} deshabilitadas=${d.deshabilitadas}` : 'sin diagnóstico';
+            if (accion === 'reparar') {
+              const n = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.reenganchar()).catch(() => -1);
+              log(`sin voz ${guardia.minutosSeguidos} min con ${humanos.length} personas: se reengancha el audio (${txt}; pistas tras reenganchar=${n})`);
+            } else {
+              log(`sin voz ${guardia.minutosSeguidos} min con ${humanos.length} personas: aviso a Vale (${txt})`);
+              void sitio.enviar({ tipo: 'error', detalle: `No está captando el audio de la sesión: lleva ${guardia.minutosSeguidos} minutos en silencio con ${humanos.length} personas en la reunión y ya intentó reconectarlo. Si la sesión sigue, graba de respaldo con "Grabar sesión" en tu celular. Diagnóstico: ${txt}` }).catch(() => {});
+            }
+          }
+        }
       }
       // Revisión ÚNICA, al minuto de empezar a grabar: ¿Meet entrega audio? (29 oct: antes se repetía en cada
       // vuelta y una lectura fallida contaba como 0, así que al final de una sesión que sí se grabó y

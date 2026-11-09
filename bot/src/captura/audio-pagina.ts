@@ -91,6 +91,9 @@ export function instalarGrabadorEnPagina(o: OpcionesGrabadorPagina): boolean {
           // Una fuente por PISTA (Meet reemplaza pistas dentro del mismo stream).
           const fuente = ctx.createMediaStreamSource(new MediaStream([pista]));
           fuente.connect(destino);
+          // También al medidor (9 nov 2026): antes solo medían las pistas RTC, así que una sesión cuyo
+          // audio llegaba solo por <audio>/<video> se veía en 0 aunque tuviera voz.
+          fuente.connect(analizador);
           pistas.set(pista.id, { pista, fuente, sumidero: null });
           pista.addEventListener('ended', () => soltar(pista.id));
         } catch { /* pista no utilizable */ }
@@ -139,6 +142,32 @@ export function instalarGrabadorEnPagina(o: OpcionesGrabadorPagina): boolean {
     },
     activas(): number[] { return [...grabadoras.keys()]; },
     pistas(): number { return pistas.size; },
+    /** Diagnóstico para el aviso de silencio: cuántas pistas hay y en qué estado llegan. */
+    diag(): { estado: string; pistas: number; rtc: number; elementos: number; mudas: number; deshabilitadas: number } {
+      let mudas = 0; let deshabilitadas = 0;
+      for (const e of pistas.values()) { if (e.pista.muted) mudas++; if (!e.pista.enabled) deshabilitadas++; }
+      return {
+        estado: ctx.state, pistas: pistas.size,
+        rtc: ((window as unknown as VentanaRtc).__voPistasRTC ?? []).length,
+        elementos: document.querySelectorAll('audio, video').length, mudas, deshabilitadas,
+      };
+    },
+    /**
+     * Reparación ante silencio con gente en la reunión (9 nov 2026: dos sesiones online de 53–56 min
+     * quedaron sin voz aunque a la máquina le llegaban datos de Meet). Suelta TODAS las pistas, reanuda
+     * el contexto y las vuelve a enlazar, ahora todas con su <audio> silenciado (sumidero). La grabadora
+     * sigue sobre el mismo `destino`, así que el segmento en curso no se corta.
+     */
+    reenganchar(): number {
+      for (const id of [...pistas.keys()]) soltar(id);
+      void ctx.resume().catch(() => {});
+      for (const pista of (window as unknown as VentanaRtc).__voPistasRTC ?? []) enlazar(pista);
+      document.querySelectorAll('audio, video').forEach((n) => {
+        const s = (n as HTMLMediaElement).srcObject;
+        if (s instanceof MediaStream) for (const pista of s.getAudioTracks()) enlazar(pista);
+      });
+      return pistas.size;
+    },
     nivel(): { pico: number; estado: string } {
       const r = { pico: Math.round(pico * 1000) / 1000, estado: ctx.state };
       pico = 0;
