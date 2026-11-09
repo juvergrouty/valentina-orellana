@@ -20,6 +20,8 @@ const PAGES: { path: string; changefreq: string; priority: string; lastmod?: str
   { path: 'condiciones', changefreq: 'yearly',  priority: '0.3' },
   { path: 'agenda',      changefreq: 'monthly', priority: '0.9' },
   { path: 'blog',        changefreq: 'weekly',  priority: '0.7' },
+  // Guías gratuitas para seguidores (9 nov 2026).
+  ...['pausa', 'hijos', 'soltar', 'frases'].map(slug => ({ path: `guias/${slug}`, changefreq: 'monthly', priority: '0.5' })),
   ...articulos.filter(a => a.publicado).map(a => ({ path: `blog/${a.slug}`, changefreq: 'monthly', priority: '0.6', lastmod: FECHAS[a.slug]?.[1] })),
   ];
 

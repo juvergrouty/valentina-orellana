@@ -1,0 +1,223 @@
+{
+ "pausa": {
+  "palabra": "PAUSA",
+  "titulo": "La pausa de 20 minutos",
+  "sub": "Qué hacer cuando una pelea se sale de control",
+  "secciones": [
+   {
+    "titulo": "Por qué pasa",
+    "intro": "Cuando discutimos y el cuerpo se activa, el corazón se acelera y la cabeza deja de escuchar. Ya no conversas: te defiendes.",
+    "puntos": [
+     "Sientes calor en la cara o el pecho.",
+     "Aprietas la mandíbula o subes la voz.",
+     "Solo piensas en ganar la discusión."
+    ]
+   },
+   {
+    "titulo": "Paso 1: nombra la pausa",
+    "intro": "Acuérdenlo antes, en un momento tranquilo. Cuando llegue la pelea, uno de los dos dice:",
+    "puntos": [
+     "\"Necesito 20 minutos para calmarme.",
+     "Vuelvo a las __ y lo conversamos.\"",
+     "Es una pausa con hora de regreso, no un portazo."
+    ]
+   },
+   {
+    "titulo": "Paso 2: durante los 20 minutos",
+    "intro": "El objetivo es que el cuerpo baje, no seguir peleando por dentro.",
+    "puntos": [
+     "Respira lento: 4 segundos al inhalar y 6 al exhalar.",
+     "Camina o lávate la cara con agua fría.",
+     "No ensayes argumentos ni busques más razones en el celular."
+    ]
+   },
+   {
+    "titulo": "Paso 3: vuelve a la conversación",
+    "intro": "Volver es lo que hace que la pausa funcione.",
+    "puntos": [
+     "Empieza con \"Lo que me pasó fue…\", en vez de \"Tú siempre…\".",
+     "Escucha primero y repite lo que entendiste.",
+     "Si se activa de nuevo, otra pausa. Está bien."
+    ]
+   }
+  ],
+  "cierre": "Si en tu relación las peleas siempre terminan igual, se puede trabajar en terapia individual o de pareja."
+ },
+ "hijos": {
+  "palabra": "HIJOS",
+  "titulo": "Cuando te separas y tienes hijos",
+  "sub": "Algunas sugerencias para acompañarlos en un momento difícil",
+  "secciones": [
+   {
+    "titulo": "Antes de empezar",
+    "intro": "No hay una sola forma correcta de hacerlo. Esto son sugerencias, no reglas.",
+    "puntos": [
+     "Tú conoces a tus hijos mejor que nadie, y eso vale más que cualquier guía.",
+     "Cada familia y cada niño lo vive distinto.",
+     "Si algo de aquí no calza con tu familia, confía en lo que sabes de ellos."
+    ]
+   },
+   {
+    "titulo": "También es difícil para ti",
+    "intro": "Una separación remueve mucho: miedo, culpa, rabia, inseguridad sobre si lo estás haciendo bien.",
+    "puntos": [
+     "Es normal tener dudas y no tener todas las respuestas.",
+     "Cuidarte a ti también es cuidarlos a ellos.",
+     "Pedir apoyo no es hacerlo mal."
+    ]
+   },
+   {
+    "titulo": "Antes de hablar con ellos",
+    "intro": "Algunas cosas que a muchas familias les ayudan:",
+    "puntos": [
+     "Si es posible, conversarlo juntos y acordar un mensaje parecido.",
+     "Buscar un momento tranquilo, con tiempo para quedarse con ellos después.",
+     "Dejar fuera los detalles y las culpas de la relación de pareja."
+    ]
+   },
+   {
+    "titulo": "Con los más pequeños",
+    "intro": "Suelen necesitar saber qué va a cambiar en su día a día.",
+    "puntos": [
+     "Puede servir algo como: \"Vas a tener dos casas y en las dos te vamos a cuidar\".",
+     "Contarles la rutina con ejemplos concretos.",
+     "Es esperable que pregunten lo mismo muchas veces."
+    ]
+   },
+   {
+    "titulo": "Con niños en edad escolar",
+    "intro": "Algunos pueden pensar que es su culpa o que pueden arreglarlo.",
+    "puntos": [
+     "Puede ayudar decirles: \"No es tu culpa\".",
+     "Dejar espacio para sus preguntas, su pena y su enojo.",
+     "Cuidar que no sientan que tienen que elegir."
+    ]
+   },
+   {
+    "titulo": "Con adolescentes",
+    "intro": "Muchas veces necesitan más honestidad y también su espacio.",
+    "puntos": [
+     "Contarles lo esencial, sin cargarlos con temas de adultos.",
+     "Respetar sus tiempos para hablar.",
+     "Cuidar de no ponerlos al medio, ni como confidentes ni como mensajeros."
+    ]
+   },
+   {
+    "titulo": "Lo que puede pasar",
+    "intro": "Es esperable que haya cambios. Cada niño lo expresa a su manera.",
+    "puntos": [
+     "Tristeza, enojo, más apego, cambios en el sueño o en el colegio.",
+     "A veces conductas de cuando eran más chicos.",
+     "Si algo te preocupa, consulta. No hace falta esperar a que pase el tiempo."
+    ]
+   }
+  ],
+  "cierre": "Si te estás separando y quieres pensar con alguien cómo acompañar a tus hijos, lo podemos conversar."
+ },
+ "soltar": {
+  "palabra": "SOLTAR",
+  "titulo": "Cuando aparecen las ganas de escribirle a tu ex",
+  "sub": "Cómo acompañar ese momento y cuidar tu proceso",
+  "secciones": [
+   {
+    "titulo": "Lo que te pasa tiene sentido",
+    "intro": "Después de una ruptura es normal extrañar, revisar o querer escribir. No es falta de voluntad.",
+    "puntos": [
+     "Soltar es un proceso, no algo que se logra en días.",
+     "Las ganas llegan como una ola: suben, llegan a su punto y bajan.",
+     "Hay formas de pasar esa ola sin que decida por ti."
+    ]
+   },
+   {
+    "titulo": "En el momento: detente y nombra",
+    "intro": "Antes de tomar el celular:",
+    "puntos": [
+     "Dite: \"Estoy sintiendo ganas de escribirle\".",
+     "Nota dónde lo sientes en el cuerpo: pecho, estómago, garganta.",
+     "Ponerle nombre ya baja un poco la intensidad."
+    ]
+   },
+   {
+    "titulo": "En el momento: calma el cuerpo",
+    "intro": "Unos minutos ayudan a que la ansiedad baje.",
+    "puntos": [
+     "Respira lento: 4 segundos al inhalar y 6 al exhalar, por 2 minutos.",
+     "Apoya los pies en el suelo y nombra 5 cosas que ves a tu alrededor.",
+     "Moja tus manos o tu cara con agua fría."
+    ]
+   },
+   {
+    "titulo": "En el momento: dale tiempo",
+    "intro": "La urgencia dura menos de lo que parece.",
+    "puntos": [
+     "Espera 20 minutos antes de decidir qué hacer.",
+     "Escribe en tus notas lo que querías decirle y qué esperas que pase.",
+     "Si después decides escribir, que sea una decisión y no un impulso."
+    ]
+   },
+   {
+    "titulo": "Cuidar el proceso",
+    "intro": "Lo que ayuda en los días siguientes:",
+    "puntos": [
+     "Bajar lo que te expone, como silenciar sus redes.",
+     "Apoyarte en alguien de confianza y cuidar tu sueño.",
+     "Si recaes, no pierdes lo avanzado: es parte del camino."
+    ]
+   },
+   {
+    "titulo": "Cuándo buscar ayuda",
+    "intro": "Es momento de consultar si:",
+    "puntos": [
+     "El malestar no baja o va en aumento con las semanas.",
+     "Afecta tu sueño, tu trabajo o tu alimentación, o estás tomando más alcohol.",
+     "En la relación hubo control o violencia."
+    ]
+   }
+  ],
+  "cierre": "Si tienes pensamientos de hacerte daño, pide ayuda hoy: en Chile llama gratis al *4141, las 24 horas. Y si quieres trabajar lo que estás viviendo, aquí estoy."
+ },
+ "frases": {
+  "palabra": "FRASES",
+  "titulo": "Frases para poner límites sin pelear",
+  "sub": "Cortas, claras y sin justificarte de más",
+  "secciones": [
+   {
+    "titulo": "3 reglas",
+    "intro": "Antes de las frases, esto es lo que hace que funcionen.",
+    "puntos": [
+     "Corto: una frase dice más que una explicación larga.",
+     "Sin justificarte: no necesitas convencer a nadie.",
+     "Repite la misma frase con calma si insisten."
+    ]
+   },
+   {
+    "titulo": "Con la familia",
+    "intro": "",
+    "puntos": [
+     "\"Prefiero no hablar de eso hoy.\"",
+     "\"Entiendo que lo veas así. Yo lo veo distinto.\"",
+     "\"Ese comentario no me gusta. Te pido que no lo hagas.\""
+    ]
+   },
+   {
+    "titulo": "Con tu pareja",
+    "intro": "",
+    "puntos": [
+     "\"Necesito un rato a solas. No es contra ti.\"",
+     "\"Quiero hablarlo, pero no así. ¿Lo conversamos más tarde?\"",
+     "\"Me importa lo que sientes, y también lo que siento yo.\""
+    ]
+   },
+   {
+    "titulo": "Con amistades y en el trabajo",
+    "intro": "",
+    "puntos": [
+     "\"Esta vez no puedo, gracias por pensar en mí.\"",
+     "\"Hoy no alcanzo a tomar eso. ¿Lo vemos el lunes?\"",
+     "\"No respondo mensajes después de las 20:00.\""
+    ]
+   }
+  ],
+  "cierre": "Si poner límites te cuesta y te deja culpa, eso también se puede trabajar en terapia."
+ }
+}
