@@ -57,6 +57,18 @@ export function estadoVisible(estado: EstadoGrabacion | string | null | undefine
   return ESTADO_VISIBLE[estado as EstadoGrabacion] ?? { texto: 'Estado desconocido', tono: 'neutro' };
 }
 
+/** Nota del pipeline cuando la transcripción completa quedó vacía (pipeline.ts, rama sin_voz). */
+export const NOTA_SIN_VOZ = 'No se reconoció voz en la grabación; no hay resumen.';
+
+/**
+ * Estado de una fila de la lista (9 nov 2026): una grabación 'lista' SIN voz no se muestra como "Listo"
+ * (así se escondieron dos sesiones online de 53–56 min que quedaron en silencio).
+ */
+export function estadoFila(g: { estado: EstadoGrabacion | string | null | undefined; nota_sistema?: string | null }): { texto: string; tono: Tono } {
+  if (g.estado === 'lista' && g.nota_sistema === NOTA_SIN_VOZ) return { texto: 'Con problema: no se captó voz', tono: 'problema' };
+  return estadoVisible(g.estado);
+}
+
 /**
  * Qué le pasó a SU grabación y qué hacer, sin términos técnicos (40-ux §7). El detalle técnico
  * (ultimo_error) nunca se muestra aquí: queda en la base y en /admin/logs.
@@ -67,6 +79,7 @@ export function textoProblema(g: Pick<Grabacion, 'estado' | 'estado_antes_error'
   // Vale, 18 oct: Vale salió y la grabación espera 15 min por si vuelve (misma grabación, una transcripción).
   if (g.estado === 'grabando' && esperandoVale({ estado: g.estado, bot_machine_id: null, nota_sistema: g.nota_sistema })) return g.nota_sistema ?? null;
   if (g.estado === 'sin_audio') return 'La grabación quedó sin audio, así que no se generó resumen.';
+  if (g.estado === 'lista' && g.nota_sistema === NOTA_SIN_VOZ) return 'La grabación llegó en silencio: no hay transcripción ni resumen de esta sesión. Escribe tu nota de evolución con lo que recuerdes.';
   if (g.estado !== 'error') return null;
   switch (g.estado_antes_error) {
     case 'creada': case 'grabando': case 'pausada': case 'subiendo':

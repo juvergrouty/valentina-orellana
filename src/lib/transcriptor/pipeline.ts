@@ -1029,13 +1029,17 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       ...(g.duracion_seg == null && duracionS != null ? { duracion_seg: duracionS } : {}),
     } as Partial<Grabacion>, db);
     // Vale, 18 oct: nada de avisos por tramos vacíos o cortos. Solo si la sesión COMPLETA (todos los tramos,
-    // una sola transcripción) no tiene voz y se grabó más de 5 min (el robot graba solo con Vale dentro), y
-    // solo en el panel: accion 'ninguna' = sin correo (alertas.correoParaAlerta).
+    // una sola transcripción) no tiene voz. Vale, 9 nov 2026 ("ni siquiera me alertaron y son sesiones
+    // perdidas"): si se grabaron más de 5 min, el aviso va TAMBIÉN por correo (accion 'revisar'); una
+    // grabación corta en silencio (prueba presencial) sigue solo en el panel ('ninguna').
     if (!palabras && (g.origen !== 'online' || avisarSinVoz(segs))) {
+      const larga = avisarSinVoz(segs);
       await alerta({
-        tipo: 'transcripcion', grabacionId: g.id, clave: `sin-voz:${g.id}`, accion: 'ninguna',
-        titulo: `No se reconoció voz en la ${etiquetaSesion(g)}`,
-        detalle: 'La grabación llegó, pero la transcripción quedó vacía (¿micrófono tapado o en silencio?). No se genera resumen.',
+        tipo: 'transcripcion', grabacionId: g.id, clave: `sin-voz:${g.id}`, accion: larga ? 'revisar' : 'ninguna',
+        titulo: larga ? `Se perdió el audio de la ${etiquetaSesion(g)}` : `No se reconoció voz en la ${etiquetaSesion(g)}`,
+        detalle: larga
+          ? 'La grabación llegó en silencio: no hay transcripción ni resumen de esta sesión. Escribe tu nota de evolución con lo que recuerdes mientras está fresca.'
+          : 'La grabación llegó, pero la transcripción quedó vacía (¿micrófono tapado o en silencio?). No se genera resumen.',
       });
     }
   }

@@ -348,7 +348,7 @@ test('presencial pareja, retomada sin internet (2 segmentos misma grabación) y 
   assert.deepEqual(e.alertas, []);
 });
 
-test('presencial sin reserva (botón de la ficha) → evolución por fecha; sin voz → "lista" sin resumen y aviso SOLO en el panel', async () => {
+test('presencial sin reserva (botón de la ficha) → evolución por fecha; sin voz → "lista" sin resumen y aviso con correo (45 min)', async () => {
   const e = escenario();
   const p = e.paciente('Josefa Muñoz', 'josefa@ejemplo.cl');
   e.firma(p, 'Josefa Muñoz', '13.131.313-1');
@@ -364,7 +364,7 @@ test('presencial sin reserva (botón de la ficha) → evolución por fecha; sin 
   assert.equal(e.grab(gid).estado, 'lista');
   assert.equal((await e.estado(gid)).resumen, false, 'el grabador dice "Sin resumen: no se reconoció voz"');
   const avisos = e.alertas as { clave: string; accion: string }[];
-  assert.deepEqual(avisos.map((a) => [a.clave, a.accion]), [[`sin-voz:${gid}`, 'ninguna']]);
+  assert.deepEqual(avisos.map((a) => [a.clave, a.accion]), [[`sin-voz:${gid}`, 'revisar']]);
   assert.equal(e.db.tabla('session_notes').length, 0, 'sin resumen no hay evolución');
 
   // Con voz, sin reserva: la evolución va a la fecha de la grabación (booking_id null).

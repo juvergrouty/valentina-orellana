@@ -131,7 +131,9 @@ export function normalizarAlerta(a: NuevaAlerta): Required<Omit<NuevaAlerta, 'de
  * en el panel.
  */
 export function correoParaAlerta(n: Pick<ReturnType<typeof normalizarAlerta>, 'accion' | 'clave'>): boolean {
-  return n.accion !== 'ninguna' && !n.clave.startsWith('sin-voz:');
+  // 9 nov 2026: el silencio de una sesión larga SÍ va por correo (pipeline lo marca 'revisar'); el
+  // silencio corto queda 'ninguna' y por eso no sale.
+  return n.accion !== 'ninguna';
 }
 
 const ETIQUETA_TIPO: Record<AlertaTipo, string> = {

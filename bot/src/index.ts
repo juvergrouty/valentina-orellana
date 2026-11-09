@@ -37,6 +37,8 @@ const TROZO_MS = 10_000;
 const SONDEO_VIGIA_MS = 2_000;
 /** Pico de la mezcla remota que cuenta como voz (0–1; el silencio de Meet queda en ~0). */
 const UMBRAL_VOZ = 0.02;
+/** Cada cuánto se lee el nivel de audio durante la grabación (guardia de silencio). */
+const LECTURA_NIVEL_MS = 15_000;
 /** Tope duro tras HORA_FIN + MAX_EXTRA_MS: pase lo que pase, el proceso termina. */
 const MARGEN_TOPE_DURO_MS = 10 * 60_000;
 /** Antes de grabar: personas sin Vale durante esto → aviso al panel (¿Vale entró con otro nombre visible?). */
@@ -112,7 +114,8 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
   let sinValeDesde: number | null = null; // hay personas pero ninguna con el nombre de Vale (antes de grabar)
   let avisoSinVale = false;
   let ultimoNivel = Date.now();
-  // 9 nov 2026: silencio con personas en la reunión → reengancha el audio (min 2) y avisa a Vale (min 4).
+  // 9 nov 2026: silencio con personas en la reunión → lectura cada 15 s; reengancha el audio a los 30 s y
+  // avisa a Vale al minuto (Vale: "es mucho tiempo 2-4 minutos").
   const guardia = new GuardiaSilencio({ umbral: UMBRAL_VOZ, repararTras: 2, avisarTras: 4, maxReparaciones: 3 });
   let motivo: MotivoFin | null = null;
 
@@ -177,7 +180,7 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
         continue;
       }
 
-      if (ahora - ultimoNivel >= 60_000) {
+      if (ahora - ultimoNivel >= LECTURA_NIVEL_MS) {
         ultimoNivel = ahora;
         const nv = await p.evaluate(() => {
           const g = (window as unknown as { __voGrab: GrabPagina }).__voGrab;
@@ -191,10 +194,10 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
             const txt = d ? `contexto=${d.estado} pistas=${d.pistas} rtc=${d.rtc} elementos=${d.elementos} mudas=${d.mudas} deshabilitadas=${d.deshabilitadas}` : 'sin diagnóstico';
             if (accion === 'reparar') {
               const n = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.reenganchar()).catch(() => -1);
-              log(`sin voz ${guardia.minutosSeguidos} min con ${humanos.length} personas: se reengancha el audio (${txt}; pistas tras reenganchar=${n})`);
+              log(`sin voz ${guardia.lecturasSeguidas * 15} s con ${humanos.length} personas: se reengancha el audio (${txt}; pistas tras reenganchar=${n})`);
             } else {
-              log(`sin voz ${guardia.minutosSeguidos} min con ${humanos.length} personas: aviso a Vale (${txt})`);
-              void sitio.enviar({ tipo: 'error', detalle: `No está captando el audio de la sesión: lleva ${guardia.minutosSeguidos} minutos en silencio con ${humanos.length} personas en la reunión y ya intentó reconectarlo. Si la sesión sigue, graba de respaldo con "Grabar sesión" en tu celular. Diagnóstico: ${txt}` }).catch(() => {});
+              log(`sin voz ${guardia.lecturasSeguidas * 15} s con ${humanos.length} personas: aviso a Vale (${txt})`);
+              void sitio.enviar({ tipo: 'error', detalle: `No está captando el audio de la sesión: lleva 1 minuto en silencio con ${humanos.length} personas en la reunión y ya intentó reconectarlo. Si la sesión sigue, graba de respaldo con "Grabar sesión" en tu celular. Diagnóstico: ${txt}` }).catch(() => {});
             }
           }
         }

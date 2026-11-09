@@ -1,7 +1,7 @@
 // Guardia de silencio durante la grabación (9 nov 2026).
 // Dos sesiones online (28 oct y 3 nov) grabaron 53–56 min de silencio aunque a la máquina le llegaban
 // datos de Meet al mismo ritmo que en sesiones buenas. Esta guardia mira el pico de audio que el robot
-// mide cada minuto: si con 2 o más personas en la reunión no hay voz por `repararTras` minutos seguidos,
+// mide en cada lectura (cada 15 s): si con 2 o más personas en la reunión no hay voz por `repararTras` lecturas seguidas,
 // pide reenganchar el audio; si sigue sin voz hasta `avisarTras`, avisa a Vale (una vez por sesión)
 // para que grabe de respaldo con su celular. Un minuto con voz reinicia la cuenta.
 
@@ -14,7 +14,7 @@ export class GuardiaSilencio {
 
   constructor(private readonly o: { umbral: number; repararTras: number; avisarTras: number; maxReparaciones: number }) {}
 
-  /** Una lectura por minuto: `pico` 0–1 de la mezcla y cuántas personas (sin el robot) hay en la reunión. */
+  /** Una lectura (cada 15 s): `pico` 0–1 de la mezcla y cuántas personas (sin el robot) hay en la reunión. */
   observar(pico: number, personas: number): AccionSilencio {
     // Con voz se reinicia todo (también reparaciones y aviso): una pausa larga normal al comienzo no
     // debe gastar la ayuda para una falla real más tarde. Con menos de 2 personas solo se reinicia la cuenta.
@@ -30,5 +30,5 @@ export class GuardiaSilencio {
     return 'nada';
   }
 
-  get minutosSeguidos(): number { return this.seguidos; }
+  get lecturasSeguidas(): number { return this.seguidos; }
 }

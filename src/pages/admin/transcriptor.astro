@@ -11,7 +11,7 @@ import { todayCL } from '../../lib/dateUtils';
 import { INSTRUCCIONES_RESUMEN_POR_DEFECTO, MAX_INSTRUCCIONES } from '../../lib/transcriptor/resumen';
 import {
   AJUSTE_NOMBRES_VALE, NOMBRES_VALE_DEFECTO, costoMes, duracionTexto, estadoVisible, fechaCorta, porcentajeTope, sePuedeReintentar,
-  textoProblema, tipoTexto, type CostoMes,
+  textoProblema, tipoTexto, estadoFila, type CostoMes,
 } from '../../lib/transcriptor/panel';
 import { AJUSTES, RUTAS, type Grabacion } from '../../lib/transcriptor/tipos';
 import { motivoBloqueoActivacion, type EstadoPasskeyActivacion } from '../../lib/transcriptor/panel';
@@ -259,7 +259,7 @@ const nombreMes = MESES[Number(hoy.slice(5, 7)) - 1];
       ) : (
         <ul class="tx-lista">
           {grabaciones.map((g) => {
-            const e = estadoVisible(g.estado);
+            const e = estadoFila(g);
             const prob = textoProblema(g);
             return (
               <li class="tx-fila">

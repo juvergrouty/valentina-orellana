@@ -1178,7 +1178,7 @@ test('una sesión = una grabación: Vale sale y vuelve por el mismo enlace → e
   assert.ok(!e.alertas.some((a) => String(a.clave).startsWith('sin-voz:')), 'hay voz en la sesión completa: sin aviso');
 });
 
-test('sin voz en TODA la sesión: con menos de 5 min grabados no hay aviso; con más, aviso solo en el panel (sin correo)', async () => {
+test('sin voz en TODA la sesión: con menos de 5 min grabados no hay aviso; con más, aviso con correo (9 nov)', async () => {
   for (const [minutos, aviso] of [[3, false], [12, true]] as const) {
     const e = escenario();
     const s = sesionOnline(e);
@@ -1189,7 +1189,7 @@ test('sin voz en TODA la sesión: con menos de 5 min grabados no hay aviso; con 
     await transcribir(e, id, []);
     const a = e.alertas.filter((x) => String(x.clave).startsWith('sin-voz:'));
     assert.equal(a.length, aviso ? 1 : 0, `${minutos} min`);
-    if (aviso) assert.equal(a[0].accion, 'ninguna', 'informativo: no manda correo');
+    if (aviso) assert.equal(a[0].accion, 'revisar', 'sesión perdida: va por correo');
   }
   assert.equal(avisarSinVoz([{ duracion_ms: 4 * 60_000 }, { duracion_ms: 60_000 }]), false);
   assert.equal(avisarSinVoz([{ duracion_ms: 4 * 60_000 }, { duracion_ms: 61_000 }]), true);
