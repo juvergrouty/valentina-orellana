@@ -1,6 +1,5 @@
 import type { APIRoute } from 'astro';
 import { articulos, FECHAS } from '../data/blog';
-import guias from '../data/guias.json';
 
 // Se genera en cada visita (14 oct 2026; antes era estático): así /talleres y
 // sus items entran SOLO cuando la vitrina está publicada (vitrina_publica).
@@ -21,8 +20,6 @@ const PAGES: { path: string; changefreq: string; priority: string; lastmod?: str
   { path: 'condiciones', changefreq: 'yearly',  priority: '0.3' },
   { path: 'agenda',      changefreq: 'monthly', priority: '0.9' },
   { path: 'blog',        changefreq: 'weekly',  priority: '0.7' },
-  // Guías gratuitas para seguidores (9 nov 2026).
-  ...Object.keys(guias).map(slug => ({ path: `guias/${slug}`, changefreq: 'monthly', priority: '0.5' })),
   ...articulos.filter(a => a.publicado).map(a => ({ path: `blog/${a.slug}`, changefreq: 'monthly', priority: '0.6', lastmod: FECHAS[a.slug]?.[1] })),
   ];
 
