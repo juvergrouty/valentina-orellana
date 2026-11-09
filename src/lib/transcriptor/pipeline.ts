@@ -22,7 +22,7 @@
 // Nunca contenido clínico en alertas, errores ni bitácora: solo fecha, hora y tipo de sesión.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  AJUSTES, MODELO_RESUMEN, MODELO_U35_PRO, TIEMPOS,
+  AJUSTES, MODELO_RESUMEN, MODELO_U35_PRO, NOTA_SIN_VOZ, TIEMPOS,
   type AccionAuditoria, type AssemblyAI, type Bot, type DecisionModelo, type EstadoGrabacion, type Grabacion,
   type Pipeline, type PuedeGrabar, type ResultadoTranscripcion, type ResumenIA, type Segmento, type SesionOnline, type TipoSesion,
 } from './tipos';
@@ -1238,7 +1238,7 @@ export function crearPipeline(deps: DepsPipeline): PipelineP6 {
       const tramos = (await deps.almacenamiento.leerTranscripcion(tr.r2_key as string)).segmentos;
       if (!tramos.some((t) => !esTramoHueco(t))) {
         await db.from('resumenes_ia').update({ estado: 'error', ultimo_error: 'sin_voz' }).eq('id', fila.id);
-        await transicionar(g.id, ['resumiendo'], 'lista', { nota_sistema: 'No se reconoció voz en la grabación; no hay resumen.', intentos: 0, proximo_intento_at: null } as Partial<Grabacion>, db);
+        await transicionar(g.id, ['resumiendo'], 'lista', { nota_sistema: NOTA_SIN_VOZ, intentos: 0, proximo_intento_at: null } as Partial<Grabacion>, db);
         return true;
       }
       const instr = await cargarInstrucciones('resumen', db);

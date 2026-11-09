@@ -4,7 +4,7 @@ import { GuardiaSilencio } from './silencio.js';
 
 const nueva = () => new GuardiaSilencio({ umbral: 0.02, repararTras: 2, avisarTras: 4, maxReparaciones: 3 });
 
-test('silencio con 2 personas: repara al minuto 2, avisa al 4 (una vez), vuelve a reparar al 6', () => {
+test('silencio con 2 personas: repara a la lectura 2 (30 s), avisa a la 4 (60 s, una vez), vuelve a reparar a la 6', () => {
   const g = nueva();
   const r = [1, 2, 3, 4, 5, 6, 7, 8].map(() => g.observar(0, 2));
   assert.deepEqual(r, ['nada', 'reparar', 'nada', 'avisar', 'nada', 'reparar', 'nada', 'reparar']);

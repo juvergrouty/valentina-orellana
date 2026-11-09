@@ -12,6 +12,8 @@ export const BOT_NOMBRE = 'Notas Ps. Valentina Orellana'; // nombre cambiado por
 
 /** Rótulo fijo del resumen IA: interfaz, exportaciones y PDF (10-etica-legal §4.6). */
 export const ROTULO_RESUMEN = 'Resumen automático (IA) — no revisado';
+/** nota_sistema de una grabación cuya transcripción completa quedó vacía (pipeline) — panel la marca con problema. */
+export const NOTA_SIN_VOZ = 'No se reconoció voz en la grabación; no hay resumen.';
 /** Rótulo fijo de cada respuesta de Q&A. */
 export const ROTULO_RESPUESTA = 'Respuesta generada por IA';
 

@@ -6,7 +6,7 @@
 // Decisiones que respeta (01-decisiones-16oct.md): el resumen es un ANEXO rotulado, separado de
 // la nota de evolución; la sección "Atención" se muestra tal cual, como cualquier otra sección
 // (sin colores de alarma, sin insignias, sin avisos).
-import { MODELO_U2, MODELO_U35_PRO, ROTULO_RESUMEN, type EstadoGrabacion, type Grabacion, type TramoTranscrito } from './tipos';
+import { MODELO_U2, MODELO_U35_PRO, NOTA_SIN_VOZ, ROTULO_RESUMEN, type EstadoGrabacion, type Grabacion, type TramoTranscrito } from './tipos';
 import { HABLANTE_NO_IDENTIFICADO, HABLANTE_SIN_SEPARAR, formatearTiempo } from './hablantes';
 import { AJUSTE_NOMBRES_VALE } from './bot';
 import { esperandoVale, NOTA_NADIE_LLEGO } from './botReconexion';
@@ -57,13 +57,12 @@ export function estadoVisible(estado: EstadoGrabacion | string | null | undefine
   return ESTADO_VISIBLE[estado as EstadoGrabacion] ?? { texto: 'Estado desconocido', tono: 'neutro' };
 }
 
-/** Nota del pipeline cuando la transcripción completa quedó vacía (pipeline.ts, rama sin_voz). */
-export const NOTA_SIN_VOZ = 'No se reconoció voz en la grabación; no hay resumen.';
 
 /**
  * Estado de una fila de la lista (9 nov 2026): una grabación 'lista' SIN voz no se muestra como "Listo"
  * (así se escondieron dos sesiones online de 53–56 min que quedaron en silencio).
  */
+export { NOTA_SIN_VOZ };
 export function estadoFila(g: { estado: EstadoGrabacion | string | null | undefined; nota_sistema?: string | null }): { texto: string; tono: Tono } {
   if (g.estado === 'lista' && g.nota_sistema === NOTA_SIN_VOZ) return { texto: 'Con problema: no se captó voz', tono: 'problema' };
   return estadoVisible(g.estado);

@@ -194,9 +194,9 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
             const txt = d ? `contexto=${d.estado} pistas=${d.pistas} rtc=${d.rtc} elementos=${d.elementos} mudas=${d.mudas} deshabilitadas=${d.deshabilitadas}` : 'sin diagnóstico';
             if (accion === 'reparar') {
               const n = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.reenganchar()).catch(() => -1);
-              log(`sin voz ${guardia.lecturasSeguidas * 15} s con ${humanos.length} personas: se reengancha el audio (${txt}; pistas tras reenganchar=${n})`);
+              log(`sin voz ${(guardia.lecturasSeguidas * LECTURA_NIVEL_MS) / 1000} s con ${humanos.length} personas: se reengancha el audio (${txt}; pistas tras reenganchar=${n})`);
             } else {
-              log(`sin voz ${guardia.lecturasSeguidas * 15} s con ${humanos.length} personas: aviso a Vale (${txt})`);
+              log(`sin voz ${(guardia.lecturasSeguidas * LECTURA_NIVEL_MS) / 1000} s con ${humanos.length} personas: aviso a Vale (${txt})`);
               void sitio.enviar({ tipo: 'error', detalle: `No está captando el audio de la sesión: lleva 1 minuto en silencio con ${humanos.length} personas en la reunión y ya intentó reconectarlo. Si la sesión sigue, graba de respaldo con "Grabar sesión" en tu celular. Diagnóstico: ${txt}` }).catch(() => {});
             }
           }
