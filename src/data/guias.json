@@ -17,9 +17,9 @@
     "titulo": "Paso 1: nombra la pausa",
     "intro": "Acuérdenlo antes, en un momento tranquilo. Cuando llegue la pelea, uno de los dos dice:",
     "puntos": [
-     "\"Necesito 20 minutos para calmarme.",
-     "Vuelvo a las __ y lo conversamos.\"",
-     "Es una pausa con hora de regreso, no un portazo."
+     "\"Necesito 20 minutos para calmarme. Vuelvo a las [hora] y lo conversamos.\"",
+     "Es una pausa con hora de regreso, no un portazo.",
+     "Si la acuerdan antes, ninguno la vive como un abandono."
     ]
    },
    {
