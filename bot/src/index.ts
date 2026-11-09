@@ -30,6 +30,7 @@ import { sanearError } from './saneo.js';
 import { estadoSesionValido, soloGoogle, type EstadoSesion } from './sesion.js';
 import { decidirInicio, listaIlegible, Vigia, type LecturaParticipantes, type MotivoFin } from './vigia.js';
 import { GuardiaSilencio } from './silencio.js';
+import { GrabadorPulso, pulsoDisponible } from './captura/pulso.js';
 
 const log = (m: string) => console.log(`[bot ${new Date().toISOString()}] ${m}`);
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -83,15 +84,28 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
   if (!ok) throw new Error('MediaRecorder no soporta audio/webm;codecs=opus en este Chromium');
   await p.evaluate(instalarHablantesEnPagina, { clases: clasesHablando, sondeoMs: 250 });
 
+  // 9 nov 2026: se graba lo que Meet REPRODUCE (monitor de PulseAudio). La mezcla WebAudio de las pistas
+  // WebRTC entregaba silencio (captura/pulso.ts). La de la página queda solo de respaldo sin PulseAudio.
+  const pulso = pulsoDisponible()
+    ? new GrabadorPulso({ log, alTerminar: (f) => { segs.agregarTrozo(f.seq, f.datos); void segs.cerrar(f.seq, f.offsetMs + desfase, f.duracionMs); } })
+    : null;
+  if (pulso) { pulso.empezarMedidor(); log('graba desde PulseAudio (lo que suena en la reunión)'); }
+  else log('sin PulseAudio: graba desde la página');
+  const leerPico = async (): Promise<number> => pulso
+    ? pulso.nivel()
+    : await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.nivel().pico).catch(() => 0);
+
   // Inicio de cada segmento según Node: solo para cerrar segmentos huérfanos (la página no avisó su fin).
   const inicioSeg = new Map<number, number>();
   const iniciar = async (seq: number) => {
-    await p.evaluate((s: number) => (window as unknown as { __voGrab: GrabPagina }).__voGrab.iniciar(s), seq);
+    if (pulso) pulso.iniciar(seq);
+    else await p.evaluate((s: number) => (window as unknown as { __voGrab: GrabPagina }).__voGrab.iniciar(s), seq);
     if (!inicioSeg.has(seq)) inicioSeg.set(seq, Date.now());
   };
   // Cortes en curso (detener sin await): se esperan antes de cerrar huérfanos y vaciar la fila.
   const cortes = new Set<Promise<void>>();
   const detener = async (seq: number) => {
+    if (pulso) { await pulso.detener(seq); return; }
     const termino = new Promise<void>((r) => { finSegmento.set(seq, r); setTimeout(r, 20_000); });
     const ok2 = await p.evaluate((s: number) => (window as unknown as { __voGrab: GrabPagina }).__voGrab.detener(s), seq).catch(() => false);
     if (ok2) await termino;
@@ -145,7 +159,7 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
           // Respaldo SOLO si la lista de participantes no se puede leer (Meet cambió el DOM): si llega VOZ por
           // las pistas remotas dos sondeos seguidos, hay gente aunque no se vea → se graba y se avisa.
           ultimoNivel = ahora;
-          const pico = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.nivel().pico).catch(() => 0);
+          const pico = await leerPico();
           vozSinTiles = pico >= UMBRAL_VOZ ? vozSinTiles + 1 : 0;
         } else if (!ilegible) vozSinTiles = 0;
         const hayVale = vigia.hayVale(nombres);
@@ -171,7 +185,7 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
         inicio = Date.now();
         // La guardia de silencio mide desde aquí (no desde la espera previa a la grabación).
         ultimoNivel = inicio;
-        await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.nivel()).catch(() => null);
+        await leerPico();
         vigia.empezoGrabacion();
         desfase = desfaseOrigen(inicio, cfg.origenMs);
         await iniciar(seq);
@@ -186,13 +200,16 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
           const g = (window as unknown as { __voGrab: GrabPagina }).__voGrab;
           return { ...g.nivel(), pistas: g.pistas(), rtc: ((window as unknown as { __voPistasRTC?: MediaStreamTrack[] }).__voPistasRTC ?? []).length };
         }).catch(() => null);
+        if (nv && pulso) nv.pico = pulso.nivel();
         if (nv) {
           log(`audio: contexto=${nv.estado} pistas=${nv.pistas} rtc=${nv.rtc} pico=${nv.pico} personas=${humanos.length}`);
           const accion = guardia.observar(nv.pico, humanos.length);
           if (accion !== 'nada') {
             const d = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.diag()).catch(() => null);
             const txt = d ? `contexto=${d.estado} pistas=${d.pistas} rtc=${d.rtc} elementos=${d.elementos} mudas=${d.mudas} deshabilitadas=${d.deshabilitadas}` : 'sin diagnóstico';
-            if (accion === 'reparar') {
+            if (accion === 'reparar' && pulso) {
+              log(`sin voz ${(guardia.lecturasSeguidas * LECTURA_NIVEL_MS) / 1000} s con ${humanos.length} personas en lo que suena en la reunión (${txt})`);
+            } else if (accion === 'reparar') {
               const n = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.reenganchar()).catch(() => -1);
               log(`sin voz ${(guardia.lecturasSeguidas * LECTURA_NIVEL_MS) / 1000} s con ${humanos.length} personas: se reengancha el audio (${txt}; pistas tras reenganchar=${n})`);
             } else {
@@ -246,13 +263,14 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
   if (motivo === 'sin_consentimiento') {
     // Sin consentimiento no se sube nada más: se cortan las grabadoras y se descarta lo que hay en memoria.
     await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.apagar()).catch(() => {});
+    await pulso?.apagar();
     segs.descartar();
     return { motivo, linea: [], fallidos: [] };
   }
 
   const tFin = Date.now() - inicio;
   await Promise.all([...cortes]); // primero los cortes en curso (si no, detener() pisa su aviso de fin)
-  const abiertas = await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.activas()).catch(() => [seq]);
+  const abiertas = pulso ? pulso.activas() : await p.evaluate(() => (window as unknown as { __voGrab: GrabPagina }).__voGrab.activas()).catch(() => [seq]);
   await Promise.all(abiertas.map((s) => detener(s)));
   const t0 = inicioSeg.get(cfg.seqInicial) ?? inicio;
   segs.cerrarHuerfanos((s) => {
@@ -260,6 +278,7 @@ async function grabar(p: Pagina, cfg: ConfigBot, sitio: Sitio, op: {
     return { offsetMs: desde - t0 + desfase, duracionMs: Date.now() - desde };
   });
   const fallidos = await segs.vaciar();
+  await pulso?.apagar();
   if (segs.sinConsentimiento) return { motivo: 'sin_consentimiento', linea: [], fallidos: [] };
   return { motivo, linea: lineaConDesfase(linea.cerrar(tFin), desfase), fallidos };
 }
