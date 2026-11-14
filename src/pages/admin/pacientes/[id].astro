@@ -339,6 +339,7 @@ const desdeNotas = (() => {
       { key: 'info',     label: 'Información' },
       { key: 'sesiones', label: `Sesiones (${patientBookings.length})` },
       { key: 'notas',    label: `Notas clínicas (${notes?.length ?? 0})` },
+      { key: 'documentos', label: 'Documentos' },
     ].map(t => (
       <a href={`${redirectBase}?tab=${t.key}`}
          style={`padding:0.6rem 1.25rem;font-size:0.8rem;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;text-decoration:none;border-bottom:2px solid ${tab===t.key ? 'var(--ink)' : 'transparent'};color:${tab===t.key ? 'var(--ink)' : 'var(--stone)'};margin-bottom:-2px;transition:color .15s;`}>
@@ -433,6 +434,28 @@ const desdeNotas = (() => {
           Guardar cambios
         </button>
       </form>
+    </div>
+  )}
+
+  <!-- ── TAB: DOCUMENTOS (14 nov 2026) ────────────────────────────────────────
+       Informes para seguros, certificados firmados y otros PDF de la ficha.
+       Bucket privado documentos-pacientes (ver /api/admin/documentos-paciente). -->
+  {tab === 'documentos' && (
+    <div style="max-width:720px;" id="docs-ficha" data-patient-id={patient.id}>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+          <p class="label" style="margin:0;">Documentos del paciente</p>
+          <label class="btn btn-dark btn-sm" style="cursor:pointer;">
+            + Subir PDF
+            <input type="file" id="docs-input" accept="application/pdf,.pdf" multiple style="display:none;" />
+          </label>
+        </div>
+        <p style="font-size:0.8rem;color:var(--stone);margin:0 0 1rem;">Informes, certificados y otros documentos en PDF. Solo se ven desde este panel.</p>
+        <p id="docs-estado" style="font-size:0.82rem;margin:0 0 0.75rem;" role="status"></p>
+        <ul id="docs-lista" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0.5rem;">
+          <li style="font-size:0.85rem;color:var(--stone);">Cargando…</li>
+        </ul>
+      </div>
     </div>
   )}
 
@@ -1819,4 +1842,89 @@ const desdeNotas = (() => {
       }
     });
   }
+
+  // ── Documentos de la ficha ─────────────────────────────────────────────
+  (() => {
+    const caja = document.getElementById('docs-ficha');
+    if (!caja) return;
+    const paciente = caja.dataset.patientId;
+    const lista = document.getElementById('docs-lista');
+    const estado = document.getElementById('docs-estado');
+    const input = document.getElementById('docs-input');
+    const api = '/api/admin/documentos-paciente';
+    const post = async (body) => {
+      const r = await fetch(api, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Panel': '1' }, body: JSON.stringify({ paciente, ...body }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error ?? 'Algo falló. Intenta de nuevo.');
+      return d;
+    };
+    const aviso = (txt, color) => { estado.textContent = txt; estado.style.color = color; };
+    const bonito = (n) => {
+      const m = n.match(/^(\d{4})-(\d{2})-(\d{2})_(.*)\.pdf$/i);
+      const titulo = (m ? m[4] : n.replace(/\.pdf$/i, '')).replace(/-/g, ' ');
+      return { titulo: titulo.charAt(0).toUpperCase() + titulo.slice(1), fecha: m ? `${m[3]}-${m[2]}-${m[1]}` : '' };
+    };
+    async function cargar() {
+      try {
+        const r = await fetch(`${api}?paciente=${encodeURIComponent(paciente)}`);
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.error) throw new Error(d.error ?? 'No se pudo cargar la lista.');
+        lista.innerHTML = '';
+        if (!d.docs.length) {
+          lista.innerHTML = '<li style="font-size:0.85rem;color:var(--stone);">Todavía no hay documentos.</li>';
+          return;
+        }
+        for (const doc of d.docs) {
+          const { titulo, fecha } = bonito(doc.nombre);
+          const li = document.createElement('li');
+          li.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:0.75rem;padding:0.6rem 0.75rem;border:1px solid var(--dust);border-radius:8px;flex-wrap:wrap;';
+          const info = document.createElement('div');
+          const t = document.createElement('div'); t.textContent = titulo; t.style.cssText = 'font-size:0.9rem;font-weight:600;';
+          const f = document.createElement('div'); f.textContent = fecha ? `Subido el ${fecha}` : ''; f.style.cssText = 'font-size:0.75rem;color:var(--stone);';
+          info.append(t, f);
+          const acc = document.createElement('div'); acc.style.cssText = 'display:flex;gap:0.4rem;';
+          const ver = document.createElement('button'); ver.type = 'button'; ver.className = 'btn btn-outline btn-sm'; ver.textContent = 'Ver';
+          ver.addEventListener('click', async () => {
+            const w = window.open('', '_blank');
+            try { const d2 = await post({ action: 'abrir', nombre: doc.nombre }); if (w) w.location.href = d2.url; else location.href = d2.url; }
+            catch (e) { if (w) w.close(); aviso(e.message, '#dc2626'); }
+          });
+          const borrar = document.createElement('button'); borrar.type = 'button'; borrar.className = 'btn btn-outline btn-sm'; borrar.textContent = 'Quitar';
+          borrar.addEventListener('click', async () => {
+            if (!confirm(`¿Quitar "${titulo}" de la ficha? Queda guardado en el archivo, no se elimina.`)) return;
+            try { await post({ action: 'borrar', nombre: doc.nombre }); aviso('Documento quitado de la ficha.', '#15803d'); cargar(); }
+            catch (e) { aviso(e.message, '#dc2626'); }
+          });
+          acc.append(ver, borrar);
+          li.append(info, acc);
+          lista.append(li);
+        }
+      } catch (e) { lista.innerHTML = ''; aviso(e.message, '#dc2626'); }
+    }
+    input.addEventListener('change', async () => {
+      const archivos = [...input.files];
+      input.value = '';
+      const listos = [], errores = [];
+      for (const f of archivos) {
+        try {
+          if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') throw new Error(`"${f.name}" no es un PDF.`);
+          if (f.size > 20 * 1024 * 1024) throw new Error(`"${f.name}" pesa más de 20 MB.`);
+          aviso(`Subiendo "${f.name}"…`, 'var(--stone)');
+          const d = await post({ action: 'subir', nombre: f.name });
+          const fd = new FormData();
+          fd.append('cacheControl', '3600');
+          fd.append('', new File([f], d.nombre, { type: 'application/pdf' }));
+          const up = await fetch(d.signedUrl, { method: 'PUT', headers: { 'x-upsert': 'false' }, body: fd });
+          if (up.status === 400 || up.status === 409) throw new Error(`"${f.name}": ya hay un documento con ese nombre hoy. Cámbiale el nombre al archivo.`);
+          if (!up.ok) throw new Error(`No se pudo subir "${f.name}" (${up.status}).`);
+          await post({ action: 'subido', nombre: d.nombre }).catch(() => {});
+          listos.push(f.name);
+        } catch (e) { errores.push(e.message); }
+      }
+      await cargar();
+      if (errores.length) aviso((listos.length ? `Subidos: ${listos.length}. ` : '') + errores.join(' '), '#dc2626');
+      else aviso(listos.length === 1 ? `Listo: "${listos[0]}" quedó en la ficha.` : `Listo: ${listos.length} documentos quedaron en la ficha.`, '#15803d');
+    });
+    cargar();
+  })();
 </script>
