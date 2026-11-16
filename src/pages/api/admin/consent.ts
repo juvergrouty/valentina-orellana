@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
+import { logInfo } from '../../../lib/logger';
 import { sendConsentLinkEmail } from '../../../lib/email';
 import { consentUrl, FaltaMigracion0021, getOrCreatePendingConsent, whatsappConsentMessage } from '../../../lib/consent';
 import { correoParejaValido, enmascararCorreo, estadoPareja, resumenEstadoPareja, urlWhatsAppPareja } from '../../../lib/transcriptor/pareja';
@@ -82,6 +83,37 @@ export const POST: APIRoute = async (ctx) => {
   }
 
   // ¿Ya firmó la segunda persona? (la ficha lo consulta mientras muestra el QR en la consulta).
+  // 'trasladar_firmas' (16 nov 2026): una pareja quedó repartida en dos fichas. Pasa las firmas
+  // de la ficha `desde` a esta ficha, sin tocar el texto firmado ni su huella: solo cambia a qué
+  // ficha pertenecen y quién es persona 1 (la del RUT de esta ficha) o 2 (la pareja).
+  // Queda constancia en /admin/logs con el antes y el después.
+  if (action === 'trasladar_firmas') {
+    const rechazo = await guardiaPanel(ctx, action as AccionAuditoria); // Origin + X-Panel + sesión estricta + bitácora
+    if (rechazo) return rechazo;
+    const desde = (body.desde ?? '').trim();
+    if (!UUID.test(desde) || desde === patientId) return json({ ok: false, error: 'Ficha de origen no válida.' }, 400);
+    const { data: destinoRut } = await supabase.from('patients').select('rut').eq('id', patientId).maybeSingle();
+    const rutDestino = String((destinoRut as { rut?: string | null } | null)?.rut ?? '').replace(/[^0-9kK]/g, '').toUpperCase();
+    if (rutDestino.length < 7) return json({ ok: false, error: 'Esta ficha no tiene RUT: no se puede saber quién es quién.' }, 400);
+    const { data: firmas, error: ef } = await supabase.from('consents')
+      .select('id, signer_name, signer_rut, signed_at, persona').eq('patient_id', desde).not('signed_at', 'is', null);
+    if (ef) return json({ ok: false, error: 'No se pudieron leer las firmas.' }, 500);
+    if (!firmas?.length) return json({ ok: false, error: 'La ficha de origen no tiene firmas.' }, 404);
+    const cambios = [];
+    for (const f of firmas as { id: string; signer_name: string | null; signer_rut: string | null; signed_at: string; persona: number | null }[]) {
+      const rut = String(f.signer_rut ?? '').replace(/[^0-9kK]/g, '').toUpperCase();
+      // Sin RUT en la firma: se reconoce por el nombre de la ficha.
+      const norm = (x: unknown) => String(x ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const esDeEstaFicha = rut.length >= 7 ? rut === rutDestino : norm(f.signer_name) === norm(patient.name);
+      const persona = esDeEstaFicha ? 1 : 2;
+      const { error } = await supabase.from('consents').update({ patient_id: patientId, persona }).eq('id', f.id).eq('patient_id', desde);
+      if (error) return json({ ok: false, error: `No se pudo trasladar una firma: ${error.message}`, trasladadas: cambios }, 500);
+      cambios.push({ consent_id: f.id, firmante: f.signer_name, firmo: f.signed_at, persona_antes: f.persona ?? 1, persona_ahora: persona });
+    }
+    await logInfo('consentimiento/traslado', `Firmas trasladadas a la ficha de ${patient.name}`, { desde, hacia: patientId, cambios });
+    return json({ ok: true, trasladadas: cambios });
+  }
+
   if (action === 'pareja_estado') {
     const { data: filas, error: ec } = await supabase.from('consents').select('*').eq('patient_id', patientId).limit(200);
     if (ec) return json({ ok: false, error: 'No se pudo revisar la firma. Intenta de nuevo.' }, 500);
