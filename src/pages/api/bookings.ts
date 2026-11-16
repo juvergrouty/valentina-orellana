@@ -20,7 +20,12 @@ export const prerender = false;
 // Crea una reserva en BD (status=pending_payment) y devuelve la URL de pago de Flow
 export const POST: APIRoute = async ({ request }) => {
     try {
-          return await handleBooking(request);
+          const copia = request.clone(); // el cuerpo se lee una sola vez
+          const res = await handleBooking(request);
+          // Toda reserva rechazada queda en /admin/logs con el motivo exacto
+          // (16 nov 2026: dos intentos fallidos de un paciente no dejaron rastro).
+          if (!res.ok && res.status !== 429) await registrarRechazo(copia, res); // 429 ya queda como bookings/limite
+          return res;
     } catch (fatal) {
           const msg = fatal instanceof Error ? fatal.message : String(fatal);
           console.error('[bookings] Error fatal:', msg);
@@ -28,6 +33,30 @@ export const POST: APIRoute = async ({ request }) => {
           return json({ error: 'Error interno del servidor.' }, 500);
     }
 };
+
+const enmascarar = (email: unknown) => {
+  const e = String(email ?? '').trim().toLowerCase();
+  const [u, d] = e.split('@');
+  return u && d ? `${u.slice(0, 3)}***@${d}` : '';
+};
+
+async function registrarRechazo(request: Request, res: Response) {
+  try {
+    const motivo = await res.clone().json().catch(() => ({})) as { error?: string; errorType?: string };
+    const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    await logWarn('bookings/rechazada', `Reserva rechazada (${res.status}): ${motivo.error ?? 'sin mensaje'}`, {
+      status: res.status,
+      errorType: motivo.errorType ?? null,
+      email: enmascarar(body.patient_email),
+      fecha: body.session_date ?? null,
+      hora: body.session_time ?? null,
+      servicio: body.service_id ?? null,
+      modalidad: body.modality_choice ?? null,
+      con_recaptcha: !!body.recaptcha_token,
+      ip: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null,
+    });
+  } catch { /* registrar nunca debe cambiar la respuesta a la paciente */ }
+}
 
 async function handleBooking(request: Request) {
     // ── Parse body ──────────────────────────────────────────────────────────────

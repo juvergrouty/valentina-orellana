@@ -41,9 +41,19 @@ export const GET: APIRoute = async ({ url }) => {
   try { await asegurarBucket(); } catch (e) { return json({ error: `No se pudo preparar el archivo de documentos: ${(e as Error).message}` }, 500); }
   const { data, error } = await supabase.storage.from(BUCKET_DOCUMENTOS).list(id, { limit: 200, sortBy: { column: 'created_at', order: 'desc' } });
   if (error) return json({ error: `No se pudo leer la lista: ${error.message}` }, 500);
+  // El nombre guardado va sin tildes (las rutas del bucket no las aceptan); el
+  // título original, con tildes, queda en el registro de la subida.
+  const titulos = new Map<string, string>();
+  const { data: subidas } = await supabase.from('admin_logs').select('data')
+    .eq('context', 'ficha/documentos').eq('data->>paciente', id).not('data->>titulo', 'is', null)
+    .order('created_at', { ascending: false }).limit(500);
+  for (const r of subidas ?? []) {
+    const d = r.data as { nombre?: string; titulo?: string } | null;
+    if (d?.nombre && d.titulo && !titulos.has(d.nombre)) titulos.set(d.nombre, d.titulo); // el más reciente manda
+  }
   const docs = (data ?? [])
     .filter((f) => f.id && f.name && !f.name.startsWith('.'))
-    .map((f) => ({ nombre: f.name, subido: f.created_at, bytes: (f.metadata as { size?: number } | null)?.size ?? null }));
+    .map((f) => ({ nombre: f.name, titulo: titulos.get(f.name) ?? null, subido: f.created_at, bytes: (f.metadata as { size?: number } | null)?.size ?? null }));
   return json({ ok: true, docs });
 };
 
@@ -79,7 +89,8 @@ export const POST: APIRoute = async ({ request }) => {
   const ruta = `${paciente}/${nombre}`;
 
   if (action === 'subido') {
-    await logInfo('ficha/documentos', `Documento subido a la ficha: ${nombre}`, { paciente, nombre });
+    const titulo = String(body?.titulo ?? '').replace(/\.pdf$/i, '').replace(/[<>]/g, '').trim().slice(0, 140) || null;
+    await logInfo('ficha/documentos', `Documento subido a la ficha: ${titulo ?? nombre}`, { paciente, nombre, titulo });
     return json({ ok: true });
   }
   if (action === 'abrir') {

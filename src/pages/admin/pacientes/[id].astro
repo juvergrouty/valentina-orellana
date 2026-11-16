@@ -1875,7 +1875,8 @@ const desdeNotas = (() => {
           return;
         }
         for (const doc of d.docs) {
-          const { titulo, fecha } = bonito(doc.nombre);
+          const b = bonito(doc.nombre);
+          const titulo = doc.titulo || b.titulo, fecha = b.fecha;
           const li = document.createElement('li');
           li.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:0.75rem;padding:0.6rem 0.75rem;border:1px solid var(--dust);border-radius:8px;flex-wrap:wrap;';
           const info = document.createElement('div');
@@ -1917,7 +1918,7 @@ const desdeNotas = (() => {
           const up = await fetch(d.signedUrl, { method: 'PUT', headers: { 'x-upsert': 'false' }, body: fd });
           if (up.status === 400 || up.status === 409) throw new Error(`"${f.name}": ya hay un documento con ese nombre hoy. Cámbiale el nombre al archivo.`);
           if (!up.ok) throw new Error(`No se pudo subir "${f.name}" (${up.status}).`);
-          await post({ action: 'subido', nombre: d.nombre }).catch(() => {});
+          await post({ action: 'subido', nombre: d.nombre, titulo: f.name }).catch(() => {});
           listos.push(f.name);
         } catch (e) { errores.push(e.message); }
       }

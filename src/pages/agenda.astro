@@ -806,6 +806,21 @@ const resumenPareja     = resumenGrupo('pareja');
       quantity:      1,
     };
   }
+  // Aviso al panel cuando la reserva falla en el navegador antes de llegar al
+  // servidor (16 nov 2026). Sin datos personales; como mucho 5 avisos por visita.
+  let avisosFallo = 0;
+  function avisarFallo(etapa, mensaje) {
+    try {
+      if (++avisosFallo > 5) return;
+      const datos = JSON.stringify({ etapa, mensaje: String(mensaje ?? '').slice(0, 300), fecha: state.selectedDate || '', hora: state.selectedTime || '', servicio: state.serviceId || '' });
+      if (!(navigator.sendBeacon && navigator.sendBeacon('/api/bookings/fallo', new Blob([datos], { type: 'text/plain' })))) {
+        fetch('/api/bookings/fallo', { method: 'POST', body: datos, keepalive: true }).catch(() => {});
+      }
+    } catch (e) { /* el aviso nunca debe romper la reserva */ }
+  }
+  window.addEventListener('error', (ev) => { if (state.step >= 2 && ev.message !== 'Script error.') avisarFallo('error-pagina', `${ev.message} @ ${String(ev.filename || '').split('/').pop()}:${ev.lineno}`); });
+  window.addEventListener('unhandledrejection', (ev) => { if (state.step >= 2) avisarFallo('promesa', ev.reason?.message || String(ev.reason)); });
+
   function voPush(eventName) {
     try {
       window.dataLayer = window.dataLayer || [];
@@ -1437,8 +1452,12 @@ const resumenPareja     = resumenGrupo('pareja');
       } catch (err) {
         console.error('[recaptcha] error obteniendo token', err);
       }
+      if (!recaptchaToken) avisarFallo('recaptcha', 'No se obtuvo la verificación de Google (bloqueada, lenta o con error).');
+    } else if (window.__RECAPTCHA_SITE_KEY__) {
+      avisarFallo('recaptcha', 'El script de verificación de Google no cargó.');
     }
 
+    let llegoRespuesta = false;
     try {
       const res = await fetch('/api/bookings', {
         method: 'POST',
@@ -1467,7 +1486,10 @@ const resumenPareja     = resumenGrupo('pareja');
         }),
       });
 
-      const data = await res.json();
+      llegoRespuesta = true;
+      let data;
+      try { data = await res.json(); }
+      catch (e) { avisarFallo('respuesta', `Respuesta ilegible del servidor (${res.status})`); throw new Error('No se pudo preparar tu reserva. Intenta de nuevo o escríbeme por WhatsApp.'); }
 
       if (!res.ok || !data.checkoutUrl) {
         // Lo que va después de la @ no recibe correos → paso 3, marcar el campo
@@ -1528,6 +1550,9 @@ const resumenPareja     = resumenGrupo('pareja');
       // En producción usa checkoutUrl directamente
 
     } catch (err) {
+      // Sin conexión o cortada: el servidor nunca la vio (las rechazadas por el servidor ya quedan registradas allá).
+      if (!llegoRespuesta) avisarFallo('conexion', err?.message);
+      else if (err instanceof TypeError) avisarFallo('error-pagina', err.message);
       hide('payment-loading');
       hide('payment-ready');
       show('payment-error');

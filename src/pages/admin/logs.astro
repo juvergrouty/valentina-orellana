@@ -19,7 +19,9 @@ if (Astro.request.method === 'POST') {
       // Ni los códigos de WhatsApp (clics y pacientes): son la medición por canal.
       .not('context', 'like', 'wa/%')
       // Ni el historial de correos automáticos (Comunicaciones → Automáticos, 16 oct 2026).
-      .not('context', 'like', 'email/%');
+      .not('context', 'like', 'email/%')
+      // Ni el registro de documentos de la ficha (quién subió/abrió/quitó y el título con tildes, 16 nov 2026).
+      .not('context', 'like', 'ficha/%');
   }
   return Astro.redirect('/admin/logs?cleared=1');
 }
