@@ -167,7 +167,7 @@ const { datos } = Astro.props;
 
   <!-- Grabando (pantalla oscura) -->
   <div class="gr-pantalla gr-oscura" id="gr-rec" hidden>
-    <div class="gr-banda" id="gr-banda-silencio" role="alert" hidden>No se escucha nada hace 1 minuto. Revisa que nada tape el micrófono.</div>
+    <div class="gr-banda" id="gr-banda-silencio" role="alert" hidden><b>Sigue grabando.</b> Hace 1 minuto que casi no se escucha voz: si están hablando, acerca el teléfono o revisa que nada tape el micrófono.</div>
     <div class="gr-banda" id="gr-banda-pantalla" role="status" hidden>La pantalla podría apagarse. Tócala de vez en cuando o enchufa el cargador.</div>
     <div class="gr-rec-centro">
       <div class="gr-rec-estado"><span class="gr-pulso" aria-hidden="true"></span><span id="gr-rec-titulo">Grabando</span></div>
@@ -345,7 +345,7 @@ const { datos } = Astro.props;
 
 <script>
   import { barrasDesdeDb, dbDesdeRms, dbSuavizado } from '../../lib/transcriptor/medidor';
-  import { cuentaComoSilencio, finGrabacionMs } from '../../lib/transcriptor/grabador';
+  import { CEROS_PARA_RECONECTAR_MS, cuentaComoSilencio, finGrabacionMs } from '../../lib/transcriptor/grabador';
   import {
     arregloBloqueo, cerrarSegmentoCortado, claveReutilizar, decidirSeguir, destinoPendiente, esRetomable, etiquetaBloqueo,
     localYaEnServidor, RETOMAR_MAX_MS, textoSinSubir, type VerificacionSeguir,
@@ -437,6 +437,7 @@ const { datos } = Astro.props;
   let analizador: AnalyserNode | null = null;
   let fuente: MediaStreamAudioSourceNode | null = null;
   let silencioDesde = 0;
+  let cerosDesde = 0; // medidor en cero exacto: desconectado del micrófono (no es silencio)
   let ocultoDesde = 0;
   let wakeLock: WakeLockSentinel | null = null;
   let micProbado = false;
@@ -666,6 +667,17 @@ const { datos } = Astro.props;
       if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
     } catch { /* sin medidor */ }
   }
+  // 16 nov: tras una interrupción, WebKit puede dejar el medidor en cero exacto aunque MediaRecorder siga
+  // grabando bien. Se vuelve a conectar al micrófono actual (no toca la grabación).
+  function reconectarMedidor() {
+    if (!stream || !audioCtx || !analizador) return;
+    try { fuente?.disconnect(); } catch { /* ya desconectado */ }
+    try {
+      if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
+      fuente = audioCtx.createMediaStreamSource(stream);
+      fuente.connect(analizador);
+    } catch { fuente = null; }
+  }
   function conectarMedidor(s: MediaStream) {
     try {
       despertarAudio();
@@ -702,9 +714,13 @@ const { datos } = Astro.props;
       pintarMedidor('gr-medidor-rec', rms);
       $('gr-crono').textContent = crono(msGrabados());
       const ahora = Date.now();
+      if (fuente && rms === 0) {
+        cerosDesde ||= ahora;
+        if (ahora - cerosDesde >= CEROS_PARA_RECONECTAR_MS) { cerosDesde = 0; reconectarMedidor(); }
+      } else cerosDesde = 0;
       if (cuentaComoSilencio(rms, !!fuente, audioCtx?.state)) { silencioDesde ||= ahora; } else silencioDesde = 0; // sin medidor (o AudioContext detenido) no se avisa silencio
       const silencio = !!silencioDesde && ahora - silencioDesde >= SILENCIO_MS;
-      if (silencio && $('gr-banda-silencio').hidden) anunciar('No se escucha nada hace 1 minuto.');
+      if (silencio && $('gr-banda-silencio').hidden) anunciar('Sigue grabando. Hace 1 minuto que casi no se escucha voz.');
       $('gr-banda-silencio').hidden = !silencio;
     }
     requestAnimationFrame(bucle);

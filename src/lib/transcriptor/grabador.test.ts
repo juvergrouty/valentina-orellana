@@ -8,7 +8,9 @@ import { cuentaComoSilencio, finGrabacionMs, UMBRAL_SILENCIO_RMS } from './graba
 const PAGINA = readFileSync(new URL('../../components/admin/Grabador.astro', import.meta.url), 'utf8');
 
 test('silencio: solo cuenta con medidor midiendo de verdad (AudioContext running)', () => {
-  assert.equal(cuentaComoSilencio(0, true, 'running'), true);
+  // 16 nov: ceros exactos = medidor desconectado del micrófono (no silencio) → no avisa; se reconecta.
+  assert.equal(cuentaComoSilencio(0, true, 'running'), false);
+  assert.match(PAGINA, /reconectarMedidor\(\)/);
   assert.equal(cuentaComoSilencio(UMBRAL_SILENCIO_RMS / 2, true, 'running'), true);
   assert.equal(cuentaComoSilencio(0.05, true, 'running'), false, 'voz');
   // iOS: AudioContext suspendido o interrumpido → el analizador da ceros aunque MediaRecorder grabe bien.
