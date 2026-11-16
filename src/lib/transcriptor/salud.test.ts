@@ -56,6 +56,22 @@ test('todo sano: ninguna alerta, se guarda cada chequeo y se cierran las alertas
   assert.ok(resueltas.some((x) => x.prefijo === 'salud:respaldo_supabase' && x.salvo.length === 0));
 });
 
+test('14 nov: buscar transcripciones sueltas puede tardar más que el tope común (4 veces) sin aviso; los demás chequeos no', async () => {
+  const lenta = <T>(v: T, ms: number) => new Promise<T>((r) => setTimeout(() => r(v), ms));
+  // 400 ms > tope común (200) pero < 4 × 200: la lista de AssemblyAI lenta ya no da "sin respuesta".
+  let listada = false;
+  const f = fuentesSanas({
+    listarTranscriptsAai: () => { listada = true; return lenta([], 400); },
+    origenTranscriptsAai: async () => ({ segmentos: [], webhooks: [] }),
+    async probarR2() { await lenta(null, 400); },
+  });
+  const { alertas, guardadas } = await correr(f);
+  assert.equal(listada, true, 'el chequeo sí leyó la lista de AssemblyAI');
+  assert.equal(guardadas.find((g) => g.chequeo === 'aai_huerfanos')!.ok, true);
+  assert.ok(!alertas.some((a) => a.clave.startsWith('salud:aai_huerfanos')), 'sin aviso por la lista lenta');
+  assert.ok(alertas.some((a) => a.clave.startsWith('salud:r2')), 'los demás chequeos mantienen su tope');
+});
+
 test('transcriptor apagado: no revisa llaves ni proveedores, solo datos y micrófono', async () => {
   let llamado = false;
   const f = fuentesSanas({

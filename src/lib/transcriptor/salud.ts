@@ -343,6 +343,8 @@ async function chequeoAaiBorrado({ f, ahora }: Ctx): Promise<ResultadoP8> {
 // Solo cuentan los creados hace más de 2 h; los 'queued/processing' se avisan pero no se borran.
 
 export const VENTANA_HUERFANOS_MS = 7 * 24 * H;   // la cuenta tiene TTL corto; 7 días de margen
+/** El chequeo de transcripciones sueltas tiene este múltiplo del tope por chequeo (15 s → 60 s). */
+export const FACTOR_TOPE_HUERFANOS = 4;
 
 export interface Huerfano { id: string; clase: 'identificado' | 'desconocido'; borrable: boolean }
 
@@ -615,7 +617,12 @@ export async function ejecutarSalud(d: DepsEjecucion, op: OpcionesSalud = {}): P
 
   const resultados = await Promise.all(tareas.map(async ([chequeo, correr]) => {
     try {
-      return { r: await conTiempo(Promise.resolve().then(correr), timeout, NOMBRE_CHEQUEO[chequeo]), revisado: true };
+      // Las transcripciones sueltas se buscan leyendo páginas de hasta 200 transcripciones en AssemblyAI
+      // y cruzándolas con la base: es el único chequeo que puede pasar de 15 s sin que nada falle (14 nov:
+      // aviso "sin respuesta en 15 s" sin incidente de AssemblyAI). Tiene 4 veces el tope (60 s; la
+      // función tiene 300 s).
+      const tope = chequeo === 'aai_huerfanos' ? timeout * FACTOR_TOPE_HUERFANOS : timeout;
+      return { r: await conTiempo(Promise.resolve().then(correr), tope, NOMBRE_CHEQUEO[chequeo]), revisado: true };
     } catch (e) {
       const r: ResultadoP8 = {
         chequeo, ok: false, detalle: { error: err(e) },
