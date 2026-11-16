@@ -11,16 +11,18 @@ export const UMBRAL_SILENCIO_RMS = 0.004;
  * MediaRecorder graba bien; ahí el analizador entrega ceros y el aviso sería una falsa alarma en plena
  * sesión (la página ya acepta que "el medidor puede fallar en iOS aunque la grabación funcione").
  */
-export function cuentaComoSilencio(rms: number, hayFuente: boolean, estadoAudio: string | null | undefined): boolean {
+export function cuentaComoSilencio(rms: number, hayFuente: boolean, estadoAudio: string | null | undefined, reconexionesAgotadas = false): boolean {
   // rms > 0 (16 nov, sesión presencial de Felipe: el aviso salió mientras conversaban y la transcripción
   // tenía la voz). Un micrófono real nunca da CERO exacto (siempre hay ruido de fondo): ceros exactos son el
-  // medidor desconectado del micrófono (WebKit tras una interrupción), no silencio. Ahí se reconecta
-  // (CEROS_PARA_RECONECTAR_MS) en vez de avisar.
-  return hayFuente && estadoAudio === 'running' && rms > 0 && rms < UMBRAL_SILENCIO_RMS;
+  // medidor desconectado del micrófono (WebKit tras una interrupción), no silencio. Ahí primero se reconecta
+  // (hasta MAX_RECONEXIONES_MEDIDOR veces); si sigue en cero, sí cuenta (micrófono muerto de verdad).
+  return hayFuente && estadoAudio === 'running' && (rms > 0 || reconexionesAgotadas) && rms < UMBRAL_SILENCIO_RMS;
 }
 
 /** Ceros exactos seguidos en el medidor mientras se graba → se vuelve a conectar al micrófono. */
 export const CEROS_PARA_RECONECTAR_MS = 3_000;
+/** Reconexiones del medidor por segmento; después, los ceros cuentan como silencio. */
+export const MAX_RECONEXIONES_MEDIDOR = 3;
 
 interface SegFin { inicioMs: number; finMs: number | null }
 

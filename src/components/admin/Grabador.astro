@@ -345,7 +345,7 @@ const { datos } = Astro.props;
 
 <script>
   import { barrasDesdeDb, dbDesdeRms, dbSuavizado } from '../../lib/transcriptor/medidor';
-  import { CEROS_PARA_RECONECTAR_MS, cuentaComoSilencio, finGrabacionMs } from '../../lib/transcriptor/grabador';
+  import { CEROS_PARA_RECONECTAR_MS, cuentaComoSilencio, finGrabacionMs, MAX_RECONEXIONES_MEDIDOR } from '../../lib/transcriptor/grabador';
   import {
     arregloBloqueo, cerrarSegmentoCortado, claveReutilizar, decidirSeguir, destinoPendiente, esRetomable, etiquetaBloqueo,
     localYaEnServidor, RETOMAR_MAX_MS, textoSinSubir, type VerificacionSeguir,
@@ -438,6 +438,7 @@ const { datos } = Astro.props;
   let fuente: MediaStreamAudioSourceNode | null = null;
   let silencioDesde = 0;
   let cerosDesde = 0; // medidor en cero exacto: desconectado del micrófono (no es silencio)
+  let reconexiones = 0; // reconexiones del medidor en este segmento (tope MAX_RECONEXIONES_MEDIDOR)
   let ocultoDesde = 0;
   let wakeLock: WakeLockSentinel | null = null;
   let micProbado = false;
@@ -673,7 +674,6 @@ const { datos } = Astro.props;
     if (!stream || !audioCtx || !analizador) return;
     try { fuente?.disconnect(); } catch { /* ya desconectado */ }
     try {
-      if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
       fuente = audioCtx.createMediaStreamSource(stream);
       fuente.connect(analizador);
     } catch { fuente = null; }
@@ -714,11 +714,12 @@ const { datos } = Astro.props;
       pintarMedidor('gr-medidor-rec', rms);
       $('gr-crono').textContent = crono(msGrabados());
       const ahora = Date.now();
-      if (fuente && rms === 0) {
+      const agotadas = reconexiones >= MAX_RECONEXIONES_MEDIDOR;
+      if (fuente && rms === 0 && audioCtx?.state === 'running' && !agotadas) {
         cerosDesde ||= ahora;
-        if (ahora - cerosDesde >= CEROS_PARA_RECONECTAR_MS) { cerosDesde = 0; reconectarMedidor(); }
-      } else cerosDesde = 0;
-      if (cuentaComoSilencio(rms, !!fuente, audioCtx?.state)) { silencioDesde ||= ahora; } else silencioDesde = 0; // sin medidor (o AudioContext detenido) no se avisa silencio
+        if (ahora - cerosDesde >= CEROS_PARA_RECONECTAR_MS) { cerosDesde = 0; reconexiones++; reconectarMedidor(); }
+      } else if (rms > 0) { cerosDesde = 0; reconexiones = 0; }
+      if (cuentaComoSilencio(rms, !!fuente, audioCtx?.state, agotadas)) { silencioDesde ||= ahora; } else silencioDesde = 0; // sin medidor (o AudioContext detenido) no se avisa silencio
       const silencio = !!silencioDesde && ahora - silencioDesde >= SILENCIO_MS;
       if (silencio && $('gr-banda-silencio').hidden) anunciar('Sigue grabando. Hace 1 minuto que casi no se escucha voz.');
       $('gr-banda-silencio').hidden = !silencio;
@@ -789,7 +790,7 @@ const { datos } = Astro.props;
     const r = mime ? new MediaRecorder(s, { mimeType: mime, audioBitsPerSecond: 64000 }) : new MediaRecorder(s, { audioBitsPerSecond: 64000 });
     const seg: SegLocal = { seq, inicioMs: Date.now(), finMs: null, mime: (r.mimeType || mime || 'audio/mp4').split(';')[0] };
     grab.segmentos.push(seg);
-    segActual = seg; recorder = r; silencioDesde = 0;
+    segActual = seg; recorder = r; silencioDesde = 0; cerosDesde = 0; reconexiones = 0;
     const g = grab;
     // Índice de trozo PROPIO de este segmento: si el recorder anterior entrega un trozo tarde (su stop llegó
     // después del plazo de 3 s y ya empezó otro segmento), no toma el contador del nuevo ni pisa el trozo 0

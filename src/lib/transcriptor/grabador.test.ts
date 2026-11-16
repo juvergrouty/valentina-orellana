@@ -11,6 +11,11 @@ test('silencio: solo cuenta con medidor midiendo de verdad (AudioContext running
   // 16 nov: ceros exactos = medidor desconectado del micrófono (no silencio) → no avisa; se reconecta.
   assert.equal(cuentaComoSilencio(0, true, 'running'), false);
   assert.match(PAGINA, /reconectarMedidor\(\)/);
+  // …pero si después de las reconexiones sigue en cero, es un micrófono muerto de verdad: sí avisa.
+  assert.equal(cuentaComoSilencio(0, true, 'running', true), true);
+  assert.equal(cuentaComoSilencio(0.05, true, 'running', true), false, 'voz');
+  assert.match(PAGINA, /reconexiones >= MAX_RECONEXIONES_MEDIDOR/);
+  assert.match(PAGINA, /silencioDesde = 0; cerosDesde = 0; reconexiones = 0;/, 'cada segmento parte de cero');
   assert.equal(cuentaComoSilencio(UMBRAL_SILENCIO_RMS / 2, true, 'running'), true);
   assert.equal(cuentaComoSilencio(0.05, true, 'running'), false, 'voz');
   // iOS: AudioContext suspendido o interrumpido → el analizador da ceros aunque MediaRecorder grabe bien.
@@ -18,7 +23,7 @@ test('silencio: solo cuenta con medidor midiendo de verdad (AudioContext running
   assert.equal(cuentaComoSilencio(0, true, 'interrupted'), false);
   assert.equal(cuentaComoSilencio(0, true, undefined), false);
   assert.equal(cuentaComoSilencio(0, false, 'running'), false, 'sin fuente conectada');
-  assert.match(PAGINA, /cuentaComoSilencio\(rms, !!fuente, audioCtx\?\.state\)/);
+  assert.match(PAGINA, /cuentaComoSilencio\(rms, !!fuente, audioCtx\?\.state, agotadas\)/);
 });
 
 test('fin_at: el de "terminar"; si Safari se cerró grabando, el fin del último segmento (no la hora de subida)', () => {
