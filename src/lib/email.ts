@@ -9,7 +9,8 @@ import { frasePlazoPago, AVISO_REAGENDAR, FORMAS_DE_PAGO } from './cobrosProximo
 import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
 import { asuntoAnulacion, htmlAnulacion, textoAnulacion, type DatosAnulacion } from './correoAnulacion';
-import { cierreFirmaHtml, LOGO_HEADER_HTML } from './firmaCorreo';
+import { cierreFirmaHtml, LOGO_HEADER_HTML, FIRMA_GMAIL, REGISTRO_SUPERINTENDENCIA_HTML } from './firmaCorreo';
+import { correoSeguimiento, correoTextoPlano, type Paso, type DatosTexto } from './seguimientos/textos';
 import { asuntoPrueba, htmlCorreoMasivo } from './correoMasivo';
 import { bloqueEntrarSesion, enlacePacienteSesion, enlaceValeSesion, filaEnlaceVale, meetDeNotas, normalizarMeet } from './enlaceSesion';
 
@@ -1408,4 +1409,50 @@ export async function sendVitrinaAdminNotification(data: VitrinaEmailData & { cu
   if ((res.error as { name?: string } | null)?.name === 'invalid_idempotent_request') (res as { error: unknown }).error = null;
   await logEmail('email/vitrina-admin', adminEmail, subject, !res.error, res.error?.message);
   return res.error ? { sent: false, reason: res.error.message } : { sent: true };
+}
+
+// ─── Seguimientos automáticos (18 nov 2026, ver src/lib/seguimientos/) ───────
+// Correo corto y personal, con el texto que aprobó Vale: sin logo ni botón (se lee como un correo
+// de ella), "Un abrazo," y su firma de Gmail + registro (regla del 19 oct). La versión de texto es
+// exactamente el texto aprobado. Las respuestas llegan a consulta@ (PATIENT_REPLY_TO).
+export async function sendSeguimientoEmail(paso: Paso, to: string, datos: DatosTexto, opts: { idempotencyKey?: string } = {}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+  const c = correoSeguimiento(paso, datos);
+  const p = (t: string) => `<p style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#1A1A18;line-height:1.6;margin:0 0 1rem;">${t}</p>`;
+  const conEnlace = (t: string) => escapeHtml(t).replace(/(https:\/\/[^\s<]+)/g, '<a href="$1" style="color:#576352;font-weight:bold;">$1</a>');
+  const html = `<div style="max-width:560px;padding:1rem 0;">${p(escapeHtml(c.saludo))}${c.parrafos.map((x) => p(conEnlace(x))).join('')}${p('Un abrazo,')}${FIRMA_GMAIL}${REGISTRO_SUPERINTENDENCIA_HTML}</div>`;
+  const res = await client.emails.send({
+    from: FROM,
+    replyTo: PATIENT_REPLY_TO,
+    to,
+    subject: c.asunto,
+    html,
+    text: correoTextoPlano(paso, datos),
+  }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+  await logEmail(`email/seguimiento-${paso}`, to, c.asunto, !res.error, res.error?.message);
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
+}
+
+// Resumen diario para Vale (aviso interno, sin firma): mensajes automáticos del día y pausas por aprobar.
+export type LineaResumen = { nombre: string; paso: string; canal: string; hora?: string };
+export async function sendResumenSeguimientos(adminEmail: string, d: { fecha: string; enviados: LineaResumen[]; porAprobar: { nombre: string; dias: number }[]; urlPanel: string }, opts: { idempotencyKey?: string } = {}): Promise<{ sent: boolean; reason?: string }> {
+  const client = getResend();
+  if (!client) return { sent: false, reason: 'RESEND_API_KEY no configurado' };
+  const li = (t: string) => `<li style="margin:0.25rem 0;">${t}</li>`;
+  const subject = `Seguimientos de hoy: ${d.enviados.length} ${d.enviados.length === 1 ? 'mensaje enviado' : 'mensajes enviados'}${d.porAprobar.length ? `, ${d.porAprobar.length} por aprobar` : ''}`;
+  const html = `
+    <div style="font-family:'Inter',Arial,sans-serif;max-width:560px;margin:0 auto;padding:1.5rem;color:#1A1A18;background:#FAF7F4;font-size:0.9rem;line-height:1.6;">
+      <h2 style="font-size:1rem;font-weight:600;margin:0 0 1rem;">Seguimientos automáticos del ${escapeHtml(d.fecha)}</h2>
+      <p style="margin:0 0 0.4rem;font-weight:600;">Mensajes enviados hoy</p>
+      ${d.enviados.length ? `<ul style="margin:0 0 1.25rem;padding-left:1.2rem;">${d.enviados.map((e) => li(`<strong>${escapeHtml(e.nombre)}</strong> · ${escapeHtml(e.paso)} · ${escapeHtml(e.canal)}${e.hora ? ` · ${escapeHtml(e.hora)}` : ''}`)).join('')}</ul>` : '<p style="margin:0 0 1.25rem;">Ninguno.</p>'}
+      <p style="margin:0 0 0.4rem;font-weight:600;">Pacientes en pausa esperando tu aprobación</p>
+      ${d.porAprobar.length ? `<ul style="margin:0 0 1.25rem;padding-left:1.2rem;">${d.porAprobar.map((e) => li(`<strong>${escapeHtml(e.nombre)}</strong> · ${e.dias} días desde su última sesión`)).join('')}</ul>` : '<p style="margin:0 0 1.25rem;">Ninguna.</p>'}
+      <a href="${d.urlPanel}" style="display:inline-block;background:#576352;color:#fff;padding:0.6rem 1.2rem;text-decoration:none;border-radius:4px;font-weight:600;">Abrir seguimientos en el panel</a>
+    </div>`;
+  const res = await client.emails.send({ from: FROM, to: adminEmail, subject, html }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
+  await logEmail('email/seguimientos-resumen', adminEmail, subject, !res.error, res.error?.message);
+  if (res.error) return { sent: false, reason: res.error.message };
+  return { sent: true };
 }

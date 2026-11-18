@@ -28,7 +28,9 @@ export type NombreSecreto =
   | 'GOOGLE_CLIENT_SECRET' | 'GOOGLE_PLACES_API_KEY'
   | 'META_APP_SECRET' | 'INSTAGRAM_ACCESS_TOKEN'
   | 'APIGATEWAY_APIKEY' | 'SII_CLAVE'
-  | 'RESEND_WEBHOOK_SECRET';
+  | 'RESEND_WEBHOOK_SECRET'
+  // Aviso (webhook) de WhatsApp: clave de verificación que se escribe en el App Dashboard de Meta (18 nov 2026).
+  | 'WHATSAPP_WEBHOOK_VERIFY_TOKEN';
 
 function desdeDev(n: NombreSecreto): string | undefined {
   try {
@@ -62,6 +64,7 @@ function desdeDev(n: NombreSecreto): string | undefined {
         case 'APIGATEWAY_APIKEY': return import.meta.env.APIGATEWAY_APIKEY;
         case 'SII_CLAVE': return import.meta.env.SII_CLAVE;
         case 'RESEND_WEBHOOK_SECRET': return import.meta.env.RESEND_WEBHOOK_SECRET;
+        case 'WHATSAPP_WEBHOOK_VERIFY_TOKEN': return import.meta.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
       }
     }
   } catch { /* fuera de Vite (tsx/node:test) import.meta.env no existe */ }

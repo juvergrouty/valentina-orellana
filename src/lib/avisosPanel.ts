@@ -14,6 +14,14 @@ import { cobrosProximos, type CobroProximo } from './cobrosProximos';
 import { contarCorreosFallidos } from './correosAutomaticos';
 import { avisosPagosPorDevolver, type PagoPorDevolver } from './pagosPorDevolver';
 
+// Seguimientos (18 nov 2026, ver src/lib/seguimientos/): pacientes en pausa con el mensaje listo,
+// esperando que Valentina lo apruebe. 0 si la migración 0027 aún no está aplicada.
+async function contarPausasPorAprobar(): Promise<number> {
+  const { count, error } = await supabase.from('seguimiento_envios').select('id', { count: 'exact', head: true })
+    .eq('paso', '3A').eq('estado', 'por_aprobar');
+  return error ? 0 : count ?? 0;
+}
+
 // Avisos del panel (antes calculados dentro de AdminLayout.astro). Salen a
 // este archivo (14 oct 2026) para que el Inicio (/admin) los use en su lista
 // "Para hacer" sin consultarlos dos veces: la página los carga, los muestra y
@@ -134,6 +142,8 @@ export type AvisosPanel = {
   // Sesiones pagadas que se anularon o vencieron, hasta "Resuelto" (19 oct 2026).
   // null = no se pudo revisar (el panel lo dice en vez de callar).
   pagosPorDevolver: PagoPorDevolver[] | null;
+  // Pacientes en pausa con el mensaje de seguimiento por aprobar (18 nov 2026).
+  pausasPorAprobar: number;
 };
 
 /** Medición de tiempos (5 nov 2026: "por qué demora tanto el panel"): cuánto tarda cada aviso, en ms.
@@ -143,7 +153,7 @@ export async function cargarAvisosPanel(origen: string, tiempos?: Record<string,
     const t0 = Date.now();
     return p.finally(() => { if (tiempos) tiempos[nombre] = Date.now() - t0; });
   };
-  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente] = await Promise.all([
+  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente, pausasPorAprobar] = await Promise.all([
     // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
     // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
     medir('errores', contarErroresNuevos().catch(() => 0)),
@@ -182,6 +192,7 @@ export async function cargarAvisosPanel(origen: string, tiempos?: Record<string,
     medir('transferencias', getTransferenciasPorRevisar().catch((): ComprobanteAlert[] | null => null)),
     // Google Calendar: eventos por borrar o mover que se están reintentando (28 oct 2026, ver syncCalendar.ts).
     medir('calendarioPendiente', listarCalendarioPendiente().catch((): AvisoCalendario[] | null => null)),
+    medir('pausas', contarPausasPorAprobar().catch(() => 0)),
   ]);
-  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente };
+  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente, pausasPorAprobar };
 }

@@ -146,6 +146,9 @@ export async function createMessageTemplate(opts: {
   language?: string; // código de idioma de plantilla de Meta, default 'es'
   bodyText:  string;
   sampleValues?: string[];
+  // Por defecto UTILITY (recordatorio de cita). Los seguimientos que invitan a empezar o retomar
+  // terapia van como MARKETING (reglas de categorías de Meta; ver src/lib/seguimientos/textos.ts).
+  category?: 'UTILITY' | 'MARKETING';
 }): Promise<{ ok: boolean; id?: string; status?: string; reason?: string }> {
   const cfg = await getWhatsappConfig();
   if (!cfg) return { ok: false, reason: 'whatsapp_not_connected' };
@@ -163,7 +166,7 @@ export async function createMessageTemplate(opts: {
       body: JSON.stringify({
         name:     opts.name,
         language: opts.language ?? 'es',
-        category: 'UTILITY',
+        category: opts.category ?? 'UTILITY',
         components: [component],
       }),
     });
@@ -175,6 +178,47 @@ export async function createMessageTemplate(opts: {
     return { ok: true, id: data.id, status: data.status };
   } catch (e) {
     console.error('[whatsapp] create template exception:', e);
+    return { ok: false, reason: e instanceof Error ? e.message : 'unknown' };
+  }
+}
+
+// Estado de las plantillas de la cuenta (APPROVED, PENDING, REJECTED, …) por nombre. null = no se
+// pudo consultar (sin conexión o error de Meta): quien llama no debe enviar plantillas en ese caso.
+export async function estadoPlantillas(): Promise<Map<string, string> | null> {
+  const cfg = await getWhatsappConfig();
+  if (!cfg?.wabaId) return null;
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${cfg.wabaId}/message_templates?fields=name,status,language&limit=200`, {
+      headers: { Authorization: `Bearer ${cfg.accessToken}` },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      await logError('whatsapp/plantillas', 'No se pudo leer el estado de las plantillas de WhatsApp', { reason: data?.error?.message ?? res.status });
+      return null;
+    }
+    const m = new Map<string, string>();
+    for (const t of (data?.data ?? []) as { name: string; status: string }[]) m.set(t.name, t.status);
+    return m;
+  } catch (e) {
+    await logError('whatsapp/plantillas', 'Excepción al leer las plantillas de WhatsApp', { reason: e instanceof Error ? e.message : 'unknown' });
+    return null;
+  }
+}
+
+// Suscribe la app del sitio a la cuenta de WhatsApp Business de Vale: sin esto Meta no manda los
+// avisos (webhooks) de mensajes entrantes ni de sus respuestas desde la app (smb_message_echoes).
+export async function suscribirAppAWhatsapp(): Promise<{ ok: boolean; reason?: string }> {
+  const cfg = await getWhatsappConfig();
+  if (!cfg) return { ok: false, reason: 'whatsapp_not_connected' };
+  if (!cfg.wabaId) return { ok: false, reason: 'missing_waba_id' };
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${cfg.wabaId}/subscribed_apps`, {
+      method: 'POST', headers: { Authorization: `Bearer ${cfg.accessToken}` },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.success === false) return { ok: false, reason: data?.error?.message ?? `graph_error_${res.status}` };
+    return { ok: true };
+  } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : 'unknown' };
   }
 }

@@ -29,7 +29,7 @@ const path = current ?? '';
 const tInicioLayout = Date.now();
 // El Inicio carga los avisos antes (index.astro) y deja sus tiempos en Astro.locals.tiemposPanel.
 const tiemposPanel: Record<string, number> = ((Astro.locals as { tiemposPanel?: Record<string, number> }).tiemposPanel ??= {});
-const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, calendarioPendiente }
+const { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, calendarioPendiente, pausasPorAprobar }
   = avisosPrecargados ?? await cargarAvisosPanel(Astro.url.origin, tiemposPanel);
 // Passkey (16 oct 2026): franja para registrarla / hacerla obligatoria (src/lib/passkey/servidor.ts).
 const tPasskey = Date.now();
@@ -57,6 +57,8 @@ const navMain = [
   { href: '/admin/servicios',      label: 'Servicios',      icon: 'briefcase'               },
   { href: '/admin/pacientes',      label: 'Pacientes',      icon: 'users'                   },
   { href: '/admin/comunicaciones', label: 'Comunicaciones', icon: 'message'                 },
+  // Seguimientos automáticos a consultas y pacientes (18 nov 2026, ver src/lib/seguimientos/).
+  { href: '/admin/seguimientos',   label: 'Seguimientos',   icon: 'message'                 },
   { href: '/admin/finanzas',       label: 'Finanzas',       icon: 'dollar'                  },
   { href: '/admin/evaluaciones',   label: 'Evaluaciones',   icon: 'clipboard'               },
   { href: '/admin/reportes',       label: 'Reportes',       icon: 'bar-chart'               },
@@ -884,6 +886,13 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
       </div>
     )}
     <AlertasTranscriptor />
+    {/* Seguimientos (18 nov 2026): pacientes en pausa con el mensaje listo; nunca sale sin su aprobación. */}
+    {(pausasPorAprobar ?? 0) > 0 && current !== '/admin/seguimientos' && (
+      <div role="status" style="background:#576352;color:#fff;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        💬 {pausasPorAprobar === 1 ? 'Hay 1 paciente en pausa' : `Hay ${pausasPorAprobar} pacientes en pausa`} con el mensaje de seguimiento listo para tu aprobación.{' '}
+        <a href="/admin/seguimientos" style="color:#fff;text-decoration:underline;">Revisar y aprobar</a>
+      </div>
+    )}
     {!ocultarAvisosDeInicio && comprobanteAlerts.length > 0 && (
       <div role="alert" id="comprobantes-alert" style="background:#1d4ed8;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
         <p style="font-weight:700;margin:0 0 0.35rem;">💸 {comprobanteAlerts.length === 1 ? 'Hay 1 comprobante de transferencia por confirmar' : `Hay ${comprobanteAlerts.length} comprobantes de transferencia por confirmar`}: revisa tu banco y confirma el pago</p>

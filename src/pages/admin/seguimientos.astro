@@ -1,0 +1,192 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { planSeguimientos, type Plan } from '../../lib/seguimientos/motor';
+import { NOMBRE_PASO, PLANTILLAS, textoWhatsapp, correoTextoPlano, type Paso } from '../../lib/seguimientos/textos';
+import { normalizarCorreo, fechaEnPalabras } from '../../lib/seguimientos/reglas';
+import { getWhatsappConfig, estadoPlantillas } from '../../lib/whatsapp';
+
+// Seguimientos automáticos (aprobado por Vale el 18 nov 2026; ver src/lib/seguimientos/).
+// Muestra lo mismo que usa la tarea automática: consultas nuevas, pacientes por seguir, pausas por
+// aprobar y el registro de envíos. Los botones van a /api/admin/seguimientos.
+
+let plan: Plan | null = null;
+let errorCarga = '';
+try { plan = await planSeguimientos(); } catch (e) { errorCarga = e instanceof Error ? e.message : String(e); }
+const wa = await getWhatsappConfig().catch(() => null);
+const plantillas = wa ? await estadoPlantillas() : null;
+
+const ok = Astro.url.searchParams.get('ok');
+const error = Astro.url.searchParams.get('error');
+const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+const fecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+const ESTADO: Record<string, string> = { activa: 'En seguimiento', agendo: 'Agendó', respondio: 'Respondió', no_siguio: 'No siguió', no_escribir: 'No escribir' };
+const ORIGEN: Record<string, string> = { anuncio: 'Anuncio', codigo: 'Código del sitio', manual: 'Marcada a mano', paciente: 'Paciente' };
+const CANAL: Record<string, string> = { correo: 'Correo', whatsapp_texto: 'WhatsApp', whatsapp_plantilla: 'WhatsApp (plantilla)' };
+const ESTADO_ENVIO: Record<string, string> = { enviado: 'Enviado', error: 'No se pudo enviar', en_curso: 'Enviando', omitido: 'Incluido en otro aviso', por_aprobar: 'Por aprobar', aprobado: 'Aprobado', descartado: 'Descartado' };
+const ESTADO_PLANTILLA: Record<string, string> = { APPROVED: 'Aprobada', PENDING: 'En revisión', REJECTED: 'Rechazada', PAUSED: 'Pausada', DISABLED: 'Desactivada' };
+const vuelta = '/admin/seguimientos';
+const candidatos = plan?.candidatos ?? [];
+const vistaPrevia = (paso: Paso, c: (typeof candidatos)[number]) => normalizarCorreo(c.email) ? correoTextoPlano(paso, c.datos) : textoWhatsapp(paso, c.datos);
+const registro = (plan?.envios ?? []).filter((e) => e.paso !== 'resumen' && e.estado !== 'por_aprobar').slice(0, 60);
+---
+
+<AdminLayout title="Seguimientos" current="/admin/seguimientos">
+  <div class="p-6 max-w-5xl text-sm">
+    <h1 class="text-xl font-semibold mb-1">Seguimientos automáticos</h1>
+    <p class="text-gray-600 mb-4">Mensajes cortos a consultas nuevas que no agendaron, pacientes sin próxima hora y sesiones pendientes de pago. Salen por correo cuando hay correo; si no, por WhatsApp. Solo de lunes a sábado, de 10:00 a 20:00, máximo 2 por persona, y se detienen si la persona agenda o responde. Las pacientes en pausa nunca reciben un mensaje sin tu aprobación.</p>
+
+    {ok && <p class="mb-4 p-3 rounded bg-green-50 text-green-800">{ok}</p>}
+    {error && <p class="mb-4 p-3 rounded bg-red-50 text-red-800">{error}</p>}
+    {errorCarga && <p class="mb-4 p-3 rounded bg-red-50 text-red-800">No se pudo cargar la información: {errorCarga}</p>}
+    {plan && !plan.listo && <p class="mb-4 p-3 rounded bg-yellow-50 text-yellow-900">Falta aplicar la actualización de la base de datos 0027. Mientras tanto no se envía nada.</p>}
+
+    {plan?.listo && (
+      <div class="mb-6 p-4 border rounded bg-white flex flex-wrap items-center gap-3">
+        <span class={`font-semibold ${plan.activo ? 'text-green-700' : 'text-gray-700'}`}>{plan.activo ? 'Encendidos: los mensajes salen solos.' : 'Apagados: no sale ningún mensaje.'}</span>
+        <form method="POST" action="/api/admin/seguimientos">
+          <input type="hidden" name="accion" value={plan.activo ? 'desactivar' : 'activar'} />
+          <input type="hidden" name="redirect" value={vuelta} />
+          <button class={`px-4 py-2 rounded text-white ${plan.activo ? 'bg-gray-600' : 'bg-indigo-600'}`}>{plan.activo ? 'Apagar' : 'Encender'}</button>
+        </form>
+      </div>
+    )}
+
+    <div class="mb-6 p-4 border rounded bg-white">
+      <h2 class="font-semibold mb-1">WhatsApp</h2>
+      {!wa ? (
+        <p class="text-gray-700">WhatsApp no está conectado: los mensajes salen solo por correo, y a quien no tiene correo no se le escribe. <a href="/admin/whatsapp-conectar" class="text-indigo-600 underline">Conectar WhatsApp</a></p>
+      ) : (
+        <>
+          <p class="text-gray-700 mb-2">Fuera de las 24 horas desde el último mensaje de la persona, Meta solo deja enviar plantillas aprobadas.</p>
+          <ul class="list-disc pl-5 mb-3">
+            {PLANTILLAS.map((p) => (
+              <li>{NOMBRE_PASO[p.paso]}: <strong>{plantillas?.get(p.nombre) ? (ESTADO_PLANTILLA[plantillas.get(p.nombre)!] ?? plantillas.get(p.nombre)) : (plantillas ? 'Sin crear' : 'No se pudo revisar')}</strong></li>
+            ))}
+          </ul>
+          <div class="flex flex-wrap gap-2">
+            <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="crear_plantillas" /><input type="hidden" name="redirect" value={vuelta} /><button class="px-3 py-2 rounded border">Enviar plantillas a revisión de Meta</button></form>
+            <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="suscribir_whatsapp" /><input type="hidden" name="redirect" value={vuelta} /><button class="px-3 py-2 rounded border">Activar avisos de mensajes de WhatsApp</button></form>
+          </div>
+        </>
+      )}
+    </div>
+
+    <form method="POST" action="/api/admin/seguimientos" class="mb-8 p-4 border rounded bg-white flex flex-wrap items-end gap-3">
+      <input type="hidden" name="accion" value="consulta_nueva" />
+      <input type="hidden" name="redirect" value={vuelta} />
+      <div class="w-full"><h2 class="font-semibold">Marcar «Consulta nueva»</h2><p class="text-gray-600">Para consultas que llegaron por otro lado (por ejemplo, Psychology Today). Escribe la fecha en que tú le respondiste: el primer seguimiento sale 3 días después si no agenda.</p></div>
+      <label>Nombre<br /><input name="nombre" required class="border rounded px-3 py-2 w-48" autocomplete="off" /></label>
+      <label>Correo<br /><input name="email" type="email" class="border rounded px-3 py-2 w-56" autocomplete="off" /></label>
+      <label>Teléfono (si no hay correo)<br /><input name="telefono" inputmode="tel" class="border rounded px-3 py-2 w-40" autocomplete="off" /></label>
+      <label>Le respondiste el<br /><input name="respondida" type="date" value={hoy} required class="border rounded px-3 py-2" /></label>
+      <button class="px-4 py-2 rounded bg-indigo-600 text-white">Guardar consulta nueva</button>
+    </form>
+
+    {(plan?.pausas.length ?? 0) > 0 && (
+      <section class="mb-8">
+        <h2 class="font-semibold mb-2">Pacientes en pausa: por aprobar</h2>
+        <p class="text-gray-600 mb-2">Pasaron 30 días o más desde su última sesión y no tienen hora. Este mensaje solo sale si lo apruebas.</p>
+        <ul class="flex flex-col gap-2">
+          {plan!.pausas.map((p) => (
+            <li class="p-3 border rounded bg-white">
+              <p><strong>{p.nombre}</strong> · Última sesión el {fechaEnPalabras(p.ultima)} ({p.dias} días)</p>
+              <p class="text-gray-600 my-1">«{p.texto}»</p>
+              {p.estado === 'aprobado' ? <p class="text-green-700">Aprobado: sale en el próximo horario de envío.</p> : p.envioId ? (
+                <div class="flex gap-2">
+                  <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="pausa_aprobar" /><input type="hidden" name="id" value={p.envioId} /><input type="hidden" name="redirect" value={vuelta} /><button class="px-3 py-1 rounded bg-indigo-600 text-white">Aprobar y enviar</button></form>
+                  <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="pausa_descartar" /><input type="hidden" name="id" value={p.envioId} /><input type="hidden" name="redirect" value={vuelta} /><button class="px-3 py-1 rounded border">No enviar</button></form>
+                </div>
+              ) : <p class="text-gray-500">Se prepara en la próxima revisión automática (cada 5 minutos, con los seguimientos encendidos).</p>}
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+
+    <section class="mb-8">
+      <h2 class="font-semibold mb-2">Por salir</h2>
+      <table class="w-full border">
+        <thead class="bg-gray-50"><tr><th class="text-left p-2">Persona</th><th class="text-left p-2">Mensaje</th><th class="text-left p-2">Texto</th></tr></thead>
+        <tbody>
+          {candidatos.filter((c) => c.paso !== '3A').map((c) => (
+            <tr class="border-t align-top">
+              <td class="p-2">{c.nombre || 'Sin nombre'}</td>
+              <td class="p-2">{NOMBRE_PASO[c.paso]} · {normalizarCorreo(c.email) ? 'Correo' : 'WhatsApp'}</td>
+              <td class="p-2 whitespace-pre-line text-gray-700">{vistaPrevia(c.paso, c)}</td>
+            </tr>
+          ))}
+          {!candidatos.filter((c) => c.paso !== '3A').length && <tr><td colspan="3" class="p-2 text-gray-500">No hay mensajes por salir ahora.</td></tr>}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="font-semibold mb-2">Consultas nuevas</h2>
+      <table class="w-full border">
+        <thead class="bg-gray-50"><tr><th class="text-left p-2">Persona</th><th class="text-left p-2">Llegó por</th><th class="text-left p-2">Estado</th><th class="text-left p-2">Siguiente paso</th><th class="text-left p-2"></th></tr></thead>
+        <tbody>
+          {(plan?.consultas ?? []).map((p) => (
+            <tr class="border-t align-top">
+              <td class="p-2"><strong>{p.nombre || 'Sin nombre'}</strong><br /><span class="text-gray-500">{p.email || (p.telefono ? `+${p.telefono}` : '')}</span></td>
+              <td class="p-2">{ORIGEN[p.origen] ?? p.origen}{p.codigo ? ` · ${p.codigo}` : ''}<br /><span class="text-gray-500">Desde el {fecha(p.creado_at)}</span></td>
+              <td class="p-2">{ESTADO[p.estado] ?? p.estado}</td>
+              <td class="p-2">{p.motivo}</td>
+              <td class="p-2">
+                <div class="flex flex-col gap-1">
+                  {p.no_escribir ? (
+                    <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="reactivar" /><input type="hidden" name="id" value={p.id} /><input type="hidden" name="redirect" value={vuelta} /><button class="underline text-indigo-600">Volver a escribirle</button></form>
+                  ) : (
+                    <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="no_escribir" /><input type="hidden" name="id" value={p.id} /><input type="hidden" name="redirect" value={vuelta} /><button class="underline text-red-700">No escribir</button></form>
+                  )}
+                  {p.estado === 'activa' && !p.no_escribir && (
+                    <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="respondio" /><input type="hidden" name="id" value={p.id} /><input type="hidden" name="redirect" value={vuelta} /><button class="underline text-gray-600">Me respondió</button></form>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+          {!(plan?.consultas.length) && <tr><td colspan="5" class="p-2 text-gray-500">Todavía no hay consultas nuevas en seguimiento.</td></tr>}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="font-semibold mb-2">Pacientes</h2>
+      <table class="w-full border">
+        <thead class="bg-gray-50"><tr><th class="text-left p-2">Paciente</th><th class="text-left p-2">Situación</th><th class="text-left p-2"></th></tr></thead>
+        <tbody>
+          {(plan?.pacientes ?? []).map((p) => (
+            <tr class="border-t">
+              <td class="p-2"><a href={`/admin/pacientes/${p.patientId}`} class="underline">{p.nombre || 'Sin nombre'}</a></td>
+              <td class="p-2">{p.detalle}</td>
+              <td class="p-2">
+                <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value={p.noEscribir ? 'paciente_reactivar' : 'paciente_no_escribir'} /><input type="hidden" name="id" value={p.patientId} /><input type="hidden" name="redirect" value={vuelta} /><button class={`underline ${p.noEscribir ? 'text-indigo-600' : 'text-red-700'}`}>{p.noEscribir ? 'Volver a escribirle' : 'No escribir'}</button></form>
+              </td>
+            </tr>
+          ))}
+          {!(plan?.pacientes.length) && <tr><td colspan="3" class="p-2 text-gray-500">Ninguna paciente necesita seguimiento ahora.</td></tr>}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2 class="font-semibold mb-2">Registro de envíos</h2>
+      <table class="w-full border">
+        <thead class="bg-gray-50"><tr><th class="text-left p-2">Fecha</th><th class="text-left p-2">Persona</th><th class="text-left p-2">Mensaje</th><th class="text-left p-2">Canal</th><th class="text-left p-2">Resultado</th></tr></thead>
+        <tbody>
+          {registro.map((e) => (
+            <tr class="border-t">
+              <td class="p-2">{fecha(e.enviado_at ?? e.creado_at)}</td>
+              <td class="p-2">{e.nombre || 'Sin nombre'}</td>
+              <td class="p-2">{NOMBRE_PASO[e.paso as Paso] ?? e.paso}</td>
+              <td class="p-2">{e.canal ? CANAL[e.canal] : '—'}</td>
+              <td class="p-2">{ESTADO_ENVIO[e.estado] ?? e.estado}{e.estado === 'error' && e.motivo ? `: ${e.motivo}` : ''}</td>
+            </tr>
+          ))}
+          {!registro.length && <tr><td colspan="5" class="p-2 text-gray-500">Todavía no se ha enviado ningún seguimiento.</td></tr>}
+        </tbody>
+      </table>
+    </section>
+  </div>
+</AdminLayout>
