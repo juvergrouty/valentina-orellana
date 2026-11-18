@@ -161,7 +161,7 @@ const btn = (accion: string, id: string | number, texto: string, clase: string) 
                   {p.estado === 'activa' && !p.no_escribir && (
                     <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="respondio" /><input type="hidden" name="id" value={p.id} /><input type="hidden" name="redirect" value={vuelta} /><button class="underline text-gray-600">Me respondió</button></form>
                   )}
-                  {p.estado === 'activa' && !p.no_escribir && p.email && !p.segundo_aprobado && (
+                  {p.estado === 'activa' && !p.no_escribir && p.email && !p.segundo_aprobado && !p.tiene1B && (
                     <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="segundo_aprobado" /><input type="hidden" name="id" value={p.id} /><input type="hidden" name="redirect" value={vuelta} /><button class="underline text-gray-600">No me respondió: enviar el segundo cuando toque</button></form>
                   )}
                 </div>

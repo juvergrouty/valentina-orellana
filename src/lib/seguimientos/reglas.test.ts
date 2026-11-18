@@ -5,7 +5,7 @@ import {
   fechaEnPalabras, sumarDias, diasEntre, enHorarioDeEnvio, primerNombre, normalizarTelefono, mismoTelefono,
   detectarCodigo, intervaloHabitual, pasoConsulta, pasoPaciente, cobroPendienteVencido, elegirCanal,
   enviadosRecientes, sePuedeReintentar, DIA_MS, codigoDeAnuncio, mediodiaChile, unirSesiones, eventosDePersona,
-  segundoRequiereAprobacion, envioTrabado, type Consulta,
+  segundoRequiereAprobacion, envioTrabado, mismoNombreFuerte, reservaVigente, decisionSegundo, debeDescartar, type Consulta,
 } from './reglas';
 import { textoWhatsapp, correoTextoPlano, PLANTILLAS, variablesPlantilla } from './textos';
 
@@ -124,10 +124,15 @@ test('Encuadrado: la próxima hora o la última sesión en Google Calendar cuent
   assert.equal(pasoPaciente(unirSesiones([s('2026-10-01')], [ev('2026-11-10')]), '2026-11-13').tipo, null);
   // Página + Encuadrado el mismo día: una sola sesión (no cambia el intervalo).
   assert.equal(unirSesiones([s('2026-11-03')], [ev('2026-11-03')]).length, 1);
-  // Calce por correo de invitado o por nombre (mismo primer nombre y un apellido en común).
-  const lista = [ev('2026-11-20', 'Ana María Pérez Soto'), ev('2026-11-21', 'Pedro Rojas', ['ana@correo.cl']), ev('2026-11-22', 'Ana Contreras')];
+  // Calce por correo de invitado o por nombre fuerte (mismo primer nombre y un apellido en común).
+  const lista = [ev('2026-11-20', 'Ana María Pérez Soto'), ev('2026-11-21', 'Pedro Rojas', ['ana@correo.cl']), ev('2026-11-22', 'Ana Contreras'), ev('2026-11-23', 'Ana')];
   assert.deepEqual(eventosDePersona(lista, { nombre: 'Ana Pérez', email: null }).map((e) => e.fecha), ['2026-11-20']);
   assert.deepEqual(eventosDePersona(lista, { nombre: null, email: 'ANA@correo.cl' }).map((e) => e.fecha), ['2026-11-21']);
+  // Un nombre de una sola palabra no toma eventos de nadie (ni en la persona ni en el evento).
+  assert.deepEqual(eventosDePersona(lista, { nombre: 'Ana', email: null }), []);
+  assert.equal(mismoNombreFuerte('Luis Medina', 'Luis Rafael Medina Mendez'), true);
+  assert.equal(mismoNombreFuerte('Luis', 'Luis Medina'), false);
+  assert.equal(mismoNombreFuerte('Luis Soto', 'Luis Medina'), false);
 });
 
 test('pendiente de pago (cobrable) cuenta como sesión realizada: no 3A falso', () => {
@@ -225,4 +230,42 @@ test('envío trabado: en curso hace más de 1 hora', () => {
   assert.equal(envioTrabado({ estado: 'en_curso', tomada_en: '2026-11-18T13:30:00Z' }, ahora), true);
   assert.equal(envioTrabado({ estado: 'en_curso', tomada_en: '2026-11-18T14:30:00Z' }, ahora), false);
   assert.equal(envioTrabado({ estado: 'error', tomada_en: '2026-11-18T10:00:00Z' }, ahora), false);
+});
+
+test('reserva vigente: pagada sin aviso, transferencia, pagada, del panel o deuda anulada cuentan', () => {
+  const web = { status: 'pending_payment', paid_at: null, created_by_admin: false, debt_voided: false, notes: '' };
+  assert.equal(reservaVigente(web, false), false); // reserva web abandonada
+  assert.equal(reservaVigente(web, true), true);   // dentro de sus 30 min
+  assert.equal(reservaVigente({ ...web, notes: 'PagoSinAviso 123' }, false), true);
+  assert.equal(reservaVigente({ ...web, notes: 'ComprobanteTransferencia x y' }, false), true);
+  assert.equal(reservaVigente({ ...web, notes: 'TransferenciaPorRevisar' }, false), true);
+  assert.equal(reservaVigente({ ...web, paid_at: '2026-11-01T00:00:00Z' }, false), true);
+  assert.equal(reservaVigente({ ...web, created_by_admin: true }, false), true);
+  assert.equal(reservaVigente({ ...web, status: 'confirmed', debt_voided: true }, false), true);
+  assert.equal(reservaVigente({ ...web, status: 'cancelled', paid_at: 'x' }, true), false);
+});
+
+test('1B por correo: por aprobar → «No me respondió: enviar el segundo» → se mantiene y se envía (no se descarta)', () => {
+  const clave = 'consulta:1';
+  // Paso 1: toca el 1B a una consulta por correo, sin fila: va a "Esperando tu aprobación", no se envía.
+  assert.deepEqual(decisionSegundo(true, null), { aprobacion: true, candidato: false });
+  // Paso 2: la tarea la crea por_aprobar; sigue esperando.
+  assert.deepEqual(decisionSegundo(true, { estado: 'por_aprobar', intentos: 0 }), { aprobacion: true, candidato: false });
+  // Paso 3: Vale aprieta "No me respondió: enviar el segundo cuando toque" → segundo_aprobado = true y la fila pasa a aprobado.
+  const requiere = segundoRequiereAprobacion({ email: 'a@b.cl', segundo_aprobado: true });
+  assert.equal(requiere, false);
+  const dec = decisionSegundo(requiere, { estado: 'aprobado', intentos: 0 });
+  assert.deepEqual(dec, { aprobacion: true, candidato: true });
+  // Como sigue en las aprobaciones del plan, la limpieza NO la descarta.
+  const vigentes = new Set(dec.aprobacion ? [`${clave}|1B|`] : []);
+  assert.equal(debeDescartar({ clave, paso: '1B', referencia: '', estado: 'aprobado' }, vigentes), false);
+  // Si la persona agenda o responde, el 1B deja de corresponder y ahí sí se descarta.
+  assert.equal(debeDescartar({ clave, paso: '1B', referencia: '', estado: 'aprobado' }, new Set()), true);
+  // Ya enviado: nada más.
+  assert.deepEqual(decisionSegundo(false, { estado: 'enviado', intentos: 1 }), { aprobacion: false, candidato: false });
+  // WhatsApp (sin correo): automático.
+  assert.deepEqual(decisionSegundo(false, null), { aprobacion: false, candidato: true });
+  // Error con intentos: se reintenta y se sigue mostrando.
+  assert.deepEqual(decisionSegundo(true, { estado: 'error', intentos: 1 }), { aprobacion: true, candidato: true });
+  assert.deepEqual(decisionSegundo(true, { estado: 'error', intentos: 3 }), { aprobacion: true, candidato: false });
 });

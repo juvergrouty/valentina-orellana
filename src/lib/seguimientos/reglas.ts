@@ -292,11 +292,21 @@ export function envioTrabado(f: { estado: string; tomada_en: string | null }, ah
 
 export type EventoCalendario = { fecha: string; nombre: string; correos: string[] };
 
-/** Eventos de una persona: por correo de invitado, o por nombre (mismaPersona). Ante la duda calza:
- *  un calce de más solo hace que NO se escriba (dirección segura). */
+const palabrasNombre = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .replace(/[^a-zñ ]/g, ' ').split(/\s+/).filter((w) => w.length > 1);
+
+/** Calce fuerte por nombre: los dos traen nombre y apellido, mismo primer nombre y al menos un
+ *  apellido en común ("Luis Medina" = "Luis Rafael Medina Mendez"; "Luis" solo NO calza con nadie). */
+export function mismoNombreFuerte(a: string, b: string): boolean {
+  const x = palabrasNombre(a), y = palabrasNombre(b);
+  return x.length >= 2 && y.length >= 2 && mismaPersona(a, b) && x.slice(1).some((w) => y.slice(1).includes(w));
+}
+
+/** Eventos de una persona: por correo de invitado, o por nombre con calce fuerte (nombre + apellido).
+ *  Un nombre de una sola palabra (p. ej. el perfil de WhatsApp "Camila") no toma eventos de otras. */
 export function eventosDePersona(eventos: EventoCalendario[], p: { nombre: string | null; email: string | null }): EventoCalendario[] {
   const correo = normalizarCorreo(p.email);
-  return eventos.filter((e) => (!!correo && e.correos.includes(correo)) || (!!p.nombre && !!e.nombre && mismaPersona(e.nombre, p.nombre)));
+  return eventos.filter((e) => (!!correo && e.correos.includes(correo)) || (!!p.nombre && !!e.nombre && mismoNombreFuerte(e.nombre, p.nombre)));
 }
 
 /** Reservas + eventos del calendario, sin repetir el mismo día. */
@@ -315,4 +325,36 @@ export function unirSesiones(reservas: SesionPaciente[], eventos: EventoCalendar
  *  detectan solas), salvo que ella ya haya marcado "No respondió: enviar el segundo". */
 export function segundoRequiereAprobacion(p: { email: string | null; segundo_aprobado?: boolean | null }): boolean {
   return !!normalizarCorreo(p.email) && p.segundo_aprobado !== true;
+}
+
+/** ¿La reserva es una hora real (agendada, realizada o pagada)? Además de confirmada o cobrable
+ *  (esCobrable de debt.ts, que se pasa como parámetro), cuenta si Flow ya la pagó sin aviso, si tiene
+ *  transferencia subida o por revisar, si está pagada, si la agendó Vale en el panel, o si se anuló
+ *  la deuda (la sesión igual ocurrió). Solo una reserva web abandonada (sin pagar, sin nada) no cuenta. */
+export function reservaVigente(b: { status: string; paid_at?: string | null; created_by_admin?: boolean | null; debt_voided?: boolean | null; notes?: string | null }, cobrable: boolean): boolean {
+  if (b.status === 'cancelled' || b.status === 'expired') return false;
+  return b.status === 'confirmed' || cobrable || !!b.paid_at || b.created_by_admin === true || b.debt_voided === true
+    || /PagoSinAviso|ComprobanteTransferencia|TransferenciaPorRevisar/.test(String(b.notes ?? ''));
+}
+
+/**
+ * Segundo mensaje (1B) cuando corresponde según pasoConsulta. `fila` es su registro, si existe.
+ *  - aprobacion: se muestra en "Esperando tu aprobación" (y por eso nunca se descarta por "ya no corresponde").
+ *  - candidato:  entra a la lista de envío.
+ * Un 1B aprobado (por el botón de la tarjeta o por "No me respondió: enviar el segundo") se mantiene y
+ * se envía; uno por aprobar solo sale cuando Vale lo aprueba.
+ */
+export function decisionSegundo(requiereAprobacion: boolean, fila: { estado: string; intentos: number } | null): { aprobacion: boolean; candidato: boolean } {
+  const reintentable = !!fila && fila.estado === 'error' && fila.intentos < MAX_INTENTOS;
+  if (fila && ['por_aprobar', 'aprobado', 'error', 'en_curso'].includes(fila.estado)) {
+    // por_aprobar nunca se toma sola (sePuedeReintentar no la deja): espera el botón de Vale.
+    return { aprobacion: true, candidato: fila.estado === 'aprobado' || reintentable };
+  }
+  if (fila) return { aprobacion: false, candidato: false }; // enviado, descartado, omitido
+  return requiereAprobacion ? { aprobacion: true, candidato: false } : { aprobacion: false, candidato: true };
+}
+
+/** ¿Se descarta una fila por aprobar/aprobada que ya no está en el plan? (claves "clave|paso|referencia") */
+export function debeDescartar(f: { clave: string; paso: string; referencia: string; estado: string }, vigentes: ReadonlySet<string>): boolean {
+  return (f.paso === '3A' || f.paso === '1B') && (f.estado === 'por_aprobar' || f.estado === 'aprobado') && !vigentes.has(`${f.clave}|${f.paso}|${f.referencia}`);
 }

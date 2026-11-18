@@ -22,7 +22,7 @@ import { sendSeguimientoEmail, sendResumenSeguimientos, ADMIN_EMAIL_FALLBACK, ty
 import {
   pasoConsulta, pasoPaciente, cobroPendienteVencido, elegirCanal, enviadosRecientes, sePuedeReintentar, envioTrabado,
   enHorarioDeEnvio, fechaEnPalabras, primerNombre, mismoTelefono, normalizarCorreo, normalizarTelefono, diasEntre,
-  sumarDias, eventosDePersona, unirSesiones, segundoRequiereAprobacion, codigoDeAnuncio, MAX_INTENTOS, TOPE_MENSAJES,
+  sumarDias, eventosDePersona, unirSesiones, segundoRequiereAprobacion, codigoDeAnuncio, reservaVigente, decisionSegundo, debeDescartar, MAX_INTENTOS, TOPE_MENSAJES,
   type Canal, type Consulta, type EventoCalendario, type SesionPaciente,
 } from './reglas';
 import { textoWhatsapp, plantillaDe, variablesPlantilla, IDIOMA_PLANTILLAS, NOMBRE_PASO, type Paso, type DatosTexto } from './textos';
@@ -62,7 +62,7 @@ export type Aprobacion = {
   paso: '3A' | '1B'; envioId: number | null; clave: string; referencia: string; nombre: string; detalle: string;
   estado: string; motivo: string | null; intentos: number; texto: string; patientId?: string; personaId?: string;
 };
-export type FilaConsulta = Persona & { motivo: string };
+export type FilaConsulta = Persona & { motivo: string; tiene1B: boolean };
 export type FilaPaciente = { patientId: string; nombre: string; detalle: string; noEscribir: boolean };
 
 export type Plan = {
@@ -87,7 +87,9 @@ type ErrorDb = { code?: string; message?: string } | null;
 const tablaFalta = (e: ErrorDb) => !!e && (e.code === '42P01' || /does not exist|schema cache/i.test(e.message ?? ''));
 class TablaFalta extends Error {}
 
-/** Todas las filas de una consulta, de a 1000 (el tope de Supabase), en orden estable. Lanza si hay más de 20 000. */
+/** Todas las filas de una consulta, de a 1000 (el tope de Supabase), en orden estable. Lanza si hay más de 20 000.
+ *  Las tablas se ordenan por `id` (uuid o bigserial): no es cronológico, pero es único y no cambia,
+ *  que es lo que importa para que las páginas no se salten ni repitan filas. */
 async function todas<T>(armar: (desde: number, hasta: number) => PromiseLike<{ data: unknown[] | null; error: ErrorDb }>): Promise<T[]> {
   const out: T[] = [];
   for (let i = 0; i < MAX_PAGINAS; i++) {
@@ -97,6 +99,10 @@ async function todas<T>(armar: (desde: number, hasta: number) => PromiseLike<{ d
     out.push(...((data ?? []) as T[]));
     if ((data ?? []).length < PAGINA) return out;
   }
+  // Justo 20 000 filas está bien; solo si hay más se lanza.
+  const extra = await armar(MAX_PAGINAS * PAGINA, MAX_PAGINAS * PAGINA);
+  if (extra.error) throw new Error(extra.error.message);
+  if (!(extra.data ?? []).length) return out;
   throw new Error(`Demasiadas filas (más de ${MAX_PAGINAS * PAGINA}): no se revisa para no trabajar con datos incompletos`);
 }
 
@@ -170,7 +176,7 @@ export async function planSeguimientos(ahora = Date.now()): Promise<Plan> {
   const existe = (clave: string, paso: string, ref: string) => envios.find((e) => e.clave === clave && e.paso === paso && e.referencia === ref);
   // Un paso ya registrado solo vuelve a la lista si falló y le quedan intentos (nunca dos veces).
   const yaTomado = (clave: string, paso: string, ref: string) => { const f = existe(clave, paso, ref); return !!f && !sePuedeReintentar(f); };
-  const vigente = (b: Reserva) => b.status === 'confirmed' || esCobrable(b);
+  const vigente = (b: Reserva) => reservaVigente(b, esCobrable(b));
   const sesionDe = (b: Reserva): SesionPaciente => ({ session_date: b.session_date, vigente: vigente(b), no_show: b.no_show, payment_note: b.payment_note });
   // "No escribir": por ficha, o una consulta marcada con el mismo correo o teléfono (pasa a paciente al agendar).
   const bloqueada = (f: Ficha) => personas.some((p) => p.no_escribir && (p.patient_id === f.id
@@ -192,16 +198,17 @@ export async function planSeguimientos(ahora = Date.now()): Promise<Plan> {
     const clave = `consulta:${p.id}`;
     const d = pasoConsulta(p, enviosDe(clave).map((e) => ({ paso: e.paso, enviado_at: e.estado === 'enviado' ? e.enviado_at : null })), agendo, ahora);
     if (d.nuevoEstado && d.nuevoEstado !== p.estado) plan.cambiosEstado.push({ id: p.id, estado: d.nuevoEstado });
-    plan.consultas.push({ ...p, estado: d.nuevoEstado ?? p.estado, motivo: d.motivo });
+    plan.consultas.push({ ...p, estado: d.nuevoEstado ?? p.estado, motivo: d.motivo, tiene1B: !!existe(clave, '1B', '') });
     if (!d.paso) continue;
     const cand: Candidato = { clave, paso: d.paso, referencia: '', nombre: p.nombre ?? '', email: p.email, telefono: p.telefono, ultimoEntrante: p.ultimo_entrante_at, datos: { nombre: primerNombre(p.nombre) }, personaId: p.id };
-    const fila = existe(clave, d.paso, '');
-    if (d.paso === '1B' && segundoRequiereAprobacion(p)) {
-      // Por correo no se ve si respondió: el segundo espera la confirmación de Vale.
-      if (!fila || ['por_aprobar', 'aprobado', 'error'].includes(fila.estado)) {
-        plan.aprobaciones.push({ paso: '1B', envioId: fila?.id ?? null, clave, referencia: '', nombre: p.nombre ?? '', detalle: `Consulta por correo (${p.email}): ¿te respondió?`, estado: fila?.estado ?? 'nueva', motivo: fila?.motivo ?? null, intentos: fila?.intentos ?? 0, texto: textoWhatsapp('1B', cand.datos), personaId: p.id });
+    const fila = existe(clave, d.paso, '') ?? null;
+    if (d.paso === '1B') {
+      // Por correo no se ve si respondió: el segundo espera la confirmación de Vale (decisionSegundo).
+      const dec = decisionSegundo(segundoRequiereAprobacion(p), fila);
+      if (dec.aprobacion) {
+        plan.aprobaciones.push({ paso: '1B', envioId: fila?.id ?? null, clave, referencia: '', nombre: p.nombre ?? '', detalle: p.email ? `Consulta por correo (${p.email}): ¿te respondió?` : 'Segundo seguimiento', estado: fila?.estado ?? 'nueva', motivo: fila?.motivo ?? null, intentos: fila?.intentos ?? 0, texto: textoWhatsapp('1B', cand.datos), personaId: p.id });
       }
-      if (fila && (fila.estado === 'aprobado' || (fila.estado === 'error' && fila.intentos < MAX_INTENTOS))) plan.candidatos.push({ ...cand, envioId: fila.id });
+      if (dec.candidato) plan.candidatos.push(fila ? { ...cand, envioId: fila.id } : cand);
       continue;
     }
     if (!yaTomado(clave, d.paso, '')) plan.candidatos.push(cand);
@@ -254,7 +261,11 @@ export async function planSeguimientos(ahora = Date.now()): Promise<Plan> {
     const clave = `paciente:${f.id}`;
     const nombre = f.name ?? '';
     if (d.tipo === '2A') {
-      if (enVuelta(correo, f.phone) || hoyEnviado('4A', correo, f.phone)) continue; // 4A gana; y una sola vez por persona
+      // 4A gana; y una sola vez por persona: ni en esta vuelta, ni hoy, ni por la misma última sesión
+      // desde otra ficha con el mismo correo o teléfono.
+      if (enVuelta(correo, f.phone) || hoyEnviado('4A', correo, f.phone) || hoyEnviado('2A', correo, f.phone)) continue;
+      if (envios.some((e) => e.paso === '2A' && e.referencia === d.referencia && e.clave !== clave && ['enviado', 'en_curso'].includes(e.estado)
+        && ((!!normalizarCorreo(e.email) && normalizarCorreo(e.email) === correo) || (!!f.phone && mismoTelefono(e.telefono, f.phone))))) continue;
       yaEnEstaVuelta.push({ email: correo, tel: f.phone });
       plan.pacientes.push({ patientId: f.id, nombre, detalle: `Última sesión hace ${d.dias} días (suele venir cada ${d.intervalo})`, noEscribir: false });
       if (!yaTomado(clave, '2A', d.referencia)) {
@@ -336,7 +347,7 @@ export async function ejecutarSeguimientos(ahora = Date.now()): Promise<Resultad
   // Siempre (aunque el interruptor esté apagado): se descartan las aprobaciones que ya no corresponden
   // (agendó, respondió, "No escribir"…), así el aviso del panel cuenta lo real. Descartar nunca envía nada.
   const vigentes = new Set(plan.aprobaciones.map((a) => `${a.clave}|${a.paso}|${a.referencia}`));
-  for (const e of plan.envios.filter((x) => (x.paso === '3A' || x.paso === '1B') && ['por_aprobar', 'aprobado'].includes(x.estado) && !vigentes.has(`${x.clave}|${x.paso}|${x.referencia}`))) {
+  for (const e of plan.envios.filter((x) => debeDescartar(x, vigentes))) {
     const r = await supabase.from('seguimiento_envios').update({ estado: 'descartado', motivo: 'Ya no corresponde (agendó, respondió o cambió su situación)' }).eq('id', e.id).eq('estado', e.estado).select('id');
     if (r.data?.length) out.descartados++;
   }

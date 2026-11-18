@@ -1416,6 +1416,8 @@ export async function sendVitrinaAdminNotification(data: VitrinaEmailData & { cu
 // de ella), "Un abrazo," y su firma de Gmail + registro (regla del 19 oct). La versión de texto es
 // exactamente el texto aprobado. Las respuestas llegan a consulta@ (PATIENT_REPLY_TO).
 // Remitente propio de los seguimientos, sin abreviaturas (los demás correos siguen con FROM_NAME).
+// Va entre comillas por la coma (RFC 5322). La tilde de "Psicóloga" la codifica Resend al armar el
+// encabezado (RFC 2047); PENDIENTE verificar con un correo de prueba real que el remitente se vea bien.
 const FROM_SEGUIMIENTO = `"Valentina Orellana, Psicóloga" <${FROM_ADDR}>`;
 export async function sendSeguimientoEmail(paso: Paso, to: string, datos: DatosTexto, opts: { idempotencyKey?: string } = {}): Promise<{ sent: boolean; reason?: string }> {
   const client = getResend();
