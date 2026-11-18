@@ -28,17 +28,26 @@ const ESTADO_PLANTILLA: Record<string, string> = { APPROVED: 'Aprobada', PENDING
 const vuelta = '/admin/seguimientos';
 const candidatos = plan?.candidatos ?? [];
 const vistaPrevia = (paso: Paso, c: (typeof candidatos)[number]) => normalizarCorreo(c.email) ? correoTextoPlano(paso, c.datos) : textoWhatsapp(paso, c.datos);
-const registro = (plan?.envios ?? []).filter((e) => e.paso !== 'resumen' && e.estado !== 'por_aprobar').slice(0, 60);
+const registro = (plan?.envios ?? []).filter((e) => e.paso !== 'resumen' && e.estado !== 'por_aprobar').sort((a, b) => b.id - a.id).slice(0, 60);
+const btn = (accion: string, id: string | number, texto: string, clase: string) => ({ accion, id: String(id), texto, clase });
 ---
 
 <AdminLayout title="Seguimientos" current="/admin/seguimientos">
   <div class="p-6 max-w-5xl text-sm">
     <h1 class="text-xl font-semibold mb-1">Seguimientos automáticos</h1>
-    <p class="text-gray-600 mb-4">Mensajes cortos a consultas nuevas que no agendaron, pacientes sin próxima hora y sesiones pendientes de pago. Salen por correo cuando hay correo; si no, por WhatsApp. Solo de lunes a sábado, de 10:00 a 20:00, máximo 2 por persona, y se detienen si la persona agenda o responde. Las pacientes en pausa nunca reciben un mensaje sin tu aprobación.</p>
+    <p class="text-gray-600 mb-4">Mensajes cortos a consultas nuevas que no agendaron, pacientes sin próxima hora y sesiones pendientes de pago. Salen por correo cuando hay correo; si no, por WhatsApp. Solo de lunes a sábado, de 10:00 a 20:00 (nunca en feriados). A una consulta nueva le llegan como máximo dos mensajes (el primero y el segundo seguimiento); a una paciente, como máximo dos mensajes automáticos cada 30 días. Se detienen si la persona agenda o responde. Las pacientes en pausa, y el segundo mensaje a consultas que llegaron por correo, nunca salen sin tu aprobación.</p>
 
     {ok && <p class="mb-4 p-3 rounded bg-green-50 text-green-800">{ok}</p>}
     {error && <p class="mb-4 p-3 rounded bg-red-50 text-red-800">{error}</p>}
     {errorCarga && <p class="mb-4 p-3 rounded bg-red-50 text-red-800">No se pudo cargar la información: {errorCarga}</p>}
+    {plan?.listo && !plan.calendarioOk && <p class="mb-4 p-3 rounded bg-red-50 text-red-800">No se pudo leer tu Google Calendar (ahí están las sesiones de Encuadrado). Mientras no se pueda, no sale ningún seguimiento. Revisa la conexión en Configuración.</p>}
+    {(plan?.trabados.length ?? 0) > 0 && (
+      <div class="mb-4 p-3 rounded bg-yellow-50 text-yellow-900">
+        <p class="font-semibold">Revisar: no se sabe si salió</p>
+        <p>Estos envíos se cortaron a la mitad hace más de una hora. No se reintentan solos para no mandarlos dos veces; revisa en tu correo o WhatsApp si llegaron.</p>
+        <ul class="list-disc pl-5 mt-1">{plan!.trabados.map((e) => <li>{e.nombre || 'Sin nombre'} · {NOMBRE_PASO[e.paso as Paso] ?? e.paso} · {fecha(e.tomada_en)}</li>)}</ul>
+      </div>
+    )}
     {plan && !plan.listo && <p class="mb-4 p-3 rounded bg-yellow-50 text-yellow-900">Falta aplicar la actualización de la base de datos 0027. Mientras tanto no se envía nada.</p>}
 
     {plan?.listo && (
@@ -83,21 +92,31 @@ const registro = (plan?.envios ?? []).filter((e) => e.paso !== 'resumen' && e.es
       <button class="px-4 py-2 rounded bg-indigo-600 text-white">Guardar consulta nueva</button>
     </form>
 
-    {(plan?.pausas.length ?? 0) > 0 && (
+    {(plan?.aprobaciones.length ?? 0) > 0 && (
       <section class="mb-8">
-        <h2 class="font-semibold mb-2">Pacientes en pausa: por aprobar</h2>
-        <p class="text-gray-600 mb-2">Pasaron 30 días o más desde su última sesión y no tienen hora. Este mensaje solo sale si lo apruebas.</p>
+        <h2 class="font-semibold mb-2">Esperando tu aprobación</h2>
+        <p class="text-gray-600 mb-2">Pacientes con 30 días o más desde su última sesión y sin hora, y consultas por correo a las que tocaría el segundo mensaje (por correo no se ve si te respondieron). Estos mensajes solo salen si los apruebas.</p>
         <ul class="flex flex-col gap-2">
-          {plan!.pausas.map((p) => (
+          {plan!.aprobaciones.map((p) => (
             <li class="p-3 border rounded bg-white">
-              <p><strong>{p.nombre}</strong> · Última sesión el {fechaEnPalabras(p.ultima)} ({p.dias} días)</p>
+              <p><strong>{p.nombre || 'Sin nombre'}</strong> · {p.detalle}</p>
               <p class="text-gray-600 my-1">«{p.texto}»</p>
-              {p.estado === 'aprobado' ? <p class="text-green-700">Aprobado: sale en el próximo horario de envío.</p> : p.envioId ? (
-                <div class="flex gap-2">
-                  <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="pausa_aprobar" /><input type="hidden" name="id" value={p.envioId} /><input type="hidden" name="redirect" value={vuelta} /><button class="px-3 py-1 rounded bg-indigo-600 text-white">Aprobar y enviar</button></form>
-                  <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="pausa_descartar" /><input type="hidden" name="id" value={p.envioId} /><input type="hidden" name="redirect" value={vuelta} /><button class="px-3 py-1 rounded border">No enviar</button></form>
-                </div>
-              ) : <p class="text-gray-500">Se prepara en la próxima revisión automática (cada 5 minutos, con los seguimientos encendidos).</p>}
+              {p.estado === 'aprobado' && <p class="text-green-700">Aprobado: sale en el próximo horario de envío.</p>}
+              {p.estado === 'en_curso' && <p class="text-gray-600">Enviando…</p>}
+              {p.estado === 'error' && <p class="text-red-700">No se pudo enviar{p.motivo ? `: ${p.motivo}` : ''}. {p.intentos < 3 ? 'Se vuelve a intentar en el próximo horario de envío.' : 'Ya se intentó 3 veces: escríbele tú.'}</p>}
+              {p.estado === 'nueva' && <p class="text-gray-500">Se prepara en la próxima revisión automática (cada 5 minutos, con los seguimientos encendidos).</p>}
+              <div class="flex flex-wrap gap-2 mt-1">
+                {p.estado === 'por_aprobar' && p.envioId && [
+                  btn('aprobar', p.envioId, p.paso === '1B' ? 'No me respondió: enviar' : 'Aprobar y enviar', 'px-3 py-1 rounded bg-indigo-600 text-white'),
+                  btn('descartar', p.envioId, 'No enviar', 'px-3 py-1 rounded border'),
+                ].map((x) => (
+                  <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value={x.accion} /><input type="hidden" name="id" value={x.id} /><input type="hidden" name="redirect" value={vuelta} /><button class={x.clase}>{x.texto}</button></form>
+                ))}
+                {p.paso === '1B' && p.personaId && (
+                  <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="respondio" /><input type="hidden" name="id" value={p.personaId} /><input type="hidden" name="redirect" value={vuelta} /><button class="px-3 py-1 rounded border">Sí me respondió</button></form>
+                )}
+                <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value={p.patientId ? 'paciente_no_escribir' : 'no_escribir'} /><input type="hidden" name="id" value={p.patientId ?? p.personaId ?? ''} /><input type="hidden" name="redirect" value={vuelta} /><button class="px-3 py-1 rounded border text-red-700">No escribir</button></form>
+              </div>
             </li>
           ))}
         </ul>
@@ -141,6 +160,9 @@ const registro = (plan?.envios ?? []).filter((e) => e.paso !== 'resumen' && e.es
                   )}
                   {p.estado === 'activa' && !p.no_escribir && (
                     <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="respondio" /><input type="hidden" name="id" value={p.id} /><input type="hidden" name="redirect" value={vuelta} /><button class="underline text-gray-600">Me respondió</button></form>
+                  )}
+                  {p.estado === 'activa' && !p.no_escribir && p.email && !p.segundo_aprobado && (
+                    <form method="POST" action="/api/admin/seguimientos"><input type="hidden" name="accion" value="segundo_aprobado" /><input type="hidden" name="id" value={p.id} /><input type="hidden" name="redirect" value={vuelta} /><button class="underline text-gray-600">No me respondió: enviar el segundo cuando toque</button></form>
                   )}
                 </div>
               </td>

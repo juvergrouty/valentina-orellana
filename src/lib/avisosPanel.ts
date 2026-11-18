@@ -14,11 +14,11 @@ import { cobrosProximos, type CobroProximo } from './cobrosProximos';
 import { contarCorreosFallidos } from './correosAutomaticos';
 import { avisosPagosPorDevolver, type PagoPorDevolver } from './pagosPorDevolver';
 
-// Seguimientos (18 nov 2026, ver src/lib/seguimientos/): pacientes en pausa con el mensaje listo,
-// esperando que Valentina lo apruebe. 0 si la migración 0027 aún no está aplicada.
+// Seguimientos (18 nov 2026, ver src/lib/seguimientos/): mensajes listos esperando que Valentina los
+// apruebe (pacientes en pausa y segundos mensajes a consultas por correo). 0 sin la migración 0027.
 async function contarPausasPorAprobar(): Promise<number> {
   const { count, error } = await supabase.from('seguimiento_envios').select('id', { count: 'exact', head: true })
-    .eq('paso', '3A').eq('estado', 'por_aprobar');
+    .in('paso', ['3A', '1B']).eq('estado', 'por_aprobar');
   return error ? 0 : count ?? 0;
 }
 
@@ -142,7 +142,7 @@ export type AvisosPanel = {
   // Sesiones pagadas que se anularon o vencieron, hasta "Resuelto" (19 oct 2026).
   // null = no se pudo revisar (el panel lo dice en vez de callar).
   pagosPorDevolver: PagoPorDevolver[] | null;
-  // Pacientes en pausa con el mensaje de seguimiento por aprobar (18 nov 2026).
+  // Mensajes de seguimiento por aprobar (18 nov 2026).
   pausasPorAprobar: number;
 };
 

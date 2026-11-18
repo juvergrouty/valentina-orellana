@@ -30,6 +30,9 @@ create table if not exists public.seguimiento_personas (
   -- ella indico al marcarla "Consulta nueva". La secuencia 1 parte SOLO despues de esto.
   ultima_respuesta_vale_at  timestamptz,
   no_escribir               boolean not null default false,
+  -- Consulta por correo: Vale ya confirmo "No respondio: enviar el segundo" (si no, el 1B espera su aprobacion,
+  -- porque las respuestas por correo no se detectan solas).
+  segundo_aprobado          boolean not null default false,
   estado                    text not null default 'activa'
                             check (estado in ('activa', 'agendo', 'respondio', 'no_siguio', 'no_escribir')),
   creado_at                 timestamptz not null default now(),
@@ -44,6 +47,7 @@ create unique index if not exists seguimiento_personas_paciente on public.seguim
 -- de enviar (estado en_curso) y se cierra despues (enviado / error).
 --  clave:      'consulta:<id>' | 'paciente:<patient_id>' | 'resumen'
 --  paso:       '1A' | '1B' | '2A' | '3A' | '4A' | 'resumen'
+--  estado por_aprobar/aprobado: 3A (pausa) y 1B de consultas por correo, que esperan a Vale.
 --  referencia: '' (1A/1B), fecha de la ultima sesion (2A/3A), id de la reserva (4A), fecha (resumen)
 create table if not exists public.seguimiento_envios (
   id           bigserial primary key,
@@ -66,6 +70,9 @@ create table if not exists public.seguimiento_envios (
 );
 create index if not exists seguimiento_envios_enviados on public.seguimiento_envios (enviado_at) where estado = 'enviado';
 create index if not exists seguimiento_envios_estado on public.seguimiento_envios (estado);
+
+-- Por si una version anterior de esta migracion ya se aplico en otra base (idempotente).
+alter table public.seguimiento_personas add column if not exists segundo_aprobado boolean not null default false;
 
 alter table public.seguimiento_personas enable row level security;
 alter table public.seguimiento_envios enable row level security;

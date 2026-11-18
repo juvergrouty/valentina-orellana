@@ -4,7 +4,7 @@ import { rutaInterna } from '../../../lib/rutaInterna';
 import { logInfo } from '../../../lib/logger';
 import { createMessageTemplate, suscribirAppAWhatsapp, estadoPlantillas } from '../../../lib/whatsapp';
 import { PLANTILLAS, IDIOMA_PLANTILLAS } from '../../../lib/seguimientos/textos';
-import { normalizarCorreo, normalizarTelefono } from '../../../lib/seguimientos/reglas';
+import { normalizarCorreo, normalizarTelefono, mediodiaChile } from '../../../lib/seguimientos/reglas';
 
 export const prerender = false;
 
@@ -40,17 +40,18 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       if (!nombre) return volver('Falta el nombre.', false);
       if (!email && !telefono) return volver('Falta el correo o el teléfono.', false);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return volver('Falta la fecha en que le respondiste.', false);
-      // Mediodía de Chile de ese día: el primer seguimiento sale 3 días después.
-      const respondida = new Date(`${fecha}T12:00:00-03:00`).toISOString();
+      // Mediodía de Chile de ese día (con su horario de verano): el primer seguimiento sale 3 días después.
+      const respondida = mediodiaChile(fecha);
       // Los correos se guardan siempre en minúsculas (normalizarCorreo).
-      const porCorreo = email ? await supabase.from('seguimiento_personas').select('id').eq('email', email).limit(1).maybeSingle() : null;
-      const porTelefono = !porCorreo?.data && telefono ? await supabase.from('seguimiento_personas').select('id').eq('telefono', telefono).limit(1).maybeSingle() : null;
+      const porCorreo = email ? await supabase.from('seguimiento_personas').select('id, no_escribir').eq('email', email).limit(1).maybeSingle() : null;
+      const porTelefono = !porCorreo?.data && telefono ? await supabase.from('seguimiento_personas').select('id, no_escribir').eq('telefono', telefono).limit(1).maybeSingle() : null;
       if (porCorreo?.error || porTelefono?.error) return volver('No se pudo guardar. ¿Falta aplicar la migración 0027?', false);
       const ya = porCorreo?.data ?? porTelefono?.data ?? null;
-      const datos = { tipo: 'consulta', nombre, email, telefono, ultima_respuesta_vale_at: respondida, no_escribir: false, estado: 'activa', actualizado_at: ahora };
+      const datos = { tipo: 'consulta', nombre, email, telefono, ultima_respuesta_vale_at: respondida, actualizado_at: ahora };
+      // Volver a marcarla NO quita un "No escribir" que ya tenía.
       const { error } = ya
-        ? await supabase.from('seguimiento_personas').update(datos).eq('id', ya.id)
-        : await supabase.from('seguimiento_personas').insert({ ...datos, origen: 'manual' });
+        ? await supabase.from('seguimiento_personas').update(ya.no_escribir ? datos : { ...datos, estado: 'activa' }).eq('id', ya.id)
+        : await supabase.from('seguimiento_personas').insert({ ...datos, origen: 'manual', no_escribir: false, estado: 'activa' });
       if (error) return volver('No se pudo guardar la consulta nueva.', false);
       return volver(`Listo: ${nombre} quedó como consulta nueva.`);
     }
@@ -84,17 +85,28 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       return volver('Listo: no se le escribirá.');
     }
 
-    case 'pausa_aprobar':
-    case 'pausa_descartar': {
+    // Mensajes que esperan a Vale: 3A (pausa) y 1B de consultas por correo.
+    case 'aprobar':
+    case 'descartar': {
       const envioId = Number(id);
       if (!Number.isInteger(envioId) || envioId <= 0) return volver('Aviso no válido.', false);
       const { data, error } = await supabase.from('seguimiento_envios')
-        .update({ estado: accion === 'pausa_aprobar' ? 'aprobado' : 'descartado', motivo: accion === 'pausa_aprobar' ? 'Aprobado por Valentina' : 'Descartado por Valentina' })
-        .eq('id', envioId).eq('paso', '3A').eq('estado', 'por_aprobar').select('id');
+        .update({ estado: accion === 'aprobar' ? 'aprobado' : 'descartado', motivo: accion === 'aprobar' ? 'Aprobado por Valentina' : 'Descartado por Valentina' })
+        .eq('id', envioId).in('paso', ['3A', '1B']).eq('estado', 'por_aprobar').select('id');
       if (error || !data?.length) return volver('Ese aviso ya no está pendiente.', false);
-      return volver(accion === 'pausa_aprobar'
+      return volver(accion === 'aprobar'
         ? 'Aprobado: el mensaje sale en el próximo horario de envío (lunes a sábado, de 10:00 a 20:00).'
         : 'Listo: no se le enviará el mensaje.');
+    }
+
+    // Consulta por correo: "No respondió: enviar el segundo" (el 1B sale solo cuando toque).
+    case 'segundo_aprobado': {
+      if (!UUID.test(id)) return volver('Persona no válida.', false);
+      const { error } = await supabase.from('seguimiento_personas').update({ segundo_aprobado: true, actualizado_at: ahora }).eq('id', id);
+      if (error) return volver('No se pudo guardar el cambio.', false);
+      await supabase.from('seguimiento_envios').update({ estado: 'aprobado', motivo: 'Aprobado por Valentina' })
+        .eq('clave', `consulta:${id}`).eq('paso', '1B').eq('estado', 'por_aprobar');
+      return volver('Listo: el segundo mensaje sale cuando corresponda.');
     }
 
     case 'crear_plantillas': {

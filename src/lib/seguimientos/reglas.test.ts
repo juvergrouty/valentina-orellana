@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import {
   fechaEnPalabras, sumarDias, diasEntre, enHorarioDeEnvio, primerNombre, normalizarTelefono, mismoTelefono,
   detectarCodigo, intervaloHabitual, pasoConsulta, pasoPaciente, cobroPendienteVencido, elegirCanal,
-  enviadosRecientes, sePuedeReintentar, DIA_MS, type Consulta,
+  enviadosRecientes, sePuedeReintentar, DIA_MS, codigoDeAnuncio, mediodiaChile, unirSesiones, eventosDePersona,
+  segundoRequiereAprobacion, envioTrabado, type Consulta,
 } from './reglas';
 import { textoWhatsapp, correoTextoPlano, PLANTILLAS, variablesPlantilla } from './textos';
 
@@ -38,9 +39,15 @@ test('nombres, teléfonos y código del sitio', () => {
   assert.equal(mismoTelefono('56912345678', '9 1234 5678'), true);
   assert.equal(mismoTelefono('56912345678', '56912345679'), false);
   assert.equal(detectarCodigo('Hola Valentina, me gustaría saber más. (código G-7K3Q)'), 'G-7K3Q');
-  assert.equal(detectarCodigo('codigo m7k3q'), 'M-7K3Q');
+  assert.equal(detectarCodigo('codigo m7k3q'), null);           // solo el formato exacto del sitio
+  assert.equal(detectarCodigo('Leí el código penal'), null);    // antes daba P-ENAL
+  assert.equal(detectarCodigo('(código G-7K3O)'), null);        // la O no existe en el alfabeto del sitio
+  assert.equal(detectarCodigo('(código Z-7K3Q)'), null);        // letra de canal inexistente
   assert.equal(detectarCodigo('Hola, soy tu prima'), null);
-  assert.equal(detectarCodigo('código G-7K3O'), null); // la O no existe en el alfabeto del sitio
+  // Solo un anuncio pagado crea consulta: G (Google Ads). Orgánico, directo, redes, etc., no.
+  assert.equal(codigoDeAnuncio('G-7K3Q'), true);
+  for (const l of ['S', 'X', 'O', 'P', 'D', 'I', 'M']) assert.equal(codigoDeAnuncio(`${l}-7K3Q`), false, l);
+  assert.equal(codigoDeAnuncio(null), false);
 });
 
 test('intervalo habitual entre sesiones', () => {
@@ -87,7 +94,7 @@ test('1A con error anterior (sin enviado_at) se puede reintentar', () => {
 });
 
 // ─── Secuencias 2 y 3 ───
-const s = (session_date: string, extra: Record<string, unknown> = {}) => ({ session_date, status: 'confirmed', ...extra });
+const s = (session_date: string, extra: Record<string, unknown> = {}) => ({ session_date, vigente: true, ...extra });
 
 test('2A: intervalo habitual + 3 días, sin próxima hora', () => {
   const ses = [s('2026-10-20'), s('2026-10-27'), s('2026-11-03')]; // cada 7
@@ -96,7 +103,7 @@ test('2A: intervalo habitual + 3 días, sin próxima hora', () => {
   assert.equal(d.tipo, '2A');
   assert.equal(d.tipo && d.referencia, '2026-11-03');
   assert.equal(pasoPaciente([...ses, s('2026-11-20')], '2026-11-13').tipo, null); // tiene próxima hora
-  assert.equal(pasoPaciente([...ses, s('2026-11-20', { status: 'cancelled' })], '2026-11-13').tipo, '2A');
+  assert.equal(pasoPaciente([...ses, s('2026-11-20', { vigente: false })], '2026-11-13').tipo, '2A'); // reserva web abandonada
   assert.equal(pasoPaciente([s('2026-11-03')], '2026-11-13').tipo, '2A'); // una sola sesión: 7 + 3
 });
 
@@ -108,22 +115,43 @@ test('3A: 30 días o más; nunca Sin costo ni inasistencias como última sesión
   assert.equal(d.tipo && d.ultima, '2026-10-01');
 });
 
+test('Encuadrado: la próxima hora o la última sesión en Google Calendar cuentan (una por día)', () => {
+  const ses = [s('2026-10-20'), s('2026-10-27'), s('2026-11-03')];
+  const ev = (fecha: string, nombre = 'Ana Pérez', correos: string[] = []) => ({ fecha, nombre, correos });
+  // Próxima hora solo en Encuadrado: no hay 2A.
+  assert.equal(pasoPaciente(unirSesiones(ses, [ev('2026-11-20')]), '2026-11-13').tipo, null);
+  // Última sesión solo en Encuadrado: no hay 3A falso.
+  assert.equal(pasoPaciente(unirSesiones([s('2026-10-01')], [ev('2026-11-10')]), '2026-11-13').tipo, null);
+  // Página + Encuadrado el mismo día: una sola sesión (no cambia el intervalo).
+  assert.equal(unirSesiones([s('2026-11-03')], [ev('2026-11-03')]).length, 1);
+  // Calce por correo de invitado o por nombre (mismo primer nombre y un apellido en común).
+  const lista = [ev('2026-11-20', 'Ana María Pérez Soto'), ev('2026-11-21', 'Pedro Rojas', ['ana@correo.cl']), ev('2026-11-22', 'Ana Contreras')];
+  assert.deepEqual(eventosDePersona(lista, { nombre: 'Ana Pérez', email: null }).map((e) => e.fecha), ['2026-11-20']);
+  assert.deepEqual(eventosDePersona(lista, { nombre: null, email: 'ANA@correo.cl' }).map((e) => e.fecha), ['2026-11-21']);
+});
+
+test('pendiente de pago (cobrable) cuenta como sesión realizada: no 3A falso', () => {
+  // Agendada por el panel, sin pagar (pending_payment cobrable → vigente) hace 5 días.
+  assert.equal(pasoPaciente([s('2026-10-01'), s('2026-11-08')], '2026-11-13').tipo, null);
+});
+
 // ─── Secuencia 4 ───
 test('4A: sin pagar, 2 a 7 días después, sin Sin costo, transferencias ni pago en consulta', () => {
   const b = { session_date: '2026-11-16', status: 'confirmed', amount: 45000, paid_at: null, notes: '' };
-  assert.equal(cobroPendienteVencido(b, '2026-11-17'), false);
-  assert.equal(cobroPendienteVencido(b, '2026-11-18'), true);
-  assert.equal(cobroPendienteVencido(b, '2026-11-23'), true);
-  assert.equal(cobroPendienteVencido(b, '2026-11-24'), false);
-  assert.equal(cobroPendienteVencido({ ...b, paid_at: '2026-11-16T12:00:00Z' }, '2026-11-18'), false);
-  assert.equal(cobroPendienteVencido({ ...b, payment_note: 'Sin costo' }, '2026-11-18'), false);
-  assert.equal(cobroPendienteVencido({ ...b, amount: 0 }, '2026-11-18'), false);
-  assert.equal(cobroPendienteVencido({ ...b, debt_voided: true }, '2026-11-18'), false);
-  assert.equal(cobroPendienteVencido({ ...b, notes: 'ComprobanteTransferencia 2026-11-16T10:00 x.pdf' }, '2026-11-18'), false);
-  assert.equal(cobroPendienteVencido({ ...b, notes: 'TransferenciaPorRevisar 2026-11-16' }, '2026-11-18'), false);
-  assert.equal(cobroPendienteVencido({ ...b, notes: 'PagoEnConsulta', payment_method: 'manual' }, '2026-11-18'), false);
-  assert.equal(cobroPendienteVencido({ ...b, status: 'cancelled' }, '2026-11-18'), false);
-  assert.equal(cobroPendienteVencido({ ...b, session_date: '2099-12-31' }, '2026-11-18'), false);
+  assert.equal(cobroPendienteVencido(b, '2026-11-18', false), false); // no cobrable (p. ej. reserva web abandonada)
+  assert.equal(cobroPendienteVencido(b, '2026-11-17', true), false);
+  assert.equal(cobroPendienteVencido(b, '2026-11-18', true), true);
+  assert.equal(cobroPendienteVencido(b, '2026-11-23', true), true);
+  assert.equal(cobroPendienteVencido(b, '2026-11-24', true), false);
+  assert.equal(cobroPendienteVencido({ ...b, paid_at: '2026-11-16T12:00:00Z' }, '2026-11-18', true), false);
+  assert.equal(cobroPendienteVencido({ ...b, payment_note: 'Sin costo' }, '2026-11-18', true), false);
+  assert.equal(cobroPendienteVencido({ ...b, amount: 0 }, '2026-11-18', true), false);
+  assert.equal(cobroPendienteVencido({ ...b, debt_voided: true }, '2026-11-18', true), false);
+  assert.equal(cobroPendienteVencido({ ...b, notes: 'ComprobanteTransferencia 2026-11-16T10:00 x.pdf' }, '2026-11-18', true), false);
+  assert.equal(cobroPendienteVencido({ ...b, notes: 'TransferenciaPorRevisar 2026-11-16' }, '2026-11-18', true), false);
+  assert.equal(cobroPendienteVencido({ ...b, notes: 'PagoEnConsulta', payment_method: 'manual' }, '2026-11-18', true), false);
+  assert.equal(cobroPendienteVencido({ ...b, status: 'cancelled' }, '2026-11-18', true), false);
+  assert.equal(cobroPendienteVencido({ ...b, session_date: '2099-12-31' }, '2026-11-18', true), false);
 });
 
 // ─── Canal, tope e idempotencia ───
@@ -179,4 +207,22 @@ test('plantillas: Meta no acepta variables al inicio ni al final; cantidad de va
     assert.equal(variablesPlantilla(p.paso, { nombre: 'Ana', fecha: 'x', enlace: 'y' }).length, n);
     assert.match(p.nombre, /^[a-z0-9_]+$/);
   }
+});
+
+test('mediodía de Chile según el horario vigente', () => {
+  assert.equal(mediodiaChile('2026-11-18'), '2026-11-18T15:00:00.000Z'); // verano (UTC-3)
+  assert.equal(mediodiaChile('2026-07-15'), '2026-07-15T16:00:00.000Z'); // invierno (UTC-4)
+});
+
+test('1B por correo espera aprobación salvo que Vale ya lo confirmó; WhatsApp no', () => {
+  assert.equal(segundoRequiereAprobacion({ email: 'a@b.cl' }), true);
+  assert.equal(segundoRequiereAprobacion({ email: 'a@b.cl', segundo_aprobado: true }), false);
+  assert.equal(segundoRequiereAprobacion({ email: null }), false);
+});
+
+test('envío trabado: en curso hace más de 1 hora', () => {
+  const ahora = Date.parse('2026-11-18T15:00:00Z');
+  assert.equal(envioTrabado({ estado: 'en_curso', tomada_en: '2026-11-18T13:30:00Z' }, ahora), true);
+  assert.equal(envioTrabado({ estado: 'en_curso', tomada_en: '2026-11-18T14:30:00Z' }, ahora), false);
+  assert.equal(envioTrabado({ estado: 'error', tomada_en: '2026-11-18T10:00:00Z' }, ahora), false);
 });

@@ -886,10 +886,10 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
       </div>
     )}
     <AlertasTranscriptor />
-    {/* Seguimientos (18 nov 2026): pacientes en pausa con el mensaje listo; nunca sale sin su aprobación. */}
+    {/* Seguimientos (18 nov 2026): mensajes listos que nunca salen sin su aprobación. */}
     {(pausasPorAprobar ?? 0) > 0 && current !== '/admin/seguimientos' && (
       <div role="status" style="background:#576352;color:#fff;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
-        💬 {pausasPorAprobar === 1 ? 'Hay 1 paciente en pausa' : `Hay ${pausasPorAprobar} pacientes en pausa`} con el mensaje de seguimiento listo para tu aprobación.{' '}
+        💬 {pausasPorAprobar === 1 ? 'Hay 1 mensaje de seguimiento esperando tu aprobación.' : `Hay ${pausasPorAprobar} mensajes de seguimiento esperando tu aprobación.`}{' '}
         <a href="/admin/seguimientos" style="color:#fff;text-decoration:underline;">Revisar y aprobar</a>
       </div>
     )}

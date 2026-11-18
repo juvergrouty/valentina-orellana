@@ -12,6 +12,8 @@
 // - Solo de lunes a sábado, de 10:00 a 20:00 (hora de Chile), y nunca en feriados.
 // - Máximo 2 mensajes automáticos por persona (ver TOPE_MENSAJES).
 
+import { mismaPersona } from '../mismaPersona';
+
 export const DIA_MS = 24 * 60 * 60 * 1000;
 export const HORA_MS = 60 * 60 * 1000;
 
@@ -30,6 +32,7 @@ export const TOPE_VENTANA_DIAS = 30;
 export const VENTANA_SERVICIO_MS = 24 * HORA_MS; // ventana de 24 horas de WhatsApp para texto libre
 export const MAX_INTENTOS = 3;
 export const EN_CURSO_MS = 10 * 60 * 1000;
+export const TRABADO_MS = 60 * 60 * 1000; // "en curso" por más de 1 hora: no se sabe si salió (no se reintenta)
 
 const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -91,10 +94,31 @@ export function normalizarCorreo(e: string | null | undefined): string | null {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c) ? c : null;
 }
 
-/** Código de seguimiento del sitio dentro de un mensaje: "(código G-7K3Q)" → "G-7K3Q". */
+/** Código de seguimiento del sitio, exactamente como lo arma BaseLayout: "(código G-7K3Q)", con su
+ *  alfabeto (sin I, O, 0 ni 1). Cualquier otra cosa ("código penal") no cuenta. */
 export function detectarCodigo(texto: string | null | undefined): string | null {
-  const m = String(texto ?? '').match(/c[oó]digo\s+([A-Z])-?([A-HJ-NP-Z2-9]{4})\b/i);
-  return m ? `${m[1].toUpperCase()}-${m[2].toUpperCase()}` : null;
+  const m = String(texto ?? '').match(/\(código ([GSIMPDOX]-[A-HJ-NP-Z2-9]{4})\)/);
+  return m ? m[1] : null;
+}
+
+/** Letras del código que vienen de un anuncio PAGADO (BaseLayout.astro, función letra()):
+ *  - G: Google Ads (gclid / gbraid / wbraid, o utm_source=google con medium cpc/ppc/paid).
+ *  Las demás NO son anuncio seguro y no crean consulta: S Google orgánico, X directo, O otro,
+ *  P Psychology Today, D Doctoralia, e I / M, que salen de utm_source o del referrer de Instagram o
+ *  Facebook y por eso también marcan visitas orgánicas desde esas redes. Los anuncios de Meta con
+ *  botón de WhatsApp llegan con `referral`, que sí crea la consulta. */
+export const LETRAS_ANUNCIO = new Set(['G']);
+export const codigoDeAnuncio = (codigo: string | null | undefined) => !!codigo && LETRAS_ANUNCIO.has(codigo.charAt(0));
+
+/** Instante (ISO) del mediodía de Chile de una fecha YYYY-MM-DD, con el horario de verano que rija ese día. */
+export function mediodiaChile(fecha: string): string {
+  const [y, m, d] = fecha.split('-').map(Number);
+  for (const desfase of [3, 4]) {
+    const t = Date.UTC(y, m - 1, d, 12 + desfase);
+    const h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Santiago', hour: '2-digit', hour12: false }).format(new Date(t)));
+    if (h === 12) return new Date(t).toISOString();
+  }
+  return new Date(Date.UTC(y, m - 1, d, 15)).toISOString();
 }
 
 /**
@@ -155,7 +179,10 @@ export function pasoConsulta(c: Consulta, envios: EnvioHecho[], agendo: boolean,
 
 export type SesionPaciente = {
   session_date: string;
-  status: string;
+  // La hora existe de verdad: confirmada, o sin pagar pero cobrable (debt.ts esCobrable: agendada por el
+  // panel con link enviado, o reserva web dentro de sus 30 min). Los eventos de Google Calendar
+  // (Encuadrado o página) cuentan como vigentes. Una reserva web abandonada no.
+  vigente: boolean;
   no_show?: boolean | null;
   payment_note?: string | null;
 };
@@ -166,11 +193,9 @@ export type DecisionPaciente =
 
 /** Qué le corresponde a una paciente activa según sus sesiones. `hoy` en hora de Chile. */
 export function pasoPaciente(sesiones: SesionPaciente[], hoy: string): DecisionPaciente {
-  const vigentes = sesiones.filter((s) => s.session_date !== '2099-12-31' && s.status !== 'cancelled' && s.status !== 'expired');
-  if (vigentes.some((s) => s.session_date >= hoy && (s.status === 'confirmed' || s.status === 'pending_payment'))) {
-    return { tipo: null, motivo: 'Tiene una próxima hora' };
-  }
-  const pasadas = vigentes.filter((s) => s.status === 'confirmed' && s.no_show !== true && s.session_date < hoy)
+  const vigentes = sesiones.filter((s) => s.session_date !== '2099-12-31' && s.vigente);
+  if (vigentes.some((s) => s.session_date >= hoy)) return { tipo: null, motivo: 'Tiene una próxima hora' };
+  const pasadas = vigentes.filter((s) => s.no_show !== true && s.session_date < hoy)
     .sort((a, b) => a.session_date.localeCompare(b.session_date));
   if (!pasadas.length) return { tipo: null, motivo: 'Sin sesiones pasadas' };
   const ultima = pasadas[pasadas.length - 1];
@@ -196,9 +221,10 @@ export type ReservaCobro = {
   payment_method?: string | null;
 };
 
-/** ¿Corresponde el aviso de pago pendiente (2 a 7 días después de la sesión)? */
-export function cobroPendienteVencido(b: ReservaCobro, hoy: string): boolean {
-  if (b.session_date === '2099-12-31') return false;
+/** ¿Corresponde el aviso de pago pendiente (2 a 7 días después de la sesión)? `cobrable` es
+ *  esCobrable(b) de debt.ts (la misma regla de /pagar): una reserva web abandonada nunca cobra. */
+export function cobroPendienteVencido(b: ReservaCobro, hoy: string, cobrable: boolean): boolean {
+  if (!cobrable || b.session_date === '2099-12-31') return false;
   if (b.paid_at || b.debt_voided === true || !((b.amount ?? 0) > 0)) return false;
   if (b.payment_note === 'Sin costo' || b.no_show === true) return false;
   // Solo horas ya confirmadas (o agendadas por el panel y aún sin pagar: status pending_payment).
@@ -252,4 +278,41 @@ export type FilaEnvio = { estado: string; intentos: number; tomada_en: string | 
 export function sePuedeReintentar(f: FilaEnvio): boolean {
   if (f.estado === 'aprobado') return true;
   return f.estado === 'error' && f.intentos < MAX_INTENTOS;
+}
+
+/** Fila "en curso" hace más de 1 hora: se cortó a medio enviar. Se muestra para revisar a mano. */
+export function envioTrabado(f: { estado: string; tomada_en: string | null }, ahora: number): boolean {
+  return f.estado === 'en_curso' && Number.isFinite(ms(f.tomada_en)) && ahora - ms(f.tomada_en) > TRABADO_MS;
+}
+
+// ─── Google Calendar (sesiones de Encuadrado y de la página) ────────────────
+// Las sesiones agendadas en Encuadrado solo están en Google Calendar, no en `bookings` (igual que en
+// el Inicio, boxCala.ts y cobrosProximos.ts). Una sesión puede tener evento de la página y de
+// Encuadrado (intencional): se cuenta una por persona y día.
+
+export type EventoCalendario = { fecha: string; nombre: string; correos: string[] };
+
+/** Eventos de una persona: por correo de invitado, o por nombre (mismaPersona). Ante la duda calza:
+ *  un calce de más solo hace que NO se escriba (dirección segura). */
+export function eventosDePersona(eventos: EventoCalendario[], p: { nombre: string | null; email: string | null }): EventoCalendario[] {
+  const correo = normalizarCorreo(p.email);
+  return eventos.filter((e) => (!!correo && e.correos.includes(correo)) || (!!p.nombre && !!e.nombre && mismaPersona(e.nombre, p.nombre)));
+}
+
+/** Reservas + eventos del calendario, sin repetir el mismo día. */
+export function unirSesiones(reservas: SesionPaciente[], eventos: EventoCalendario[]): SesionPaciente[] {
+  const dias = new Set(reservas.filter((r) => r.vigente).map((r) => r.session_date));
+  const extra: SesionPaciente[] = [];
+  for (const e of eventos) {
+    if (dias.has(e.fecha)) continue;
+    dias.add(e.fecha);
+    extra.push({ session_date: e.fecha, vigente: true });
+  }
+  return [...reservas, ...extra];
+}
+
+/** Consulta nueva por correo: el 1B espera la confirmación de Vale (las respuestas por correo no se
+ *  detectan solas), salvo que ella ya haya marcado "No respondió: enviar el segundo". */
+export function segundoRequiereAprobacion(p: { email: string | null; segundo_aprobado?: boolean | null }): boolean {
+  return !!normalizarCorreo(p.email) && p.segundo_aprobado !== true;
 }
