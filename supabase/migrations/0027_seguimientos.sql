@@ -85,6 +85,12 @@ grant usage, select on sequence public.seguimiento_envios_id_seq to service_role
 -- Interruptor general (apagado hasta que Vale lo encienda en /admin/seguimientos).
 insert into public.settings (key, value) values ('seguimientos_activos', 'false') on conflict (key) do nothing;
 
+-- Clave de verificacion del webhook de WhatsApp en Meta, generada aqui al azar (nadie la escribe a mano).
+-- /admin/seguimientos la muestra para copiarla en Meta. La variable WHATSAPP_WEBHOOK_VERIFY_TOKEN, si existe, manda.
+insert into public.settings (key, value)
+values ('whatsapp_webhook_verify_token', replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', ''))
+on conflict (key) do nothing;
+
 -- DESPUES de aplicar esta migracion: agregar la llamada a /api/cron/seguimientos al job de pg_cron
 -- existente 'tareas-cada-5-min' (su comando vive solo en la base; ver docs/transcriptor/70-cron.md),
 -- o crear un job propio con la misma forma:

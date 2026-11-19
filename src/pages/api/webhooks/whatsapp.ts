@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { timingSafeEqual } from 'node:crypto';
-import { secreto } from '../../../lib/secretos';
+import { claveVerificacionWebhook } from '../../../lib/seguimientos/claveWebhook';
 import { logError } from '../../../lib/logger';
 import { firmaWhatsappValida, leerEventosWhatsapp } from '../../../lib/seguimientos/webhookWhatsapp';
 import { registrarEventosWhatsapp } from '../../../lib/seguimientos/motor';
@@ -9,7 +9,8 @@ export const prerender = false;
 
 // Aviso (webhook) de WhatsApp Cloud API para los seguimientos automáticos (18 nov 2026).
 // En el App Dashboard de Meta: URL https://www.valentinaorellana.cl/api/webhooks/whatsapp, clave de
-// verificación = WHATSAPP_WEBHOOK_VERIFY_TOKEN, campos "messages" y "smb_message_echoes".
+// verificación = la que muestra /admin/seguimientos (WHATSAPP_WEBHOOK_VERIFY_TOKEN o, si no está, la
+// que generó la base en settings.whatsapp_webhook_verify_token, migración 0027), campos "messages" y "smb_message_echoes".
 // - GET: verificación de Meta (hub.mode=subscribe, hub.verify_token, hub.challenge).
 // - POST: firma X-Hub-Signature-256 (HMAC-SHA256 del cuerpo con el secreto de la app, META_APP_SECRET,
 //   la misma app de /admin/whatsapp-conectar). Falla cerrado: sin secreto o con firma inválida, 503/401.
@@ -19,7 +20,7 @@ export const prerender = false;
 const igual = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 
 export const GET: APIRoute = async ({ url }) => {
-  const clave = secreto('WHATSAPP_WEBHOOK_VERIFY_TOKEN');
+  const clave = await claveVerificacionWebhook();
   const modo = url.searchParams.get('hub.mode');
   const dada = url.searchParams.get('hub.verify_token') ?? '';
   const desafio = url.searchParams.get('hub.challenge') ?? '';
