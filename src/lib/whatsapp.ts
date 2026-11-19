@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { logError } from './logger';
+import { claveVerificacionWebhook } from './seguimientos/claveWebhook';
 
 export interface WhatsappCfg {
   accessToken:   string;
@@ -207,18 +208,55 @@ export async function estadoPlantillas(): Promise<Map<string, string> | null> {
 
 // Suscribe la app del sitio a la cuenta de WhatsApp Business de Vale: sin esto Meta no manda los
 // avisos (webhooks) de mensajes entrantes ni de sus respuestas desde la app (smb_message_echoes).
+export const URL_WEBHOOK_WHATSAPP = 'https://www.valentinaorellana.cl/api/webhooks/whatsapp';
+
 export async function suscribirAppAWhatsapp(): Promise<{ ok: boolean; reason?: string }> {
   const cfg = await getWhatsappConfig();
   if (!cfg) return { ok: false, reason: 'whatsapp_not_connected' };
   if (!cfg.wabaId) return { ok: false, reason: 'missing_waba_id' };
   try {
-    const res = await fetch(`https://graph.facebook.com/v21.0/${cfg.wabaId}/subscribed_apps`, {
-      method: 'POST', headers: { Authorization: `Bearer ${cfg.accessToken}` },
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data?.success === false) return { ok: false, reason: data?.error?.message ?? `graph_error_${res.status}` };
-    return { ok: true };
+    // Con la clave de verificación (generada por la base, migración 0027) se registra además la URL del
+    // aviso para esta cuenta (override_callback_uri, documentado en embedded-signup/webhooks/override),
+    // así nadie tiene que escribir la URL ni la clave a mano en el panel de Meta.
+    const clave = await claveVerificacionWebhook();
+    const cuerpo = clave ? { override_callback_uri: URL_WEBHOOK_WHATSAPP, verify_token: clave } : null;
+    const suscribir = async (body: object | null) => {
+      const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(cfg.wabaId!)}/subscribed_apps`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfg.accessToken}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      return (!res.ok || data?.success === false) ? (data?.error?.message ?? `graph_error_${res.status}`) : null;
+    };
+    const error = await suscribir(cuerpo);
+    if (!error) return { ok: true };
+    // Si Meta no pudo verificar la URL propia, al menos queda suscrita como antes (sin override).
+    if (cuerpo && !(await suscribir(null))) return { ok: false, reason: `suscrita, pero sin la URL del sitio: ${error}` };
+    return { ok: false, reason: error };
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : 'unknown' };
   }
+}
+
+// Coexistencia (app WhatsApp Business + Cloud API): justo después de conectar hay 24 horas para pedir
+// la sincronización de contactos y luego del historial (cada una se puede pedir una sola vez). El sitio
+// no guarda nada de eso: el webhook solo procesa los campos "messages" y "smb_message_echoes".
+export async function sincronizarCoexistencia(): Promise<{ contactos: string; historial: string }> {
+  const cfg = await getWhatsappConfig().catch(() => null);
+  if (!cfg?.phoneNumberId) return { contactos: 'sin_numero', historial: 'sin_numero' };
+  const pedir = async (sync_type: string) => {
+    try {
+      const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(cfg.phoneNumberId)}/smb_app_data`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfg.accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', sync_type }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return res.ok ? 'ok' : (data?.error?.message ?? `graph_error_${res.status}`);
+    } catch (e) { return e instanceof Error ? e.message : 'unknown'; }
+  };
+  const contactos = await pedir('smb_app_state_sync');
+  const historial = await pedir('history');
+  return { contactos, historial };
 }

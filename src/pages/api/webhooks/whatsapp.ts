@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { timingSafeEqual } from 'node:crypto';
+import { secreto } from '../../../lib/secretos';
 import { claveVerificacionWebhook } from '../../../lib/seguimientos/claveWebhook';
 import { logError } from '../../../lib/logger';
 import { firmaWhatsappValida, leerEventosWhatsapp } from '../../../lib/seguimientos/webhookWhatsapp';

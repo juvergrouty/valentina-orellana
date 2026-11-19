@@ -178,7 +178,17 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
           .then((r) => r.json())
           .then((data) => {
             if (data.ok) {
-              showStatus('✓ WhatsApp conectado correctamente. Recarga la página para ver el estado.', true);
+              const sync = data.sincronizacion || {};
+              const problemas = [];
+              if (data.numero !== 'ok') problemas.push('no se identificó el número');
+              if (data.aviso !== 'ok') problemas.push('avisos de mensajes: ' + data.aviso);
+              if (sync.contactos !== 'ok') problemas.push('sincronización de contactos: ' + sync.contactos);
+              if (sync.historial !== 'ok') problemas.push('sincronización del historial: ' + sync.historial);
+              if (problemas.length) {
+                showStatus('WhatsApp quedó conectado, pero falta algo (avísale a Claude hoy mismo, Meta da 24 horas): ' + problemas.join('; ') + '.', false);
+              } else {
+                showStatus('✓ WhatsApp conectado correctamente, con los avisos de mensajes activos. Recarga la página para ver el estado.', true);
+              }
             } else {
               // TEMPORAL: se muestra data.debug (detalle crudo del error de
               // Meta) para diagnosticar — quitar una vez resuelto.
@@ -200,7 +210,9 @@ const configId = import.meta.env.PUBLIC_META_WHATSAPP_CONFIG_ID ?? '';
       // (staticxx.facebook.com/x/connect/xd_arbiter/...), que cambia en
       // cada intento. Por eso el canje del código (exchange-token.ts) ya
       // NO manda redirect_uri al servidor de Meta — ver ese archivo.
-      extras: { setup: {} },
+      // Coexistencia (app WhatsApp Business + Cloud API), documentado en
+      // embedded-signup/custom-flows/onboarding-business-app-users (v4, 18 nov 2026).
+      extras: { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3' },
     });
   }
 

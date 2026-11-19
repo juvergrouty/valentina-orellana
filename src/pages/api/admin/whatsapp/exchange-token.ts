@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../../lib/supabase';
 import { secreto } from '../../../../lib/secretos';
+import { suscribirAppAWhatsapp, sincronizarCoexistencia, clearWhatsappCache } from '../../../../lib/whatsapp';
 
 export const prerender = false;
 
@@ -13,8 +14,12 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     // `redirectUri` ya no se usa en el canje (ver comentario más abajo) —
     // se deja de desestructurar para no arrastrar una variable sin uso.
-    const { code, wabaId, phoneNumberId } = await request.json();
+    const cuerpo = await request.json();
+    const code = cuerpo?.code;
     if (!code) return json({ error: 'Falta el código de autorización.' }, 400);
+    const soloDigitos = (v: unknown) => (typeof v === 'string' || typeof v === 'number') && /^\d{1,30}$/.test(String(v)) ? String(v) : '';
+    const wabaId = soloDigitos(cuerpo?.wabaId);
+    const phoneNumberId = soloDigitos(cuerpo?.phoneNumberId);
 
     const appId     = import.meta.env.PUBLIC_META_APP_ID;
     const appSecret = secreto('META_APP_SECRET');
@@ -49,7 +54,18 @@ export const POST: APIRoute = async ({ request }) => {
       { key: 'whatsapp_connected_at', value: new Date().toISOString() },
     ];
     if (wabaId)        upserts.push({ key: 'whatsapp_waba_id',         value: String(wabaId) });
-    if (phoneNumberId) upserts.push({ key: 'whatsapp_phone_number_id', value: String(phoneNumberId) });
+    // En coexistencia el aviso FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING trae solo waba_id: el id del
+    // número se busca en la cuenta.
+    let numeroId = phoneNumberId ? String(phoneNumberId) : '';
+    if (!numeroId && wabaId) {
+      const r = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/phone_numbers?fields=id`, {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      }).then((x) => x.json()).catch(() => null);
+      if (Array.isArray(r?.data) && r.data.length === 1 && r.data[0]?.id) numeroId = String(r.data[0].id);
+    }
+    if (numeroId) upserts.push({ key: 'whatsapp_phone_number_id', value: numeroId });
+    // Sin número identificado no se deja el de una conexión anterior (mezclaría cuentas).
+    else await supabase.from('settings').delete().eq('key', 'whatsapp_phone_number_id');
 
     for (const u of upserts) {
       await supabase.from('settings').upsert(
@@ -58,7 +74,11 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    return json({ ok: true });
+    // Avisos de mensajes (con la URL y la clave del sitio) y sincronización de coexistencia (24 h).
+    clearWhatsappCache();
+    const aviso = await suscribirAppAWhatsapp();
+    const sync = await sincronizarCoexistencia();
+    return json({ ok: true, aviso: aviso.ok ? 'ok' : aviso.reason, sincronizacion: sync, numero: numeroId ? 'ok' : 'falta' });
   } catch (err) {
     console.error('[whatsapp/exchange-token]', err);
     return json({ error: 'Error interno al conectar WhatsApp.' }, 500);
