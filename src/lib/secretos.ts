@@ -30,7 +30,9 @@ export type NombreSecreto =
   | 'APIGATEWAY_APIKEY' | 'SII_CLAVE'
   | 'RESEND_WEBHOOK_SECRET'
   // Aviso (webhook) de WhatsApp: clave de verificación que se escribe en el App Dashboard de Meta (18 nov 2026).
-  | 'WHATSAPP_WEBHOOK_VERIFY_TOKEN';
+  | 'WHATSAPP_WEBHOOK_VERIFY_TOKEN'
+  // Cobros con SumUp (18 nov 2026, src/lib/sumup.ts).
+  | 'SUMUP_API_KEY';
 
 function desdeDev(n: NombreSecreto): string | undefined {
   try {
@@ -65,6 +67,7 @@ function desdeDev(n: NombreSecreto): string | undefined {
         case 'SII_CLAVE': return import.meta.env.SII_CLAVE;
         case 'RESEND_WEBHOOK_SECRET': return import.meta.env.RESEND_WEBHOOK_SECRET;
         case 'WHATSAPP_WEBHOOK_VERIFY_TOKEN': return import.meta.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+        case 'SUMUP_API_KEY': return import.meta.env.SUMUP_API_KEY;
       }
     }
   } catch { /* fuera de Vite (tsx/node:test) import.meta.env no existe */ }

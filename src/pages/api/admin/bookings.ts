@@ -23,6 +23,7 @@ import { rutaInterna } from '../../../lib/rutaInterna';
 import { anularReserva, quiereAvisar } from '../../../lib/anularReserva';
 import { MARCA_PAGO_EN_CONSULTA } from '../../../lib/pagoEnConsulta';
 import { cambiarConsultaALink } from '../../../lib/consultaALink';
+import { anularPagoSumUp, marcarManualSumUp } from '../../../lib/sumup';
 import { MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA } from '../../../lib/comprobantes';
 
 export const prerender = false;
@@ -342,6 +343,17 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Transferencia que no llegó (28 oct 2026): sin el número de pago "transferencia-…" la tarea
     // "Revisar en tu banco" no vuelve si después se confirma a mano.
     if (String(antes?.mp_payment_id ?? '').startsWith('transferencia-')) cambios.mp_payment_id = null;
+    // Cobro de SumUp asociado por error (18 nov 2026): el cobro vuelve a quedar libre para asociarlo bien.
+    const codigoSumUp = String(antes?.mp_payment_id ?? '').startsWith('sumup-') ? String(antes!.mp_payment_id).slice(6) : null;
+    if (codigoSumUp) {
+      // Antes de quitar el pago: que la revisión de cada 5 min ya no lo vuelva a asociar solo.
+      try { await marcarManualSumUp(codigoSumUp); }
+      catch (e) {
+        console.error('[unmark_paid] sumup manual:', (e as Error).message);
+        return redirect(conParam(dest) + 'error=guardar_reserva&detail=' + encodeURIComponent('el pago con tarjeta sigue registrado'));
+      }
+      cambios.mp_payment_id = null;
+    }
     const montoAntes = new RegExp(`^${MARCA_MONTO_SIN_COSTO} (\\d+)$`, 'm').exec(antes?.notes ?? '');
     const restaurarMonto = antes?.payment_note === SIN_COSTO && !(antes.amount > 0) && !!montoAntes;
     if (restaurarMonto) cambios.amount = parseInt(montoAntes![1]);
@@ -360,6 +372,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // Comprobante de transferencia (28 oct 2026): si no llegó el dinero y se anula el pago, la paciente
     // tiene que poder pagar de nuevo; con la marca, /pagar le decía para siempre "lo estoy revisando".
     await quitarLineasNotas(id, [MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA]);
+    if (codigoSumUp) await anularPagoSumUp(codigoSumUp).catch((e) => console.error('[unmark_paid] sumup:', e));
     return redirect(dest);
   }
 

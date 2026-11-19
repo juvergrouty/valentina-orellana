@@ -2,6 +2,7 @@
 export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
+import { sumupConfigurado } from '../../lib/sumup';
 
 // Pacientes activos
 const { data: patients } = await supabase
@@ -234,6 +235,18 @@ const servicesJson  = JSON.stringify(services  ?? []);
 
     <!-- ── Panel derecho: historial ─────────────────────────────────────────── -->
     <div>
+      <!-- Cobros con tarjeta en SumUp (18 nov 2026, src/lib/sumup.ts): cada cobro de la app de SumUp se
+           asocia a su sesión (paciente y servicio) y sale la boleta y los correos como con Flow. -->
+      {sumupConfigurado() && (<div class="card" id="sumup-card" style="margin-bottom:1.5rem;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.75rem;">
+          <p class="label" style="margin:0;">Cobros con tarjeta (SumUp)</p>
+          <button type="button" id="sumup-revisar" class="btn btn-outline btn-sm">Revisar cobros ahora</button>
+        </div>
+        <p style="font-size:0.8rem;color:var(--stone);margin:0 0 0.9rem;">Cobra en la app de SumUp con el monto exacto de la sesión. La página encuentra la sesión sola y emite la boleta con los correos, igual que con Flow. Si hay más de una sesión posible, el cobro aparece aquí para que elijas la sesión.</p>
+        <div id="sumup-estado" style="font-size:0.85rem;color:var(--stone);">Cargando cobros de SumUp…</div>
+        <div id="sumup-por-asociar"></div>
+        <div id="sumup-recientes"></div>
+      </div>)}
       <div class="card" style="padding:0;overflow:hidden;">
         <div style="padding:1.25rem 1.5rem;border-bottom:1px solid var(--dust);display:flex;align-items:center;justify-content:space-between;">
           <p class="label">Historial de cobros</p>
@@ -324,6 +337,121 @@ const servicesJson  = JSON.stringify(services  ?? []);
   }
   #patient-results { position: absolute; }
 </style>
+
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  if (!$('sumup-card')) return; // SumUp sin conectar: la tarjeta no se muestra
+  const SIN_RED = 'No se pudo conectar. Revisa tu internet e intenta de nuevo.';
+  const clp = (n) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+  const cuando = (iso) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const fechaSesion = (s) => `${new Date(`${s.session_date}T12:00:00`).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}, ${String(s.session_time).slice(0, 5)}`;
+  const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let sesiones = [];
+
+  async function post(body) {
+    const r = await fetch('/api/admin/sumup', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Panel': '1' }, body: JSON.stringify(body) }).catch(() => null);
+    if (!r) throw new Error(SIN_RED);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.error) throw new Error(d.error || 'No se pudo completar. Intenta de nuevo en un minuto.');
+    return d;
+  }
+
+  // Sesiones sin pagar que caben en el cobro (una sola del mismo monto, o varias que sumen el monto).
+  function opciones(monto) {
+    const caben = sesiones.filter((s) => Number(s.amount) <= Number(monto))
+      .sort((a, b) => (Number(b.amount) === Number(monto)) - (Number(a.amount) === Number(monto)));
+    if (!caben.length) return '<p style="font-size:0.8rem;color:var(--stone);margin:0 0 0.5rem;">No hay sesiones sin pagar de ese monto o menos. Si no es de una sesión, toca "No es de una sesión".</p>';
+    return `<div style="max-height:180px;overflow:auto;border:1px solid var(--dust);border-radius:var(--radius);padding:0.4rem 0.6rem;margin-bottom:0.5rem;">${caben.map((s) => `
+      <label style="display:flex;gap:0.45rem;align-items:center;font-size:0.82rem;padding:0.2rem 0;cursor:pointer;">
+        <input type="checkbox" class="sumup-chk" value="${s.id}" data-monto="${Number(s.amount)}">
+        <span>${esc(s.patient_name)} · ${fechaSesion(s)} · ${clp(s.amount)}${Number(s.amount) === Number(monto) ? ' · Mismo monto' : ''}</span>
+      </label>`).join('')}</div>`;
+  }
+
+  function pintar(d) {
+    const estado = $('sumup-estado');
+    if (!d.configurado) { estado.textContent = 'SumUp todavía no está conectado en la página.'; return; }
+    sesiones = d.sesiones || [];
+    const pend = d.porAsociar || [];
+    estado.innerHTML = pend.length
+      ? `<p style="color:var(--red);font-weight:600;margin:0 0 0.5rem;">${pend.length === 1 ? 'Hay 1 cobro sin sesión asociada' : `Hay ${pend.length} cobros sin sesión asociada`}</p>`
+      : '<p style="margin:0 0 0.5rem;">Todos los cobros de SumUp están asociados a su sesión.</p>';
+    $('sumup-por-asociar').innerHTML = pend.map((c) => `
+      <div class="sumup-pend" data-codigo="${esc(c.codigo)}" data-monto="${Number(c.monto)}" style="border:1px solid var(--dust);border-radius:var(--radius);padding:0.75rem;margin-bottom:0.6rem;">
+        <p style="margin:0 0 0.5rem;font-size:0.86rem;"><strong>${clp(c.monto)}</strong> · ${cuando(c.cuando)}${c.tarjeta ? ` · ${esc(c.tarjeta)}` : ''}</p>
+        ${opciones(c.monto)}
+        <p class="sumup-suma" style="font-size:0.78rem;color:var(--stone);margin:0 0 0.5rem;">Marca la sesión (o las sesiones) que pagó con este cobro.</p>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <button type="button" class="btn btn-dark btn-sm sumup-asociar">Asociar y emitir boleta</button>
+          <button type="button" class="btn btn-outline btn-sm sumup-ignorar">No es de una sesión</button>
+        </div>
+        <p class="sumup-msg" style="font-size:0.78rem;margin:0.4rem 0 0;"></p>
+      </div>`).join('');
+    const rec = d.recientes || [];
+    $('sumup-recientes').innerHTML = rec.length ? `
+      <p style="font-size:0.72rem;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;color:var(--stone);margin:1rem 0 0.4rem;">Últimos 14 días</p>
+      <ul style="list-style:disc;padding-left:1.1rem;margin:0;font-size:0.82rem;">
+        ${rec.map((c) => `<li style="margin-bottom:0.25rem;">${clp(c.monto)} · ${cuando(c.cuando)} · ${
+          c.sesiones.length ? `${c.sesiones.length > 1 ? 'Pagó las sesiones de' : 'Pagó la sesión de'} ${c.sesiones.map((s) => `${esc(s.patient_name)} (${fechaSesion(s)})`).join(', ')}`
+          : c.ignorado ? 'No es de una sesión' : 'Sin sesión asociada'}</li>`).join('')}
+      </ul>` : '<p style="font-size:0.82rem;color:var(--stone);margin:0.75rem 0 0;">Sin cobros con tarjeta en los últimos 14 días.</p>';
+  }
+
+  async function cargar() {
+    try {
+      const r = await fetch('/api/admin/sumup').catch(() => null);
+      if (!r) throw new Error(SIN_RED);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error || 'No se pudo leer SumUp. Intenta de nuevo en un minuto.');
+      pintar(d);
+    } catch (e) { $('sumup-estado').textContent = e.message; }
+  }
+
+  $('sumup-card').addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button');
+    if (!btn) return;
+    const caja = btn.closest('.sumup-pend');
+    const msg = caja?.querySelector('.sumup-msg');
+    try {
+      if (btn.id === 'sumup-revisar') {
+        btn.disabled = true; btn.textContent = 'Revisando…';
+        await post({ action: 'sincronizar' });
+        await cargar();
+        btn.disabled = false; btn.textContent = 'Revisar cobros ahora';
+      } else if (btn.classList.contains('sumup-asociar')) {
+        const marcadas = [...caja.querySelectorAll('.sumup-chk:checked')];
+        const suma = marcadas.reduce((t, x) => t + Number(x.dataset.monto), 0);
+        if (!marcadas.length) { msg.textContent = 'Marca la sesión primero.'; return; }
+        if (suma !== Number(caja.dataset.monto)) { msg.textContent = `Las sesiones marcadas suman ${clp(suma)} y el cobro es de ${clp(Number(caja.dataset.monto))}.`; return; }
+        btn.disabled = true; msg.textContent = 'Asociando y emitiendo la boleta…';
+        await post({ action: 'asociar', codigo: caja.dataset.codigo, ids: marcadas.map((x) => x.value) });
+        await cargar();
+        $('sumup-estado').insertAdjacentHTML('afterbegin', '<p style="color:var(--green);font-weight:600;margin:0 0 0.5rem;">Listo: sesión pagada. La boleta y los correos van saliendo.</p>');
+      } else if (btn.classList.contains('sumup-ignorar')) {
+        if (!confirm('¿Este cobro no corresponde a ninguna sesión? Deja de aparecer aquí y no se emite boleta.')) return;
+        btn.disabled = true;
+        await post({ action: 'ignorar', codigo: caja.dataset.codigo });
+        await cargar();
+      }
+    } catch (e) {
+      if (msg) msg.textContent = e.message; else $('sumup-estado').textContent = e.message;
+      btn.disabled = false;
+      if (btn.id === 'sumup-revisar') btn.textContent = 'Revisar cobros ahora';
+    }
+  });
+  $('sumup-card').addEventListener('change', (ev) => {
+    if (!ev.target.classList?.contains('sumup-chk')) return;
+    const caja = ev.target.closest('.sumup-pend');
+    const suma = [...caja.querySelectorAll('.sumup-chk:checked')].reduce((t, x) => t + Number(x.dataset.monto), 0);
+    const total = Number(caja.dataset.monto);
+    caja.querySelector('.sumup-suma').textContent = suma === 0 ? 'Marca la sesión (o las sesiones) que pagó con este cobro.'
+      : suma === total ? `Listo: suman ${clp(suma)}, igual que el cobro.` : `Marcadas: ${clp(suma)} de ${clp(total)}.`;
+  });
+  cargar();
+})();
+</script>
 
 <script define:vars={{ patientsJson, servicesJson, prefillJson, hasPrefill }}>
 (function () {

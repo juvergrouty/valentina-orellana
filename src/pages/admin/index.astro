@@ -11,6 +11,7 @@ import { mismaPersona as mismaPersonaNombre } from '../../lib/mismaPersona';
 import { URL_SII } from '../../lib/impuestos';
 import { ETIQUETA_PAGO_EN_CONSULTA, esPagoEnConsulta } from '../../lib/pagoEnConsulta';
 import { textoPagoPorDevolver } from '../../lib/pagosPorDevolver';
+import { porAsociarVigentes, sumupConfigurado } from '../../lib/sumup';
 
 // Inicio del panel (rediseño aprobado por Valentina, 14 oct 2026): TODO lleva
 // directo a donde está la acción. Arriba el día que se mira (‹ › para moverse,
@@ -313,6 +314,18 @@ for (const a of transferenciasPorRevisar ?? []) {
     detalle: `${clp(a.total)} · ya le llegó la confirmación · toca para ver el comprobante; si no llegó, en la sesión usa «Anular pago»`,
     href: `/api/admin/comprobante?b=${a.bookingIds[0]}`, externo: true,
     accion: { tipo: 'form', action: '/api/admin/transferencia-revisada', campos: { ids: a.bookingIds.join(','), redirect: vuelta }, texto: 'Ya la revisé' },
+  });
+}
+// Cobros con tarjeta de SumUp que la página no pudo asociar sola a una sesión (18 nov 2026, src/lib/sumup.ts).
+// Se lee lo que dejó el cron cada 5 min (sin llamar a SumUp al abrir el Inicio).
+for (const c of sumupConfigurado() ? await porAsociarVigentes().catch(() => []) : []) {
+  const k = claveCL(c.cuando);
+  tareas.push({
+    clave: k,
+    chip: `tarjeta ${cuando(k.slice(0, 10), k.slice(11, 16))}`,
+    titulo: `Elegir la sesión de un cobro con tarjeta de ${clp(c.monto)}`,
+    detalle: 'La página no supo de qué sesión es. Elige la sesión y sale la boleta con los correos.',
+    href: '/admin/cobros#sumup-card',
   });
 }
 if (transferenciasPorRevisar === null) {

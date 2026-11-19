@@ -18,6 +18,7 @@ const REEMPLAZOS: [RegExp, string][] = [
   [/(cobro manual)(\s+)(generado)/gi, '$1-$3'],                    // Cobro manual generado desde admin
   [/(meet)(\s*):/gi, '$1 -$2'],                                   // Meet: <link> (en cualquier parte de la línea)
   [/(monto)(?=antesdesincosto)/gi, '$1-'],                        // MontoAntesDeSinCosto
+  [/(sumup)(?=checkout)/gi, '$1-'],                               // SumUpCheckout (link de pago de SumUp)
 ];
 
 export function limpiarNotasPaciente(texto: string | null | undefined): string | null {

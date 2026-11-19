@@ -57,6 +57,7 @@ export const POST: APIRoute = async ({ request, url }) => {
       // pagado por transferencia, o aunque no hubiera pagado todavía.
       payment_method: !b.paid_at ? 'pendiente'
         : /transfer/i.test(b.payment_note ?? '') ? 'transferencia'
+        : /sumup/i.test(b.payment_note ?? '') ? 'Tarjeta'
         : /flow|webpay/i.test(b.payment_note ?? '') || (!b.payment_note && b.payment_method === 'flow') ? 'flow'
         : (b.payment_note || b.payment_method || 'manual'),
       service_name:   serviceName,

@@ -15,6 +15,7 @@ import { mensajeLinkPago } from '../../lib/cobrosProximos';
 import { estadosConsentimientoSeguro, ETIQUETA_CONSENTIMIENTO, type EstadoConsentimiento } from '../../lib/transcriptor/estadoConsentimiento';
 import { esPagoEnConsulta, ETIQUETA_PAGO_EN_CONSULTA } from '../../lib/pagoEnConsulta';
 import { carrilesDelDia } from '../../lib/horaLibre';
+import { sumupConfigurado } from '../../lib/sumup';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
 // ?w=abc daba NaN y la página se caía al armar las fechas (8 oct 2026): si no es un número, semana actual.
@@ -427,6 +428,8 @@ const plWaMsg      = paymentLink ? mensajeLinkPago(Astro.url.searchParams.get('p
 // El botón manual de WhatsApp solo se muestra si el envío automático (plantilla
 // de Meta) no se hizo — para no mandar el mensaje duplicado.
 const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${plPhoneWa}?text=${encodeURIComponent(plWaMsg)}` : null;
+// Cobro con tarjeta por SumUp (18 nov 2026): la caja solo aparece si la clave está en el servidor.
+const sumupActivo = sumupConfigurado();
 ---
 
 <AdminLayout title="Agenda" current="/admin/agenda" fullHeight={true}>
@@ -1446,6 +1449,17 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
           </form>
         </div>
         <div id="sp-confirm-form" style="display:none;margin-top:0.6rem;">
+          <!-- Cobro con tarjeta por SumUp (18 nov 2026, src/lib/sumup.ts): queda pagada sola y sale la boleta
+               con los correos, como con Flow. Presencial: Tap to Pay en la app. Online: link de pago de SumUp. -->
+          <div id="sp-sumup" style="border:1px solid var(--dust);border-radius:var(--radius);padding:0.6rem;margin-bottom:0.6rem;">
+            <p style="font-size:0.72rem;font-weight:600;margin:0 0 0.4rem;">Cobrar con tarjeta (SumUp)</p>
+            <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+              <button type="button" id="sp-sumup-tap" class="btn btn-outline btn-sm">En la consulta</button>
+              <button type="button" id="sp-sumup-link" class="btn btn-outline btn-sm">Link de pago</button>
+            </div>
+            <p id="sp-sumup-msg" style="font-size:0.75rem;color:var(--stone);margin:0.4rem 0 0;display:none;"></p>
+            <div id="sp-sumup-acciones" style="display:none;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem;"></div>
+          </div>
           <form method="POST" action="/api/admin/bookings" style="margin:0;display:flex;flex-direction:column;gap:0.5rem;">
             <input type="hidden" name="action" value="mark_paid">
             <input type="hidden" name="id" id="sp-confirm-id">
@@ -1455,7 +1469,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
               <select name="medio" id="sp-medio-pago">
                 <option value="Efectivo">Efectivo</option>
                 <option value="Transferencia">Transferencia</option>
-                <option value="Tarjeta">Tarjeta (fuera de Flow)</option>
+                <option value="Tarjeta">Tarjeta (otra máquina, no SumUp)</option>
                 <option value="Otro">Otro</option>
               </select>
             </div>
@@ -2035,7 +2049,7 @@ const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${pl
 }
 </style>
 
-<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase, direccionLlegar, weekOffset, etiquetasConsent: ETIQUETA_CONSENTIMIENTO }}>
+<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase, direccionLlegar, weekOffset, etiquetasConsent: ETIQUETA_CONSENTIMIENTO, sumupActivo }}>
 // ── Indicador de consentimiento en los paneles (mismos textos y clases que IndicadorConsentimiento.astro) ──
 function pintarConsentPanel(caja, estado, fichaId) {
   if (!caja) return;
@@ -2936,6 +2950,83 @@ document.getElementById('session-panel')?.addEventListener('submit', (e) => {
   }
 }
 
+
+// ── Cobro con tarjeta por SumUp (18 nov 2026) ─────────────────────────────────
+// var (no let): openSessionDetail la usa también al reabrir el panel con ?booking=, que corre más arriba.
+var spSumUpSesion; // sin "= null": esta línea corre después de reabrir el panel y no debe borrarla
+function spSumUpPreparar(b) {
+  spSumUpSesion = b;
+  const msg = document.getElementById('sp-sumup-msg');
+  const acc = document.getElementById('sp-sumup-acciones');
+  if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
+  if (acc) { acc.style.display = 'none'; acc.innerHTML = ''; }
+  const link = document.getElementById('sp-sumup-link');
+  if (link) link.disabled = false; // un link pedido para otra sesión no deja el botón bloqueado aquí
+  const caja = document.getElementById('sp-sumup');
+  if (caja) caja.style.display = sumupActivo && (b.amount ?? 0) > 0 ? '' : 'none';
+}
+function spSumUpMsg(t) { const m = document.getElementById('sp-sumup-msg'); m.textContent = t; m.style.display = 'block'; }
+async function spSumUpPost(body) {
+  const r = await fetch('/api/admin/sumup', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Panel': '1' }, body: JSON.stringify(body) }).catch(() => null);
+  if (!r) throw new Error('No se pudo conectar. Revisa tu internet e intenta de nuevo.');
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error(d.error || 'No se pudo completar. Intenta de nuevo en un minuto.');
+  return d;
+}
+document.getElementById('sp-sumup-tap')?.addEventListener('click', () => {
+  const b = spSumUpSesion; if (!b) return;
+  spSumUpMsg(`Abre la app de SumUp en tu iPhone y cobra ${formatCLP(b.amount)} acercando la tarjeta al celular. En unos minutos la sesión queda pagada sola y salen la boleta y los correos. No la marques como pagada a mano.`);
+  const acc = document.getElementById('sp-sumup-acciones');
+  acc.innerHTML = '';
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'btn btn-dark btn-sm'; btn.textContent = 'Ya cobré, revisar ahora';
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Revisando…';
+    try {
+      await spSumUpPost({ action: 'sincronizar' });
+      const r = await fetch(`/api/admin/sumup`).catch(() => null);
+      const d = r ? await r.json().catch(() => ({})) : {};
+      if (!r || !r.ok || d.error) throw new Error(d.error || 'No se pudo revisar. Intenta de nuevo en un minuto.');
+      if (spSumUpSesion !== b) return; // ya abrió otra sesión: no mostrar este resultado ahí
+      const pagada = (d.recientes || []).some((c) => (c.sesiones || []).some((s) => s.id === b.id));
+      if (pagada) { spSumUpMsg('Listo: la sesión quedó pagada. La boleta y los correos van saliendo.'); setTimeout(() => location.reload(), 1500); }
+      else { spSumUpMsg('Todavía no aparece el cobro en SumUp, o la página no sabe de qué sesión es. Vuelve a revisar en un minuto o elige la sesión en Cobros.'); btn.disabled = false; btn.textContent = 'Ya cobré, revisar ahora'; }
+    } catch (e) { if (spSumUpSesion === b) spSumUpMsg(e.message); btn.disabled = false; btn.textContent = 'Ya cobré, revisar ahora'; }
+  });
+  acc.appendChild(btn); acc.style.display = 'flex';
+});
+document.getElementById('sp-sumup-link')?.addEventListener('click', async (ev) => {
+  const b = spSumUpSesion; if (!b) return;
+  const boton = ev.currentTarget; boton.disabled = true;
+  spSumUpMsg('Creando el link de pago…');
+  try {
+    const d = await spSumUpPost({ action: 'link', bookingId: b.id });
+    if (spSumUpSesion !== b) return; // ya abrió otra sesión (su botón ya quedó activo)
+    spSumUpMsg(`Link de pago de ${formatCLP(b.amount)} listo. Cuando lo pague, la sesión queda pagada sola y salen la boleta y los correos. No la marques como pagada a mano.`);
+    const acc = document.getElementById('sp-sumup-acciones');
+    acc.innerHTML = '';
+    // Copiar con su propio toque: en el iPhone, copiar después de esperar al servidor no funciona.
+    const cp = document.createElement('button');
+    cp.type = 'button'; cp.className = 'btn btn-outline btn-sm'; cp.textContent = 'Copiar el link';
+    cp.addEventListener('click', () => navigator.clipboard.writeText(d.url).then(() => { cp.textContent = 'Link copiado'; }).catch(() => { cp.textContent = 'No se pudo copiar'; }));
+    let tel = String(b.patient_phone || '').replace(/\D/g, '');
+    if (tel.length === 9) tel = '56' + tel;
+    if (tel.length >= 10) {
+      const nombre = String(b.patient_name || '').trim().split(' ')[0];
+      const fechaLarga = new Date(`${b.session_date}T12:00:00`).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
+      const texto = `Hola${nombre ? ` ${nombre}` : ''} 👋 Te comparto el link para pagar con tarjeta tu sesión del ${fechaLarga} (${formatCLP(b.amount)}):\n${d.url}\n\nCualquier consulta, escríbeme. 🌿`;
+      const wa = document.createElement('a');
+      wa.className = 'btn btn-dark btn-sm'; wa.target = '_blank'; wa.rel = 'noopener';
+      wa.href = `https://wa.me/${tel}?text=${encodeURIComponent(texto)}`; wa.textContent = 'Enviar por WhatsApp';
+      acc.appendChild(wa);
+    }
+    const ver = document.createElement('a');
+    ver.className = 'btn btn-outline btn-sm'; ver.target = '_blank'; ver.rel = 'noopener'; ver.href = d.url; ver.textContent = 'Ver el link';
+    acc.appendChild(cp); acc.appendChild(ver); acc.style.display = 'flex';
+  } catch (e) { if (spSumUpSesion === b) spSumUpMsg(e.message); }
+  if (spSumUpSesion === b) boton.disabled = false;
+});
+
 function openSessionDetail(b) {
   window.__currentSessionBookingId = b.id;
   window.__currentSessionBooking = b;
@@ -3168,6 +3259,7 @@ function openSessionDetail(b) {
   const showMarkPaid = !isPaid && !isVoided;
   document.getElementById('sp-confirm-form').style.display = showMarkPaid ? 'block' : 'none';
   document.getElementById('sp-confirm-id').value    = b.id;
+  spSumUpPreparar(b);
   document.getElementById('sp-void-debt-id').value  = b.id;
   document.getElementById('sp-sin-costo-id').value  = b.id;
   document.getElementById('sp-mark-paid-rut').value = b.patient_rut || '';
@@ -3464,7 +3556,10 @@ document.getElementById('sp-btn-sin-costo')?.addEventListener('click', () => {
 
 // ── Anular pago (deshacer "Marcar como pagado") ──────────────────────────────
 document.getElementById('sp-btn-unmark-paid')?.addEventListener('click', () => {
-  if (confirm('¿Anular este pago? La sesión vuelve a quedar "Por pagar". Esto no afecta ninguna boleta ya emitida.')) {
+  const conSumUp = spSumUpSesion?.payment_note === 'Tarjeta (SumUp)';
+  if (confirm(conSumUp
+    ? '¿Anular este pago? La sesión vuelve a quedar "Por pagar" y el cobro con tarjeta vuelve a Cobros para que elijas su sesión. No devuelve el dinero en SumUp ni anula la boleta ya emitida.'
+    : '¿Anular este pago? La sesión vuelve a quedar "Por pagar". Esto no afecta ninguna boleta ya emitida.')) {
     document.getElementById('sp-unmark-paid-form').submit();
   }
 });

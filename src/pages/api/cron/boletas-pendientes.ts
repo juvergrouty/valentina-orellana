@@ -7,6 +7,7 @@ import { registrarLatido, revisarSaludSiToca } from '../../../lib/saludSitio';
 import { enviarBoletaDeReserva, emitBoletaParaReserva, folioVigente, MARCA_PENDIENTE, MARCA_PENDIENTE_EMISION, MARCA_PROGRAMADA, quitarLineasNotas } from '../../../lib/apigateway';
 import { logWarn } from '../../../lib/logger';
 import { todayCL } from '../../../lib/dateUtils';
+import { sincronizarSumUp, anotarRevisionSumUp } from '../../../lib/sumup';
 
 export const prerender = false;
 
@@ -22,6 +23,7 @@ function json(data: unknown, status = 200) {
 export const GET: APIRoute = async ({ request }) => {
   // Falla cerrado: CRON_SECRET o la clave interna de Supabase (ver cronAuth.ts).
   if (!(await cronAutorizado(request))) return new Response('Unauthorized', { status: 401 });
+  const inicioCron = Date.now();
 
   // Primero, los envíos que siguen a un pago y quedaron pendientes o fallaron
   // (confirmación, aviso, calendario, boleta, pasos a seguir): se reintentan
@@ -109,5 +111,21 @@ export const GET: APIRoute = async ({ request }) => {
     }
   }
 
-  return json({ ok: true, envios, pending: results.length, sent: results.filter(r => r.sent).length, results, emisiones, programadas });
+  // Cobros con tarjeta de SumUp (18 nov 2026), al final para no atrasar las boletas de arriba: asocia
+  // cada cobro a su sesión y dispara boleta y correos como un pago de Flow (src/lib/sumup.ts). Hasta
+  // 60 s y nunca pasado el minuto 4 de la función (máximo 300 s). Si SumUp falla, el cron responde igual.
+  let sumup: Awaited<ReturnType<typeof sincronizarSumUp>> | { error: string } = null;
+  const hastaSumUp = Math.min(Date.now() + 60_000, inicioCron + 230_000);
+  if (Date.now() < hastaSumUp) {
+    try {
+      sumup = await sincronizarSumUp({ hastaMs: hastaSumUp });
+      if (sumup) await anotarRevisionSumUp(true).catch(() => {});
+    } catch (e) {
+      sumup = { error: (e as Error).message };
+      console.error('[boletas-pendientes] sumup:', (e as Error).message);
+      await anotarRevisionSumUp(false).catch(() => {});
+    }
+  }
+
+  return json({ ok: true, envios, sumup, pending: results.length, sent: results.filter(r => r.sent).length, results, emisiones, programadas });
 };
