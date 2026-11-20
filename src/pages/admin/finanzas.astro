@@ -24,6 +24,19 @@ const { data: all } = await supabase
   .not('status', 'in', '(cancelled,expired)');
 const bookings = all ?? [];
 
+// Cobros con tarjeta asociados a una sesión sin boleta ("Asociar a un paciente" en Cobros):
+// bookingId → suma cobrada con tarjeta y de dónde vino el resto. Sirve para separar en
+// "Por medio de pago" la parte con tarjeta de la parte pagada por otro lado.
+const { data: filasSinBoleta } = await supabase.from('settings').select('value').like('key', 'sumup_paciente_%');
+const tarjetaSinBoleta = new Map<string, { monto: number; origen: string }>();
+for (const f of filasSinBoleta ?? []) {
+  let v: any = null;
+  try { v = JSON.parse(String(f.value ?? '')); } catch { /* fila rara: se ignora */ }
+  if (!v?.bookingId || !(Number(v.monto) > 0)) continue;
+  const prev = tarjetaSinBoleta.get(v.bookingId);
+  tarjetaSinBoleta.set(v.bookingId, { monto: (prev?.monto ?? 0) + Number(v.monto), origen: prev?.origen || String(v.origenResto ?? '') });
+}
+
 // REGLA (Valentina, 3 oct 2026): ingreso = solo lo que tiene fecha de pago
 // (paid_at). Antes contaba toda sesión 'confirmed', pagada o no, e incluía
 // deudas anuladas: la misma sesión salía como ingreso y como deuda.
@@ -39,19 +52,34 @@ const ingresosMes = pagosMes.reduce((s, b) => s + (b.amount ?? 0), 0);
 // Medio de pago real (payment_note guarda cómo se pagó; payment_method es cómo se reservó)
 const medio = (b: any) => {
   const n = String(b.payment_note ?? '').toLowerCase();
-  if (n.includes('flow')) return 'Flow (Webpay)';
   if (n.includes('sumup')) return 'Tarjeta (SumUp)'; // también "Tarjeta (SumUp) + <resto>" (asociado sin boleta)
+  if (n.includes('flow')) return 'Flow (Webpay)';
   if (n.includes('transfer')) return 'Transferencia';
   if (n.includes('efectivo')) return 'Efectivo';
   if (b.payment_note) return String(b.payment_note);
   return ({ manual: 'Pago en consulta', transferencia: 'Transferencia', flow: 'Flow (Webpay)' } as Record<string, string>)[b.payment_method] ?? 'Otro';
 };
 const byMethod: Record<string, { count: number; total: number }> = {};
-pagosMes.forEach(b => {
-  const k = medio(b);
+const sumar = (k: string, monto: number) => {
+  if (monto <= 0) return;
   (byMethod[k] ??= { count: 0, total: 0 });
   byMethod[k].count++;
-  byMethod[k].total += b.amount ?? 0;
+  byMethod[k].total += monto;
+};
+pagosMes.forEach(b => {
+  const total = b.amount ?? 0;
+  const tarjeta = tarjetaSinBoleta.get(b.id);
+  if (!tarjeta) { sumar(medio(b), total); return; }
+  // Parte con tarjeta → "Tarjeta (SumUp)"; el resto → su medio real. Si la sesión quedó pagada por
+  // el propio cobro ("Tarjeta (SumUp) + Encuadrado"), el resto va a lo que ella escribió; si ya
+  // estaba pagada por otro medio, el resto queda en ese medio.
+  const conTarjeta = Math.min(tarjeta.monto, total);
+  const nota = String(b.payment_note ?? '');
+  const medioResto = nota.startsWith('Tarjeta (SumUp)')
+    ? (tarjeta.origen ? medio({ payment_note: tarjeta.origen }) : 'Tarjeta (SumUp)')
+    : medio(b);
+  sumar('Tarjeta (SumUp)', conTarjeta);
+  sumar(medioResto, total - conTarjeta);
 });
 
 // ── Lo que se adeuda (para cobrar): sesiones ya realizadas sin pagar ────────
