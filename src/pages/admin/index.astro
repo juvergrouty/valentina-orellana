@@ -324,7 +324,7 @@ for (const c of sumupConfigurado() ? await porAsociarVigentes().catch(() => []) 
     clave: k,
     chip: `tarjeta ${cuando(k.slice(0, 10), k.slice(11, 16))}`,
     titulo: `Elegir la sesión de un cobro con tarjeta de ${clp(c.monto)}`,
-    detalle: 'La página no supo de qué sesión es. Elige la sesión y sale la boleta con los correos.',
+    detalle: 'La página no supo de qué sesión es. En Cobros eliges la sesión, con boleta o sin boleta.',
     href: '/admin/cobros#sumup-card',
   });
 }
@@ -720,6 +720,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
   .ini-btn-wa { background: #25D366 !important; color: white !important; border-color: #25D366 !important; }
   .ini-hecho { font-size: 0.75rem; color: var(--enc-text-3); }
   .ini-chip { align-self: flex-start; font-size: 0.68rem; font-weight: 600; padding: 0.1rem 0.5rem; border-radius: 99px; margin-bottom: 0.1rem; }
+  .ini-chip::first-letter { text-transform: uppercase; }
   .ini-chip-rojo { background: #fee2e2; color: #b91c1c; }
   .ini-chip-ambar { background: #fef3c7; color: #92400e; }
   .ini-chip-gris { background: var(--enc-border-2); color: var(--enc-text-3); }

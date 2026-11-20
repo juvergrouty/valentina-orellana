@@ -539,7 +539,8 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
   // Desconectar Google Calendar sin form anidado
   document.getElementById('btn-google-disconnect')?.addEventListener('click', async () => {
     if (!confirm('¿Desconectar Google Calendar?')) return;
-    const res = await fetch('/api/admin/google/disconnect', { method: 'POST' });
+    const res = await fetch('/api/admin/google/disconnect', { method: 'POST' }).catch(() => null);
+    if (!res) { alert('No se pudo conectar. Revisa tu internet e intenta nuevamente.'); return; }
     if (res.ok || res.redirected) {
       window.location.href = '/admin/configuracion?google=disconnected';
     } else {
