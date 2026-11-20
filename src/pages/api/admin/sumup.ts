@@ -4,6 +4,7 @@ import { logInfo, logError } from '../../../lib/logger';
 import {
   sumupConfigurado, leerEstado, sesionesParaElegir, sincronizarSumUp, cobroPorCodigo, registrarPagoSumUp,
   ignorarCobro, quitarDePorAsociar, crearLinkSumUp, cobrosExitosos, porAsociarVigentes,
+  sesionesParaAsociar, asociarSinBoleta, asociacionesSinBoleta,
 } from '../../../lib/sumup';
 import { codigoValido } from '../../../lib/sumupMatch';
 
@@ -18,9 +19,10 @@ const esId = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f-]{3
 export const GET: APIRoute = async () => {
   if (!sumupConfigurado()) return json({ ok: true, configurado: false });
   try {
-    const [estado, pendientes, sesiones, recientes] = await Promise.all([
-      leerEstado(), porAsociarVigentes(), sesionesParaElegir(), cobrosExitosos(new Date(Date.now() - 14 * 86400_000).toISOString()),
+    const [estado, pendientes, sesiones, sesionesPaciente, recientes] = await Promise.all([
+      leerEstado(), porAsociarVigentes(), sesionesParaElegir(), sesionesParaAsociar(), cobrosExitosos(new Date(Date.now() - 14 * 86400_000).toISOString()),
     ]);
+    const sinBoleta = await asociacionesSinBoleta(recientes.map((c) => c.codigo));
     const codigos = recientes.map((c) => `sumup-${c.codigo}`);
     const { data: usadas } = codigos.length
       ? await supabase.from('bookings').select('id, patient_name, session_date, session_time, mp_payment_id').in('mp_payment_id', codigos)
@@ -31,8 +33,9 @@ export const GET: APIRoute = async () => {
     return json({
       ok: true, configurado: true,
       porAsociar: pendientes,
-      recientes: recientes.map((c) => ({ ...c, sesiones: porCodigo.get(c.codigo) ?? [], ignorado: ignorados.has(c.codigo) })),
+      recientes: recientes.map((c) => ({ ...c, sesiones: porCodigo.get(c.codigo) ?? [], ignorado: ignorados.has(c.codigo), sinBoleta: sinBoleta.get(c.codigo) ?? null })),
       sesiones,
+      sesionesPaciente,
     });
   } catch (e) {
     console.error('[sumup] GET:', (e as Error).message);
@@ -62,6 +65,13 @@ export const POST: APIRoute = async ({ request }) => {
       await quitarDePorAsociar(body.codigo).catch((e) => console.error('[sumup] quitar de la lista:', (e as Error).message));
       return json({ ok: true, pagadas: r.pagadas });
     }
+    if (action === 'asociar_paciente') {
+      if (!codigoValido(body.codigo) || !esId(body.id)) return json({ error: 'Elige el cobro y la sesión.' }, 400);
+      const cobro = await cobroPorCodigo(body.codigo);
+      if (!cobro) return json({ error: 'SumUp no muestra ese cobro como exitoso.' }, 400);
+      const r = await asociarSinBoleta(body.id, cobro, typeof body.resto === 'string' ? body.resto : '');
+      return r.ok ? json({ ok: true, quedoPagada: r.quedoPagada }) : json({ error: r.error }, 409);
+    }
     if (action === 'ignorar') {
       if (!codigoValido(body.codigo)) return json({ error: 'Cobro no válido.' }, 400);
       await ignorarCobro(body.codigo);
@@ -75,7 +85,7 @@ export const POST: APIRoute = async ({ request }) => {
     }
     return json({ error: 'Acción no válida.' }, 400);
   } catch (e) {
-    const que: Record<string, string> = { sincronizar: 'revisar los cobros', link: 'crear el link de pago', asociar: 'asociar el cobro', ignorar: 'marcar "No es de una sesión"' };
+    const que: Record<string, string> = { sincronizar: 'revisar los cobros', link: 'crear el link de pago', asociar: 'asociar el cobro', asociar_paciente: 'asociar el cobro al paciente', ignorar: 'marcar "No es de una sesión"' };
     await logError('sumup/panel', `No se pudo ${que[String(action)] ?? 'completar la acción'} con SumUp.`, { error: (e as Error).message }).catch(() => {});
     return json({ error: 'No se pudo conectar con SumUp. Intenta de nuevo en un minuto.' }, 502);
   }

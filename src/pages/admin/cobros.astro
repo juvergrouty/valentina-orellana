@@ -242,7 +242,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
           <p class="label" style="margin:0;">Cobros con tarjeta (SumUp)</p>
           <button type="button" id="sumup-revisar" class="btn btn-outline btn-sm">Revisar cobros ahora</button>
         </div>
-        <p style="font-size:0.8rem;color:var(--stone);margin:0 0 0.9rem;">Cobra en la app de SumUp con el monto exacto de la sesión. La página encuentra la sesión sola y emite la boleta con los correos, igual que con Flow. Si hay más de una sesión posible, el cobro aparece aquí para que elijas la sesión.</p>
+        <p style="font-size:0.8rem;color:var(--stone);margin:0 0 0.9rem;">Cobra en la app de SumUp con el monto exacto de la sesión. La página encuentra la sesión sola y emite la boleta con los correos, igual que con Flow. Si hay más de una sesión posible, el cobro aparece aquí para que elijas la sesión. Si ese cobro ya tiene boleta por otro lado, usa "Asociar a un paciente": queda en su sesión sin emitir otra boleta.</p>
         <div id="sumup-estado" style="font-size:0.85rem;color:var(--stone);">Cargando cobros de SumUp…</div>
         <div id="sumup-por-asociar"></div>
         <div id="sumup-recientes"></div>
@@ -347,8 +347,10 @@ const servicesJson  = JSON.stringify(services  ?? []);
   const clp = (n) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
   const cuando = (iso) => new Date(iso).toLocaleString('es-CL', { timeZone: 'America/Santiago', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   const fechaSesion = (s) => `${new Date(`${s.session_date}T12:00:00`).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}, ${String(s.session_time).slice(0, 5)}`;
+  const sinTildes = (t) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let sesiones = [];
+  let sesionesPaciente = [];
 
   async function post(body) {
     const r = await fetch('/api/admin/sumup', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Panel': '1' }, body: JSON.stringify(body) }).catch(() => null);
@@ -370,10 +372,29 @@ const servicesJson  = JSON.stringify(services  ?? []);
       </label>`).join('')}</div>`;
   }
 
+  // "Asociar a un paciente" (sin boleta): cualquier sesión de los últimos 60 días, pagada o no. Si el
+  // cobro es menor que la sesión, hay que escribir de dónde vino el resto.
+  function listaPaciente(c) {
+    if (!sesionesPaciente.length) return '<p style="font-size:0.8rem;color:var(--stone);margin:0 0 0.5rem;">No hay sesiones de los últimos 60 días.</p>';
+    return `<input type="search" class="sumup-buscar" placeholder="Buscar paciente" style="width:100%;font-size:0.85rem;padding:0.4rem 0.55rem;border:1px solid var(--dust);border-radius:var(--radius);margin-bottom:0.4rem;box-sizing:border-box;">
+      <div style="max-height:200px;overflow:auto;border:1px solid var(--dust);border-radius:var(--radius);padding:0.4rem 0.6rem;margin-bottom:0.5rem;">${sesionesPaciente.map((s) => `
+        <label class="sumup-op" data-nombre="${esc(sinTildes(s.patient_name))}" style="display:flex;gap:0.45rem;align-items:center;font-size:0.82rem;padding:0.2rem 0;cursor:pointer;">
+          <input type="radio" name="sumup-pac-${esc(c.codigo)}" class="sumup-radio" value="${s.id}" data-monto="${Number(s.amount)}" data-pagada="${s.paid_at ? '1' : ''}">
+          <span>${esc(s.patient_name)} · ${fechaSesion(s)} · ${clp(s.amount)} · ${s.paid_at ? `Pagada${s.payment_note ? ` (${esc(s.payment_note)})` : ''}` : 'Sin pagar'}</span>
+        </label>`).join('')}</div>
+      <p class="sumup-pac-info" style="font-size:0.78rem;color:var(--stone);margin:0 0 0.5rem;">Elige la sesión de ese paciente.</p>
+      <div class="sumup-resto" hidden style="margin-bottom:0.5rem;">
+        <label style="display:block;font-size:0.82rem;margin-bottom:0.3rem;">Faltan <strong class="sumup-falta"></strong>. ¿De dónde vino el resto?</label>
+        <input type="text" class="sumup-resto-txt" maxlength="120" placeholder="Transferencia, Encuadrado, efectivo…" style="width:100%;font-size:0.85rem;padding:0.4rem 0.55rem;border:1px solid var(--dust);border-radius:var(--radius);box-sizing:border-box;">
+      </div>
+      <button type="button" class="btn btn-dark btn-sm sumup-guardar-paciente">Guardar sin boleta</button>`;
+  }
+
   function pintar(d) {
     const estado = $('sumup-estado');
     if (!d.configurado) { estado.textContent = 'SumUp todavía no está conectado en la página.'; return; }
     sesiones = d.sesiones || [];
+    sesionesPaciente = d.sesionesPaciente || [];
     const pend = d.porAsociar || [];
     estado.innerHTML = pend.length
       ? `<p style="color:var(--red);font-weight:600;margin:0 0 0.5rem;">${pend.length === 1 ? 'Hay 1 cobro sin sesión asociada' : `Hay ${pend.length} cobros sin sesión asociada`}</p>`
@@ -381,11 +402,19 @@ const servicesJson  = JSON.stringify(services  ?? []);
     $('sumup-por-asociar').innerHTML = pend.map((c) => `
       <div class="sumup-pend" data-codigo="${esc(c.codigo)}" data-monto="${Number(c.monto)}" style="border:1px solid var(--dust);border-radius:var(--radius);padding:0.75rem;margin-bottom:0.6rem;">
         <p style="margin:0 0 0.5rem;font-size:0.86rem;"><strong>${clp(c.monto)}</strong> · ${cuando(c.cuando)}${c.tarjeta ? ` · ${esc(c.tarjeta)}` : ''}</p>
-        ${opciones(c.monto)}
-        <p class="sumup-suma" style="font-size:0.78rem;color:var(--stone);margin:0 0 0.5rem;">Marca la sesión (o las sesiones) que pagó con este cobro.</p>
         <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-          <button type="button" class="btn btn-dark btn-sm sumup-asociar">Asociar y emitir boleta</button>
+          <button type="button" class="btn btn-outline btn-sm sumup-abrir" data-panel="paciente">Asociar a un paciente</button>
+          <button type="button" class="btn btn-outline btn-sm sumup-abrir" data-panel="boleta">Asociar y emitir boleta</button>
           <button type="button" class="btn btn-outline btn-sm sumup-ignorar">No es de una sesión</button>
+        </div>
+        <div class="sumup-panel" data-panel="paciente" hidden style="margin-top:0.6rem;">
+          <p style="font-size:0.8rem;margin:0 0 0.4rem;">Queda en la sesión del paciente sin emitir boleta ni enviar correos.</p>
+          ${listaPaciente(c)}
+        </div>
+        <div class="sumup-panel" data-panel="boleta" hidden style="margin-top:0.6rem;">
+          ${opciones(c.monto)}
+          <p class="sumup-suma" style="font-size:0.78rem;color:var(--stone);margin:0 0 0.5rem;">Marca la sesión (o las sesiones) que pagó con este cobro.</p>
+          <button type="button" class="btn btn-dark btn-sm sumup-asociar">Confirmar y emitir boleta</button>
         </div>
         <p class="sumup-msg" style="font-size:0.78rem;margin:0.4rem 0 0;"></p>
       </div>`).join('');
@@ -395,6 +424,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
       <ul style="list-style:disc;padding-left:1.1rem;margin:0;font-size:0.82rem;">
         ${rec.map((c) => `<li style="margin-bottom:0.25rem;">${clp(c.monto)} · ${cuando(c.cuando)} · ${
           c.sesiones.length ? `${c.sesiones.length > 1 ? 'Pagó las sesiones de' : 'Pagó la sesión de'} ${c.sesiones.map((s) => `${esc(s.patient_name)} (${fechaSesion(s)})`).join(', ')}`
+          : c.sinBoleta && c.sinBoleta.bookingId ? `Asociado a ${esc(c.sinBoleta.patient_name)} (${fechaSesion(c.sinBoleta)}), sin boleta${c.sinBoleta.resto > 0 ? `. Resto (${clp(c.sinBoleta.resto)}): ${esc(c.sinBoleta.origenResto)}` : ''}`
           : c.ignorado ? 'No es de una sesión' : 'Sin sesión asociada'}</li>`).join('')}
       </ul>` : '<p style="font-size:0.82rem;color:var(--stone);margin:0.75rem 0 0;">Sin cobros con tarjeta en los últimos 14 días.</p>';
   }
@@ -420,6 +450,28 @@ const servicesJson  = JSON.stringify(services  ?? []);
         await post({ action: 'sincronizar' });
         await cargar();
         btn.disabled = false; btn.textContent = 'Revisar cobros ahora';
+      } else if (btn.classList.contains('sumup-abrir')) {
+        // Cada opción tiene su propio panel: se abre uno y se cierra el otro.
+        const cual = btn.dataset.panel;
+        caja.querySelectorAll('.sumup-panel').forEach((p) => { p.hidden = p.dataset.panel !== cual ? true : !p.hidden; });
+        caja.querySelectorAll('.sumup-abrir').forEach((b) => {
+          const abierto = !caja.querySelector(`.sumup-panel[data-panel="${b.dataset.panel}"]`).hidden;
+          b.classList.toggle('btn-dark', abierto); b.classList.toggle('btn-outline', !abierto);
+        });
+        msg.textContent = '';
+      } else if (btn.classList.contains('sumup-guardar-paciente')) {
+        const elegida = caja.querySelector('.sumup-radio:checked');
+        if (!elegida) { msg.textContent = 'Elige la sesión primero.'; return; }
+        const falta = Number(elegida.dataset.monto) - Number(caja.dataset.monto);
+        if (falta < 0) { msg.textContent = 'El cobro es mayor que esa sesión. Elige otra sesión.'; return; }
+        const resto = (caja.querySelector('.sumup-resto-txt')?.value || '').trim();
+        if (falta > 0 && !resto) { msg.textContent = `Escribe de dónde vinieron los ${clp(falta)} que faltan.`; caja.querySelector('.sumup-resto-txt')?.focus(); return; }
+        if (falta === 0 && elegida.dataset.pagada && !confirm('Esa sesión ya figura pagada por el monto completo. ¿Igual quieres asociarle este cobro? Revisa que no sea un pago doble.')) return;
+        btn.disabled = true; msg.textContent = 'Guardando…';
+        const nombre = elegida.closest('.sumup-op')?.querySelector('span')?.textContent.split(' · ')[0] || 'el paciente';
+        const r = await post({ action: 'asociar_paciente', codigo: caja.dataset.codigo, id: elegida.value, resto: falta > 0 ? resto : '' });
+        await cargar();
+        $('sumup-estado').insertAdjacentHTML('afterbegin', `<p style="color:var(--green);font-weight:600;margin:0 0 0.5rem;">Listo: cobro asociado a ${esc(nombre)}, sin boleta.${r.quedoPagada ? ' La sesión quedó pagada.' : ''}</p>`);
       } else if (btn.classList.contains('sumup-asociar')) {
         const marcadas = [...caja.querySelectorAll('.sumup-chk:checked')];
         const suma = marcadas.reduce((t, x) => t + Number(x.dataset.monto), 0);
@@ -441,7 +493,29 @@ const servicesJson  = JSON.stringify(services  ?? []);
       if (btn.id === 'sumup-revisar') btn.textContent = 'Revisar cobros ahora';
     }
   });
+  $('sumup-card').addEventListener('input', (ev) => {
+    if (!ev.target.classList?.contains('sumup-buscar')) return;
+    const q = sinTildes(ev.target.value.trim());
+    const panel = ev.target.closest('.sumup-panel');
+    panel.querySelectorAll('.sumup-op').forEach((l) => {
+      const ver = !q || l.dataset.nombre.includes(q);
+      l.style.display = ver ? 'flex' : 'none';
+      // Una sesión oculta por la búsqueda no queda elegida sin que se vea.
+      const r = l.querySelector('.sumup-radio');
+      if (!ver && r.checked) { r.checked = false; panel.querySelector('.sumup-resto').hidden = true; panel.querySelector('.sumup-pac-info').textContent = 'Elige la sesión de ese paciente.'; }
+    });
+  });
   $('sumup-card').addEventListener('change', (ev) => {
+    if (ev.target.classList?.contains('sumup-radio')) {
+      const caja = ev.target.closest('.sumup-pend');
+      const falta = Number(ev.target.dataset.monto) - Number(caja.dataset.monto);
+      const bloque = caja.querySelector('.sumup-resto');
+      const info = caja.querySelector('.sumup-pac-info');
+      bloque.hidden = !(falta > 0);
+      if (falta > 0) caja.querySelector('.sumup-falta').textContent = clp(falta);
+      info.textContent = falta < 0 ? 'El cobro es mayor que esa sesión. Elige otra sesión.' : falta === 0 ? 'El cobro es igual al monto de la sesión.' : `La sesión es de ${clp(Number(ev.target.dataset.monto))} y el cobro de ${clp(Number(caja.dataset.monto))}.`;
+      return;
+    }
     if (!ev.target.classList?.contains('sumup-chk')) return;
     const caja = ev.target.closest('.sumup-pend');
     const suma = [...caja.querySelectorAll('.sumup-chk:checked')].reduce((t, x) => t + Number(x.dataset.monto), 0);

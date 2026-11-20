@@ -21,6 +21,8 @@ import { logError, logInfo, logWarn } from './logger';
 import { encolarTareas, procesarTareas, tareasDePago, sesionVigente, type TareaPago } from './tareasEnvio';
 import { upsertPatientFromBooking, fichaDesdePrimerPago } from './patients';
 import { agregarLineaNotas } from './apigateway';
+import { markBookingPaidInCalendar, syncBookingToCalendar } from './syncCalendar';
+import { todayCL } from './dateUtils';
 import { NOTA_PAGO_SUMUP, pagoSumUp, sesionParaCobro, esPresencial, sesionCobrable, codigoValido, enHoraChile, type CobroSumUp, type SesionCandidata } from './sumupMatch';
 
 export const SUMUP_MERCHANT = 'M421JSNB';
@@ -33,6 +35,9 @@ const CLAVE_USO = (codigo: string) => `sumup_uso_${codigo}`;
 const PREF_MANUAL = 'sumup_manual_';
 const PREF_IGNORADO = 'sumup_ignorado_';
 const PREF_REEMBOLSO = 'sumup_reembolso_'; // aviso de reembolso ya dado (una vez por cobro)
+// "Asociar a un paciente" (20 nov 2026): el cobro queda registrado en una sesión SIN emitir boleta
+// (ej. parte de una sesión cuya boleta ya se emitió por otro lado). Una fila por cobro con el detalle.
+const PREF_PACIENTE = 'sumup_paciente_';
 // En LIKE el "_" es comodín de un carácter: no se escapa (no hay otras llaves "sumup?…" en settings)
 // para no depender de cómo PostgREST pasa la barra invertida.
 const comoPrefijo = (p: string) => `${p}%`;
@@ -153,12 +158,33 @@ async function cambiarEstado(cambio: (e: EstadoSumUp) => EstadoSumUp): Promise<v
   }
 }
 
-/** Códigos de SumUp que ya pagaron alguna sesión (bookings.mp_payment_id = "sumup-<código>"). */
+/** Códigos de SumUp ya usados: pagaron una sesión con boleta (bookings.mp_payment_id = "sumup-<código>")
+ *  o se asociaron a un paciente sin boleta (fila 'sumup_paciente_<código>'). Nunca se usan dos veces. */
 async function codigosUsados(codigos: string[]): Promise<Set<string>> {
   if (!codigos.length) return new Set();
-  const { data, error } = await supabase.from('bookings').select('mp_payment_id').in('mp_payment_id', codigos.map(pagoSumUp));
+  const [{ data, error }, sinBoleta] = await Promise.all([
+    supabase.from('bookings').select('mp_payment_id').in('mp_payment_id', codigos.map(pagoSumUp)),
+    asociacionesSinBoleta(codigos),
+  ]);
   if (error) throw new Error(error.message);
-  return new Set((data ?? []).map((r: { mp_payment_id: string }) => r.mp_payment_id.slice(6)));
+  return new Set([...(data ?? []).map((r: { mp_payment_id: string }) => r.mp_payment_id.slice(6)), ...sinBoleta.keys()]);
+}
+
+export type AsociacionSinBoleta = { bookingId: string; patient_name: string; session_date: string; session_time: string; monto: number; resto: number; origenResto: string; en: string };
+
+/** Cobros asociados a un paciente sin boleta (código → detalle). Lanza error si no se pudo leer. */
+export async function asociacionesSinBoleta(codigos: string[]): Promise<Map<string, AsociacionSinBoleta>> {
+  const validos = codigos.filter(codigoValido);
+  if (!validos.length) return new Map();
+  const { data, error } = await supabase.from('settings').select('key, value').in('key', validos.map((c) => `${PREF_PACIENTE}${c}`));
+  if (error) throw new Error(error.message);
+  const m = new Map<string, AsociacionSinBoleta>();
+  for (const r of data ?? []) {
+    let v: any = {};
+    try { v = JSON.parse(String(r.value ?? '{}')); } catch { /* fila rara: igual cuenta como usado */ }
+    m.set(String(r.key).slice(PREF_PACIENTE.length), v && v.bookingId && v.patient_name ? v : { bookingId: '', patient_name: 'una sesión', session_date: '', session_time: '', monto: 0, resto: 0, origenResto: '', en: '' });
+  }
+  return m;
 }
 
 /** Reserva el código para este proceso. false = otro proceso ya lo tomó (o ya pagó una sesión). */
@@ -455,6 +481,115 @@ export async function anotarRevisionSumUp(ok: boolean): Promise<void> {
   if (ahora === antes) return;
   await supabase.from('settings').upsert({ key: 'sumup_fallas', value: String(ahora), updated_at: new Date().toISOString() }, { onConflict: 'key' });
   if (ahora === 6) await logWarn('sumup/caida', 'La página no ha podido leer los cobros de SumUp en la última media hora. Los cobros con tarjeta se asocian solos cuando SumUp vuelva a responder.', {});
+}
+
+/** Sesiones para "Asociar a un paciente": pagadas o no (también las ya pagadas por otro medio, cuya
+ *  boleta ya se emitió), de los últimos 60 días a los próximos 7. */
+export async function sesionesParaAsociar(): Promise<any[]> {
+  const hoy = Date.now();
+  const desde = new Date(hoy - 60 * 86400_000).toISOString().slice(0, 10);
+  const hasta = new Date(hoy + 7 * 86400_000).toISOString().slice(0, 10);
+  const { data } = await supabase.from('bookings').select('id, patient_name, session_date, session_time, amount, paid_at, payment_note')
+    .not('status', 'in', '(cancelled,expired,pending_payment)').or('debt_voided.is.null,debt_voided.eq.false')
+    .gte('session_date', desde).lte('session_date', hasta).gt('amount', 0)
+    .order('session_date', { ascending: false }).order('session_time', { ascending: false }).limit(400);
+  return data ?? [];
+}
+
+const clpTxt = (n: number) => `$${Math.round(n).toLocaleString('es-CL')}`;
+
+/**
+ * "Asociar a un paciente" (Vale, 20 nov 2026): el cobro queda en esa sesión SIN emitir boleta ni
+ * correos. Si el cobro es menor que la sesión, Vale escribe de dónde vino el resto (transferencia,
+ * Encuadrado, efectivo…). Si la sesión estaba sin pagar, queda pagada (calendario en verde) con ese
+ * detalle; si ya estaba pagada, solo se anota. Nunca se usa un payment_note que el barrido de
+ * tareasEnvio.ts lea como pago con boleta (y no se toca mp_payment_id).
+ */
+export async function asociarSinBoleta(bookingId: string, cobro: CobroSumUp, origenResto: string): Promise<{ ok: boolean; error?: string; quedoPagada?: boolean }> {
+  const { data: s, error: e1 } = await supabase.from('bookings').select(`${COLS}, payment_note`).eq('id', bookingId).maybeSingle();
+  if (e1) return { ok: false, error: 'No se pudo leer la sesión. Intenta de nuevo en un minuto.' };
+  if (!s) return { ok: false, error: 'No se encontró esa sesión.' };
+  if (s.status === 'cancelled' || s.status === 'expired' || s.debt_voided === true) return { ok: false, error: 'Esa sesión está anulada, cancelada o vencida.' };
+  // Reserva web que espera su pago: necesita la confirmación y los correos de siempre.
+  if (s.status === 'pending_payment' && !s.paid_at) return { ok: false, error: 'Esa reserva web espera su pago: usa "Asociar y emitir boleta".' };
+  const montoSesion = Number(s.amount) || 0;
+  if (montoSesion <= 0) return { ok: false, error: 'Esa sesión no tiene monto.' };
+  const resto = montoSesion - cobro.monto;
+  if (resto < 0) return { ok: false, error: `El cobro (${clpTxt(cobro.monto)}) es mayor que la sesión (${clpTxt(montoSesion)}).` };
+  const limpio = String(origenResto ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const origen = limpio.charAt(0).toUpperCase() + limpio.slice(1);
+  if (resto > 0 && !origen) return { ok: false, error: `Faltan ${clpTxt(resto)}: escribe de dónde vino el resto.` };
+
+  if ((await codigosUsados([cobro.codigo])).size || !(await reservarCodigo(cobro.codigo))) {
+    return { ok: false, error: 'Ese cobro de SumUp ya está asociado.' };
+  }
+  if ((await codigosUsados([cobro.codigo])).size) {
+    await liberarCobroSumUp(cobro.codigo);
+    return { ok: false, error: 'Ese cobro de SumUp ya está asociado.' };
+  }
+  const detalle: AsociacionSinBoleta = {
+    bookingId: s.id, patient_name: s.patient_name, session_date: s.session_date, session_time: String(s.session_time).slice(0, 5),
+    monto: cobro.monto, resto, origenResto: resto > 0 ? origen : '', en: new Date().toISOString(),
+  };
+  const { error: eIns } = await supabase.from('settings').insert({ key: `${PREF_PACIENTE}${cobro.codigo}`, value: JSON.stringify(detalle), updated_at: new Date().toISOString() });
+  await liberarCobroSumUp(cobro.codigo);
+  if (eIns) {
+    if (eIns.code === '23505') return { ok: false, error: 'Ese cobro de SumUp ya está asociado.' };
+    console.error('[sumup] asociar sin boleta:', eIns.message);
+    return { ok: false, error: 'No se pudo guardar. Intenta de nuevo en un minuto.' };
+  }
+
+  let quedoPagada = false;
+  if (!s.paid_at) {
+    const nota = (resto > 0 ? `Tarjeta (SumUp) + ${origen}` : 'Tarjeta (SumUp), sin boleta').slice(0, 150);
+    const { data: up, error: eUp } = await supabase.from('bookings')
+      .update({ status: 'confirmed', paid_at: new Date().toISOString(), payment_note: nota })
+      .eq('id', s.id).is('paid_at', null).select('id');
+    if (eUp) await logError('sumup/sin-boleta', `El cobro con tarjeta quedó asociado a ${s.patient_name}, pero la sesión no se pudo marcar pagada. Márcala a mano sin boleta.`, { bookingId: s.id, codigo: cobro.codigo, error: eUp.message });
+    quedoPagada = !!up?.length;
+    if (quedoPagada) {
+      const futura = s.session_date !== '2099-12-31' && s.session_date >= todayCL();
+      try {
+        const { data: row } = await supabase.from('bookings').select('*').eq('id', s.id).maybeSingle();
+        if (row && !row.google_event_id && row.session_date !== '2099-12-31') await syncBookingToCalendar(row, futura ? {} : { invite: false });
+        await markBookingPaidInCalendar(s.id, true, { invitar: futura });
+      } catch (e) { console.error('[sumup] calendario:', (e as Error).message); }
+      await upsertPatientFromBooking({ patient_name: s.patient_name, patient_email: s.patient_email, patient_phone: s.patient_phone, rut: s.patient_rut }).catch(console.error);
+    }
+  }
+  const hora = new Date(cobro.cuando).toLocaleString('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  await agregarLineaNotas(s.id, `Cobro con tarjeta SumUp ${cobro.codigo} de ${clpTxt(cobro.monto)} del ${hora}, asociado sin boleta${resto > 0 ? `. Resto (${clpTxt(resto)}): ${origen}` : ''}`);
+  await quitarDePorAsociar(cobro.codigo).catch((e) => console.error('[sumup] quitar de la lista:', (e as Error).message));
+  await logInfo('sumup/sin-boleta', `Cobro de SumUp ${clpTxt(cobro.monto)} asociado a ${s.patient_name} sin boleta`, { codigo: cobro.codigo, bookingId: s.id, resto, origenResto: detalle.origenResto });
+  return { ok: true, quedoPagada };
+}
+
+/** "Anular pago", paso 1 (ANTES de quitar el pago): cobros asociados sin boleta a esa sesión; quedan
+ *  marcados para no asociarse solos nunca más. Lanza error si no se pudo leer o marcar: el pago no se anula. */
+export async function sinBoletaDeSesion(bookingId: string): Promise<string[]> {
+  const { data, error } = await supabase.from('settings').select('key, value').like('key', comoPrefijo(PREF_PACIENTE)).limit(2000);
+  if (error) throw new Error(error.message);
+  const codigos: string[] = [];
+  for (const r of data ?? []) {
+    let v: any = {};
+    try { v = JSON.parse(String(r.value ?? '{}')); } catch { continue; }
+    const codigo = String(r.key).slice(PREF_PACIENTE.length);
+    if (v.bookingId !== bookingId || !codigoValido(codigo)) continue;
+    await marcar(PREF_MANUAL, codigo);
+    codigos.push(codigo);
+  }
+  return codigos;
+}
+
+/** "Anular pago", paso 2 (pago ya quitado): el cobro deja de estar asociado y vuelve a "por asociar". */
+export async function soltarSinBoleta(codigo: string): Promise<void> {
+  if (!codigoValido(codigo)) return;
+  const { error } = await supabase.from('settings').delete().eq('key', `${PREF_PACIENTE}${codigo}`);
+  if (error) {
+    await logError('sumup/anular', 'Anulaste el pago, pero el cobro con tarjeta quedó asociado a esa sesión y no volvió a Cobros. Pídele a Claude que lo libere.', { codigo, error: error.message });
+    return;
+  }
+  await anularPagoSumUp(codigo);
 }
 
 /** "No es de una sesión" (Vale): el cobro deja de aparecer por asociar. */

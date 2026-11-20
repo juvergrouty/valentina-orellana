@@ -40,6 +40,7 @@ const ingresosMes = pagosMes.reduce((s, b) => s + (b.amount ?? 0), 0);
 const medio = (b: any) => {
   const n = String(b.payment_note ?? '').toLowerCase();
   if (n.includes('flow')) return 'Flow (Webpay)';
+  if (n.includes('sumup')) return 'Tarjeta (SumUp)'; // también "Tarjeta (SumUp) + <resto>" (asociado sin boleta)
   if (n.includes('transfer')) return 'Transferencia';
   if (n.includes('efectivo')) return 'Efectivo';
   if (b.payment_note) return String(b.payment_note);

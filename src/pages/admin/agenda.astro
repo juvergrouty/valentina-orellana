@@ -3556,7 +3556,7 @@ document.getElementById('sp-btn-sin-costo')?.addEventListener('click', () => {
 
 // ── Anular pago (deshacer "Marcar como pagado") ──────────────────────────────
 document.getElementById('sp-btn-unmark-paid')?.addEventListener('click', () => {
-  const conSumUp = spSumUpSesion?.payment_note === 'Tarjeta (SumUp)';
+  const conSumUp = String(spSumUpSesion?.payment_note ?? '').startsWith('Tarjeta (SumUp)');
   if (confirm(conSumUp
     ? '¿Anular este pago? La sesión vuelve a quedar "Por pagar" y el cobro con tarjeta vuelve a Cobros para que elijas su sesión. No devuelve el dinero en SumUp ni anula la boleta ya emitida.'
     : '¿Anular este pago? La sesión vuelve a quedar "Por pagar". Esto no afecta ninguna boleta ya emitida.')) {

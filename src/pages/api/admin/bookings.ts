@@ -23,7 +23,7 @@ import { rutaInterna } from '../../../lib/rutaInterna';
 import { anularReserva, quiereAvisar } from '../../../lib/anularReserva';
 import { MARCA_PAGO_EN_CONSULTA } from '../../../lib/pagoEnConsulta';
 import { cambiarConsultaALink } from '../../../lib/consultaALink';
-import { anularPagoSumUp, marcarManualSumUp } from '../../../lib/sumup';
+import { anularPagoSumUp, marcarManualSumUp, sinBoletaDeSesion, soltarSinBoleta } from '../../../lib/sumup';
 import { MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA } from '../../../lib/comprobantes';
 
 export const prerender = false;
@@ -354,6 +354,13 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       }
       cambios.mp_payment_id = null;
     }
+    // Cobros de SumUp asociados a esta sesión sin boleta (20 nov 2026): vuelven a "por asociar".
+    let sinBoletaSueltos: string[] = [];
+    try { sinBoletaSueltos = await sinBoletaDeSesion(id); }
+    catch (e) {
+      console.error('[unmark_paid] sumup sin boleta:', (e as Error).message);
+      return redirect(conParam(dest) + 'error=guardar_reserva&detail=' + encodeURIComponent('el cobro con tarjeta sigue asociado'));
+    }
     const montoAntes = new RegExp(`^${MARCA_MONTO_SIN_COSTO} (\\d+)$`, 'm').exec(antes?.notes ?? '');
     const restaurarMonto = antes?.payment_note === SIN_COSTO && !(antes.amount > 0) && !!montoAntes;
     if (restaurarMonto) cambios.amount = parseInt(montoAntes![1]);
@@ -373,6 +380,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // tiene que poder pagar de nuevo; con la marca, /pagar le decía para siempre "lo estoy revisando".
     await quitarLineasNotas(id, [MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA]);
     if (codigoSumUp) await anularPagoSumUp(codigoSumUp).catch((e) => console.error('[unmark_paid] sumup:', e));
+    for (const c of sinBoletaSueltos) await soltarSinBoleta(c).catch((e) => console.error('[unmark_paid] sumup sin boleta:', e));
     return redirect(dest);
   }
 
