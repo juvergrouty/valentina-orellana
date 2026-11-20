@@ -111,7 +111,7 @@ const [bookingsRes, svcRes, patientRes, allSvcRes, settingsRes] = await Promise.
   supabase.from('services_catalog')
     .select('id, name, price, price_online, price_presencial, modality, type, duration_min')
     .eq('visible', true).order('sort_order'),
-  supabase.from('settings').select('key, value').in('key', ['google_review_url', 'clinic_address', 'flow_env']),
+  supabase.from('settings').select('key, value').in('key', ['google_review_url', 'clinic_address', 'flow_env', 'sumup_afiliado']),
 ]);
 
 const bookings    = (bookingsRes.data ?? []) as Array<Record<string, any>>;
@@ -430,6 +430,10 @@ const plWaMsg      = paymentLink ? mensajeLinkPago(Astro.url.searchParams.get('p
 const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${plPhoneWa}?text=${encodeURIComponent(plWaMsg)}` : null;
 // Cobro con tarjeta por SumUp (18 nov 2026): la caja solo aparece si la clave está en el servidor.
 const sumupActivo = sumupConfigurado();
+// Clave de afiliado de SumUp (20 nov 2026): con ella "En la consulta" abre la app de SumUp con el monto y
+// el id de la sesión (foreign-tx-id), y el cobro se asocia a esa sesión sin adivinar por hora. No es
+// secreta (va dentro del enlace que abre la app); la pega Vale en Configuración.
+const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['sumup_afiliado'] : '';
 ---
 
 <AdminLayout title="Agenda" current="/admin/agenda" fullHeight={true}>
@@ -2049,7 +2053,7 @@ const sumupActivo = sumupConfigurado();
 }
 </style>
 
-<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase, direccionLlegar, weekOffset, etiquetasConsent: ETIQUETA_CONSENTIMIENTO, sumupActivo }}>
+<script define:vars={{ reviewUrl, clinicAddress, flowCheckoutBase, direccionLlegar, weekOffset, etiquetasConsent: ETIQUETA_CONSENTIMIENTO, sumupActivo, sumupAfiliado }}>
 // ── Indicador de consentimiento en los paneles (mismos textos y clases que IndicadorConsentimiento.astro) ──
 function pintarConsentPanel(caja, estado, fichaId) {
   if (!caja) return;
@@ -2973,27 +2977,52 @@ async function spSumUpPost(body) {
   if (!r.ok || d.error) throw new Error(d.error || 'No se pudo completar. Intenta de nuevo en un minuto.');
   return d;
 }
-document.getElementById('sp-sumup-tap')?.addEventListener('click', () => {
-  const b = spSumUpSesion; if (!b) return;
-  spSumUpMsg(`Abre la app de SumUp en tu iPhone y cobra ${formatCLP(b.amount)} acercando la tarjeta al celular. En unos minutos la sesión queda pagada sola y salen la boleta y los correos. No la marques como pagada a mano.`);
-  const acc = document.getElementById('sp-sumup-acciones');
-  acc.innerHTML = '';
-  const btn = document.createElement('button');
-  btn.type = 'button'; btn.className = 'btn btn-dark btn-sm'; btn.textContent = 'Ya cobré, revisar ahora';
-  btn.addEventListener('click', async () => {
-    btn.disabled = true; btn.textContent = 'Revisando…';
-    try {
+// Revisa en SumUp si el cobro de la sesión b ya quedó asociado. intentos > 1: reintenta (SumUp puede
+// tardar unos segundos en mostrar un cobro recién hecho).
+async function spSumUpRevisar(b, btn, intentos) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Revisando…'; }
+  try {
+    for (let i = 0; i < intentos; i++) {
+      if (i) await new Promise((r) => setTimeout(r, 6000));
       await spSumUpPost({ action: 'sincronizar' });
       const r = await fetch(`/api/admin/sumup`).catch(() => null);
       const d = r ? await r.json().catch(() => ({})) : {};
       if (!r || !r.ok || d.error) throw new Error(d.error || 'No se pudo revisar. Intenta de nuevo en un minuto.');
       if (spSumUpSesion !== b) return; // ya abrió otra sesión: no mostrar este resultado ahí
       const pagada = (d.recientes || []).some((c) => (c.sesiones || []).some((s) => s.id === b.id));
-      if (pagada) { spSumUpMsg('Listo: la sesión quedó pagada. La boleta y los correos van saliendo.'); setTimeout(() => location.reload(), 1500); }
-      else { spSumUpMsg('Todavía no aparece el cobro en SumUp, o la página no sabe de qué sesión es. Vuelve a revisar en un minuto o elige la sesión en Cobros.'); btn.disabled = false; btn.textContent = 'Ya cobré, revisar ahora'; }
-    } catch (e) { if (spSumUpSesion === b) spSumUpMsg(e.message); btn.disabled = false; btn.textContent = 'Ya cobré, revisar ahora'; }
-  });
+      if (pagada) { spSumUpMsg('Listo: la sesión quedó pagada. La boleta y los correos van saliendo.'); setTimeout(() => location.assign(location.pathname + '?booking=' + encodeURIComponent(b.id)), 1500); return; }
+    }
+    spSumUpMsg('Todavía no aparece el cobro en SumUp, o la página no sabe de qué sesión es. Vuelve a revisar en un minuto o elige la sesión en Cobros.');
+  } catch (e) { if (spSumUpSesion === b) spSumUpMsg(e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = 'Ya cobré, revisar ahora'; }
+}
+function spSumUpBotonRevisar(b) {
+  const acc = document.getElementById('sp-sumup-acciones');
+  acc.innerHTML = '';
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'btn btn-dark btn-sm'; btn.textContent = 'Ya cobré, revisar ahora';
+  btn.addEventListener('click', () => spSumUpRevisar(b, btn, 1));
   acc.appendChild(btn); acc.style.display = 'flex';
+  return btn;
+}
+document.getElementById('sp-sumup-tap')?.addEventListener('click', () => {
+  const b = spSumUpSesion; if (!b) return;
+  spSumUpBotonRevisar(b);
+  if (!sumupAfiliado) {
+    spSumUpMsg(`Abre la app de SumUp en tu iPhone y cobra ${formatCLP(b.amount)} acercando la tarjeta al celular. En unos minutos la sesión queda pagada sola y salen la boleta y los correos. No la marques como pagada a mano.`);
+    return;
+  }
+  // Abre la app de SumUp con el monto y el id de la sesión (foreign-tx-id: único por cobro, por eso
+  // lleva la hora; el servidor usa los primeros 36 caracteres). Al terminar, SumUp vuelve aquí.
+  const vuelta = (estado) => `${location.origin}/admin/agenda?booking=${encodeURIComponent(b.id)}&sumup_vuelta=${estado}`;
+  const monto = String(Math.round(Number(b.amount)));
+  const q = new URLSearchParams({
+    'affiliate-key': sumupAfiliado, amount: monto, total: monto, currency: 'CLP', title: 'Sesión de terapia',
+    'foreign-tx-id': `${b.id}.${Date.now().toString(36)}`,
+    callbacksuccess: vuelta('ok'), callbackfail: vuelta('fallo'), callback: vuelta('ok'), 'skip-screen-success': 'true',
+  });
+  spSumUpMsg(`Abriendo SumUp con ${formatCLP(b.amount)}. Cobra acercando la tarjeta al celular: al terminar vuelves aquí y la sesión queda pagada sola. Si SumUp no se abre, ábrela tú y cobra el monto.`);
+  location.href = `sumupmerchant://pay/1.0?${q.toString().replace(/\+/g, '%20')}`;
 });
 document.getElementById('sp-sumup-link')?.addEventListener('click', async (ev) => {
   const b = spSumUpSesion; if (!b) return;
@@ -3026,6 +3055,25 @@ document.getElementById('sp-sumup-link')?.addEventListener('click', async (ev) =
   } catch (e) { if (spSumUpSesion === b) spSumUpMsg(e.message); }
   if (spSumUpSesion === b) boton.disabled = false;
 });
+// Vuelta desde la app de SumUp (?booking=<id>&sumup_vuelta=ok|fallo): el panel de la sesión ya se
+// reabrió más arriba; se revisa el cobro solo y se limpia la dirección para no repetirlo al recargar.
+{
+  const qs = new URLSearchParams(location.search);
+  const vuelta = qs.get('sumup_vuelta');
+  const b = spSumUpSesion;
+  if (vuelta && b && b.id === qs.get('booking')) {
+    history.replaceState(null, '', location.pathname + '?booking=' + encodeURIComponent(b.id));
+    const btn = spSumUpBotonRevisar(b);
+    // SumUp agrega smp-status a la dirección de vuelta; si lo pega con otro "?", queda dentro de sumup_vuelta.
+    if (vuelta.startsWith('fallo') || /failed|invalidstate/.test(vuelta) || /^(failed|invalidstate)$/.test(qs.get('smp-status') || '')) {
+      spSumUpMsg('SumUp dice que el cobro no se completó. Puedes intentarlo de nuevo con «En la consulta».');
+      document.getElementById('sp-sumup-acciones').style.display = 'none';
+    } else {
+      spSumUpMsg('Cobro hecho en SumUp. Revisando y dejando la sesión pagada…');
+      spSumUpRevisar(b, btn, 4);
+    }
+  }
+}
 
 function openSessionDetail(b) {
   window.__currentSessionBookingId = b.id;

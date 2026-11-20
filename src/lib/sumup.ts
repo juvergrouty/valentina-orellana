@@ -6,8 +6,8 @@
 //   1. Presencial, tarjeta en la consulta (Tap to Pay en el iPhone de Vale): ella cobra en la app de
 //      SumUp el monto de la sesión. La página asocia el cobro a la sesión por monto y hora
 //      (sumupMatch.ts, solo cobros presenciales) y, si hay cualquier duda, lo deja "por asociar" en
-//      Cobros e Inicio para que ella elija. (Si algún día el panel abre la app con foreign-tx-id = id
-//      de la reserva, ese id manda: ver sincronizarSumUp.)
+//      Cobros e Inicio para que ella elija. Si el cobro se inició con «En la consulta» del panel (abre
+//      la app con foreign-tx-id = id de la reserva, 20 nov 2026), ese id manda: ver sincronizarSumUp.
 //   2. Online: link de pago de SumUp (hosted checkout) creado por la página para esa sesión; al
 //      pagarse se asocia por el link, nunca por hora.
 //
@@ -431,10 +431,14 @@ export async function sincronizarSumUp(opts: { hastaMs?: number } = {}): Promise
     if (Date.now() > hastaMs) break;
     let elegida: string | null = null;
     // 1) foreign-tx-id = id de la reserva (si el cobro se inició desde el panel).
-    const idBoton = /^[0-9a-f-]{36}$/i.test(String(c.foreign ?? '')) ? String(c.foreign) : null;
+    //    El panel lo manda como "<id>.<hora>" (SumUp exige que sea único por cobro, y así se puede
+    //    reintentar un cobro fallido): manda el id de 36 caracteres del inicio.
+    const idBoton = /^[0-9a-f-]{36}(\.[0-9a-z]{1,12})?$/i.test(String(c.foreign ?? '')) ? String(c.foreign).slice(0, 36) : null;
     if (idBoton) {
       const { data: s } = await supabase.from('bookings').select(COLS).eq('id', idBoton).maybeSingle();
       if (s && sesionCobrable(s as SesionCandidata) && Number(s.amount) === c.monto) elegida = s.id;
+      // Ella lo inició para ESA sesión: si no calza (ya pagada, otro monto), no se busca otra por hora.
+      else { nuevosPend.push({ codigo: c.codigo, monto: c.monto, cuando: c.cuando, tarjeta: c.tarjeta, modo: c.modo }); continue; }
     }
     // 2) Presencial: por hora y monto. Se leen TODAS las sesiones del día (también las pagadas y las
     //    de otro monto): si otra cae en la misma ventana, hay duda y no se asocia sola.

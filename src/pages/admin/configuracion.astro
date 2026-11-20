@@ -217,6 +217,21 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
         </p>
       </div>
 
+      <div style="margin-bottom:0.5rem;">
+        <label class="label" style="margin-bottom:0.4rem;display:block;">Clave de afiliado de SumUp</label>
+        <input
+          type="text"
+          name="sumup_afiliado"
+          value={settings['sumup_afiliado'] ?? ''}
+          placeholder="La copias en me.sumup.com, en Claves de afiliado"
+          autocomplete="off"
+          pattern="[A-Za-z0-9_\-]{8,80}"
+        />
+        <p style="font-size:0.7rem;color:var(--stone);margin-top:0.4rem;">
+          Con esta clave, «En la consulta» abre la app de SumUp con el monto de la sesión, y el cobro queda asociado a esa sesión solo. Si la dejas vacía, cobras abriendo SumUp tú misma, como hasta ahora.
+        </p>
+      </div>
+
       <div style="margin-bottom:0.5rem;border-top:1px solid var(--dust);padding-top:1rem;">
         <label style="display:flex;align-items:flex-start;gap:0.6rem;cursor:pointer;">
           <input type="checkbox" name="review_auto_enabled" value="true"
