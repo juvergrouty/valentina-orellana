@@ -109,6 +109,13 @@ async function avisarReembolsos(): Promise<void> {
   }
 }
 
+/** foreign-tx-id del cobro (lo puso el botón «En la consulta» del panel), leído del detalle. */
+async function foreignDeCobro(codigo: string): Promise<string | null> {
+  if (!codigoValido(codigo)) return null;
+  const t = await api<TxApi>(`/v2.1/merchants/${SUMUP_MERCHANT}/transactions?transaction_code=${encodeURIComponent(codigo)}`);
+  return t?.foreign_transaction_id ?? null;
+}
+
 /** Un cobro por su código, vuelto a leer en SumUp (para asociarlo a mano). */
 export async function cobroPorCodigo(codigo: string): Promise<CobroSumUp | null> {
   if (!codigoValido(codigo)) return null;
@@ -424,12 +431,25 @@ export async function sincronizarSumUp(opts: { hastaMs?: number } = {}): Promise
   const usados = await codigosUsados(cobros.map((c) => c.codigo));
   const ignorados = new Set(estado.ignorados);
   let asociados = links.asociados;
+  const foreignPrevio = new Map(estado.porAsociar.filter((p) => 'foreign' in p).map((p) => [p.codigo, p.foreign ?? null]));
 
   for (const c of cobros) {
     if (usados.has(c.codigo) || ignorados.has(c.codigo) || links.codigos.has(c.codigo)) continue;
     if (manual.has(c.codigo)) { nuevosPend.push({ codigo: c.codigo, monto: c.monto, cuando: c.cuando, tarjeta: c.tarjeta, modo: c.modo }); continue; }
     if (Date.now() > hastaMs) break;
     let elegida: string | null = null;
+    // La lista de SumUp (transactions/history) NO trae foreign_transaction_id: solo el detalle lo trae
+    // (verificado 20 nov 2026 con el cobro de prueba TAAA7LS7VTB). Se lee el detalle de cada cobro
+    // todavía sin asociar (pocos por pasada); si la lectura falla, se sigue con hora y monto.
+    //    Se guarda en la lista "por asociar" para no volver a leerlo en cada pasada. Si la lectura
+    //    falla, el cobro se salta esta pasada (no se asocia por hora a otra sesión) y se reintenta.
+    if (!c.foreign && esPresencial(c)) {
+      if (foreignPrevio.has(c.codigo)) c.foreign = foreignPrevio.get(c.codigo) ?? null;
+      else {
+        try { c.foreign = await foreignDeCobro(c.codigo); }
+        catch (e) { console.error('[sumup] detalle del cobro:', (e as Error).message); continue; }
+      }
+    }
     // 1) foreign-tx-id = id de la reserva (si el cobro se inició desde el panel).
     //    El panel lo manda como "<id>.<hora>" (SumUp exige que sea único por cobro, y así se puede
     //    reintentar un cobro fallido): manda el id de 36 caracteres del inicio.
@@ -438,7 +458,7 @@ export async function sincronizarSumUp(opts: { hastaMs?: number } = {}): Promise
       const { data: s } = await supabase.from('bookings').select(COLS).eq('id', idBoton).maybeSingle();
       if (s && sesionCobrable(s as SesionCandidata) && Number(s.amount) === c.monto) elegida = s.id;
       // Ella lo inició para ESA sesión: si no calza (ya pagada, otro monto), no se busca otra por hora.
-      else { nuevosPend.push({ codigo: c.codigo, monto: c.monto, cuando: c.cuando, tarjeta: c.tarjeta, modo: c.modo }); continue; }
+      else { nuevosPend.push({ codigo: c.codigo, monto: c.monto, cuando: c.cuando, tarjeta: c.tarjeta, modo: c.modo, foreign: c.foreign ?? null }); continue; }
     }
     // 2) Presencial: por hora y monto. Se leen TODAS las sesiones del día (también las pagadas y las
     //    de otro monto): si otra cae en la misma ventana, hay duda y no se asocia sola.
@@ -455,7 +475,7 @@ export async function sincronizarSumUp(opts: { hastaMs?: number } = {}): Promise
       if (r.ok) { asociados++; continue; }
       if ((await codigosUsados([c.codigo])).size) continue;
     }
-    nuevosPend.push({ codigo: c.codigo, monto: c.monto, cuando: c.cuando, tarjeta: c.tarjeta, modo: c.modo });
+    nuevosPend.push({ codigo: c.codigo, monto: c.monto, cuando: c.cuando, tarjeta: c.tarjeta, modo: c.modo, foreign: c.foreign ?? null });
   }
 
   let total = 0;

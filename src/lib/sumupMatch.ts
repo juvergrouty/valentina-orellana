@@ -25,6 +25,7 @@ export type CobroSumUp = {
   cuando: string;      // ISO (UTC) del cobro
   tarjeta?: string | null;
   estado?: string | null;
+  foreign?: string | null; // foreign-tx-id leído del detalle (lo pone «En la consulta» del panel)
 };
 
 export type SesionCandidata = {
