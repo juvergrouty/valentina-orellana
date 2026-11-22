@@ -242,7 +242,7 @@ type Tarea = {
   externo?: boolean;
   accion?: Accion;
 };
-const vuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); return u.pathname + u.search; })();
+const vuelta = (() => { const u = new URL(Astro.url); for (const k of ['error', 'detail', 'aviso', 'hecho', 'boleta', 'pagado']) u.searchParams.delete(k); return u.pathname + u.search; })();
 const tareas: Tarea[] = [];
 const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos, pagosPorDevolver, transferenciasPorRevisar } = avisos;
 
@@ -336,7 +336,7 @@ for (const c of sumupConfigurado() ? await porAsociarVigentes().catch(() => []) 
   tareas.push({
     clave: k,
     chip: `tarjeta ${cuando(k.slice(0, 10), k.slice(11, 16))}`,
-    id: `sumup:${k}`,
+    id: `sumup:${k}:${c.monto}`,
     titulo: `Elegir la sesión de un cobro con tarjeta de ${clp(c.monto)}`,
     detalle: 'La página no supo de qué sesión es. En Cobros eliges la sesión, con boleta o sin boleta.',
     href: '/admin/cobros#sumup-card',
@@ -426,7 +426,7 @@ for (const d of proximosDelColegio(hoy)) {
   tareas.push({
     id: d.id, colegio: { desde: d.desde },
     clave: `${d.desde}T00:00`,
-    chip: d.enDias === 0 ? 'Colegio de tu hijo · ya empezó' : `En ${d.enDias} ${d.enDias === 1 ? 'día' : 'días'} · Colegio de tu hijo`,
+    chip: d.enDias === 0 ? 'Hoy · Colegio de tu hijo' : `En ${d.enDias} ${d.enDias === 1 ? 'día' : 'días'} · Colegio de tu hijo`,
     titulo: d.que,
     detalle: `${mayus(fechaLarga(d.desde))}${d.hasta !== d.desde ? ` al ${fechaLarga(d.hasta)}` : ''}. Las sesiones que ya tienes agendadas no se tocan.${d.preliminar ? ' Fecha de la versión preliminar del colegio.' : ''}`,
     href: `/admin/agenda?fecha=${d.desde}`,
@@ -440,15 +440,31 @@ const tareasVisibles = tareas.filter((t) => !t.id || !escondidos.has(t.id));
 const avisoRecien = Astro.url.searchParams.get('aviso') ?? '';
 const hechoRecien = Astro.url.searchParams.get('hecho') ?? '';
 const errorAviso = Astro.url.searchParams.get('error') === 'aviso_guardar';
+// Resultado de «Ya me pagó» (mismos parámetros que deja mark_paid en /api/admin/bookings; textos como en la agenda).
+const qp = Astro.url.searchParams;
+const errPago = qp.get('pagado') ? (qp.get('error') ?? '') : '';
+const detallePago = qp.get('detail') ?? '';
+const msgPago: { ok: boolean; texto: string } | null = !qp.get('pagado') ? null
+  : errPago === 'boleta_reintento' ? { ok: false, texto: 'El pago se registró, pero la boleta no salió todavía. Quedó en la cola: se reintenta sola cada 5 minutos y, si no sale, te aparece un aviso aquí.' }
+  : errPago === 'boleta_failed' ? { ok: false, texto: `El pago se registró, pero la boleta no salió${detallePago ? `: ${detallePago}` : ''}.` }
+  : errPago === 'ya_pagada' ? { ok: false, texto: 'Esa sesión ya estaba pagada. No se cambió nada.' }
+  : errPago === 'conflict' ? { ok: false, texto: 'No se guardó el pago: la sesión se cruza con otra. Ábrela en la agenda.' }
+  : errPago ? { ok: false, texto: `No se pudo guardar el pago${detallePago ? ` (${detallePago})` : ''}. No se cambió nada; intenta de nuevo o ábrela en la agenda.` }
+  : qp.get('boleta') === 'emitida' ? { ok: true, texto: 'Pago registrado y boleta emitida. Se le envía por correo.' }
+  : { ok: true, texto: 'Pago registrado.' };
 
 // Horarios libres de hoy (mismo cálculo que la reserva de la página, src/lib/disponibilidad.ts).
 type Libre = { hora: string; modo: 'presencial' | 'online' | 'ambas' };
 let libres: Libre[] | null = null;
 if (esHoy) {
   try {
+    // Duración: la sesión más corta que ofrece (si no, 50 min), para no mostrar libre una hora que choca con otra sesión.
+    const { data: svcs } = await supabase.from('services_catalog').select('duration_min').eq('visible', true);
+    const durs = (svcs ?? []).map((s) => Number(s.duration_min)).filter((n) => Number.isFinite(n) && n > 0);
+    const duracion = durs.length ? Math.min(...durs) : 50;
     const [pres, onl] = await Promise.all([
-      calcularDisponibilidad({ date: dia, serviceId: null, duration: null, modality: 'presencial' }),
-      calcularDisponibilidad({ date: dia, serviceId: null, duration: null, modality: 'online' }),
+      calcularDisponibilidad({ date: dia, serviceId: null, duration: duracion, modality: 'presencial' }),
+      calcularDisponibilidad({ date: dia, serviceId: null, duration: duracion, modality: 'online' }),
     ]);
     const lp = new Set('slots' in pres ? pres.slots.map((x) => String(x).slice(0, 5)) : []);
     const lo = new Set('slots' in onl ? onl.slots.map((x) => String(x).slice(0, 5)) : []);
@@ -505,12 +521,13 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
 
     {errorReservas && <p class="hoy-error">No se pudieron leer las sesiones. Recarga en un rato.</p>}
     {errorAviso && <p class="hoy-error">No se pudo guardar ese cambio del aviso. Intenta de nuevo.</p>}
+    {msgPago && <p class={msgPago.ok ? 'hoy-exito' : 'hoy-error'} role="status">{msgPago.ok ? '✓ ' : ''}{msgPago.texto}</p>}
     {avisoRecien && hechoRecien && (
       <form method="POST" action="/api/admin/aviso" class="hoy-deshacer" role="status">
         <span>{hechoRecien === 'atendido' ? 'Listo, quedó como atendido.' : 'Te lo recuerdo mañana.'}</span>
         <input type="hidden" name="id" value={avisoRecien} />
         <input type="hidden" name="accion" value="deshacer" />
-        <input type="hidden" name="redirect" value="/admin" />
+        <input type="hidden" name="redirect" value={vuelta} />
         <button type="submit">Deshacer</button>
       </form>
     )}
@@ -597,7 +614,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
                             <form method="POST" action="/api/admin/bookings" class="hoy-pago-form">
                               <input type="hidden" name="action" value="mark_paid" />
                               <input type="hidden" name="id" value={t.cobro.id} />
-                              <input type="hidden" name="redirect" value="/admin" />
+                              <input type="hidden" name="redirect" value={vuelta + (vuelta.includes('?') ? '&' : '?') + 'pagado=1'} />
                               <p>¿Cómo te pagó? ({clp(t.cobro.monto)})</p>
                               <div class="hoy-medios">
                                 <label><input type="radio" name="medio" value="Efectivo" required /> Efectivo</label>
@@ -619,13 +636,13 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
                         )}
                         {t.colegio && t.id && (
                           <form method="POST" action="/api/admin/aviso" class="hoy-form">
-                            <input type="hidden" name="id" value={t.id} /><input type="hidden" name="accion" value="atendido" /><input type="hidden" name="redirect" value="/admin" />
+                            <input type="hidden" name="id" value={t.id} /><input type="hidden" name="accion" value="atendido" /><input type="hidden" name="redirect" value={vuelta} />
                             <button type="submit" class="hb hb-listo">✓ Atiendo normal</button>
                           </form>
                         )}
                         {t.id && (
                           <form method="POST" action="/api/admin/aviso" class="hoy-form">
-                            <input type="hidden" name="id" value={t.id} /><input type="hidden" name="accion" value="manana" /><input type="hidden" name="redirect" value="/admin" />
+                            <input type="hidden" name="id" value={t.id} /><input type="hidden" name="accion" value="manana" /><input type="hidden" name="redirect" value={vuelta} />
                             <button type="submit" class="hb hb-gris">Recordar mañana</button>
                           </form>
                         )}
@@ -694,6 +711,24 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
   </div>
 </AdminLayout>
 
+<script>
+  // Un solo toque por botón (revisión 22 nov 2026): evita que dos toques rápidos en «Confirmar pago»
+  // registren el pago dos veces o pidan dos boletas. Respeta los confirm() de cada formulario.
+  document.querySelectorAll<HTMLFormElement>('.hoy form').forEach((f) => {
+    f.addEventListener('submit', (e) => {
+      if (e.defaultPrevented) return;
+      if (f.dataset.enviando) { e.preventDefault(); return; }
+      f.dataset.enviando = '1';
+      f.querySelectorAll<HTMLButtonElement>('button[type="submit"]').forEach((b) => { b.disabled = true; b.setAttribute('aria-busy', 'true'); });
+    });
+  });
+  // Si vuelve con el botón Atrás del navegador, los botones quedan activos de nuevo.
+  window.addEventListener('pageshow', (e) => {
+    if (!e.persisted) return;
+    document.querySelectorAll<HTMLFormElement>('.hoy form').forEach((f) => { delete f.dataset.enviando; f.querySelectorAll<HTMLButtonElement>('button').forEach((b) => { b.disabled = false; b.removeAttribute('aria-busy'); }); });
+  });
+</script>
+
 <style>
   .hoy { --verde:#576352; --verde-osc:#3F4A3B; --verde-claro:#E6EBE3; --dorado:#F5A623; --dorado-claro:#FDEBC8; --tinta:#2E332A; --gris:#5F5E57; --linea:#CFC8BF; --suave:#F3F0EB; --rojo:#B03A27; --rojo-claro:#FBE7E3; --ambar:#8A5200; --ambar-claro:#FDF0D9; --wa:#15803D; --sombra:0 1px 2px rgba(46,51,42,.06),0 4px 14px rgba(46,51,42,.06);
     max-width: 1120px; margin: 0 auto; font-size: 17px; line-height: 1.45; color: var(--tinta); display: flex; flex-direction: column; gap: 16px; }
@@ -704,6 +739,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
   .hoy-dias { display: flex; gap: 6px; }
   .hoy-dias a { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border-radius: 12px; background: #fff; border: 2px solid var(--linea); color: var(--tinta); text-decoration: none; font-size: 20px; font-weight: 700; }
   .hoy-dias a.hoy-volver { font-size: 16px; }
+  .hoy-exito { background: var(--verde-claro); color: var(--verde-osc); border-radius: 12px; padding: 10px 14px; font-weight: 600; }
   .hoy-error { background: var(--rojo-claro); color: #7A2618; border-radius: 12px; padding: 10px 14px; font-weight: 600; }
   .hoy-deshacer { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--tinta); color: #fff; border-radius: 14px; padding: 8px 8px 8px 16px; font-weight: 600; font-size: 16px; }
   .hoy-deshacer button { min-height: 44px; padding: 0 14px; border-radius: 10px; background: rgba(255,255,255,.15); color: var(--dorado); font-weight: 800; border: 0; cursor: pointer; }

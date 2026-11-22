@@ -701,6 +701,8 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   .enc-tabbar a svg { width: 25px; height: 25px; }
   .enc-tabbar a.on { color: #3F4A3B; background: #E6EBE3; }
   .enc-main { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  /* Páginas de alto completo (agenda, pacientes, pagos, reportes…): terminan sobre la barra de abajo. */
+  .cal-wrap, .com-wrap, .fin-wrap, .ev-wrap, .rep-wrap, .pac-wrap { height: calc(100dvh - 76px - env(safe-area-inset-bottom)) !important; }
 }
 
 /* ── Field error ─────────────────────────────────────────────────────────── */
@@ -777,7 +779,7 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
 <head>
   <meta charset="UTF-8" />
   <meta name="tiempos-panel" content={JSON.stringify(tiemposPanel)} />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>{title} · Valentina Orellana</title>
   <link rel="icon" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1420,21 +1422,21 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   // Tutoriales (preguntas frecuentes con pasos)
   const TUTORIALS = [
     { q: '¿Cómo agendo una cita?', steps: [
-      'Entra a <strong>Calendario</strong> en el menú lateral.',
+      'Entra a <strong>Agenda</strong> en el menú (abajo en el celular).',
       'Haz <strong>clic</strong> en un espacio vacío de la hora y día que quieras.',
       'Se abre el panel <strong>Agendar hora</strong>: elige el paciente (o crea uno nuevo) y el servicio.',
       'Si es un pack, elige la cantidad de sesiones; se agendan semana a semana automáticamente.',
       'Pulsa <strong>Confirmar agendamiento</strong>. Si es online, se crea el link de Meet solo.',
     ], cta: { label: 'Ir al calendario →', href: '/admin/agenda' } },
     { q: '¿Cómo bloqueo un horario?', steps: [
-      'En el <strong>Calendario</strong>, mantén presionado el clic y <strong>arrastra</strong> sobre las horas o días a bloquear.',
+      'En la <strong>Agenda</strong>, mantén presionado el clic y <strong>arrastra</strong> sobre las horas o días a bloquear.',
       'Se abre el panel <strong>Bloquear hora</strong> con las fechas ya cargadas.',
       'Marca "Bloquea todo el día" si aplica, o ajusta las horas.',
       'Opcional: usa <strong>Bloquear feriados</strong> para bloquear todos los feriados de Chile del año.',
       'Pulsa <strong>Confirmar bloqueo</strong>.',
     ], cta: { label: 'Ir al calendario →', href: '/admin/agenda' } },
     { q: '¿Cómo creo un servicio?', steps: [
-      'Entra a <strong>Servicios</strong> y pulsa <strong>+ Nuevo servicio</strong>.',
+      'Entra a <strong>Más → Servicios y precios</strong> y pulsa <strong>+ Nuevo servicio</strong>.',
       'Completa nombre, tipo (individual/pareja/grupal/paquete) y modalidad.',
       'Pon el precio y la duración. Si es "ambos", define precio online y presencial.',
       'Marca si va visible en la página pública y/o en el carrusel del inicio.',
@@ -1447,13 +1449,13 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
       'Haz clic en el paciente para abrir su ficha completa con historial y notas.',
     ], cta: { label: 'Ir a pacientes →', href: '/admin/pacientes' } },
     { q: '¿Cómo cobro a un paciente?', steps: [
-      'Entra a <strong>Finanzas → Ir a cobrar</strong> (o directo a Cobros).',
+      'En <strong>Hoy</strong>, toca <strong>Cobrar por WhatsApp</strong> en el aviso, o entra a <strong>Más → Cobros y links de pago</strong>.',
       'Elige el paciente o ingresa un número, y selecciona el servicio (se autocompleta el precio).',
       'Genera el link de pago de Flow y compártelo por WhatsApp.',
       'Cuando el paciente paga, la reserva queda confirmada automáticamente.',
     ], cta: { label: 'Ir a cobrar →', href: '/admin/cobros' } },
     { q: '¿Cómo envío un correo a varios pacientes?', steps: [
-      'Entra a <strong>Comunicaciones</strong> y pulsa <strong>Enviar correo</strong>.',
+      'Entra a <strong>Más → Correos automáticos</strong> y pulsa <strong>Enviar correo</strong>.',
       'Elige enviarlo a todos los pacientes activos o a una selección manual.',
       'Escribe el asunto y el mensaje (se personaliza con el nombre de cada uno).',
       'Pulsa <strong>Enviar correo</strong>. Se envían con la firma de Valentina.',
@@ -1462,10 +1464,10 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
       'Obtén tu <strong>Place ID</strong> en el buscador de Place ID de Google.',
       'Crea una <strong>API key</strong> en Google Cloud con la Places API activada.',
       'Guárdalas en <strong>Configuración</strong> (claves google_place_id y google_places_api_key).',
-      'Entra a <strong>Evaluaciones</strong> y verás tus reseñas reales de Google.',
+      'Entra a <strong>Más → Reseñas en tu página</strong> y verás tus reseñas reales de Google.',
     ], cta: { label: 'Ir a evaluaciones →', href: '/admin/evaluaciones' } },
     { q: '¿Cómo veo mi agenda de hoy?', steps: [
-      'Entra a <strong>Calendario</strong>: por defecto muestra la semana actual.',
+      'Entra a <strong>Agenda</strong>: por defecto muestra la semana actual.',
       'El día de hoy aparece resaltado y una línea roja marca la hora actual.',
       'Haz clic en cualquier cita para ver el detalle, reagendar o anular.',
     ], cta: { label: 'Ir al calendario →', href: '/admin/agenda' } },
@@ -1567,6 +1569,8 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   function closeCmdk() { cmdkOverlay.classList.remove('open'); }
 
   searchBar?.addEventListener('click', openCmdk);
+  // Botón «Buscar» de la página Más (en el celular el menú lateral no se ve).
+  document.querySelectorAll('[data-abrir-buscar]').forEach((b) => b.addEventListener('click', openCmdk));
   document.getElementById('cmdk-back')?.addEventListener('click', () => renderCmdk(cmdkInput.value));
   cmdkOverlay?.addEventListener('click', e => { if (e.target === cmdkOverlay) closeCmdk(); });
   cmdkInput?.addEventListener('input', () => renderCmdk(cmdkInput.value));

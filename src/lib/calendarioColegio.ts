@@ -32,9 +32,9 @@ const DIAS_AVISO = 31; // "por lo menos con un mes de anticipación"
 
 const diasEntre = (a: string, b: string) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 86400000);
 
-/** Días del colegio que empiezan en los próximos 31 días (o ya empezaron y siguen). */
+/** Días del colegio que empiezan hoy o en los próximos 31 días (una vez empezados, el aviso ya no sigue saliendo). */
 export function proximosDelColegio(hoy: string): Array<DiaColegio & { id: string; enDias: number }> {
   return CALENDARIO_COLEGIO
-    .filter((d) => d.hasta >= hoy && diasEntre(hoy, d.desde) <= DIAS_AVISO)
+    .filter((d) => d.desde >= hoy && diasEntre(hoy, d.desde) <= DIAS_AVISO)
     .map((d) => ({ ...d, id: `colegio:${d.desde}`, enDias: Math.max(0, diasEntre(hoy, d.desde)) }));
 }

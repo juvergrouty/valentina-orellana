@@ -22,6 +22,9 @@ const grupos: Array<{ titulo: string; items: Item[] }> = [
     { href: '/admin/grabar', titulo: 'Grabar sesión', desc: 'Grabar una sesión presencial', icono: ic('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor"/>') },
     { href: '/admin/sala-online', titulo: 'Sala online', desc: 'Tu sala de Meet para las sesiones online', icono: ic('<rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3"/>'), nueva: true },
   ] },
+  { titulo: 'Cobros', items: [
+    { href: '/admin/cobros', titulo: 'Cobros y links de pago', desc: 'Crear un link de Flow, cobros con tarjeta por asociar', icono: ic('<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>') },
+  ] },
   { titulo: 'Tu consulta', items: [
     { href: '/admin/servicios', titulo: 'Servicios y precios', desc: 'Lo que se puede agendar en tu página', icono: ic('<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>') },
     { href: '/admin/horarios', titulo: 'Feriados y días cerrados', desc: 'Cerrar fechas y decidir los feriados', icono: ic('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M9 14l6 4M15 14l-6 4"/>') },
@@ -79,6 +82,23 @@ const pausa: Array<{ titulo: string; desc: string; href?: string }> = [
       <p class="nota">Fuente: calendario oficial en lafase.cl. Te aviso en Hoy un mes antes de cada fecha. El de 2027 es una primera versión y puede cambiar.</p>
     </section>
 
+    <section>
+      <h2>Tu cuenta</h2>
+      <div class="grupo">
+        <button type="button" class="item boton" data-abrir-buscar>
+          <span class="ico" set:html={ic('<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>')}></span>
+          <span class="txt"><b>Buscar en el panel</b><span>Acciones y preguntas frecuentes</span></span>
+          <span class="flecha" aria-hidden="true">›</span>
+        </button>
+        <form method="POST" action="/api/admin/logout">
+          <button type="submit" class="item boton">
+            <span class="ico" set:html={ic('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>')}></span>
+            <span class="txt"><b>Cerrar sesión</b><span>Salir del panel en este aparato</span></span>
+          </button>
+        </form>
+      </div>
+    </section>
+
     <details class="pausa">
       <summary><span><b>En pausa (proyectos futuros)</b><small>No están funcionando. Quedan aquí para retomarlos.</small></span><span class="flecha" aria-hidden="true">›</span></summary>
       {pausa.map((p) => p.href
@@ -95,6 +115,8 @@ const pausa: Array<{ titulo: string; desc: string; href?: string }> = [
   .grupo { background: #fff; border-radius: 18px; box-shadow: 0 1px 2px rgba(46,51,42,.06), 0 4px 14px rgba(46,51,42,.06); overflow: hidden; }
   .item { display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: center; min-height: 64px; padding: 10px 14px; border-top: 1px solid #EFEBE5; text-decoration: none; color: inherit; }
   .item:first-child { border-top: 0; }
+  .item.boton { width: 100%; background: none; border-left: 0; border-right: 0; border-bottom: 0; font: inherit; text-align: left; cursor: pointer; }
+  form .item.boton { border-top: 1px solid #EFEBE5; }
   .item:hover { background: #FAF7F4; }
   .item.fijo { grid-template-columns: 1fr; }
   .item.fijo:hover { background: none; }

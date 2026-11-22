@@ -16,6 +16,15 @@ async function leerMapa(): Promise<Mapa> {
   try { const v = JSON.parse(String(data.value)); return v && typeof v === 'object' ? v as Mapa : {}; } catch { return {}; }
 }
 
+// Para guardar: si la lectura falla, no se sigue (así nunca se borran los avisos ya escondidos).
+async function leerMapaEstricto(): Promise<Mapa> {
+  const { data, error } = await supabase.from('settings').select('value').eq('key', CLAVE).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data?.value) return {};
+  const v = JSON.parse(String(data.value));
+  return v && typeof v === 'object' ? v as Mapa : {};
+}
+
 async function guardarMapa(m: Mapa): Promise<void> {
   const { error } = await supabase.from('settings').upsert(
     { key: CLAVE, value: JSON.stringify(m), updated_at: new Date().toISOString() },
@@ -31,12 +40,12 @@ export async function avisosEscondidos(): Promise<Set<string>> {
   return new Set(Object.entries(m).filter(([, v]) => v === 'atendido' || v > hoy).map(([k]) => k));
 }
 
-const idValido = (id: string) => /^[a-z]+:[\w:.\-@]{1,160}$/i.test(id);
+const idValido = (id: string) => /^[a-z]+:\S{1,200}$/i.test(id); // cualquier carácter visible (correos con + o ', etc.)
 
 /** "Recordar mañana": lo esconde hasta mañana. "atendido": lo esconde para siempre (solo avisos informativos). "deshacer": lo vuelve a mostrar. */
 export async function cambiarAviso(id: string, accion: 'manana' | 'atendido' | 'deshacer'): Promise<void> {
   if (!idValido(id)) throw new Error('aviso inválido');
-  const m = await leerMapa();
+  const m = await leerMapaEstricto();
   const hoy = todayCL();
   // Limpieza: se borran los pospuestos que ya vencieron.
   for (const [k, v] of Object.entries(m)) if (v !== 'atendido' && v <= hoy) delete m[k];
