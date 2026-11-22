@@ -157,6 +157,18 @@ if (pageState === 'paid' && allBookings.length && esReservaWeb) {
   };
 }
 
+// Hora con link (/hora/<token>, 22 nov 2026): después de pagar, la paciente puede dejar (opcional)
+// sus datos para la boleta en su página. Consulta aparte: sin la migración 0028 la columna no existe
+// y esta página debe seguir igual.
+let horaLinkUrl: string | null = null;
+if (pageState === 'paid' && allBookings.length === 1 && booking?.id) {
+  try {
+    const { data: hl, error: hlErr } = await supabase.from('bookings').select('link_token').eq('id', booking.id as string).maybeSingle();
+    if (!hlErr && hl?.link_token) horaLinkUrl = `/hora/${hl.link_token}#datos`;
+  } catch { horaLinkUrl = null; }
+}
+const horaLinkPagado = horaLinkUrl ? { metodo: 'flow', value: Number(booking?.amount) || 0, clave: createHash('sha256').update(String(token)).digest('hex').slice(0, 16) } : null;
+
 // Solo el primer nombre de la paciente (8 oct 2026): en esta página cargan
 // GTM / GA4 / Google Ads / Meta; no hace falta mostrar su nombre completo.
 const primerNombre = String(booking?.patient_name ?? '').trim().split(/\s+/)[0];
@@ -242,6 +254,14 @@ const titles: Record<PageState, string> = {
               {paymentMedia && (
                 <p class="label text-stone/60 text-right">Vía {paymentMedia}</p>
               )}
+            </div>
+          )}
+
+          {horaLinkUrl && !porRevisar && (
+            <div class="w-full bg-white border border-dust p-6 text-left">
+              <p class="font-body text-sm text-ink font-medium mb-1">Datos para tu boleta (opcional)</p>
+              <p class="font-body text-sm text-stone font-light mb-4">Si quieres tu boleta, por ejemplo para la isapre, puedes dejarme tus datos ahora. Si prefieres, me los das en la consulta.</p>
+              <a href={horaLinkUrl} class="btn-dark text-[10px] py-3.5 px-6 text-center w-full justify-center inline-flex">Dejar mis datos</a>
             </div>
           )}
 
@@ -357,6 +377,19 @@ const titles: Record<PageState, string> = {
     </div>
   </section>
 
+  {horaLinkPagado && (
+    <script is:inline define:vars={{ horaLinkPagado }}>
+      // Pago de una hora con link (22 nov 2026): evento propio, sin datos personales; una vez por pago.
+      window.dataLayer = window.dataLayer || [];
+      try {
+        var _k = 'vo_hora_pagada_' + horaLinkPagado.clave;
+        if (!sessionStorage.getItem(_k)) {
+          window.dataLayer.push({ event: 'hora_link_pagado', metodo: horaLinkPagado.metodo, value: horaLinkPagado.value, currency: 'CLP' });
+          sessionStorage.setItem(_k, '1');
+        }
+      } catch (e) { window.dataLayer.push({ event: 'hora_link_pagado', metodo: horaLinkPagado.metodo, value: horaLinkPagado.value, currency: 'CLP' }); }
+    </script>
+  )}
   {purchase && (
     <script is:inline define:vars={{ purchase }}>
       // Conversión de compra para GTM (GA4 / Google Ads). Se dispara al cargar la

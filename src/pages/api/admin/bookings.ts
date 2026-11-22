@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { crearHoraConLink, FALTA_MIGRACION as FALTA_MIGRACION_HORA } from '../../../lib/horaLink';
 import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
@@ -25,6 +26,8 @@ import { MARCA_PAGO_EN_CONSULTA } from '../../../lib/pagoEnConsulta';
 import { cambiarConsultaALink } from '../../../lib/consultaALink';
 import { anularPagoSumUp, marcarManualSumUp, sinBoletaDeSesion, soltarSinBoleta } from '../../../lib/sumup';
 import { MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA } from '../../../lib/comprobantes';
+import { MARCA_ESPERA_BANCO, MARCA_BANCO_OK, MARCA_BANCO_DUDOSO, MARCA_BANCO_NO, MARCA_TITULAR } from '../../../lib/gmailBancoUtil';
+import { MARCA_BOLETA_DATOS } from '../../../lib/horaLinkUtil';
 
 export const prerender = false;
 
@@ -378,7 +381,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     await quitarLineasNotas(id, [MARCA_PROGRAMADA]);
     // Comprobante de transferencia (28 oct 2026): si no llegó el dinero y se anula el pago, la paciente
     // tiene que poder pagar de nuevo; con la marca, /pagar le decía para siempre "lo estoy revisando".
-    await quitarLineasNotas(id, [MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA]);
+    await quitarLineasNotas(id, [MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA,
+      // Revisión del correo del banco (22 nov 2026, gmailBanco.ts) y avisos de la hora con link pagada.
+      MARCA_ESPERA_BANCO, MARCA_BANCO_OK, MARCA_BANCO_DUDOSO, MARCA_BANCO_NO, MARCA_TITULAR, MARCA_BOLETA_DATOS]);
     if (codigoSumUp) await anularPagoSumUp(codigoSumUp).catch((e) => console.error('[unmark_paid] sumup:', e));
     for (const c of sinBoletaSueltos) await soltarSinBoleta(c).catch((e) => console.error('[unmark_paid] sumup sin boleta:', e));
     return redirect(dest);
@@ -708,7 +713,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // link de pago Flow) o 'free' (sin costo, ej. obra social: $0 y queda como
     // pagada, para que el paciente reciba igual Pasos a seguir y el consentimiento).
     const pmRaw           = form.get('payment_mode')?.toString();
-    const payment_mode    = pmRaw === 'link' ? 'link' : pmRaw === 'free' ? 'free' : 'manual';
+    const payment_mode    = pmRaw === 'link' ? 'link' : pmRaw === 'free' ? 'free' : pmRaw === 'hora' ? 'hora' : 'manual';
     const notesText        = form.get('notes')?.toString()?.trim() ?? '';
 
     if (!service_id || !session_date || !session_time) {
@@ -719,6 +724,32 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     const { data: svc } = await supabase
       .from('services_catalog').select('*').eq('id', service_id).single();
     if (!svc) return redirect(conParam(dest) + 'error=service_not_found');
+
+    // ── Link a ESTA hora (22 nov 2026, src/lib/horaLink.ts): solo nombre + correo o teléfono ──
+    // Una sola sesión, retenida el plazo de Configuración; Vale manda el link (copiar o WhatsApp).
+    if (payment_mode === 'hora') {
+      let nombreH = form.get('patient_name')?.toString()?.trim() ?? '';
+      let correoH = form.get('patient_email')?.toString()?.trim().toLowerCase() ?? '';
+      let telH    = form.get('patient_phone')?.toString()?.trim() ?? '';
+      if (patient_id && patient_id !== '_new') {
+        const { data: p } = await supabase.from('patients').select('name, email, phone').eq('id', patient_id).maybeSingle();
+        if (p) { nombreH = p.name ?? nombreH; correoH = (p.email ?? correoH).toLowerCase(); telH = p.phone ?? telH; }
+      }
+      const overrideH = parseInt(form.get('amount_override')?.toString() ?? '', 10);
+      const reqUrlH = new URL(request.url);
+      const r = await crearHoraConLink({
+        servicio: svc.id, fecha: session_date, hora: session_time, nombre: nombreH,
+        telefono: telH || null, correo: correoH || null, origen: 'panel',
+        modalidad: modality_choice === 'online' ? 'online' : 'presencial',
+        monto: Number.isFinite(overrideH) && overrideH > 0 ? overrideH : null,
+        permitirCruce: forzarCruce, siteUrl: `${reqUrlH.protocol}//${reqUrlH.host}`,
+      });
+      if (!r.ok) {
+        const codigo = r.codigo === 'ocupada' ? 'slot_conflict' : r.codigo === FALTA_MIGRACION_HORA ? 'falta_0028' : 'hora_link';
+        return redirect(conParam(dest) + `error=${codigo}&detail=${encodeURIComponent(r.error)}`);
+      }
+      return redirect(conParam(dest) + `hora_link=${encodeURIComponent(r.url)}&hl_wa=${encodeURIComponent(r.whatsappUrl)}&hl_vence=${encodeURIComponent(r.venceAt)}&hl_canal=${r.canal}&hl_correo=${r.correoEnviado ? "1" : "0"}`);
+    }
 
     // Patient info: from patients table OR form fields
     let finalName  = form.get('patient_name')?.toString()?.trim()  ?? '';

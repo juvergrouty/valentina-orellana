@@ -7,6 +7,10 @@ import { BUCKET_COMPROBANTES, MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR
 import { encolarTareas, procesarTareas, ejecutarTarea, nombreTarea, tareasDePago, sesionVigente, type TareaPago } from '../../lib/tareasEnvio';
 import { upsertPatientFromBooking, fichaDesdePrimerPago } from '../../lib/patients';
 import { logError, logInfo } from '../../lib/logger';
+import { esCobrable } from '../../lib/debt';
+import { horaPorToken } from '../../lib/horaLink';
+import { tokenValido } from '../../lib/horaLinkUtil';
+import { MARCA_ESPERA_BANCO, MARCA_TITULAR } from '../../lib/gmailBancoUtil';
 
 export const prerender = false;
 
@@ -58,8 +62,12 @@ export const POST: APIRoute = async ({ request }) => {
   catch { return json({ error: 'No se pudo leer el archivo. Intenta de nuevo.' }, 400); }
 
   const patientId = form.get('patientId')?.toString() ?? '';
+  // Link a una hora (/hora/<token>, 22 nov 2026): cubre solo esa sesión, aunque no haya ficha ni correo.
+  const horaToken = form.get('horaToken')?.toString() ?? '';
+  // Nombre de la cuenta desde la que transfirió, si no es la suya (para encontrar el correo del banco).
+  const titular = (form.get('titular')?.toString() ?? '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
   const file = form.get('comprobante') as File | null;
-  if (!patientId) return json({ error: 'Link no válido.' }, 400);
+  if (!patientId && !tokenValido(horaToken)) return json({ error: 'Link no válido.' }, 400);
   if (!file || !file.size) return json({ error: 'Adjunta la foto o captura de tu comprobante.' }, 400);
   if (file.size > MAX_SIZE) return json({ error: 'El archivo es muy grande (máximo 4 MB). Prueba con una captura de pantalla.' }, 400);
   const bytes = await file.arrayBuffer();
@@ -67,10 +75,23 @@ export const POST: APIRoute = async ({ request }) => {
   const ext = tipo ? TIPOS[tipo] : undefined;
   if (!tipo || !ext) return json({ error: 'Sube una foto (JPG o PNG) o un PDF del comprobante.' }, 400);
 
-  const { data: patient } = await supabase.from('patients').select('id, name, email').eq('id', patientId).maybeSingle();
-  if (!patient?.email) return json({ error: 'Link no válido. Escríbele a Valentina para que te mande uno nuevo.' }, 404);
-
-  const todo = await getTotalOwedByEmail(patient.email);
+  // Quién paga y qué sesiones cubre: la ficha (link /pagar) o la hora del link (/hora).
+  let patient: { id: string | null; name: string; email: string } | null = null;
+  let todo: Awaited<ReturnType<typeof getTotalOwedByEmail>> = [];
+  if (patientId) {
+    const { data: p } = await supabase.from('patients').select('id, name, email').eq('id', patientId).maybeSingle();
+    if (!p?.email) return json({ error: 'Link no válido. Escríbele a Valentina para que te mande uno nuevo.' }, 404);
+    patient = p;
+    todo = await getTotalOwedByEmail(p.email);
+  } else {
+    const h = await horaPorToken(horaToken);
+    if (!h) return json({ error: 'Link no válido. Escríbele a Valentina para que te mande uno nuevo.' }, 404);
+    if (h.paid_at) return json({ error: 'Esta hora ya está pagada. No necesitas pagar de nuevo.' }, 400);
+    if (h.status === 'cancelled' || h.status === 'expired') return json({ error: 'Esta hora ya no está reservada. Escríbele a Valentina para buscar otra.' }, 400);
+    const { data: ficha } = h.patient_email ? await supabase.from('patients').select('id').eq('email', h.patient_email.toLowerCase()).maybeSingle() : { data: null };
+    patient = { id: ficha?.id ?? null, name: h.patient_name, email: h.patient_email ?? '' };
+    todo = esCobrable(h) ? [h] : [];
+  }
   if (!todo.length) return json({ error: 'Ya no tienes pagos pendientes. Si crees que es un error, escríbele a Valentina.' }, 400);
   // Un comprobante por cobro: si ya hay uno en revisión, no se suben más (evita
   // correos y archivos repetidos). Si se equivocó de archivo, escribe a Valentina.
@@ -79,7 +100,7 @@ export const POST: APIRoute = async ({ request }) => {
   const total = pending.reduce((s, b) => s + b.amount, 0);
 
   // Guardar el comprobante en un bucket privado (con el tipo detectado).
-  const path = `${patient.id}/${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID()}.${ext}`;
+  const path = `${patient.id ?? `hora-${todo[0].id}`}/${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID()}.${ext}`;
   {
     const { error: bErr } = await supabase.storage.getBucket(BUCKET_COMPROBANTES);
     if (bErr) await supabase.storage.createBucket(BUCKET_COMPROBANTES, { public: false });
@@ -102,7 +123,12 @@ export const POST: APIRoute = async ({ request }) => {
   let confirmadas = 0;
   try {
     const ids = pending.map(b => b.id);
-    for (const id of ids) await agregarLineaNotas(id, `${MARCA_TRANSFERENCIA_POR_REVISAR} ${iso} ${path}`);
+    for (const id of ids) {
+      await agregarLineaNotas(id, `${MARCA_TRANSFERENCIA_POR_REVISAR} ${iso} ${path}`);
+      // La boleta espera el correo del banco (o «Ya la revisé» de Vale): ver src/lib/gmailBanco.ts (22 nov 2026).
+      await agregarLineaNotas(id, `${MARCA_ESPERA_BANCO} ${iso}`);
+      if (titular) await agregarLineaNotas(id, `${MARCA_TITULAR} ${titular}`);
+    }
     const { data: antes } = await supabase.from('bookings').select('id, status, session_date').in('id', ids);
     const pago = `transferencia-${Date.parse(iso)}`;
     const datosPago = { status: 'confirmed', paid_at: iso, payment_note: 'Transferencia', mp_payment_id: pago };
@@ -158,7 +184,7 @@ export const POST: APIRoute = async ({ request }) => {
     })),
     fileName: `comprobante-${(patient.name.split(' ')[0] || 'paciente').toLowerCase()}.${ext}`,
     fileBase64: Buffer.from(bytes).toString('base64'),
-    panelUrl: `${site}/admin/pacientes/${patient.id}?tab=sesiones`,
+    panelUrl: patient.id ? `${site}/admin/pacientes/${patient.id}?tab=sesiones` : `${site}/admin/agenda?booking=${pending[0].id}`,
   });
   if (!r.sent) await logError('transferencia/aviso', 'No se pudo enviar a Valentina el correo del comprobante', { patientId, error: r.reason });
 

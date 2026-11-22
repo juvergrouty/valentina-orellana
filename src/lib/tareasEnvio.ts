@@ -23,9 +23,13 @@ import { logError, logWarn } from './logger';
 import { sendConfirmationToClient, sendNotificationToAdmin, ADMIN_EMAIL_FALLBACK } from './email';
 import { syncBookingToCalendar, markBookingPaidInCalendar } from './syncCalendar';
 import { sendStepsOnFirstPayment, upsertPatientFromBooking, fichaDesdePrimerPago } from './patients';
-import { emitBoletaParaReserva } from './apigateway';
+import { emitBoletaParaReserva, agregarLineaNotas } from './apigateway';
 import { todayCL } from './dateUtils';
 import { esPagoDelPanel } from './horaLibre';
+import { enviarPasosWhatsapp } from './horaLink';
+import { esHoraLink, tieneMarca, MARCA_BOLETA_DATOS } from './horaLinkUtil';
+import { MARCA_ESPERA_BANCO, MARCA_BANCO_OK } from './gmailBancoUtil';
+import { MARCA_TRANSFERENCIA_REVISADA } from './comprobantes';
 export { pagoDelPanel } from './horaLibre';
 
 // calendario_pagado: pago de una sesión que ya estaba agendada (deuda o sesión
@@ -163,6 +167,12 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
     switch (tarea) {
       case 'confirmacion': {
         if (sinFecha) return { ok: true, descartada: true, nota: 'cobro sin fecha' };
+        // Hora con link agendada con teléfono (22 nov 2026, horaLink.ts): lo imprescindible (fecha,
+        // cómo llegar o conectarse y Pasos a seguir) va por WhatsApp, una sola vez. Nunca hace fallar
+        // esta tarea: si WhatsApp no está disponible, Vale ve en el Inicio el botón para mandarlo ella.
+        if (esHoraLink(b.notes) && b.patient_phone && (b.link_canal === 'whatsapp' || !b.patient_email)) {
+          try { await enviarPasosWhatsapp(b); } catch (e) { console.error('[envios] pasos por WhatsApp:', e); }
+        }
         if (!b.patient_email) return { ok: true, descartada: true, nota: 'sin correo' };
         const r = await sendConfirmationToClient(await datosCorreo(), { idempotencyKey: llave });
         return r.sent ? { ok: true, nota: r.reason } : { ok: false, error: r.reason };
@@ -193,6 +203,11 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
         return (await markBookingPaidInCalendar(bookingId, true, { invitar })) ? { ok: true } : { ok: false, error: 'no se pudo marcar pagado en el calendario' };
       }
       case 'boleta': {
+        // Transferencia (22 nov 2026, gmailBanco.ts): la boleta espera el correo del banco (o que Vale
+        // apriete «Ya la revisé»). Quien la confirma vuelve a pedir la boleta con su propio nombre de envío.
+        if (tieneMarca(b.notes, MARCA_ESPERA_BANCO) && !tieneMarca(b.notes, MARCA_BANCO_OK) && !tieneMarca(b.notes, MARCA_TRANSFERENCIA_REVISADA)) {
+          return { ok: true, descartada: true, nota: 'espera el correo del banco' };
+        }
         // Interruptor "Emitir la boleta automáticamente" del servicio. No aplica
         // cuando Valentina marcó el pago en el panel con "Emitir y enviar boleta"
         // (pago "panel-…"): ahí lo pidió ella explícitamente (20 oct 2026).
@@ -209,6 +224,13 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
         // Sesión futura pagada por adelantado: queda programada para el día de
         // la sesión (cron boletas-pendientes). No es error ni aviso (8 oct 2026).
         if (res.programada) return { ok: true, nota: res.mensaje };
+        // Hora con link sin RUT (22 nov 2026): no es un error. Queda «Pagada · boleta pendiente de datos»
+        // hasta que la paciente (formulario opcional) o Vale (en la consulta) escriban el RUT; la boleta
+        // sale entonces con la fecha del pago (fechaEmisionBoleta).
+        if (!res.ok && (res.error ?? '').toLowerCase().includes('rut') && esHoraLink(b.notes)) {
+          if (!tieneMarca(b.notes, MARCA_BOLETA_DATOS)) await agregarLineaNotas(bookingId, `${MARCA_BOLETA_DATOS} ${new Date().toISOString()}`);
+          return { ok: true, nota: 'boleta pendiente de datos (falta el RUT)' };
+        }
         if (!res.ok) {
           const esFaltaRut = (res.error ?? '').toLowerCase().includes('rut');
           await logWarn('flow/boleta-automatica', esFaltaRut
@@ -420,4 +442,16 @@ export async function terminarEnvioUnico(bookingId: string, tarea: string, ok: b
   await supabase.from('tareas_envio')
     .update(ok ? { estado: 'hecha', hecha_en: new Date().toISOString(), ultimo_error: null } : { estado: 'error', ultimo_error: (error ?? '').slice(0, 500) })
     .eq('booking_id', bookingId).eq('tarea', tarea);
+}
+
+/**
+ * Transferencia confirmada (correo del banco o «Ya la revisé» de Vale, 22 nov 2026): emite la boleta
+ * de cada sesión que la esperaba. Un nombre de envío nuevo por confirmación; emitBoletaParaReserva
+ * tiene candado y folio, así que nunca salen dos boletas para la misma sesión.
+ */
+export async function emitirBoletasConfirmadas(ids: string[], pago: string): Promise<void> {
+  for (const id of ids) {
+    try { await encolarYEjecutar(id, 'boleta', pago); }
+    catch (e) { await logError('transferencia/boleta', 'No se pudo emitir la boleta de una transferencia confirmada; se reintenta sola', { bookingId: id, error: e instanceof Error ? e.message : String(e) }); }
+  }
 }

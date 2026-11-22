@@ -16,6 +16,7 @@ import { estadosConsentimientoSeguro, ETIQUETA_CONSENTIMIENTO, type EstadoConsen
 import { esPagoEnConsulta, ETIQUETA_PAGO_EN_CONSULTA } from '../../lib/pagoEnConsulta';
 import { carrilesDelDia } from '../../lib/horaLibre';
 import { sumupConfigurado } from '../../lib/sumup';
+import { venceTexto, esHoraLink, tieneMarca, mensajeHoraWhatsapp, MARCA_BOLETA_DATOS } from '../../lib/horaLinkUtil';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
 // ?w=abc daba NaN y la página se caía al armar las fechas (8 oct 2026): si no es un número, semana actual.
@@ -115,6 +116,16 @@ const [bookingsRes, svcRes, patientRes, allSvcRes, settingsRes] = await Promise.
 ]);
 
 const bookings    = (bookingsRes.data ?? []) as Array<Record<string, any>>;
+// Horas con link (22 nov 2026, src/lib/horaLink.ts): su link y hasta cuándo se retiene. Consulta aparte:
+// sin la migración 0028 las columnas no existen y la agenda debe seguir igual.
+const horaLinkDe: Record<string, { url: string; vence: string | null; venceIso: string | null }> = {};
+{
+  const ids = bookings.filter((b) => esHoraLink(b.notes)).map((b) => b.id);
+  if (ids.length) {
+    const { data: hl, error: hlErr } = await supabase.from('bookings').select('id, link_token, link_vence_at').in('id', ids);
+    if (!hlErr) for (const r of hl ?? []) if (r.link_token) horaLinkDe[r.id] = { url: `${Astro.url.origin}/hora/${r.link_token}`, vence: r.link_vence_at ? venceTexto(r.link_vence_at) : null, venceIso: r.link_vence_at ?? null };
+  }
+}
 const svcMap: Record<string, string> = {};
 (svcRes.data ?? []).forEach((s: { id: string; name: string }) => { svcMap[s.id] = s.name; });
 const patientList = patientRes.data ?? [];
@@ -428,6 +439,11 @@ const plWaMsg      = paymentLink ? mensajeLinkPago(Astro.url.searchParams.get('p
 // El botón manual de WhatsApp solo se muestra si el envío automático (plantilla
 // de Meta) no se hizo — para no mandar el mensaje duplicado.
 const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${plPhoneWa}?text=${encodeURIComponent(plWaMsg)}` : null;
+// Link a una hora recién creado (22 nov 2026): aviso con «Copiar link» y «Enviar por WhatsApp».
+const horaLinkNuevo = (() => { const u = Astro.url.searchParams.get('hora_link') ?? ''; return /^https?:\/\/[^/]+\/hora\/[A-Za-z0-9_-]{24,64}$/.test(u) ? u : null; })();
+const hlWa = (() => { const u = Astro.url.searchParams.get('hl_wa') ?? ''; return u.startsWith('https://wa.me/') ? u : null; })();
+const hlVence = (() => { const v = Astro.url.searchParams.get('hl_vence') ?? ''; return Number.isFinite(Date.parse(v)) ? venceTexto(v) : null; })();
+const hlCorreo = Astro.url.searchParams.get('hl_correo') === '1';
 // Cobro con tarjeta por SumUp (18 nov 2026): la caja solo aparece si la clave está en el servidor.
 const sumupActivo = sumupConfigurado();
 // Clave de afiliado de SumUp (20 nov 2026): con ella "En la consulta" abre la app de SumUp con el monto y
@@ -507,6 +523,12 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
       )}
       {errorParam === 'flow_error' && (
         <div class="cal-error-banner">⚠ No se pudo generar el link de pago{errorDetail ? `: ${errorDetail}` : ''}.{Astro.url.searchParams.get('canceladas') === '1' ? ' Las sesiones de este intento se cancelaron, así que la hora queda libre para reintentar.' : ' Revisa en la agenda si las sesiones quedaron creadas "esperando pago" y cancélalas antes de reintentar.'} Revisa la configuración de Flow.</div>
+      )}
+      {errorParam === 'falta_0028' && (
+        <div class="cal-error-banner">⚠ Para usar «Link a esta hora» falta aplicar la actualización 0028 de la base de datos. No se agendó nada.</div>
+      )}
+      {errorParam === 'hora_link' && (
+        <div class="cal-error-banner">⚠ No se creó la hora con link{errorDetail ? `: ${errorDetail}` : ''}. No se agendó nada.</div>
       )}
       {errorParam === 'missing_patient_data' && (
         <div class="cal-error-banner">⚠ Para crear una paciente nueva faltan datos: correo, teléfono, dirección, comuna y RUT (o documento si no tiene RUT). No se agendó nada.</div>
@@ -682,6 +704,17 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
       <span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.72rem;color:#374151;"><span style="width:12px;height:12px;border-radius:3px;background:repeating-linear-gradient(45deg,#eef1f5,#eef1f5 3px,#e5e9ef 3px,#e5e9ef 6px);border:1px dashed #9aa4b2;"></span>Google Calendar / Encuadrado</span>
     </div>
 
+    {horaLinkNuevo && (
+      <div class="hl-banner" role="status">
+        <p class="hl-banner-titulo">✓ Hora reservada{hlVence ? ` y guardada hasta el ${hlVence}` : ''}.</p>
+        <p class="hl-banner-texto">{hlCorreo ? 'Le mandé el link por correo. ' : ''}Mándale este link: ahí ve solo esa hora, el valor y cómo pagarla.</p>
+        <div class="hl-banner-botones">
+          <button type="button" class="btn btn-dark btn-sm" data-copy-link={horaLinkNuevo}>Copiar link</button>
+          {hlWa && <a href={hlWa} target="_blank" rel="noopener" class="btn btn-outline btn-sm">Enviar por WhatsApp</a>}
+          <a href={`${horaLinkNuevo}?vista=vale`} target="_blank" rel="noopener" class="btn btn-outline btn-sm">Ver la página</a>
+        </div>
+      </div>
+    )}
     {paymentLink && (
       <div style="margin:0.6rem 1rem;padding:0.75rem 1rem;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
         <span style="font-size:0.85rem;color:#166534;font-weight:600;">
@@ -794,6 +827,11 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
                   // Indicador de consentimiento (estadoConsentimiento.ts); ficha_consent = ficha aunque esté archivada.
                   consent_estado: cs.estado ?? '',
                   ficha_consent:  cs.pid,
+                  // Hora con link (22 nov 2026): link para reenviar y si la boleta espera el RUT.
+                  hora_link_url:  horaLinkDe[b.id]?.url ?? null,
+                  hora_vence:     horaLinkDe[b.id]?.vence ?? null,
+                  hora_wa_msg:    horaLinkDe[b.id] ? mensajeHoraWhatsapp({ nombre: b.patient_name, fecha: b.session_date, hora: String(b.session_time).slice(0, 5), online: String(b.session_type).includes('online'), url: horaLinkDe[b.id].url, venceIso: horaLinkDe[b.id].venceIso ?? new Date().toISOString() }) : null,
+                  boleta_datos:   esHoraLink(b.notes) && tieneMarca(b.notes, MARCA_BOLETA_DATOS),
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}${esPagoEnConsulta(b) ? ` · ${ETIQUETA_PAGO_EN_CONSULTA}` : ''}${tituloConsent(cs.estado) ? ` · ${tituloConsent(cs.estado)}` : ''}`}
               >
@@ -881,14 +919,16 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
           </div>
           <div class="bp-field-row">
             <div class="bp-field">
-              <label>Teléfono *</label>
+              <label>Teléfono <span class="bp-req">*</span></label>
               <input type="tel" name="patient_phone" id="bp-pphone" data-validar-telefono placeholder="+56 9 XXXX XXXX">
             </div>
             <div class="bp-field">
-              <label>Correo *</label>
+              <label>Correo <span class="bp-req">*</span></label>
               <input type="email" name="patient_email" id="bp-pemail" placeholder="correo@mail.cl">
             </div>
           </div>
+          <p id="bp-hora-nota" class="bp-hora-nota" style="display:none">Basta el nombre y el teléfono o el correo. El RUT, la dirección y la comuna se los pides en la consulta (o ella los deja después de pagar).</p>
+          <div id="bp-ficha-extra">
           <div class="bp-field">
             <label>RUT *</label>
             <input type="text" name="patient_rut" id="bp-prut" data-rut maxlength="12" placeholder="12.345.678-9">
@@ -929,6 +969,7 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
               <label>Tel. emergencia</label>
               <input type="tel" name="emergency_phone" id="bp-emerg-phone" data-validar-telefono placeholder="+56 9 XXXX XXXX">
             </div>
+          </div>
           </div>
         </div>
 
@@ -1013,7 +1054,10 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
                ni el consentimiento. El defecto ahora es "Link de pago". -->
           <div class="bp-radio-group">
             <label class="bp-radio-opt">
-              <input type="radio" name="payment_mode" value="link" checked> Enviar link de pago
+              <input type="radio" name="payment_mode" value="hora" checked> Link a esta hora
+            </label>
+            <label class="bp-radio-opt">
+              <input type="radio" name="payment_mode" value="link"> Link de pago por correo
             </label>
             <label class="bp-radio-opt">
               <input type="radio" name="payment_mode" value="free"> Sin costo
@@ -1027,7 +1071,7 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
             <p style="font-size:0.72rem;color:#b45309;margin-top:0.2rem;">No envía Pasos a seguir ni consentimiento hasta que marques el pago.</p>
           </details>
           <p id="bp-pay-note" style="font-size:0.72rem;color:#6b7280;margin-top:0.35rem;">
-            "Link de pago" la deja pendiente y le envía al paciente un enlace de Flow por correo. "Sin costo" (obra social) la confirma en $0, sin boleta, y si es su primera sesión le envía Pasos a seguir y el consentimiento.
+            "Link a esta hora" guarda la hora y te da un link para mandarle: ahí ve solo esa hora, el valor y paga con tarjeta o transferencia. "Link de pago por correo" le manda el enlace de siempre (pide la ficha completa). "Sin costo" (obra social) la confirma en $0, sin boleta, y si es su primera sesión le envía Pasos a seguir y el consentimiento.
           </p>
         </div>
 
@@ -1440,6 +1484,14 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
             <input type="hidden" name="patient_id" id="sp-paylink-mail-patient">
             <input type="hidden" name="redirect" value={`/admin/agenda?w=${weekOffset}`}>
           </form>
+        </div>
+        <!-- Hora con link (22 nov 2026, src/lib/horaLink.ts): reenviar el link de SU hora. -->
+        <div id="sp-hora-link-box" style="display:none;margin-top:0.6rem;border:1px solid var(--dust);border-radius:var(--radius);padding:0.6rem;">
+          <p id="sp-hora-link-texto" style="font-size:0.75rem;color:var(--stone);margin:0 0 0.45rem;line-height:1.4;"></p>
+          <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+            <button type="button" id="sp-hora-link-copiar" class="btn btn-dark btn-sm">Copiar link de su hora</button>
+            <a href="#" id="sp-hora-link-wa" target="_blank" rel="noopener" class="btn btn-outline btn-sm">Enviar por WhatsApp</a>
+          </div>
         </div>
         <!-- "Paga en consulta" → link de pago (20 oct 2026, ver src/lib/consultaALink.ts): quita la marca
              y vuelve con "💳 Cobrar" abierto para mandarle el link (mismo flujo que una hora por pagar). -->
@@ -1884,6 +1936,13 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
 /* ── Session panel specific ──────────────────────────────────────────────── */
 .sp-service  { font-size: 0.875rem; font-weight: 600; color: #111827; line-height: 1.3; }
 .sp-status   { font-size: 0.72rem; margin-top: 3px; }
+/* Link a una hora (22 nov 2026) */
+.hl-banner { margin: 0.6rem 1rem; padding: 0.85rem 1rem; background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; }
+.hl-banner-titulo { font-size: 0.9rem; color: #166534; font-weight: 600; margin: 0 0 0.25rem; }
+.hl-banner-texto { font-size: 0.8rem; color: #166534; margin: 0 0 0.6rem; line-height: 1.4; }
+.hl-banner-botones { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.hl-banner-botones .btn { min-height: 40px; display: inline-flex; align-items: center; }
+.bp-hora-nota { font-size: 0.75rem; color: var(--stone); background: var(--sand); border-radius: var(--radius); padding: 0.5rem 0.65rem; margin: 0 0 0.75rem; line-height: 1.4; }
 .status-confirmed { color: #15803d; font-weight: 600; }
 .status-pending   { color: #b45309; font-weight: 600; }
 .sp-patient-name  { font-size: 0.875rem; font-weight: 600; color: #111827; }
@@ -2501,6 +2560,15 @@ document.getElementById('bp-sin-rut')?.addEventListener('change', actualizarSinR
 document.getElementById('bp-form')?.addEventListener('submit', (e) => {
   if (bpPatientSel?.value !== '_new') return;
   const val = (id) => (document.getElementById(id)?.value ?? '').trim();
+  // Link a esta hora (22 nov 2026): solo nombre y teléfono o correo.
+  if (modoHora()) {
+    const faltanH = [];
+    if (!val('bp-pname')) faltanH.push('el nombre');
+    if (!val('bp-pphone') && !val('bp-pemail')) faltanH.push('el teléfono o el correo');
+    else if (val('bp-pemail') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val('bp-pemail'))) faltanH.push('un correo válido');
+    if (faltanH.length) { e.preventDefault(); e.stopImmediatePropagation(); alert('Para el link a esta hora falta ' + faltanH.join(' y ') + '.'); }
+    return;
+  }
   const sinRut = document.getElementById('bp-sin-rut')?.checked;
   const faltan = [];
   if (!val('bp-pname')) faltan.push('nombre');
@@ -2511,6 +2579,21 @@ document.getElementById('bp-form')?.addEventListener('submit', (e) => {
   if (!val('bp-pcomuna')) faltan.push('comuna');
   if (faltan.length) { e.preventDefault(); e.stopImmediatePropagation(); alert('Para crear la paciente falta: ' + faltan.join(', ') + '.'); }
 }, true);
+// Link a esta hora (22 nov 2026): con esa opción la paciente nueva necesita solo nombre y un contacto,
+// y es una sola sesión (el link es para esa hora).
+function modoHora() { return !!document.querySelector('input[name="payment_mode"][value="hora"]')?.checked; }
+function actualizarModoHora() {
+  const hora = modoHora();
+  const extra = document.getElementById('bp-ficha-extra');
+  if (extra) extra.style.display = hora ? 'none' : '';
+  const nota = document.getElementById('bp-hora-nota');
+  if (nota) nota.style.display = hora ? '' : 'none';
+  document.querySelectorAll('#bp-new-patient .bp-req').forEach((el) => { el.style.display = hora ? 'none' : ''; });
+  const ses = document.getElementById('bp-sessions');
+  if (ses) { if (hora) ses.value = '1'; ses.disabled = hora; }
+}
+document.querySelectorAll('input[name="payment_mode"]').forEach((r) => r.addEventListener('change', actualizarModoHora));
+actualizarModoHora();
 // Hora libre (Valentina, 20 oct 2026): el panel acepta cualquier minuto (7:53).
 // Antes de enviar pregunta al servidor si la hora queda fuera de su horario o
 // se cruza con otra sesión; si es así lo AVISA y ella decide agendar igual
@@ -3279,6 +3362,26 @@ function openSessionDetail(b) {
     paylinkBox.style.display = 'none';
   }
   document.getElementById('sp-cobrar-menu').style.display = 'none';
+  // Hora con link (22 nov 2026): su propio link, con la hora y el valor, para reenviarlo.
+  {
+    const caja = document.getElementById('sp-hora-link-box');
+    const ver = !!b.hora_link_url && !isPaid && !isVoided;
+    caja.style.display = ver ? 'block' : 'none';
+    if (ver) {
+      document.getElementById('sp-hora-link-texto').textContent = b.hora_vence
+        ? `Esperando el pago. La hora está guardada hasta el ${b.hora_vence}; después se libera sola.`
+        : 'Esperando el pago de su hora.';
+      const copiar = document.getElementById('sp-hora-link-copiar');
+      copiar.onclick = async () => {
+        try { await navigator.clipboard.writeText(b.hora_link_url); copiar.textContent = 'Copiado'; }
+        catch (err) { prompt('Copia el link:', b.hora_link_url); }
+        setTimeout(() => { copiar.textContent = 'Copiar link de su hora'; }, 2000);
+      };
+      const wa = document.getElementById('sp-hora-link-wa');
+      const base = waPhone.length >= 10 ? `https://wa.me/${waPhone}` : 'https://wa.me/';
+      wa.href = `${base}?text=${encodeURIComponent(b.hora_wa_msg || b.hora_link_url)}`;
+    }
+  }
   // "Cambiar a link de pago": solo en una hora "Paga en consulta" vigente y sin pagar (pago_en_consulta ya lo exige).
   // Sin correo no hay link /pagar que mandar (consultaALink.ts lo rechaza): no se ofrece.
   document.getElementById('sp-a-link-box').style.display = (b.pago_en_consulta && !isPaid && !isVoided && b.patient_email) ? 'block' : 'none';
@@ -3300,6 +3403,7 @@ function openSessionDetail(b) {
   if (boletaSec) boletaSec.style.display = (b.amount ?? 0) > 0 ? '' : 'none';
   const badge = document.getElementById('sp-pay-badge');
   if (isVoided)     { badge.textContent = 'Deuda anulada'; badge.className = 'sp-pay-badge badge-manual'; }
+  else if (isPaid && b.boleta_datos && !/Boleta\s+Folio\s+\d+/i.test(b.notes ?? '')) { badge.textContent = 'Pagada · boleta pendiente de datos'; badge.className = 'sp-pay-badge badge-paid'; }
   else if (isPaid)  { badge.textContent = b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado'; badge.className = 'sp-pay-badge badge-paid'; }
   else if (b.pago_en_consulta) { badge.textContent = 'Paga en consulta'; badge.className = 'sp-pay-badge badge-consulta'; }
   else              { badge.textContent = 'Por pagar'; badge.className = 'sp-pay-badge badge-pending'; }
@@ -3433,6 +3537,12 @@ function openSessionDetail(b) {
   } else {
     const emitBtn = document.getElementById('sp-btn-emitir');
     if (emitBtn) emitBtn.style.display = '';
+    // Hora con link pagada sin RUT (22 nov 2026): se abre el formulario para completarlo y emitirla.
+    if (b.paid_at && b.boleta_datos && boletaResult) {
+      boletaResult.textContent = 'Pagada · boleta pendiente de datos. Escribe su RUT y emítela: sale con la fecha del pago.';
+      boletaResult.style.color = '#b45309';
+      document.getElementById('sp-boleta-form').style.display = 'block';
+    }
     // Pagada por adelantado: la boleta ya quedó programada para el día de la sesión (8 oct 2026).
     const hoyCL = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
     if (b.paid_at && /BoletaProgramada/.test(b.notes ?? '') && b.session_date && b.session_date !== '2099-12-31' && b.session_date > hoyCL && boletaResult) {

@@ -8,6 +8,9 @@ import { enviarBoletaDeReserva, emitBoletaParaReserva, folioVigente, MARCA_PENDI
 import { logWarn } from '../../../lib/logger';
 import { todayCL } from '../../../lib/dateUtils';
 import { sincronizarSumUp, anotarRevisionSumUp } from '../../../lib/sumup';
+import { vencerHorasLink } from '../../../lib/horaLink';
+import { revisarTransferenciasEnBanco } from '../../../lib/gmailBanco';
+import { emitirBoletasConfirmadas } from '../../../lib/tareasEnvio';
 
 export const prerender = false;
 
@@ -36,6 +39,10 @@ export const GET: APIRoute = async ({ request }) => {
   const envios = await procesarTareas({ hastaMs: Date.now() + 25_000 });
   // Eventos de Google Calendar que no se pudieron borrar o mover al anular/reagendar (28 oct 2026).
   await reintentarCalendarioPendiente({ hastaMs: Date.now() + 20_000 });
+  // Horas con link (/hora/<token>, 22 nov 2026): libera las que vencieron sin pago y avisa a Vale.
+  const horasVencidas = await vencerHorasLink(Date.now() + 15_000).catch((e) => { console.error('[boletas-pendientes] horas con link:', e); return null; });
+  // Transferencias: busca en el Gmail de Vale (solo lectura) el aviso del banco; si calza, emite la boleta.
+  const banco = await revisarTransferenciasEnBanco(emitirBoletasConfirmadas, Date.now() + 25_000).catch((e) => { console.error('[boletas-pendientes] banco:', e); return null; });
 
   const { data: rows, error } = await supabase
     .from('bookings').select('id, notes').ilike('notes', `%${MARCA_PENDIENTE}%`)
@@ -127,5 +134,5 @@ export const GET: APIRoute = async ({ request }) => {
     }
   }
 
-  return json({ ok: true, envios, sumup, pending: results.length, sent: results.filter(r => r.sent).length, results, emisiones, programadas });
+  return json({ ok: true, envios, horasVencidas, banco, sumup, pending: results.length, sent: results.filter(r => r.sent).length, results, emisiones, programadas });
 };

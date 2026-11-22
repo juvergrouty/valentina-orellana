@@ -372,6 +372,29 @@ export async function crearLinkSumUp(bookingId: string): Promise<{ ok: boolean; 
 }
 
 /**
+ * Página /hora/<token> (22 nov 2026): al volver del link de SumUp la paciente no espera al cron de
+ * 5 min. Revisa SOLO los links de esa sesión y, si uno está pagado, lo registra con el mismo
+ * registrarPagoSumUp del cron (el código se reserva una sola vez: nunca paga dos veces). Cualquier
+ * caso dudoso (cobro anulado por Vale, ignorado, sesión ya pagada) se deja al cron, que avisa.
+ */
+export async function revisarLinkSumUpDeSesion(bookingId: string): Promise<boolean> {
+  if (!sumupConfigurado()) return false;
+  const { data: b } = await supabase.from('bookings').select('id, notes, paid_at, status').eq('id', bookingId).maybeSingle();
+  if (!b || b.paid_at || b.status === 'cancelled') return !!b?.paid_at;
+  const estado = await leerEstado();
+  for (const id of checkoutsDe(b.notes).slice(-2)) {
+    let c: { status: string; transactions?: TxApi[] };
+    try { c = await api(`/v0.1/checkouts/${encodeURIComponent(id)}`); } catch { continue; }
+    const tx = (c.transactions ?? []).find(valido);
+    if (c.status !== 'PAID' || !tx) continue;
+    if (estado.ignorados.includes(tx.transaction_code) || estado.manual.includes(tx.transaction_code)) return false;
+    const r = await registrarPagoSumUp([b.id], aCobro(tx), 'auto');
+    return r.ok;
+  }
+  return false;
+}
+
+/**
  * Links de SumUp pagados. Devuelve los códigos de cobro que vinieron de un link (esos nunca se
  * asocian por hora). Un link pagado de una sesión ya pagada por otro medio o cancelada queda por
  * asociar y con aviso (posible pago doble), como en Flow.

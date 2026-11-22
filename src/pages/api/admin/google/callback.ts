@@ -24,6 +24,28 @@ export const GET: APIRoute = async ({ url, cookies }) => {
     });
   }
 
+  // Conexión de Gmail (solo lectura, transferencias): se guarda aparte y no toca Calendar.
+  if (state.startsWith('gmail.')) {
+    try {
+      const tokens = await exchangeCodeForTokens(code);
+      if (!tokens.refresh_token) throw new Error('Google no devolvió el permiso permanente');
+      const userInfo = await getGoogleUserInfo(tokens.access_token);
+      const ahora = new Date().toISOString();
+      for (const [key, value] of [
+        ['gmail_access_token', tokens.access_token],
+        ['gmail_refresh_token', tokens.refresh_token],
+        ['gmail_token_expiry', String(Date.now() + tokens.expires_in * 1000)],
+        ['gmail_user_email', userInfo.email ?? ''],
+      ]) {
+        await supabase.from('settings').upsert({ key, value, updated_at: ahora }, { onConflict: 'key' });
+      }
+      return new Response(null, { status: 302, headers: { Location: '/admin/configuracion?gmail=connected#gmail-banco' } });
+    } catch (err) {
+      console.error('[google/callback gmail]', err);
+      return new Response(null, { status: 302, headers: { Location: '/admin/configuracion?gmail=error#gmail-banco' } });
+    }
+  }
+
   try {
     // Intercambiar código por tokens
     const tokens = await exchangeCodeForTokens(code);

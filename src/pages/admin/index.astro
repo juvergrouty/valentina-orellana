@@ -238,7 +238,7 @@ type Tarea = {
 };
 const vuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); return u.pathname + u.search; })();
 const tareas: Tarea[] = [];
-const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos, pagosPorDevolver, transferenciasPorRevisar } = avisos;
+const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos, pagosPorDevolver, transferenciasPorRevisar, horasLink, banco } = avisos;
 
 // Pago por devolver o reagendar (19 oct 2026, ver src/lib/pagosPorDevolver.ts): queda hasta "Resuelto".
 for (const p of pagosPorDevolver ?? []) {
@@ -307,14 +307,56 @@ if (box.error) {
 // Transferencia confirmada sola al subir el comprobante (28 oct 2026): el paciente ya recibió todo;
 // falta que Valentina vea el dinero en su banco. Si no llegó: en la sesión, "Anular pago".
 for (const a of transferenciasPorRevisar ?? []) {
+  // Desde el 22 nov 2026 la boleta espera esta revisión o el correo del banco (gmailBanco.ts).
+  const estadoB = banco?.porComprobante[a.path];
+  const conBoleta = !!estadoB; // la boleta de esta transferencia todavía espera
+  const textoBanco = !conBoleta ? ''
+    : estadoB === 'dudoso' ? ' · encontré un correo del banco por ese monto, pero con otro nombre: revísalo'
+    : estadoB === 'no' ? ' · no encontré el correo del banco: revisa tu cuenta'
+    : banco?.gmail ? ' · estoy buscando el correo del banco' : ' · la boleta sale cuando confirmes';
   tareas.push({
     clave: claveCL(a.subidoEl),
-    chip: `transferencia ${cuando(claveCL(a.subidoEl).slice(0, 10), claveCL(a.subidoEl).slice(11, 16))}`,
+    chip: estadoB === 'no' ? 'sin correo del banco' : estadoB === 'dudoso' ? 'revisar nombre' : `transferencia ${cuando(claveCL(a.subidoEl).slice(0, 10), claveCL(a.subidoEl).slice(11, 16))}`,
     titulo: `Revisar en tu banco la transferencia de ${a.patientName}`,
-    detalle: `${clp(a.total)} · ya le llegó la confirmación · toca para ver el comprobante; si no llegó, en la sesión usa «Anular pago»`,
+    detalle: `${clp(a.total)} · ya le llegó la confirmación${textoBanco} · toca para ver el comprobante; si no llegó, en la sesión usa «Anular pago»`,
     href: `/api/admin/comprobante?b=${a.bookingIds[0]}`, externo: true,
-    accion: { tipo: 'form', action: '/api/admin/transferencia-revisada', campos: { ids: a.bookingIds.join(','), redirect: vuelta }, texto: 'Ya la revisé' },
+    accion: { tipo: 'form', action: '/api/admin/transferencia-revisada', campos: { ids: a.bookingIds.join(','), redirect: vuelta }, texto: conBoleta ? 'Ya la vi: emitir boleta' : 'Ya la revisé' },
   });
+}
+// Horas con link (22 nov 2026, src/lib/horaLink.ts). Cada aviso con su botón de «atendido».
+for (const h of horasLink ?? []) {
+  const enSesion = `/admin/agenda?booking=${h.bookingId}`;
+  if (h.tipo === 'vencida') {
+    tareas.push({
+      clave: h.cuando ? claveCL(h.cuando) : ahoraClave,
+      chip: 'hora liberada',
+      titulo: `Venció sin pago la hora de ${h.paciente}`,
+      detalle: `${mayus(fechaLarga(h.fecha))} a las ${h.hora} · ${clp(h.monto)} · la hora quedó libre en tu agenda; si quieres, escríbele para buscar otra`,
+      href: null,
+      accion: { tipo: 'form', action: '/api/admin/hora-link', campos: { id: h.bookingId, accion: 'vencida_vista', redirect: vuelta }, texto: 'Ya lo vi' },
+    });
+  } else if (h.tipo === 'pasos_whatsapp') {
+    tareas.push({
+      clave: ahoraClave,
+      chip: 'mandar por WhatsApp',
+      titulo: `Mandarle a ${h.paciente} cómo llegar y los pasos a seguir`,
+      detalle: `Pagó su hora del ${fechaLarga(h.fecha)} a las ${h.hora}, pero el WhatsApp automático no salió · toca para abrir el mensaje listo en WhatsApp`,
+      href: h.waUrl ?? enSesion, externo: !!h.waUrl,
+      accion: { tipo: 'form', action: '/api/admin/hora-link', campos: { id: h.bookingId, accion: 'pasos_hecho', redirect: vuelta }, texto: 'Ya se lo mandé' },
+    });
+  } else {
+    tareas.push({
+      clave: '9999',
+      chip: 'pagada',
+      titulo: `Boleta pendiente de datos: ${h.paciente}`,
+      detalle: `Sesión del ${fechaLarga(h.fecha)} · ${clp(h.monto)} · pídele el RUT en la consulta y emite la boleta desde la sesión (sale con la fecha del pago)`,
+      href: enSesion,
+      accion: { tipo: 'form', action: '/api/admin/hora-link', campos: { id: h.bookingId, accion: 'boleta_ocultar', redirect: vuelta }, texto: 'Ocultar' },
+    });
+  }
+}
+if (horasLink === null) {
+  tareas.push({ clave: ahoraClave, chip: 'revisar', titulo: 'No se pudieron revisar las horas con link', detalle: 'Recarga en un rato.', href: null });
 }
 // Cobros con tarjeta de SumUp que la página no pudo asociar sola a una sesión (18 nov 2026, src/lib/sumup.ts).
 // Se lee lo que dejó el cron cada 5 min (sin llamar a SumUp al abrir el Inicio).

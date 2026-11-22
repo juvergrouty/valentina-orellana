@@ -4,6 +4,9 @@ import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { secreto } from '../../lib/secretos';
 import { ADMIN_EMAIL_FALLBACK } from '../../lib/email';
+import { retencionHoras as retencionHorasDe, RETENCION_HORAS_MIN, RETENCION_HORAS_MAX } from '../../lib/horaLinkUtil';
+import { CLAVE_RETENCION } from '../../lib/horaLink';
+import { CLAVE_REMITENTE } from '../../lib/gmailBanco';
 
 // Cargar settings actuales
 const { data: rows } = await supabase.from('settings').select('key, value');
@@ -21,6 +24,12 @@ const googleEmail    = settings['google_user_email'] ?? null;
 const googleName     = settings['google_user_name'] ?? null;
 const googleCalName  = settings['google_calendar_name'] ?? null;
 const googleConnected = !!googleEmail;
+
+// Link a una hora (22 nov 2026, src/lib/horaLink.ts) y revisión de transferencias en Gmail (gmailBanco.ts).
+const retencionHoras = retencionHorasDe(settings[CLAVE_RETENCION]);
+const gmailCorreo = settings['gmail_user_email'] || null;
+const gmailOk = !!settings['gmail_refresh_token'];
+const gmailStatus = Astro.url.searchParams.get('gmail');
 
 const googleStatus = Astro.url.searchParams.get('google');
 const saved = Astro.url.searchParams.get('saved') === '1';
@@ -48,6 +57,9 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
   {googleStatus === 'connected'    && <div class="alert-success">✓ Google Calendar conectado correctamente.</div>}
   {googleStatus === 'disconnected' && <div class="alert-success">Google Calendar desconectado.</div>}
   {googleStatus === 'error'        && <div class="alert-error">Error al conectar con Google. Intenta nuevamente.</div>}
+  {gmailStatus === 'connected'     && <div class="alert-success">✓ Gmail conectado: ya reviso ahí los avisos del banco de cada transferencia.</div>}
+  {gmailStatus === 'disconnected'  && <div class="alert-success">Gmail desconectado. Las transferencias quedan en el Inicio para que las revises tú.</div>}
+  {gmailStatus === 'error'         && <div class="alert-error">No se pudo conectar Gmail. Intenta nuevamente.</div>}
 
   <form method="POST" action="/api/admin/settings" style="display:flex;flex-direction:column;gap:1.5rem;max-width:520px;">
     <input type="hidden" name="_bool_form" value="1" />
@@ -272,6 +284,19 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
       </div>
     </div>
 
+    <!-- Link a una hora (22 nov 2026) -->
+    <div class="card">
+      <p class="label" style="margin-bottom:0.75rem;">Link a una hora</p>
+      <p style="font-size:0.82rem;color:var(--stone);margin-bottom:1rem;line-height:1.5;">
+        Cuando agendas con «Link a esta hora», la hora queda guardada para esa persona hasta que pague.
+        Si no paga dentro de este plazo, la hora se libera sola y te aviso en el Inicio y por correo.
+        Nunca se guarda más allá del comienzo de la sesión.
+      </p>
+      <label class="label" for="cfg-retencion" style="display:block;margin-bottom:0.3rem;">Horas que se guarda la hora sin pagar</label>
+      <input id="cfg-retencion" type="number" name={CLAVE_RETENCION} value={String(retencionHoras)} min={RETENCION_HORAS_MIN} max={RETENCION_HORAS_MAX} step="0.5" inputmode="decimal" style="max-width:8rem;" />
+      <p style="font-size:0.72rem;color:var(--stone);margin-top:0.3rem;">Por defecto 24. Entre {RETENCION_HORAS_MIN} y {RETENCION_HORAS_MAX} horas.</p>
+    </div>
+
     <!-- Google Calendar -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
@@ -321,6 +346,40 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
             Requiere <code style="background:var(--warm);padding:0.1rem 0.3rem;border-radius:3px;">GOOGLE_CLIENT_ID</code>,
             <code style="background:var(--warm);padding:0.1rem 0.3rem;border-radius:3px;">GOOGLE_CLIENT_SECRET</code> y
             <code style="background:var(--warm);padding:0.1rem 0.3rem;border-radius:3px;">GOOGLE_REDIRECT_URI</code> en Vercel.
+          </p>
+        </div>
+      )}
+    </div>
+
+    <!-- Gmail: avisos del banco de cada transferencia (22 nov 2026, src/lib/gmailBanco.ts) -->
+    <div class="card" id="gmail-banco">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap;">
+        <p class="label" style="margin:0;">Revisar transferencias en tu correo</p>
+        {gmailOk
+          ? <span style="font-size:0.72rem;background:#f0fdf4;color:var(--green);border:1px solid #86efac;padding:0.2rem 0.6rem;border-radius:99px;font-weight:600;">● Conectado</span>
+          : <span style="font-size:0.72rem;background:var(--warm);color:var(--stone);border:1px solid var(--dust);padding:0.2rem 0.6rem;border-radius:99px;">○ No conectado</span>}
+      </div>
+      <p style="font-size:0.82rem;color:var(--stone);margin-bottom:1rem;line-height:1.5;">
+        Cuando alguien paga por transferencia y sube el comprobante, la sesión queda pagada y le llega todo al instante.
+        La boleta espera a que el correo de tu banco confirme el dinero: busco el aviso con el mismo monto, el nombre y la fecha.
+        Si lo encuentro, emito la boleta. Si no, te aviso en el Inicio y la boleta no sale hasta que tú lo revises.
+        Solo leo tu correo para esto: no envío, no borro y no guardo el texto de ningún correo.
+      </p>
+      {gmailOk ? (
+        <div>
+          <p style="font-size:0.82rem;margin-bottom:0.75rem;">Conectado con <strong>{gmailCorreo}</strong>.</p>
+          <label class="label" for="cfg-banco-remitente" style="display:block;margin-bottom:0.3rem;">Correo o dominio del banco (opcional)</label>
+          <input id="cfg-banco-remitente" type="text" name={CLAVE_REMITENTE} value={settings[CLAVE_REMITENTE] ?? ''} placeholder="Ejemplo: santander.cl" style="max-width:16rem;" />
+          <p style="font-size:0.72rem;color:var(--stone);margin:0.3rem 0 1rem;">Si lo escribes, solo miro los correos que vienen de ahí. En blanco, miro todos los que traen el monto.</p>
+          <button type="button" id="btn-gmail-disconnect" class="btn btn-outline btn-sm">Desconectar Gmail</button>
+        </div>
+      ) : (
+        <div>
+          <a href="/api/admin/google/auth?gmail=1" class="btn btn-dark">Conectar Gmail (solo lectura)</a>
+          <p style="font-size:0.75rem;color:var(--stone);margin-top:0.75rem;line-height:1.5;">
+            Se hace una sola vez, con la cuenta donde te llegan los avisos del banco. Google te va a mostrar un aviso
+            porque el permiso es para leer correos: es esperable. Mientras no lo conectes, revisas tú las transferencias
+            desde el Inicio con «Ya la revisé», y ahí sale la boleta.
           </p>
         </div>
       )}
@@ -561,6 +620,14 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
     } else {
       alert('Error al desconectar. Intenta nuevamente.');
     }
+  });
+
+  // Desconectar Gmail (solo la lectura de transferencias; Calendar sigue igual)
+  document.getElementById('btn-gmail-disconnect')?.addEventListener('click', async () => {
+    if (!confirm('¿Desconectar Gmail? Las transferencias quedarán en el Inicio para que las revises tú.')) return;
+    const res = await fetch('/api/admin/google/disconnect-gmail', { method: 'POST' }).catch(() => null);
+    if (!res) { alert('No se pudo conectar. Revisa tu internet e intenta nuevamente.'); return; }
+    window.location.href = '/admin/configuracion?gmail=disconnected#gmail-banco';
   });
 
   // Toggle transferencia
