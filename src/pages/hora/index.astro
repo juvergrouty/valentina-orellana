@@ -1,0 +1,383 @@
+---
+// /hora — UNA sola hora, su precio y cómo pagarla (22 nov 2026, src/lib/horaLink.ts).
+// La paciente abre /hora/<token>, que guarda el código en la cookie vo_hora y la trae aquí:
+// la URL queda limpia para GTM. Nunca muestra la agenda. Privada: noindex, sin sitemap (como /pagar).
+export const prerender = false;
+import Layout from '../../layouts/BaseLayout.astro';
+import { supabase } from '../../lib/supabase';
+import { horaPorToken, COOKIE_HORA } from '../../lib/horaLink';
+import { tokenValido, fechaLarga, venceTexto, primerNombre } from '../../lib/horaLinkUtil';
+import { comprobanteEnRevision } from '../../lib/comprobantes';
+import { sumupConfigurado } from '../../lib/sumup';
+import { conEstacionamiento } from '../../data/consulta';
+
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+const token = Astro.cookies.get(COOKIE_HORA)?.value ?? '';
+const h = tokenValido(token) ? await horaPorToken(token) : null;
+if (!h) Astro.response.status = 404;
+
+const WA_VALE = '56972735696';
+const formatCLP = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+const mayus = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+let servicio = '';
+let direccion = '';
+if (h) {
+  const [{ data: svc }, { data: addr }] = await Promise.all([
+    h.service_id ? supabase.from('services_catalog').select('name').eq('id', h.service_id).maybeSingle() : Promise.resolve({ data: null }),
+    supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle(),
+  ]);
+  servicio = svc?.name ?? (String(h.session_type).startsWith('pareja') ? 'Sesión de pareja' : 'Sesión individual');
+  direccion = addr?.value?.trim() ? conEstacionamiento(addr.value.trim()) : '';
+}
+const online = !!h && String(h.session_type).includes('online');
+const hora = h ? String(h.session_time).slice(0, 5) : '';
+const pagada = !!h?.paid_at;
+const noVigente = !!h && !pagada && (h.status === 'cancelled' || h.status === 'expired' || h.debt_voided === true);
+// Pagada y después anulada por Vale (o reagendada a otra): no se le dice "confirmada".
+const anulada = !!h && pagada && h.status === 'cancelled';
+const enRevision = !!h && comprobanteEnRevision(h.notes);
+const necesitaCorreo = !!h && !h.patient_email;
+const conSumUp = sumupConfigurado();
+const nombre = primerNombre(h?.patient_name);
+const canalPasos = h?.link_canal === 'whatsapp' || (!!h?.patient_phone && !h?.patient_email) ? 'whatsapp' : 'correo';
+
+// Datos para transferir (Configuración → Pagos), los mismos de /pagar.
+const { data: trRows } = await supabase.from('settings').select('key, value').like('key', 'transfer_%');
+const tr: Record<string, string> = Object.fromEntries((trRows ?? []).map((r: { key: string; value: string }) => [r.key, (r.value ?? '').trim()]));
+const datosTransferencia = [
+  ['Titular', tr['transfer_account_holder']],
+  ['RUT', tr['transfer_rut']],
+  ['Banco', tr['transfer_bank_name']],
+  ['Tipo de cuenta', tr['transfer_account_type']],
+  ['Número de cuenta', tr['transfer_account_number']],
+  ['Correo', tr['transfer_email']],
+].filter(([, v]) => v) as [string, string][];
+const datosCompletos = !!tr['transfer_account_number'];
+
+const waOtraHora = `https://wa.me/${WA_VALE}?text=${encodeURIComponent('Hola Valentina, se venció el plazo para pagar mi hora. ¿Buscamos otra?')}`;
+const waDuda = `https://wa.me/${WA_VALE}?text=${encodeURIComponent('Hola Valentina, tengo una duda sobre el pago de mi hora.')}`;
+const waDatos = `https://wa.me/${WA_VALE}?text=${encodeURIComponent('Hola Valentina, ¿me mandas los datos para transferir?')}`;
+const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0, online, pagada, estado: pagada ? 'pagada' : noVigente ? 'vencida' : 'pendiente' });
+---
+
+<Layout title="Tu hora" description="Tu hora con Ps. Valentina Orellana." noindex sinMenu>
+  <section class="max-w-xl mx-auto px-4 sm:px-5 pt-12 pb-28 md:pt-20">
+    {!h ? (
+      <div class="text-center">
+        <h1 class="font-heading text-2xl mb-3">Link no válido</h1>
+        <p class="text-stone">Este link no es correcto. Escríbeme y te mando uno nuevo.</p>
+        <a href={`https://wa.me/${WA_VALE}`} target="_blank" rel="noopener" class="btn-dark justify-center text-center mt-6 inline-flex">Escribirme por WhatsApp</a>
+      </div>
+    ) : anulada ? (
+      <div class="text-center">
+        <h1 class="font-heading text-2xl mb-3">Esta hora fue anulada</h1>
+        <p class="text-stone mb-6">Escríbeme y buscamos otra hora o vemos la devolución de tu pago.</p>
+        <a href={waDuda} target="_blank" rel="noopener" class="btn-dark w-full sm:w-auto justify-center text-center inline-flex">Escribirme por WhatsApp</a>
+      </div>
+    ) : noVigente ? (
+      <div class="text-center">
+        <h1 class="font-heading text-2xl mb-3">Esta hora ya no está guardada</h1>
+        <p class="text-stone mb-6">El plazo para pagarla venció y la hora quedó libre. Escríbeme y buscamos otra que te acomode.</p>
+        <a href={waOtraHora} target="_blank" rel="noopener" class="btn-dark w-full sm:w-auto justify-center text-center inline-flex">Escribirme por WhatsApp</a>
+      </div>
+    ) : (
+      <>
+        <p class="label text-stone mb-1">{nombre ? `Hola ${nombre}` : 'Hola'}</p>
+        <h1 class="font-heading text-2xl md:text-3xl mb-6" id="hora-titulo">{pagada ? 'Tu hora está confirmada' : 'Tu hora con Valentina'}</h1>
+
+        <div class="border border-dust rounded-lg divide-y divide-dust mb-6">
+          <div class="px-5 py-4">
+            <p class="font-medium">{servicio}</p>
+            <p class="text-stone text-sm mt-1">{mayus(fechaLarga(h.session_date))} a las {hora}</p>
+            <p class="text-stone text-sm mt-1">{online ? 'Online, por videollamada' : direccion ? `Presencial, en ${direccion}` : 'Presencial, en mi consulta'}</p>
+          </div>
+          <div class="flex items-center justify-between px-5 py-4 bg-sand">
+            <p class="font-medium text-sm">{pagada ? 'Pagado' : 'Valor'}</p>
+            <p class="font-heading text-xl font-semibold">{formatCLP(h.amount)}</p>
+          </div>
+        </div>
+
+        {pagada ? (
+          <div id="hora-pagada">
+            <p class="text-stone mb-8 leading-relaxed">
+              {canalPasos === 'whatsapp'
+                ? `Te mandé por WhatsApp ${online ? 'cómo conectarte' : 'cómo llegar'} y los pasos a seguir antes de la sesión.`
+                : `Te mandé a tu correo ${online ? 'cómo conectarte' : 'cómo llegar'} y los pasos a seguir antes de la sesión. Si no lo ves, revisa spam o la pestaña Promociones.`}
+            </p>
+
+            <!-- Datos opcionales: la boleta sale cuando haya RUT, con la fecha del pago. -->
+            <div class="border border-dust rounded-lg p-5" id="datos">
+              <h2 class="font-medium mb-1">Datos para tu boleta (opcional)</h2>
+              <p class="text-sm text-stone mb-4 leading-relaxed">Si quieres tu boleta, por ejemplo para la isapre, déjame aquí tus datos. Si prefieres, me los das en la consulta.</p>
+              <form id="datos-form" class="flex flex-col gap-3" novalidate>
+                <label class="text-sm font-medium" for="d-rut">RUT</label>
+                <input id="d-rut" name="rut" type="text" inputmode="text" autocomplete="off" maxlength="12" placeholder="12.345.678-9" class="border border-dust rounded px-3 py-3 text-base" />
+                <label class="flex items-center gap-2 text-sm text-stone"><input type="checkbox" id="d-sin-rut" class="w-5 h-5" /> No tengo RUT chileno</label>
+                <label class="text-sm font-medium" for="d-dir">Dirección</label>
+                <input id="d-dir" name="direccion" type="text" autocomplete="street-address" placeholder="Calle, número, departamento" class="border border-dust rounded px-3 py-3 text-base" />
+                <label class="text-sm font-medium" for="d-comuna">Comuna</label>
+                <input id="d-comuna" name="comuna" type="text" autocomplete="address-level2" class="border border-dust rounded px-3 py-3 text-base" />
+                {necesitaCorreo && (
+                  <>
+                    <label class="text-sm font-medium" for="d-correo">Correo, para mandarte la boleta</label>
+                    <input id="d-correo" name="correo" type="email" autocomplete="email" class="border border-dust rounded px-3 py-3 text-base" />
+                  </>
+                )}
+                <button type="submit" id="d-enviar" class="btn-dark w-full justify-center text-center mt-2">Guardar mis datos</button>
+                <p id="d-msg" class="hidden text-sm text-center" role="status" aria-live="polite"></p>
+              </form>
+            </div>
+          </div>
+        ) : enRevision ? (
+          <p class="text-stone leading-relaxed" id="hora-revision">Recibí tu comprobante de transferencia y tu hora quedó confirmada. No necesitas pagar de nuevo.</p>
+        ) : (
+          <div id="hora-pendiente">
+            {h.link_vence_at && (
+              <p class="text-sm bg-sand border border-dust rounded-lg px-4 py-3 mb-6">Te guardo esta hora hasta el {venceTexto(h.link_vence_at)}. Cuando la pagas, queda confirmada.</p>
+            )}
+            <h2 class="font-medium mb-3">¿Cómo quieres pagar?</h2>
+            <div class="flex flex-col gap-3">
+              <button type="button" id="btn-flow" class="pago-opcion">
+                <span class="font-medium">Pagar con tarjeta</span>
+                <span class="text-sm text-stone">Débito o crédito, con Flow</span>
+              </button>
+              <div id="correo-box" hidden class="border border-dust rounded-lg p-4 flex flex-col gap-2">
+                <label for="correo-flow" class="text-sm font-medium">Tu correo</label>
+                <p class="text-xs text-stone">Flow lo pide para mandarte el comprobante del pago.</p>
+                <input id="correo-flow" type="email" autocomplete="email" class="border border-dust rounded px-3 py-3 text-base" />
+                <button type="button" id="btn-flow-seguir" class="btn-dark w-full justify-center text-center">Seguir al pago</button>
+              </div>
+              {conSumUp && (
+                <button type="button" id="btn-sumup" class="pago-opcion">
+                  <span class="font-medium">Pagar con tarjeta por SumUp</span>
+                  <span class="text-sm text-stone">Otra opción con débito o crédito</span>
+                </button>
+              )}
+              <button type="button" id="btn-transfer" class="pago-opcion" aria-expanded="false" aria-controls="transfer-box">
+                <span class="font-medium">Pagar por transferencia</span>
+                <span class="text-sm text-stone">Transfieres y subes aquí la foto del comprobante</span>
+              </button>
+            </div>
+            <p id="pago-error" class="hidden text-sm text-red-700 text-center mt-3" role="alert"></p>
+
+            <div id="transfer-box" hidden class="mt-5 border border-dust rounded-lg p-5 text-left">
+              <h2 class="font-medium mb-4">Pagar por transferencia</h2>
+              <ol class="flex flex-col gap-4 text-sm">
+                <li class="paso"><span class="paso-num">1</span>
+                  <div class="min-w-0 flex-1">
+                    <p class="font-medium mb-2">Transfiere {formatCLP(h.amount)} a esta cuenta</p>
+                    {datosCompletos ? (
+                      <dl class="divide-y divide-dust">
+                        {datosTransferencia.map(([k, v]) => (
+                          <div class="flex items-center justify-between gap-3 py-2">
+                            <dt class="text-stone">{k}</dt>
+                            <dd class="flex items-center gap-2 min-w-0">
+                              <span class="font-medium break-all text-right">{v}</span>
+                              <button type="button" class="copy-btn text-xs border border-dust rounded px-3 py-2 hover:border-ink shrink-0" data-copy={v}>Copiar</button>
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : (
+                      <p><a href={waDatos} target="_blank" rel="noopener" class="underline">Escríbeme por WhatsApp y te mando los datos para transferir</a>.</p>
+                    )}
+                  </div>
+                </li>
+                <li class="paso"><span class="paso-num">2</span><p class="flex-1">Toma una foto o una captura de pantalla del comprobante de la transferencia.</p></li>
+                <li class="paso"><span class="paso-num">3</span>
+                  <div class="flex-1 min-w-0">
+                    <p class="mb-2">Toca «Elegir la foto del comprobante» y elígela.</p>
+                    <label for="comprobante" class="btn-outline w-full justify-center text-center cursor-pointer">Elegir la foto del comprobante</label>
+                    <input id="comprobante" name="comprobante" type="file" accept="image/*,application/pdf" class="sr-only" />
+                    <p id="archivo-nombre" class="text-xs text-stone mt-2 break-all"></p>
+                  </div>
+                </li>
+                <li class="paso"><span class="paso-num">4</span>
+                  <div class="flex-1 min-w-0">
+                    <p class="mb-2">Toca «Enviar comprobante». Listo: tu hora queda confirmada.</p>
+                    <label for="titular" class="text-xs text-stone block mb-1">Si la cuenta desde la que transferiste no está a tu nombre, escribe aquí el nombre del titular (opcional)</label>
+                    <input id="titular" type="text" autocomplete="off" class="border border-dust rounded px-3 py-3 text-base w-full mb-3" />
+                    <button type="button" id="btn-comprobante" class="btn-dark w-full justify-center text-center">Enviar comprobante</button>
+                  </div>
+                </li>
+              </ol>
+              <p id="transfer-msg" class="hidden text-sm text-center mt-4" role="status" aria-live="polite"></p>
+            </div>
+          </div>
+        )}
+        <p class="text-xs text-stone text-center mt-8"><a href={waDuda} target="_blank" rel="noopener" class="underline underline-offset-4">¿Tienes alguna duda? Escríbeme por WhatsApp</a></p>
+      </>
+    )}
+  </section>
+</Layout>
+
+<style>
+  [hidden] { display: none !important; }
+  .pago-opcion { display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; width: 100%; text-align: left;
+    border: 1px solid #DDD8CF; border-radius: 0.5rem; padding: 1rem 1.1rem; min-height: 3.5rem; background: #fff; cursor: pointer; }
+  .pago-opcion:hover, .pago-opcion:focus-visible { border-color: #1A1A18; }
+  .pago-opcion[aria-expanded="true"] { border-color: #576352; background: #F6F8F4; }
+  .pago-opcion:disabled { opacity: 0.6; cursor: wait; }
+  .paso { display: flex; gap: 0.75rem; align-items: flex-start; }
+  .paso-num { flex: 0 0 1.75rem; height: 1.75rem; border-radius: 999px; background: #576352; color: #fff; display: inline-flex;
+    align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 600; }
+</style>
+
+<script define:vars={{ datosJs }}>
+(function () {
+  const D = JSON.parse(datosJs);
+  if (!D.token) return;
+  window.dataLayer = window.dataLayer || [];
+  // Medición (dataLayer → GTM): sin datos personales, solo el estado, el método y el monto.
+  // ?vista=vale = Vale mirando la página desde el panel: no cuenta como apertura.
+  const deVale = new URLSearchParams(location.search).get('vista') === 'vale';
+  const evento = (event, extra) => { if (deVale) return; try { window.dataLayer.push(Object.assign({ event }, extra || {})); } catch (e) { /* sin GTM no pasa nada */ } };
+  const unaVez = (clave, fn) => { try { if (sessionStorage.getItem(clave)) return; sessionStorage.setItem(clave, '1'); } catch (e) { /* sin almacenamiento: igual */ } fn(); };
+  unaVez('hora_abierta_' + D.token, () => evento('hora_link_abierto', { hora_link_estado: D.estado }));
+  const pagado = (metodo) => unaVez('hora_pagada_' + D.token, () => evento('hora_link_pagado', { metodo, value: D.monto, currency: 'CLP' }));
+  const origen = () => { try { return JSON.parse(localStorage.getItem('vo_origen') || 'null'); } catch (e) { return null; } };
+  const api = async (accion, extra) => {
+    const res = await fetch('/api/hora', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ token: D.token, accion }, extra || {})) });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  };
+
+  // Volvió de SumUp (o recargó): se pregunta unos minutos si ya quedó pagada.
+  const esperarPago = (metodo) => {
+    let n = 0;
+    const t = setInterval(async () => {
+      n++;
+      try { const { data } = await api('estado'); if (data.pagada) { clearInterval(t); pagado(metodo); location.reload(); } } catch (e) { /* reintenta */ }
+      if (n >= 24) clearInterval(t);
+    }, 5000);
+  };
+  if (!D.pagada && D.estado === 'pendiente') {
+    try { if (sessionStorage.getItem('hora_sumup_' + D.token)) esperarPago('sumup'); } catch (e) { /* nada */ }
+  }
+
+  const errEl = document.getElementById('pago-error');
+  const mostrarError = (t) => { if (!errEl) return; errEl.textContent = t; errEl.classList.remove('hidden'); };
+
+  // ── Flow ──
+  const btnFlow = document.getElementById('btn-flow');
+  const correoBox = document.getElementById('correo-box');
+  const irAFlow = async (correo) => {
+    errEl?.classList.add('hidden');
+    btnFlow.disabled = true;
+    try {
+      const { res, data } = await api('flow', { correo, origen: origen() });
+      if (data.pagada) { location.reload(); return; }
+      if (data.necesitaCorreo) {
+        correoBox.hidden = false; btnFlow.disabled = false;
+        document.getElementById('correo-flow')?.focus();
+        if (data.error) mostrarError(data.error);
+        return;
+      }
+      if (!res.ok || !data.paymentUrl) { mostrarError(data.error || 'No se pudo preparar el pago. Intenta de nuevo.'); btnFlow.disabled = false; return; }
+      window.location.href = data.paymentUrl;
+    } catch (e) { mostrarError('Error de conexión. Intenta de nuevo.'); btnFlow.disabled = false; }
+  };
+  btnFlow?.addEventListener('click', () => { evento('hora_link_pago_inicio', { metodo: 'flow' }); irAFlow(''); });
+  document.getElementById('btn-flow-seguir')?.addEventListener('click', () => {
+    const v = document.getElementById('correo-flow').value.trim();
+    if (!v) { mostrarError('Escribe tu correo para seguir.'); return; }
+    irAFlow(v);
+  });
+
+  // ── SumUp ──
+  const btnSumup = document.getElementById('btn-sumup');
+  btnSumup?.addEventListener('click', async () => {
+    evento('hora_link_pago_inicio', { metodo: 'sumup' });
+    errEl?.classList.add('hidden');
+    btnSumup.disabled = true;
+    try {
+      const { res, data } = await api('sumup');
+      if (data.pagada) { location.reload(); return; }
+      if (!res.ok || !data.paymentUrl) { mostrarError(data.error || 'No se pudo preparar el pago. Intenta de nuevo.'); btnSumup.disabled = false; return; }
+      try { sessionStorage.setItem('hora_sumup_' + D.token, '1'); } catch (e) { /* nada */ }
+      window.location.href = data.paymentUrl;
+    } catch (e) { mostrarError('Error de conexión. Intenta de nuevo.'); btnSumup.disabled = false; }
+  });
+
+  // ── Transferencia ──
+  const btnTr = document.getElementById('btn-transfer');
+  const box = document.getElementById('transfer-box');
+  btnTr?.addEventListener('click', () => {
+    box.hidden = !box.hidden;
+    btnTr.setAttribute('aria-expanded', String(!box.hidden));
+    if (!box.hidden) { evento('hora_link_transferencia'); box.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  });
+  document.querySelectorAll('.copy-btn').forEach((b) => {
+    b.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copiado'; }
+      catch (e) { b.textContent = 'Mantén presionado para copiar'; }
+      setTimeout(() => { b.textContent = 'Copiar'; }, 2000);
+    });
+  });
+  const input = document.getElementById('comprobante');
+  input?.addEventListener('change', () => {
+    const f = input.files && input.files[0];
+    document.getElementById('archivo-nombre').textContent = f ? `Elegiste: ${f.name}` : '';
+  });
+  // Fotos grandes del celular: se achican antes de subir (máximo 4 MB en el servidor).
+  async function achicar(file) {
+    if (!file.type.startsWith('image/') || file.size <= 3.5 * 1024 * 1024) return file;
+    try {
+      const img = await createImageBitmap(file);
+      const escala = Math.min(1, 1800 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * escala); c.height = Math.round(img.height * escala);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.82));
+      return blob ? new File([blob], 'comprobante.jpg', { type: 'image/jpeg' }) : file;
+    } catch (e) { return file; }
+  }
+  const btnC = document.getElementById('btn-comprobante');
+  const msg = document.getElementById('transfer-msg');
+  btnC?.addEventListener('click', async () => {
+    msg.className = 'text-sm text-center mt-4 text-red-700';
+    if (!input.files || !input.files[0]) { msg.textContent = 'Primero elige la foto del comprobante (paso 3).'; return; }
+    btnC.disabled = true; btnC.textContent = 'Enviando…';
+    try {
+      const fd = new FormData();
+      fd.set('horaToken', D.token);
+      fd.set('titular', document.getElementById('titular').value || '');
+      fd.set('comprobante', await achicar(input.files[0]));
+      const res = await fetch('/api/comprobante-transferencia', { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        pagado('transferencia');
+        box.innerHTML = '<p class="text-sm text-center leading-relaxed"><strong>¡Listo! Recibí tu comprobante.</strong><br>Tu hora quedó confirmada. En unos minutos te llega cómo ' + (D.online ? 'conectarte' : 'llegar') + ' y los pasos a seguir.</p>';
+        setTimeout(() => location.reload(), 4000);
+        return;
+      }
+      msg.textContent = data.error || 'No se pudo enviar el comprobante. Intenta de nuevo.';
+    } catch (e) { msg.textContent = 'Error de conexión. Intenta de nuevo.'; }
+    btnC.disabled = false; btnC.textContent = 'Enviar comprobante';
+  });
+
+  // ── Datos opcionales (después de pagar) ──
+  const form = document.getElementById('datos-form');
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const dMsg = document.getElementById('d-msg');
+    const btn = document.getElementById('d-enviar');
+    const val = (id) => (document.getElementById(id)?.value || '').trim();
+    const datos = { rut: val('d-rut'), sin_rut: !!document.getElementById('d-sin-rut')?.checked, direccion: val('d-dir'), comuna: val('d-comuna'), correo: val('d-correo') };
+    if (!datos.rut && !datos.direccion && !datos.comuna && !datos.correo && !datos.sin_rut) { dMsg.className = 'text-sm text-center text-red-700'; dMsg.textContent = 'Escribe al menos un dato, o déjalo para la consulta.'; return; }
+    btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      const { res, data } = await api('datos', datos);
+      if (res.ok && data.ok) {
+        const boleta = data.boleta === 'emitida' ? ' Tu boleta va camino a tu correo.' : data.boleta === 'pendiente' ? ' La boleta sale en cuanto se confirme el pago.' : '';
+        form.innerHTML = '<p class="text-sm leading-relaxed"><strong>Gracias, tus datos quedaron guardados.</strong>' + boleta + '</p>'
+          + (data.consentimiento ? '<p class="text-sm text-stone mt-3 leading-relaxed">Antes de la primera sesión te pido firmar el consentimiento informado. Toma un par de minutos.</p><a class="btn-dark w-full justify-center text-center mt-3 inline-flex" href="' + data.consentimiento + '">Firmar el consentimiento</a>' : '');
+        return;
+      }
+      dMsg.className = 'text-sm text-center text-red-700'; dMsg.textContent = data.error || 'No se pudieron guardar. Intenta de nuevo.';
+    } catch (err) { dMsg.className = 'text-sm text-center text-red-700'; dMsg.textContent = 'Error de conexión. Intenta de nuevo.'; }
+    btn.disabled = false; btn.textContent = 'Guardar mis datos';
+  });
+})();
+</script>

@@ -29,6 +29,9 @@ export const prerender = false;
 // - datos: formulario OPCIONAL después de pagar (RUT, dirección, comuna, correo). Con RUT y la
 //   sesión pagada, emite la boleta (con la fecha del pago, fechaEmisionBoleta).
 // Pago doble aceptado (regla de Vale): nada aquí impide pagar una sesión que todavía no figura pagada.
+// Sondeo de 'estado' (la página pregunta cada 5 s al volver de SumUp): a SumUp se le pregunta como
+// máximo cada 15 s por sesión (por instancia del servidor), para que nadie pueda saturarlo.
+const ultimaRevisionSumUp = new Map<string, number>();
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 
 export const POST: APIRoute = async ({ request }) => {
@@ -43,7 +46,10 @@ export const POST: APIRoute = async ({ request }) => {
 
   if (accion === 'estado') {
     let pagada = !!h.paid_at;
-    if (!pagada && /SumUpCheckout/.test(h.notes ?? '')) pagada = await revisarLinkSumUpDeSesion(h.id).catch(() => false);
+    if (!pagada && /SumUpCheckout/.test(h.notes ?? '') && Date.now() - (ultimaRevisionSumUp.get(h.id) ?? 0) > 15_000) {
+      ultimaRevisionSumUp.set(h.id, Date.now());
+      pagada = await revisarLinkSumUpDeSesion(h.id).catch(() => false);
+    }
     return json({ pagada, enRevision: comprobanteEnRevision(h.notes), estado: h.status });
   }
 
@@ -70,7 +76,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!correo) {
       if (!nuevo) return json({ necesitaCorreo: true });
       if (!correoValido(nuevo)) return json({ error: 'Revisa tu correo: no parece válido.', necesitaCorreo: true }, 400);
-      const { error } = await supabase.from('bookings').update({ patient_email: nuevo, reminder_email_enabled: true }).eq('id', h.id).eq('patient_email', h.patient_email ?? '');
+      const { error } = await supabase.from('bookings').update({ patient_email: nuevo, reminder_email_enabled: true }).eq('id', h.id).or('patient_email.is.null,patient_email.eq.');
       if (error) return json({ error: 'No se pudo guardar tu correo. Intenta de nuevo.' }, 500);
       correo = nuevo;
       await upsertPatientFromBooking({ patient_name: h.patient_name, patient_email: correo, patient_phone: h.patient_phone, rut: h.patient_rut }).catch(() => null);
@@ -86,6 +92,8 @@ export const POST: APIRoute = async ({ request }) => {
         amount: h.amount, email: correo,
         orderId: `hora-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
         urlConfirmation: `${site}/api/flow/confirm`, urlReturn: `${site}/api/flow/return`, baseUrl,
+        // El link de Flow vence con la hora retenida (mínimo 30 min): un pago muy tardío no revive una hora liberada.
+        timeoutSeconds: Math.max(1800, Math.round((Date.parse(h.link_vence_at ?? '') - Date.now()) / 1000) || 1800),
       });
       const { error: tagErr } = await supabase.from('bookings').update({ mp_preference_id: order.token }).eq('id', h.id);
       if (tagErr) {
@@ -120,13 +128,20 @@ export const POST: APIRoute = async ({ request }) => {
     const cambios: Record<string, unknown> = {};
     if (rut && !h.patient_rut) cambios.patient_rut = rut;
     if (correoNuevo && !h.patient_email) { cambios.patient_email = correoNuevo; cambios.reminder_email_enabled = true; }
+    // Correo escrito aquí que ya es de otra ficha: se guarda en la reserva, pero no se completa esa
+    // ficha ni se muestra su consentimiento (no se puede saber si es la misma persona).
+    let fichaAjena = false;
+    if (correoNuevo && !h.patient_email) {
+      const { data: ya } = await supabase.from('patients').select('id').eq('email', correoNuevo).maybeSingle();
+      fichaAjena = !!ya;
+    }
     if (Object.keys(cambios).length) {
       const { error } = await supabase.from('bookings').update(cambios).eq('id', h.id);
       if (error) return json({ error: 'No se pudieron guardar tus datos. Intenta de nuevo.' }, 500);
     }
     const correo = (h.patient_email || correoNuevo || '').toLowerCase();
     let fichaId: string | null = null;
-    if (correo) {
+    if (correo && !fichaAjena) {
       fichaId = await upsertPatientFromBooking({
         patient_name: h.patient_name, patient_email: correo, patient_phone: h.patient_phone,
         rut: rut || h.patient_rut, address: direccion, comuna, sin_rut: sinRut && !rut,
@@ -140,7 +155,7 @@ export const POST: APIRoute = async ({ request }) => {
       if (esperaBanco) boleta = 'pendiente';
       else {
         const r = await encolarYEjecutar(h.id, 'boleta', `datos-${Date.now()}`).catch(() => null);
-        boleta = r?.ok ? 'emitida' : 'pendiente';
+        boleta = r?.ok && !r.descartada && !r.nota ? 'emitida' : 'pendiente';
       }
     }
     // Consentimiento: el mismo link de firma de siempre (/consentimiento/<token>), si hay ficha.

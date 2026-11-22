@@ -13,6 +13,8 @@ interface Props {
   image?: string;
   noindex?: boolean;
   ogType?: 'website' | 'article';
+  /** Sin menú, sin pie y sin "Agendar sesión" (página de UNA hora, /hora, 22 nov 2026). */
+  sinMenu?: boolean;
 }
 
 const {
@@ -22,6 +24,7 @@ const {
   image = '/images/og-default.jpg',
   noindex = false,
   ogType = 'website',
+  sinMenu = false,
 } = Astro.props;
 
 const canonicalPath = Astro.url.pathname !== '/' ? Astro.url.pathname.replace(/\/$/, '') : '/';
@@ -138,7 +141,7 @@ const enAgenda = ruta === '/agenda';
 // pacientes: no en páginas de pago, reagendar, confirmación ni pasos a seguir.
 const waSegunCanal = !['/reagendar', '/confirmacion', '/recuperar', '/condiciones'].includes(ruta)
   && !/^\/(pagar|consentimiento|pasos-a-seguir|sesion|admin)(\/|$)/.test(ruta);
-const mostrarAgendarFlotante = !['/agenda', '/reagendar', '/confirmacion', '/recuperar'].includes(ruta)
+const mostrarAgendarFlotante = !sinMenu && !['/agenda', '/reagendar', '/confirmacion', '/recuperar'].includes(ruta)
   && !/^\/(pagar|consentimiento|pasos-a-seguir|sesion)\//.test(ruta) && !noindex;
 // Google Tag Manager (Analytics/Meta) NO se carga en páginas con datos de una
 // paciente o con claves en el link: pago, consentimiento (nombre y RUT), pasos
@@ -206,11 +209,15 @@ const cargarGTM = !['/reagendar', '/recuperar'].includes(ruta)
     {cargarGTM && <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WQHZZSPS"
     height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>}
     <!-- End Google Tag Manager (noscript) -->
-    <Header />
+    {sinMenu ? (
+      <header class="border-b border-dust bg-header">
+        <div class="container-site py-5"><span class="font-heading font-semibold text-xl text-ink">Ps. Valentina Orellana</span></div>
+      </header>
+    ) : <Header />}
     <main>
       <slot />
     </main>
-    <Footer />
+    {!sinMenu && <Footer />}
 
     <!-- Botón flotante "Agendar sesión" solo en celular (en el menú del celular
          el botón queda escondido tras la hamburguesa). No en las páginas del

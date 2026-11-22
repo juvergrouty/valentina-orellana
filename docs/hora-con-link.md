@@ -60,8 +60,9 @@ if (r.ok) {
   más la marca `BoletaEsperaBanco`: la boleta no sale todavía.
 - Con Gmail conectado (Configuración → «Revisar transferencias en tu correo», permiso de solo
   lectura, conexión aparte de Calendar), el cron busca el aviso del banco con el monto exacto entre
-  2 días antes y 3 después: monto + nombre → boleta; monto sin nombre → aviso para que Vale decida;
-  nada en 48 h → aviso y sin boleta.
+  2 días antes y 3 después, sin contar los correos de su propia cuenta, del sitio ni de la paciente:
+  monto + nombre + remitente del banco (Configuración) → boleta; si falta el nombre o no hay
+  remitente configurado → aviso para que Vale decida; nada (o Gmail sin acceso) en 48 h → aviso y sin boleta.
 - Sin Gmail, o en cualquier caso, «Ya la vi: emitir boleta» en el Inicio emite la boleta.
 - El texto de los correos no se guarda; solo el id del mensaje que calzó.
 

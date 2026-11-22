@@ -368,9 +368,9 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
       {gmailOk ? (
         <div>
           <p style="font-size:0.82rem;margin-bottom:0.75rem;">Conectado con <strong>{gmailCorreo}</strong>.</p>
-          <label class="label" for="cfg-banco-remitente" style="display:block;margin-bottom:0.3rem;">Correo o dominio del banco (opcional)</label>
+          <label class="label" for="cfg-banco-remitente" style="display:block;margin-bottom:0.3rem;">Correo o dominio de tu banco</label>
           <input id="cfg-banco-remitente" type="text" name={CLAVE_REMITENTE} value={settings[CLAVE_REMITENTE] ?? ''} placeholder="Ejemplo: santander.cl" style="max-width:16rem;" />
-          <p style="font-size:0.72rem;color:var(--stone);margin:0.3rem 0 1rem;">Si lo escribes, solo miro los correos que vienen de ahí. En blanco, miro todos los que traen el monto.</p>
+          <p style="font-size:0.72rem;color:var(--stone);margin:0.3rem 0 1rem;line-height:1.5;">Mira de qué dirección te llegan los avisos de transferencia recibida y escríbela aquí. Solo con un correo que venga de ahí emito la boleta sola. En blanco, si encuentro un correo con el monto te lo muestro en el Inicio y decides tú.</p>
           <button type="button" id="btn-gmail-disconnect" class="btn btn-outline btn-sm">Desconectar Gmail</button>
         </div>
       ) : (

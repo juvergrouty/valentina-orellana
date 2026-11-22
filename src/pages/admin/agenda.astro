@@ -16,7 +16,7 @@ import { estadosConsentimientoSeguro, ETIQUETA_CONSENTIMIENTO, type EstadoConsen
 import { esPagoEnConsulta, ETIQUETA_PAGO_EN_CONSULTA } from '../../lib/pagoEnConsulta';
 import { carrilesDelDia } from '../../lib/horaLibre';
 import { sumupConfigurado } from '../../lib/sumup';
-import { venceTexto, esHoraLink, tieneMarca, mensajeHoraWhatsapp, MARCA_BOLETA_DATOS } from '../../lib/horaLinkUtil';
+import { venceTexto, esHoraLink, tieneMarca, mensajeHoraWhatsapp, enlaceWhatsapp, MARCA_BOLETA_DATOS } from '../../lib/horaLinkUtil';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
 // ?w=abc daba NaN y la página se caía al armar las fechas (8 oct 2026): si no es un número, semana actual.
@@ -440,10 +440,21 @@ const plWaMsg      = paymentLink ? mensajeLinkPago(Astro.url.searchParams.get('p
 // de Meta) no se hizo — para no mandar el mensaje duplicado.
 const plWaUrl      = (!plWaSent && plPhoneWa.length >= 10) ? `https://wa.me/${plPhoneWa}?text=${encodeURIComponent(plWaMsg)}` : null;
 // Link a una hora recién creado (22 nov 2026): aviso con «Copiar link» y «Enviar por WhatsApp».
-const horaLinkNuevo = (() => { const u = Astro.url.searchParams.get('hora_link') ?? ''; return /^https?:\/\/[^/]+\/hora\/[A-Za-z0-9_-]{24,64}$/.test(u) ? u : null; })();
-const hlWa = (() => { const u = Astro.url.searchParams.get('hl_wa') ?? ''; return u.startsWith('https://wa.me/') ? u : null; })();
-const hlVence = (() => { const v = Astro.url.searchParams.get('hl_vence') ?? ''; return Number.isFinite(Date.parse(v)) ? venceTexto(v) : null; })();
+let horaLinkNuevo: string | null = null, hlWa: string | null = null, hlVence: string | null = null;
+{
+  const id = Astro.url.searchParams.get('hora_creada') ?? '';
+  if (/^[0-9a-f-]{36}$/i.test(id)) {
+    const { data: hb } = await supabase.from('bookings').select('patient_name, patient_phone, session_type, session_date, session_time, link_token, link_vence_at').eq('id', id).maybeSingle();
+    if (hb?.link_token) {
+      horaLinkNuevo = `${Astro.url.origin}/hora/${hb.link_token}`;
+      hlVence = hb.link_vence_at ? venceTexto(hb.link_vence_at) : null;
+      hlWa = enlaceWhatsapp(hb.patient_phone, mensajeHoraWhatsapp({ nombre: hb.patient_name, fecha: hb.session_date, hora: String(hb.session_time).slice(0, 5), online: String(hb.session_type).includes('online'), url: horaLinkNuevo, venceIso: hb.link_vence_at ?? new Date().toISOString() }));
+    }
+  }
+}
 const hlCorreo = Astro.url.searchParams.get('hl_correo') === '1';
+// ¿Está aplicada la migración 0028? Sin ella no se ofrece «Link a esta hora» (no agendaría nada).
+const horaLinkDisponible = !(await supabase.from('bookings').select('link_token').limit(1)).error;
 // Cobro con tarjeta por SumUp (18 nov 2026): la caja solo aparece si la clave está en el servidor.
 const sumupActivo = sumupConfigurado();
 // Clave de afiliado de SumUp (20 nov 2026): con ella "En la consulta" abre la app de SumUp con el monto y
@@ -1053,11 +1064,13 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
                Vale, 19 oct 2026): lo eligió por error y no salieron Pasos a seguir
                ni el consentimiento. El defecto ahora es "Link de pago". -->
           <div class="bp-radio-group">
+            {horaLinkDisponible && (
+              <label class="bp-radio-opt">
+                <input type="radio" name="payment_mode" value="hora"> Link a esta hora
+              </label>
+            )}
             <label class="bp-radio-opt">
-              <input type="radio" name="payment_mode" value="hora" checked> Link a esta hora
-            </label>
-            <label class="bp-radio-opt">
-              <input type="radio" name="payment_mode" value="link"> Link de pago por correo
+              <input type="radio" name="payment_mode" value="link" checked> Enviar link de pago
             </label>
             <label class="bp-radio-opt">
               <input type="radio" name="payment_mode" value="free"> Sin costo
@@ -1071,7 +1084,7 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
             <p style="font-size:0.72rem;color:#b45309;margin-top:0.2rem;">No envía Pasos a seguir ni consentimiento hasta que marques el pago.</p>
           </details>
           <p id="bp-pay-note" style="font-size:0.72rem;color:#6b7280;margin-top:0.35rem;">
-            "Link a esta hora" guarda la hora y te da un link para mandarle: ahí ve solo esa hora, el valor y paga con tarjeta o transferencia. "Link de pago por correo" le manda el enlace de siempre (pide la ficha completa). "Sin costo" (obra social) la confirma en $0, sin boleta, y si es su primera sesión le envía Pasos a seguir y el consentimiento.
+            "Link a esta hora" (para alguien nuevo: basta nombre y teléfono o correo) guarda la hora un plazo y te da un link para mandarle: ahí ve solo esa hora, el valor y cómo pagar. "Enviar link de pago" es el de siempre (pide la ficha completa). "Sin costo" (obra social) la confirma en $0, sin boleta, y si es su primera sesión le envía Pasos a seguir y el consentimiento.
           </p>
         </div>
 
@@ -2672,6 +2685,9 @@ window.addEventListener('pageshow', () => {
 bpPatientSel?.addEventListener('change', () => {
   const isNew = bpPatientSel.value === '_new';
   bpNewPatient.style.display = isNew ? 'block' : 'none';
+  // Paciente nueva: se propone «Link a esta hora» (solo nombre y un contacto). Ella puede cambiarlo.
+  const radioHora = document.querySelector('input[name="payment_mode"][value="hora"]');
+  if (isNew && radioHora && !radioHora.checked) { radioHora.checked = true; actualizarModoHora(); updatePrice(); }
   const opt = bpPatientSel.selectedOptions[0];
   if (!isNew && bpPatientSel.value) {
     // existing patient — clear new-patient hidden fields

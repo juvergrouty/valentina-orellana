@@ -29,6 +29,9 @@ export const GET: APIRoute = async ({ url, cookies }) => {
     try {
       const tokens = await exchangeCodeForTokens(code);
       if (!tokens.refresh_token) throw new Error('Google no devolvió el permiso permanente');
+      // Si en la pantalla de Google se desmarcó el permiso de leer correos, no sirve: se avisa.
+      const alcance = (tokens as { scope?: string }).scope ?? '';
+      if (alcance && !alcance.includes('gmail.readonly')) throw new Error('No se dio el permiso de leer el correo');
       const userInfo = await getGoogleUserInfo(tokens.access_token);
       const ahora = new Date().toISOString();
       for (const [key, value] of [

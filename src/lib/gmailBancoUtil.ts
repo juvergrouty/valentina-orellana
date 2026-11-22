@@ -42,17 +42,37 @@ export function traeNombre(texto: string, nombres: string[]): boolean {
   });
 }
 
-/** ¿Parece un aviso de transferencia recibida (y no publicidad o un estado de cuenta)? */
+/** ¿Parece un aviso de transferencia RECIBIDA (y no publicidad, una enviada por Vale o un aviso del propio sitio)? */
 export function pareceAvisoTransferencia(texto: string): boolean {
-  return /transferencia|transferido|abono|te transfiri|recibiste|has recibido|deposito/.test(sinTildes(texto));
+  const t = sinTildes(texto);
+  if (/comprobante de transferencia por confirmar|transferencia (realizada|enviada)|has (realizado|enviado)|realizaste|enviaste/.test(t)) return false;
+  return /transferencia|transferido|abono|te transfiri|recibiste|has recibido|deposito/.test(t);
 }
 
 export type Coincidencia = 'ok' | 'dudoso' | 'no';
 
-/** Resultado de comparar UN correo: ok = monto + nombre; dudoso = monto sin nombre; no = no calza. */
-export function compararCorreo(texto: string, monto: number, nombres: string[]): Coincidencia {
+/**
+ * Resultado de comparar UN correo: ok = monto + nombre y viene del banco; dudoso = monto sin nombre, o
+ * sin saber si viene del banco; no = no calza. `delBanco`: el remitente coincide con el banco que Vale
+ * escribió en Configuración. Sin eso nunca es 'ok' (cualquiera puede mandar un correo que diga
+ * "recibiste una transferencia"): queda como dudoso para que Vale decida.
+ */
+export function compararCorreo(texto: string, monto: number, nombres: string[], delBanco = true): Coincidencia {
   if (!traeMonto(texto, monto) || !pareceAvisoTransferencia(texto)) return 'no';
-  return traeNombre(texto, nombres) ? 'ok' : 'dudoso';
+  return traeNombre(texto, nombres) && delBanco ? 'ok' : 'dudoso';
+}
+
+/** ¿El remitente ("Banco <aviso@banco.cl>") es del banco configurado ("banco.cl" o "aviso@banco.cl")? */
+export function remitenteDelBanco(from: string, banco: string | null | undefined): boolean {
+  const b = (banco ?? '').trim().toLowerCase();
+  if (!b) return false;
+  const correo = (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
+  return b.includes('@') ? correo === b : correo.endsWith(`@${b}`) || correo.endsWith(`.${b}`);
+}
+
+/** Remitente de un mensaje de Gmail. */
+export function remitenteDe(msg: { payload?: ParteGmail }): string {
+  return (msg.payload?.headers ?? []).find((h) => h.name.toLowerCase() === 'from')?.value ?? '';
 }
 
 /** Búsqueda de Gmail: correos con el monto entre 2 días antes y 3 días después del comprobante. */
@@ -62,7 +82,8 @@ export function consultaGmail(monto: number, subidoMs: number, remitente?: strin
   const despues = Math.floor((subidoMs - 2 * 86400_000) / 1000);
   const antes = Math.floor((subidoMs + 3 * 86400_000) / 1000);
   const de = (remitente ?? '').trim().replace(/[^\w.@+-]/g, '');
-  return `("${conPunto}" OR "${d}") after:${despues} before:${antes}${de ? ` from:${de}` : ''}`;
+  // Nunca los correos que salen de la propia cuenta ni el aviso del sitio con el comprobante.
+  return `("${conPunto}" OR "${d}") after:${despues} before:${antes} -from:me -subject:"Comprobante de transferencia"${de ? ` from:${de}` : ''}`;
 }
 
 /** Texto de un mensaje de Gmail (format=full): partes text/plain, o text/html sin etiquetas. */

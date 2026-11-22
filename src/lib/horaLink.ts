@@ -34,6 +34,8 @@ import {
 export const SITIO = 'https://www.valentinaorellana.cl';
 export const CLAVE_RETENCION = 'hora_link_retencion_horas';
 export const FALTA_MIGRACION = 'falta_migracion_0028';
+/** Cookie con el código del link: /hora/<token> la guarda y redirige a /hora (sin el código en la URL). */
+export const COOKIE_HORA = 'vo_hora';
 
 const TIPOS_SESION = ['online', 'presencial', 'pareja-online', 'pareja-presencial'] as const;
 
@@ -205,6 +207,14 @@ export async function crearHoraConLink(input: CrearHoraInput): Promise<CrearHora
   };
 }
 
+/** Reagendar una hora con link sin pagar: nuevo plazo (desde ahora) que nunca pasa el inicio de la sesión nueva. */
+export async function recalcularRetencionHora(bookingId: string, fecha: string, hora: string): Promise<void> {
+  const { data: b, error } = await supabase.from('bookings').select('link_vence_at, paid_at, status').eq('id', bookingId).maybeSingle();
+  if (error || !b?.link_vence_at || b.paid_at || b.status !== 'pending_payment') return; // sin 0028, pagada o no es hora con link
+  const vence = calcularVence(Date.now(), await leerRetencionHoras(), hoursUntilSessionCL(fecha, String(hora).slice(0, 5)) * 3600_000);
+  await supabase.from('bookings').update({ link_vence_at: vence.toISOString() }).eq('id', bookingId).is('paid_at', null);
+}
+
 export type HoraPublica = {
   id: string; status: string; session_type: string; session_date: string; session_time: string;
   patient_name: string; patient_email: string | null; patient_phone: string | null; patient_rut: string | null;
@@ -231,6 +241,7 @@ export async function vencerHorasLink(hastaMs = Date.now() + 20_000): Promise<{ 
   const { data, error } = await supabase.from('bookings')
     .select('id, patient_name, patient_email, patient_phone, session_date, session_time, notes, mp_preference_id, google_event_id, link_vence_at')
     .eq('status', 'pending_payment').is('paid_at', null)
+    .or('debt_voided.is.null,debt_voided.eq.false') // deuda anulada por Vale: es decisión suya, no se libera sola
     .not('link_vence_at', 'is', null).lt('link_vence_at', new Date().toISOString())
     .limit(20);
   if (error) return { liberadas: 0 }; // sin la migración 0028 no hay nada que vencer
@@ -253,6 +264,13 @@ export async function vencerHorasLink(hastaMs = Date.now() + 20_000): Promise<{ 
         ]);
         if (st.status === 2) continue; // pagó: el aviso de Flow la confirma (flow/confirm.ts)
       } catch { continue; } // Flow no respondió: se intenta en la próxima pasada (nunca liberar a ciegas)
+    }
+    // Link de SumUp: se pregunta antes de liberar (el cron de SumUp corre después de este).
+    if (/SumUpCheckout/.test(b.notes ?? '')) {
+      try {
+        const { revisarLinkSumUpDeSesion } = await import('./sumup');
+        if (await revisarLinkSumUpDeSesion(b.id)) continue;
+      } catch { continue; }
     }
     const { data: upd } = await supabase.from('bookings').update({ status: 'expired' })
       .eq('id', b.id).eq('status', 'pending_payment').is('paid_at', null).select('id');
@@ -305,12 +323,17 @@ export async function enviarPasosWhatsapp(b: { id: string; patient_name: string;
   return enviado ? 'enviado' : 'pendiente';
 }
 
-export async function textoPasosWhatsapp(b: { patient_name: string; session_type: string; session_date: string; session_time: string; notes: string | null }): Promise<string> {
-  const online = String(b.session_type).includes('online');
+async function datosPasos(): Promise<{ direccion: string | null; pasosUrl: string | null }> {
   const { data: addr } = await supabase.from('settings').select('value').eq('key', 'clinic_address').maybeSingle();
   const direccion = addr?.value?.trim() ? conEstacionamiento(addr.value.trim()) : null;
   let pasosUrl: string | null = null;
   try { pasosUrl = await stepsPageUrl(SITIO); } catch { pasosUrl = null; }
+  return { direccion, pasosUrl };
+}
+
+export async function textoPasosWhatsapp(b: { patient_name: string; session_type: string; session_date: string; session_time: string; notes: string | null }, datos?: { direccion: string | null; pasosUrl: string | null }): Promise<string> {
+  const online = String(b.session_type).includes('online');
+  const { direccion, pasosUrl } = datos ?? await datosPasos();
   return mensajePasosWhatsapp({
     nombre: b.patient_name, fecha: b.session_date, hora: String(b.session_time).slice(0, 5), online,
     meet: normalizarMeet(meetDeNotas(b.notes)), direccion, pasosUrl,
@@ -332,6 +355,7 @@ export async function avisosHoraLink(): Promise<AvisoHora[]> {
   if (error) throw new Error(error.message);
   const avisos: AvisoHora[] = [];
   const marcaEn = (n: string | null, m: string) => new RegExp(`^${m} (\\S+)`, 'm').exec(n ?? '')?.[1] ?? '';
+  let datos: { direccion: string | null; pasosUrl: string | null } | null = null;
   for (const b of data ?? []) {
     if (!esHoraLink(b.notes)) continue;
     const base = { bookingId: b.id, paciente: b.patient_name, fecha: b.session_date, hora: String(b.session_time).slice(0, 5), monto: b.amount ?? 0 };
@@ -339,7 +363,8 @@ export async function avisosHoraLink(): Promise<AvisoHora[]> {
       avisos.push({ ...base, tipo: 'vencida', cuando: marcaEn(b.notes, MARCA_HORA_VENCIDA) });
     }
     if (b.paid_at && b.status !== 'cancelled' && tieneMarca(b.notes, MARCA_PASOS_WA_PENDIENTE) && !tieneMarca(b.notes, MARCA_PASOS_WA_HECHO)) {
-      const texto = await textoPasosWhatsapp(b);
+      datos ??= await datosPasos();
+      const texto = await textoPasosWhatsapp(b, datos);
       avisos.push({ ...base, tipo: 'pasos_whatsapp', cuando: marcaEn(b.notes, MARCA_PASOS_WA_PENDIENTE), waUrl: enlaceWhatsapp(b.patient_phone, texto) });
     }
     if (b.paid_at && b.status !== 'cancelled' && (b.amount ?? 0) > 0 && tieneMarca(b.notes, MARCA_BOLETA_DATOS)

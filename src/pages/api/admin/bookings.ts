@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { crearHoraConLink, FALTA_MIGRACION as FALTA_MIGRACION_HORA } from '../../../lib/horaLink';
+import { crearHoraConLink, recalcularRetencionHora, FALTA_MIGRACION as FALTA_MIGRACION_HORA } from '../../../lib/horaLink';
 import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
@@ -447,6 +447,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (updErr) return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(updErr.message.slice(0, 200)));
     // Nueva fecha: se borran las marcas de recordatorio para que le llegue uno para la fecha nueva.
     await quitarLineasNotas(id, ['RecordatorioEnviado', 'RecordatorioWhatsAppEnviado']);
+    // Hora con link sin pagar (22 nov 2026): el plazo de retención se recalcula para la hora nueva.
+    await recalcularRetencionHora(id, session_date, session_time).catch((e) => console.error('[reschedule] retención:', e));
     // notifyPatient también decide si Google le manda la invitación actualizada.
     try { await rescheduleBookingInCalendar(id, session_date, session_time, booking?.duration_min ?? undefined, notifyPatient); } catch (e) { console.error('[reschedule] gcal:', e); }
 
@@ -748,7 +750,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
         const codigo = r.codigo === 'ocupada' ? 'slot_conflict' : r.codigo === FALTA_MIGRACION_HORA ? 'falta_0028' : 'hora_link';
         return redirect(conParam(dest) + `error=${codigo}&detail=${encodeURIComponent(r.error)}`);
       }
-      return redirect(conParam(dest) + `hora_link=${encodeURIComponent(r.url)}&hl_wa=${encodeURIComponent(r.whatsappUrl)}&hl_vence=${encodeURIComponent(r.venceAt)}&hl_canal=${r.canal}&hl_correo=${r.correoEnviado ? "1" : "0"}`);
+      // Solo el id en la URL (nada de nombre ni mensaje): la agenda arma el aviso con el link desde la base.
+      return redirect(conParam(dest) + `hora_creada=${r.bookingId}&hl_correo=${r.correoEnviado ? '1' : '0'}`);
     }
 
     // Patient info: from patients table OR form fields

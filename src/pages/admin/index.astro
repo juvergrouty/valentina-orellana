@@ -311,7 +311,7 @@ for (const a of transferenciasPorRevisar ?? []) {
   const estadoB = banco?.porComprobante[a.path];
   const conBoleta = !!estadoB; // la boleta de esta transferencia todavía espera
   const textoBanco = !conBoleta ? ''
-    : estadoB === 'dudoso' ? ' · encontré un correo del banco por ese monto, pero con otro nombre: revísalo'
+    : estadoB === 'dudoso' ? ' · encontré un correo por ese monto, pero no calza el nombre o el remitente del banco: revísalo'
     : estadoB === 'no' ? ' · no encontré el correo del banco: revisa tu cuenta'
     : banco?.gmail ? ' · estoy buscando el correo del banco' : ' · la boleta sale cuando confirmes';
   tareas.push({
