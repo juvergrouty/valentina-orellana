@@ -50,49 +50,31 @@ const fechaFeriado = (iso: string) => { const [y, m, d] = iso.split('-').map(Num
 const urlVuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); u.searchParams.delete('detail'); u.searchParams.delete('calendario'); if (u.searchParams.get('saved') === 'anulada') { u.searchParams.delete('saved'); u.searchParams.delete('correo'); } return u.pathname + u.search; })();
 const fmtSesion = (d: string | null) => d ? d.split('-').reverse().join('-') : '';
 
+// Menú del rediseño (aprobado por Valentina, 21–22 nov 2026: "mezcla B con C"): 5 opciones grandes.
+// Lo que antes eran 19 opciones sueltas quedó ordenado en la página Más (/admin/mas), y lo que no
+// funciona pasó a "En pausa (proyectos futuros)" dentro de Más (no se borró ninguna página).
+// Cada opción se marca también en sus páginas hijas (ej. Pagos en Deudas y Por cobrar).
+const SECCIONES: Record<string, string[]> = {
+  '/admin':           ['/admin'],
+  '/admin/agenda':    ['/admin/agenda', '/admin/horarios', '/admin/bloqueos', '/admin/calendario'],
+  '/admin/pacientes': ['/admin/pacientes'],
+  '/admin/finanzas':  ['/admin/finanzas', '/admin/deudas', '/admin/por-cobrar', '/admin/cobros'],
+};
 const navMain = [
-  // Inicio (14 oct 2026): el resumen del día, donde todo lleva a su acción.
-  { href: '/admin',                label: 'Inicio',         icon: 'home',       exact: true },
-  { href: '/admin/agenda',         label: 'Calendario',     icon: 'calendar',   exact: true },
-  { href: '/admin/servicios',      label: 'Servicios',      icon: 'briefcase'               },
-  { href: '/admin/pacientes',      label: 'Pacientes',      icon: 'users'                   },
-  { href: '/admin/comunicaciones', label: 'Comunicaciones', icon: 'message'                 },
-  // Seguimientos automáticos a consultas y pacientes (18 nov 2026, ver src/lib/seguimientos/).
-  { href: '/admin/seguimientos',   label: 'Seguimientos',   icon: 'message'                 },
-  { href: '/admin/finanzas',       label: 'Finanzas',       icon: 'dollar'                  },
-  { href: '/admin/evaluaciones',   label: 'Evaluaciones',   icon: 'clipboard'               },
-  { href: '/admin/reportes',       label: 'Reportes',       icon: 'bar-chart'               },
-  // Códigos de WhatsApp → qué canal trae pacientes (14 oct 2026).
-  { href: '/admin/whatsapp-codigos', label: 'Pacientes por canal', icon: 'bar-chart'          },
-];
-
-const navSecondary = [
-  // Vitrina (14 oct 2026): talleres, charlas y contenido digital. Los links a
-  // la vitrina pública y a /servicios están arriba en esa página.
-  { href: '/admin/vitrina',       label: 'Vitrina',        icon: 'store'   },
-  // Abre el Meet de la sesión online en curso o por empezar (14 oct 2026).
-  { href: '/admin/sala-online',   label: 'Sala online',    icon: 'video',      target: '_blank' },
-  // Transcriptor IA (P7, 16 oct 2026): grabador presencial y ajustes/instrucciones del resumen.
-  { href: '/admin/grabar',        label: 'Grabar sesión',  icon: 'mic'     },
-  { href: '/admin/transcriptor',  label: 'Transcriptor',   icon: 'wave'    },
-];
-
-const navBottom = [
-  // El horario semanal ahora es POR SERVICIO (se edita en Servicios → botón "Horario").
-  // Esta página queda para vacaciones/feriados y bloqueos de fechas.
-  { href: '/admin/horarios',      label: 'Feriados',       icon: 'clock'   },
-  { href: '/admin/configuracion', label: 'Configuración',  icon: 'settings' },
-  { href: '/admin/seguridad',     label: 'Seguridad',      icon: 'lock'    },
-  { href: '/admin/logs',          label: 'Logs',           icon: 'file'    },
+  { href: '/admin',           label: 'Hoy',       icon: 'home'     },
+  { href: '/admin/agenda',    label: 'Agenda',    icon: 'calendar' },
+  { href: '/admin/pacientes', label: 'Pacientes', icon: 'users'    },
+  { href: '/admin/finanzas',  label: 'Pagos',     icon: 'dollar'   },
+  { href: '/admin/mas',       label: 'Más',       icon: 'more'     },
 ];
 
 function isActive(href: string) {
-  // Inicio solo se marca en /admin; Calendario ya no se marca en el Inicio.
-  if (href === '/admin' || href === '/admin/agenda') return path === href;
-  return path === href || path.startsWith(href + '/');
+  if (href === '/admin') return path === '/admin';
+  if (href === '/admin/mas') return !Object.values(SECCIONES).flat().some((p) => p === '/admin' ? path === '/admin' : path === p || path.startsWith(p + '/'));
+  return (SECCIONES[href] ?? [href]).some((p) => path === p || path.startsWith(p + '/'));
 }
 
-type IconName = 'home' | 'calendar' | 'briefcase' | 'users' | 'message' | 'dollar' | 'clipboard' | 'bar-chart' | 'store' | 'video' | 'clock' | 'settings' | 'file' | 'logout' | 'link' | 'help' | 'search' | 'chevron-left' | 'menu' | 'lock' | 'mic' | 'wave';
+type IconName = 'home' | 'calendar' | 'briefcase' | 'users' | 'message' | 'dollar' | 'clipboard' | 'bar-chart' | 'store' | 'video' | 'clock' | 'settings' | 'file' | 'logout' | 'link' | 'help' | 'search' | 'chevron-left' | 'menu' | 'lock' | 'mic' | 'wave' | 'more';
 
 const icons: Record<IconName, string> = {
   home: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1h-5v-6h-6v6H4a1 1 0 01-1-1z"/></svg>`,
@@ -116,6 +98,7 @@ const icons: Record<IconName, string> = {
   menu: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>`,
   lock: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>`,
   mic: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/></svg>`,
+  more: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>`,
   wave: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 7v10M21 12h0"/></svg>`,
 };
 import CamposContacto from '../CamposContacto.astro';
@@ -674,6 +657,52 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
 }
 .mobile-toggle { display: none; }
 
+/* ── Rediseño del menú (22 nov 2026, aprobado por Valentina) ─────────────────
+   Menú lateral con los colores de la marca y opciones grandes; en el celular,
+   barra fija abajo con las mismas 5 opciones (reemplaza al menú escondido). */
+.enc-sidebar { background: #3F4A3B; border-right: 0; width: 236px; }
+.enc-logo-area { border-bottom-color: rgba(255,255,255,.12); }
+.enc-logo-brand, .sidebar-logo-text { color: #fff !important; font-family: 'Domine', Georgia, serif; font-weight: 700; font-size: 1.05rem; }
+.collapse-btn { color: rgba(255,255,255,.75) !important; }
+.enc-search { background: rgba(255,255,255,.10) !important; border-color: transparent !important; color: rgba(255,255,255,.8) !important; }
+.enc-search input { color: #fff !important; }
+.enc-search input::placeholder { color: rgba(255,255,255,.7) !important; }
+.enc-search .kbd { background: rgba(255,255,255,.15) !important; color: #fff !important; border-color: transparent !important; }
+.enc-nav { padding: 0.75rem 0.6rem; display: flex; flex-direction: column; gap: 4px; }
+.enc-nav .nav-item { min-height: 50px; padding: 0 12px; gap: 12px; border-radius: 12px; color: #fff; opacity: .88; font-size: 16px; font-weight: 600; }
+.enc-nav .nav-item svg { width: 22px; height: 22px; color: #fff; }
+.enc-nav .nav-item:hover:not(.disabled) { background: rgba(255,255,255,.10); }
+.enc-nav .nav-item:hover:not(.disabled) svg { color: #fff; }
+.enc-nav .nav-item.active { background: rgba(255,255,255,.18); color: #fff; opacity: 1; font-weight: 700; }
+.enc-nav .nav-item.active svg { color: #fff; }
+.enc-sidebar.collapsed .nav-item { padding: 0; }
+.enc-sidebar-footer { border-top-color: rgba(255,255,255,.12); }
+.enc-user-row:hover { background: rgba(255,255,255,.08); }
+.enc-user-avatar { background: #F5A623; color: #2E332A; }
+.enc-user-name { color: #fff; }
+.enc-user-role { color: rgba(255,255,255,.75); }
+.enc-logout-btn { color: rgba(255,255,255,.75); }
+
+.enc-tabbar { display: none; }
+@media (max-width: 768px) {
+  .enc-sidebar, .sidebar-overlay { display: none !important; }
+  .mobile-toggle { display: none !important; }
+  .enc-tabbar {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    background: #fff; border-top: 1px solid #CFC8BF;
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  }
+  .enc-tabbar a {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    min-height: 58px; border-radius: 12px; color: #5F5E57; text-decoration: none;
+    font-size: 14px; font-weight: 600;
+  }
+  .enc-tabbar a svg { width: 25px; height: 25px; }
+  .enc-tabbar a.on { color: #3F4A3B; background: #E6EBE3; }
+  .enc-main { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+}
+
 /* ── Field error ─────────────────────────────────────────────────────────── */
 .field-error { color: var(--enc-red); font-size: 0.8rem; }
 
@@ -752,7 +781,7 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   <title>{title} · Valentina Orellana</title>
   <link rel="icon" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Domine:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 </head>
 <body>
   <div class="sidebar-overlay" id="sidebar-overlay"></div>
@@ -780,48 +809,13 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
     </div>
 
     <!-- Main nav -->
-    <nav class="enc-nav">
+    <nav class="enc-nav" aria-label="Menú">
       {navMain.map(item => (
-        <a
-          href={item.disabled ? undefined : item.href}
-          class={`nav-item ${isActive(item.href) && !item.disabled ? 'active' : ''} ${item.disabled ? 'disabled' : ''}`}
-        >
-          <Fragment set:html={icons[item.icon as IconName] ?? icons.file} />
-          <span class="nav-label">{item.label}</span>
-          {item.disabled && <span class="nav-badge soon">Próximo</span>}
-        </a>
-      ))}
-
-      <div class="enc-nav-divider"></div>
-
-      {navSecondary.map(item => (
-        <a
-          href={item.disabled ? undefined : item.href}
-          target={(item as { target?: string }).target}
-          class={`nav-item ${isActive(item.href) && !item.disabled ? 'active' : ''} ${item.disabled ? 'disabled' : ''}`}
-        >
-          <Fragment set:html={icons[item.icon as IconName] ?? icons.file} />
-          <span class="nav-label">{item.label}</span>
-          {item.disabled && <span class="nav-badge soon">Próximo</span>}
-        </a>
-      ))}
-
-      <div class="enc-nav-divider"></div>
-
-      {navBottom.map(item => (
-        <a
-          href={item.href}
-          class={`nav-item ${isActive(item.href) ? 'active' : ''}`}
-        >
-          <Fragment set:html={icons[item.icon as IconName] ?? icons.file} />
+        <a href={item.href} class={`nav-item ${isActive(item.href) ? 'active' : ''}`} aria-current={isActive(item.href) ? 'page' : undefined}>
+          <Fragment set:html={icons[item.icon as IconName]} />
           <span class="nav-label">{item.label}</span>
         </a>
       ))}
-
-      <a href="/admin/precios" class={`nav-item ${isActive('/admin/precios') ? 'active' : ''}`}>
-        <Fragment set:html={icons.clipboard} />
-        <span class="nav-label">Precios/FAQ</span>
-      </a>
     </nav>
 
     <!-- User / logout -->
@@ -840,6 +834,16 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
       </div>
     </div>
   </aside>
+
+  <!-- ── Menú de abajo (celular) · rediseño 22 nov 2026 ────────────────── -->
+  <nav class="enc-tabbar" aria-label="Menú">
+    {navMain.map(item => (
+      <a href={item.href} class={isActive(item.href) ? 'on' : ''} aria-current={isActive(item.href) ? 'page' : undefined}>
+        <Fragment set:html={icons[item.icon as IconName]} />
+        <span>{item.label}</span>
+      </a>
+    ))}
+  </nav>
 
   <!-- ── Main area ──────────────────────────────────────────────────────── -->
   <main class="enc-main">

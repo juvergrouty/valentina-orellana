@@ -12,6 +12,9 @@ import { URL_SII } from '../../lib/impuestos';
 import { ETIQUETA_PAGO_EN_CONSULTA, esPagoEnConsulta } from '../../lib/pagoEnConsulta';
 import { textoPagoPorDevolver } from '../../lib/pagosPorDevolver';
 import { porAsociarVigentes, sumupConfigurado } from '../../lib/sumup';
+import { avisosEscondidos } from '../../lib/avisosPospuestos';
+import { proximosDelColegio } from '../../lib/calendarioColegio';
+import { calcularDisponibilidad } from '../../lib/disponibilidad';
 
 // Inicio del panel (rediseño aprobado por Valentina, 14 oct 2026): TODO lleva
 // directo a donde está la acción. Arriba el día que se mira (‹ › para moverse,
@@ -228,6 +231,9 @@ type Accion =
   | { tipo: 'link'; url: string; texto: string }
   | { tipo: 'folio'; bookingId: string; sugerido: number | null };
 type Tarea = {
+  id?: string;           // para "Recordar mañana" (src/lib/avisosPospuestos.ts); sin id no se puede posponer
+  cobro?: { id: string; monto: number }; // "Ya me pagó" (marca el pago con el mismo formulario del calendario)
+  colegio?: { desde: string };
   clave: string;         // plazo "YYYY-MM-DDTHH:MM" (hora de Chile) para ordenar; '9999' = sin plazo
   chip: string;
   titulo: string;
@@ -243,6 +249,7 @@ const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, ta
 // Pago por devolver o reagendar (19 oct 2026, ver src/lib/pagosPorDevolver.ts): queda hasta "Resuelto".
 for (const p of pagosPorDevolver ?? []) {
   tareas.push({
+    id: `devolver:${p.id}`,
     clave: ahoraClave,
     chip: 'pago por devolver',
     titulo: textoPagoPorDevolver(p),
@@ -259,6 +266,7 @@ for (const c of cobros ?? []) {
   // Paga en consulta (19 oct 2026, ver src/lib/pagoEnConsulta.ts): sin plazo de 24 h, sin box ni link.
   if (c.enConsulta) {
     tareas.push({
+      id: `consulta:${c.id}`,
       clave: `${c.fecha}T${c.hora}`,
       chip: `sesión ${cuando(c.fecha, c.hora)}`,
       titulo: `${ETIQUETA_PAGO_EN_CONSULTA}: ${c.paciente}`,
@@ -270,6 +278,8 @@ for (const c of cobros ?? []) {
   const plazo = sumarDias(c.fecha, -1); // el pago debe quedar 24 h antes
   const vencido = hoursUntilSessionCL(plazo, c.hora) <= 0;
   tareas.push({
+    id: `cobro:${c.id}`,
+    cobro: { id: c.id, monto: c.monto },
     clave: `${plazo}T${c.hora}`,
     chip: vencido ? `sesión ${cuando(c.fecha, c.hora)}` : `pago vence ${cuando(plazo, c.hora)}`,
     titulo: `Cobrar a ${c.paciente}`,
@@ -285,6 +295,7 @@ for (const b of box.liberar) {
   tareas.push({
     clave: `${b.fecha}T${b.hora}`,
     chip: `liberar antes de ${cuando(b.fecha, b.hora)}`,
+    id: `boxlib:${b.slot}`,
     titulo: `Liberar box de ${b.paciente}`,
     detalle: 'Espacio Cala · la sesión ya no está en tu calendario (se canceló o se movió)',
     href: `/admin/agenda?fecha=${b.fecha}&hora=${b.hora}`,
@@ -295,6 +306,7 @@ for (const b of box.pendientes) {
   tareas.push({
     clave: `${b.fecha}T${b.hora}`,
     chip: `box vence ${cuando(b.fecha, b.hora)}`,
+    id: `box:${b.slot}`,
     titulo: `Comprar box para ${b.paciente}`,
     detalle: `Espacio Cala · ${fechaLarga(b.fecha)} a las ${b.hora}`,
     href: `/admin/agenda?fecha=${b.fecha}&hora=${b.hora}`,
@@ -310,6 +322,7 @@ for (const a of transferenciasPorRevisar ?? []) {
   tareas.push({
     clave: claveCL(a.subidoEl),
     chip: `transferencia ${cuando(claveCL(a.subidoEl).slice(0, 10), claveCL(a.subidoEl).slice(11, 16))}`,
+    id: `transf:${a.bookingIds[0]}`,
     titulo: `Revisar en tu banco la transferencia de ${a.patientName}`,
     detalle: `${clp(a.total)} · ya le llegó la confirmación · toca para ver el comprobante; si no llegó, en la sesión usa «Anular pago»`,
     href: `/api/admin/comprobante?b=${a.bookingIds[0]}`, externo: true,
@@ -323,6 +336,7 @@ for (const c of sumupConfigurado() ? await porAsociarVigentes().catch(() => []) 
   tareas.push({
     clave: k,
     chip: `tarjeta ${cuando(k.slice(0, 10), k.slice(11, 16))}`,
+    id: `sumup:${k}`,
     titulo: `Elegir la sesión de un cobro con tarjeta de ${clp(c.monto)}`,
     detalle: 'La página no supo de qué sesión es. En Cobros eliges la sesión, con boleta o sin boleta.',
     href: '/admin/cobros#sumup-card',
@@ -335,6 +349,7 @@ for (const a of comprobanteAlerts) {
   tareas.push({
     clave: claveCL(a.subidoEl),
     chip: `subido ${cuando(claveCL(a.subidoEl).slice(0, 10), claveCL(a.subidoEl).slice(11, 16))}`,
+    id: `compro:${a.bookingIds[0]}`,
     titulo: `Confirmar transferencia de ${a.patientName}`,
     detalle: `${clp(a.total)} · revisa tu banco y confirma el pago en la sesión`,
     href: `/admin/agenda?booking=${a.bookingIds[0]}`,
@@ -344,6 +359,7 @@ for (const a of comprobanteAlerts) {
 for (const a of boletaAlerts) {
   tareas.push({
     clave: ahoraClave,
+    id: `boleta:${a.bookingId}`,
     chip: 'boleta con problemas',
     titulo: `Boleta de ${a.patientName}${a.sessionDate && a.sessionDate !== '2099-12-31' ? ` · sesión ${fechaCorta(a.sessionDate)}` : ''}`,
     detalle: a.message,
@@ -354,6 +370,7 @@ for (const a of boletaAlerts) {
 for (const r of rebotes) {
   tareas.push({
     clave: ahoraClave,
+    id: `rebote:${r.correo}`,
     chip: 'correo rebotado',
     titulo: `Correo que no llegó${r.paciente ? `: ${r.paciente.name}` : ''}`,
     detalle: `${r.correo}${r.asunto ? ` (“${r.asunto}”)` : ''} · ${r.paciente ? 'pídele su correo correcto y cámbialo en su ficha' : 'revisa ese correo con la persona'}`,
@@ -374,6 +391,7 @@ for (const t of tarifas) {
   const monto = `${t.anterior ? `${clp(t.anterior)} → ` : ''}${clp(t.nuevo)} desde el ${fechaLarga(t.desde)}`;
   const montoAntiguo = t.sesionesConMontoAntiguo > 0 ? ` · ⚠ ${t.sesionesConMontoAntiguo} ${t.sesionesConMontoAntiguo === 1 ? 'sesión agendada' : 'sesiones agendadas'} con el monto antiguo` : '';
   tareas.push({
+    id: `tarifa:${t.id}`,
     clave: t.fase === 'avisar' ? (t.atrasado ? ahoraClave : `${sumarDias(t.desde, -1)}T23:59`) : t.fase === 'vigente' ? ahoraClave : `${t.desde}T00:00`,
     chip: t.fase === 'avisar' ? (t.atrasado ? 'urgente: ya rige' : `avisar antes del ${cuando(t.desde)}`) : t.fase === 'proxima' ? `rige ${cuando(t.desde)}` : 'ya rige',
     titulo: t.fase === 'avisar' ? `Avisar cambio de tarifa a ${t.nombre}` : `Tarifa nueva de ${t.nombre}`,
@@ -386,6 +404,7 @@ for (const i of impuestos) {
   tareas.push({
     clave: ahoraClave,
     chip: 'pendiente',
+    id: `impuestos:${i.mes}`,
     titulo: `Pagar impuestos de ${i.nombre}`,
     detalle: 'En el SII (se abre en otra pestaña)',
     href: URL_SII, externo: true,
@@ -396,12 +415,48 @@ for (const a of consentAlerts) {
   tareas.push({
     clave: '9999',
     chip: a.sentAt ? 'enviado, sin firmar' : 'sin enviar',
+    id: `consent:${a.patientId}`,
     titulo: `Consentimiento de datos: ${a.name}`,
     detalle: 'Ley 21.719 · envíaselo desde su ficha',
     href: `/admin/pacientes/${a.patientId}#consentimiento`,
   });
 }
+// Calendario del colegio del hijo de Valentina (22 nov 2026): aviso un mes antes (src/lib/calendarioColegio.ts).
+for (const d of proximosDelColegio(hoy)) {
+  tareas.push({
+    id: d.id, colegio: { desde: d.desde },
+    clave: `${d.desde}T00:00`,
+    chip: d.enDias === 0 ? 'Colegio de tu hijo · ya empezó' : `En ${d.enDias} ${d.enDias === 1 ? 'día' : 'días'} · Colegio de tu hijo`,
+    titulo: d.que,
+    detalle: `${mayus(fechaLarga(d.desde))}${d.hasta !== d.desde ? ` al ${fechaLarga(d.hasta)}` : ''}. Las sesiones que ya tienes agendadas no se tocan.${d.preliminar ? ' Fecha de la versión preliminar del colegio.' : ''}`,
+    href: `/admin/agenda?fecha=${d.desde}`,
+  });
+}
 tareas.sort((a, b) => a.clave.localeCompare(b.clave));
+// "Recordar mañana" / "Atiendo normal" (22 nov 2026): se esconden hasta mañana o para siempre.
+const escondidos = await avisosEscondidos().catch(() => new Set<string>());
+const tareasVisibles = tareas.filter((t) => !t.id || !escondidos.has(t.id));
+// Aviso recién pospuesto (para ofrecer "Deshacer").
+const avisoRecien = Astro.url.searchParams.get('aviso') ?? '';
+const hechoRecien = Astro.url.searchParams.get('hecho') ?? '';
+const errorAviso = Astro.url.searchParams.get('error') === 'aviso_guardar';
+
+// Horarios libres de hoy (mismo cálculo que la reserva de la página, src/lib/disponibilidad.ts).
+type Libre = { hora: string; modo: 'presencial' | 'online' | 'ambas' };
+let libres: Libre[] | null = null;
+if (esHoy) {
+  try {
+    const [pres, onl] = await Promise.all([
+      calcularDisponibilidad({ date: dia, serviceId: null, duration: null, modality: 'presencial' }),
+      calcularDisponibilidad({ date: dia, serviceId: null, duration: null, modality: 'online' }),
+    ]);
+    const lp = new Set('slots' in pres ? pres.slots.map((x) => String(x).slice(0, 5)) : []);
+    const lo = new Set('slots' in onl ? onl.slots.map((x) => String(x).slice(0, 5)) : []);
+    const ahora = nowCL().toISOString().slice(11, 16);
+    libres = [...new Set([...lp, ...lo])].filter((h) => h > ahora).sort()
+      .map((hora) => ({ hora, modo: lp.has(hora) && lo.has(hora) ? 'ambas' : lp.has(hora) ? 'presencial' : 'online' }));
+  } catch { libres = null; }
+}
 // Color del plazo: rojo si vence en menos de 24 h (o ya venció), ámbar hasta 3 días.
 const tono = (clave: string) => {
   if (clave === '9999') return 'gris';
@@ -409,7 +464,7 @@ const tono = (clave: string) => {
   const horas = hoursUntilSessionCL(f, h ?? '00:00');
   return horas < 24 ? 'rojo' : horas < 72 ? 'ambar' : 'gris';
 };
-const VISIBLES = 6;
+const VISIBLES = 3;
 const hayBox = box.pendientes.length > 0 || box.liberar.length > 0;
 
 // ── Números ─────────────────────────────────────────────────────────────────
@@ -432,344 +487,317 @@ const chevron = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" str
 const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-pagar': 'por pagar', 'en-consulta': 'paga en consulta', 'anulada': 'deuda anulada', 'sin-cobro': 'sin costo', 'externa': 'Encuadrado' };
 ---
 
-<AdminLayout title="Inicio" current="/admin" avisos={avisos} ocultarAvisosDeInicio>
-  <div class="inicio">
+<AdminLayout title="Hoy" current="/admin" avisos={avisos} ocultarAvisosDeInicio>
+  <div class="hoy">
 
-    <!-- Día que se mira -->
-    <nav class="ini-dia" aria-label="Cambiar de día">
-      <a href={`/admin?dia=${sumarDias(dia, -1)}`} class="ini-flecha" aria-label="Día anterior">‹</a>
-      <div class="ini-dia-txt">
-        <p class="ini-dia-rel">{esHoy ? 'Hoy' : dia === manana ? 'Mañana' : dia === ayer ? 'Ayer' : ' '}</p>
-        <h2>{mayus(fechaLarga(dia))}</h2>
+    <!-- Saludo y día -->
+    <header class="hoy-cab">
+      <div>
+        <h1>{esHoy ? 'Hola, Vale' : mayus(dia === manana ? 'Mañana' : dia === ayer ? 'Ayer' : 'Otro día')}</h1>
+        <p>{mayus(fechaLarga(dia))}</p>
       </div>
-      <a href={`/admin?dia=${sumarDias(dia, 1)}`} class="ini-flecha" aria-label="Día siguiente">›</a>
-      {!esHoy && <a href="/admin" class="btn btn-outline btn-sm ini-hoy">Hoy</a>}
-    </nav>
+      <nav class="hoy-dias" aria-label="Cambiar de día">
+        <a href={`/admin?dia=${sumarDias(dia, -1)}`} aria-label="Día anterior">‹</a>
+        {!esHoy && <a href="/admin" class="hoy-volver">Hoy</a>}
+        <a href={`/admin?dia=${sumarDias(dia, 1)}`} aria-label="Día siguiente">›</a>
+      </nav>
+    </header>
 
-    {errorReservas && (
-      <p class="alert-error">⚠ No se pudieron leer las sesiones. Recarga en un rato.</p>
+    {errorReservas && <p class="hoy-error">No se pudieron leer las sesiones. Recarga en un rato.</p>}
+    {errorAviso && <p class="hoy-error">No se pudo guardar ese cambio del aviso. Intenta de nuevo.</p>}
+    {avisoRecien && hechoRecien && (
+      <form method="POST" action="/api/admin/aviso" class="hoy-deshacer" role="status">
+        <span>{hechoRecien === 'atendido' ? 'Listo, quedó como atendido.' : 'Te lo recuerdo mañana.'}</span>
+        <input type="hidden" name="id" value={avisoRecien} />
+        <input type="hidden" name="accion" value="deshacer" />
+        <input type="hidden" name="redirect" value="/admin" />
+        <button type="submit">Deshacer</button>
+      </form>
     )}
 
-    <!-- Próxima sesión -->
-    <section class="card ini-hero">
-      <p class="label">{hero ? (heroEnCurso ? 'En curso' : esHoy ? 'Próxima sesión' : 'Primera sesión del día') : (esHoy ? 'Próxima sesión' : 'Sesiones del día')}</p>
-      {hero ? (
-        <>
-          <a href={hero.href} class="ini-hero-main">
-            <span class="ini-hero-hora">{hero.hora}</span>
-            <span class="ini-hero-txt">
-              <strong>{hero.paciente}</strong>
-              <span>{hero.fecha !== dia ? `${cuando(hero.fecha)} · ` : ''}{hero.tipo}</span>
-            </span>
-            <span class={`ini-pago ini-pago-${hero.pago}`}>{PAGO_TXT[hero.pago]}</span>
-          </a>
-          <div class="ini-hero-botones">
-            <a href={hero.href} class="btn btn-dark ini-btn">Ver en el calendario</a>
-            {/* Sala online abre el Meet de la sesión de la página en curso o por
-                empezar: solo se ofrece si esta sesión es de la página (las de
-                Encuadrado no tienen Meet aquí) y es la que viene hoy. */}
-            {hero.online && hero.id && hero.fecha === hoy && (
-              <a href="/admin/sala-online" target="_blank" rel="noopener" class="btn btn-primary ini-btn">Entrar a Meet</a>
+    <div class="hoy-arriba">
+      <!-- Sesión en curso o próxima -->
+      <section class={`hoy-ahora ${heroEnCurso ? 'en-curso' : ''}`} aria-label="Próxima sesión">
+        <p class="hoy-tag">{hero ? (heroEnCurso ? <><i aria-hidden="true"></i>En curso ahora</> : esHoy ? 'Próxima sesión' : 'Primera sesión del día') : (esHoy ? 'Próxima sesión' : 'Sesiones del día')}</p>
+        {hero ? (
+          <>
+            <a href={hero.href} class="hoy-ahora-fila">
+              <span class="hoy-hora">{hero.hora}</span>
+              <span><b>{hero.paciente}</b><span>{hero.fecha !== dia ? `${mayus(cuando(hero.fecha))} · ` : ''}{hero.tipo} · {mayus(PAGO_TXT[hero.pago])}</span></span>
+            </a>
+            <div class="hoy-dos">
+              {hero.online && hero.id && hero.fecha === hoy
+                ? <a href="/admin/sala-online" target="_blank" rel="noopener" class="hb hb-verde">Entrar a Meet</a>
+                : null}
+              <a href={hero.href} class="hb hb-borde">Ver detalles</a>
+            </div>
+          </>
+        ) : (
+          <p class="hoy-vacio">{errorReservas ? 'No se pudieron leer las sesiones.' : esHoy ? 'No quedan sesiones hoy ni en los próximos 7 días.' : 'Sin sesiones este día.'}</p>
+        )}
+      </section>
+
+      <!-- Meta de la semana y horarios libres -->
+      <section class="hoy-meta" aria-label="Meta de la semana">
+        <a href={`/admin/agenda?fecha=${lunes}`} class="hoy-meta-fila"><span>Sesiones esta semana</span><b>{semana.length} de {META_SEMANA}</b></a>
+        <span class="hoy-barra" aria-hidden="true"><i style={`width:${avanceSemana}%`}></i></span>
+        <small>{semana.length >= META_SEMANA ? '¡Llegaste a tu meta de la semana!' : `Te faltan ${META_SEMANA - semana.length} para tu meta de la semana.`}{google === null ? ' No se pudo leer Google Calendar: faltan las sesiones de Encuadrado.' : ''}</small>
+        {esHoy && (
+          <>
+            <p class="hoy-libres-t">{libres === null ? 'No se pudieron leer tus horarios libres de hoy.' : libres.length ? 'Horarios libres hoy. Toca uno para agendar.' : 'No te quedan horarios libres hoy.'}</p>
+            {libres && libres.length > 0 && (
+              <div class="hoy-libres">
+                {libres.slice(0, 6).map((l) => (
+                  <a href={`/admin/agenda?fecha=${dia}&hora=${l.hora}`} class={`hoy-libre ${l.modo === 'online' ? 'onl' : 'pres'}`}>
+                    <b>{l.hora}</b>
+                    <span>{l.modo === 'ambas' ? 'Presencial u online' : l.modo === 'online' ? 'Online' : 'Presencial'}</span>
+                  </a>
+                ))}
+              </div>
             )}
-          </div>
-        </>
-      ) : (
-        <p class="ini-vacio">{errorReservas ? 'No se pudieron leer las sesiones.' : esHoy ? 'No quedan sesiones hoy ni en los próximos 7 días.' : 'Sin sesiones este día.'}</p>
-      )}
-    </section>
+          </>
+        )}
+      </section>
+    </div>
 
-    <!-- Números -->
-    <section class="ini-stats" aria-label="Resumen">
-      <a href={`/admin/agenda?fecha=${dia}`} class="ini-stat">
-        <span class="stat-label">{esHoy ? 'Hoy' : 'Día'}</span>
-        <span class="stat-value">{delDia.length}</span>
-        <span class="stat-sub">{delDia.length === 1 ? 'sesión' : 'sesiones'}</span>
-      </a>
-      <a href={`/admin/agenda?fecha=${lunes}`} class="ini-stat">
-        <span class="stat-label">Semana</span>
-        <span class="stat-value">{semana.length}<small>/{META_SEMANA}</small></span>
-        <span class="ini-barra" aria-hidden="true"><span style={`width:${avanceSemana}%`}></span></span>
-        <span class="stat-sub">lun {Number(lunes.slice(8))} – dom {Number(domingo.slice(8))}{google === null ? ' · sin Google' : ''}</span>
-      </a>
-      <a href="/admin/por-cobrar" class="ini-stat">
-        <span class="stat-label">Por cobrar</span>
-        <span class="stat-value">{porCobrar === null ? '—' : porCobrar.length}</span>
-        <span class="stat-sub">{porCobrar === null ? 'no se pudo leer' : clp(porCobrarTotal)}</span>
-      </a>
-      <a href="/admin/deudas" class="ini-stat">
-        <span class="stat-label">Te deben</span>
-        <span class="stat-value">{deben === null ? '—' : deben.personas}</span>
-        <span class="stat-sub">{deben === null ? 'no se pudo leer' : `${clp(deben.total)} en total`}</span>
-      </a>
-    </section>
-
-    <div class="ini-cols">
-      <!-- Para hacer -->
-      <section class="card ini-lista">
-        <div class="section-header">
-          <p class="label">Para hacer{tareas.length ? ` (${tareas.length})` : ''}</p>
-          {hayBox && <a href="https://espaciocala.cl" target="_blank" rel="noopener" class="ini-link-sec">espaciocala.cl ↗</a>}
-        </div>
-        {!tareas.length ? (
-          <p class="ini-ok">Todo al día ✓</p>
+    <div class="hoy-cols">
+      <!-- Te necesita ahora -->
+      <section aria-labelledby="t-avisos">
+        <h2 id="t-avisos">Te necesita ahora {tareasVisibles.length > 0 && <span class="hoy-cuenta">{tareasVisibles.length}</span>}</h2>
+        {!tareasVisibles.length ? (
+          <p class="hoy-ok">Todo al día ✓</p>
         ) : (
           <>
-            {[tareas.slice(0, VISIBLES), tareas.slice(VISIBLES)].map((grupo, gi) => {
-              const lista = (
-                <ul class="ini-tareas">
-                  {grupo.map((t) => (
-                    <li class="ini-tarea">
-                      {t.href ? (
-                        <a href={t.href} class="ini-tarea-link" {...(t.externo ? { target: '_blank', rel: 'noopener' } : {})}>
-                          <span class="ini-tarea-txt">
-                            <span class={`ini-chip ini-chip-${tono(t.clave)}`}>{t.chip}</span>
-                            <strong>{t.titulo}</strong>
-                            <span class="ini-det">{t.detalle}</span>
-                          </span>
-                          <span class="ini-chev" set:html={chevron}></span>
-                        </a>
-                      ) : (
-                        <div class="ini-tarea-link">
-                          <span class="ini-tarea-txt">
-                            <span class={`ini-chip ini-chip-${tono(t.clave)}`}>{t.chip}</span>
-                            <strong>{t.titulo}</strong>
-                            <span class="ini-det">{t.detalle}</span>
-                          </span>
-                        </div>
-                      )}
-                      {t.accion && (
-                        <div class="ini-tarea-accion">
-                          {t.accion.tipo === 'wa' && (t.accion.url
-                            ? <>
-                                <a href={t.accion.url} target="_blank" rel="noopener" data-cobro-wa={t.accion.id} data-tomar-cobro={t.accion.id} class="btn ini-btn ini-btn-wa">WhatsApp</a>
-                                <span data-cobro-enviado={t.accion.id} hidden class="ini-hecho">✓ abierto</span>
-                              </>
-                            : <span class="ini-hecho">sin teléfono válido</span>)}
-                          {t.accion.tipo === 'form' && (
-                            <form method="POST" action={t.accion.action}
-                              onsubmit={t.accion.action === '/api/admin/pago-resuelto' ? "return confirm('¿Marcar como resuelto? (ya devolviste el pago o la pasaste a otra hora). El aviso desaparece; la sesión y su pago no cambian.')" : undefined}>
-                              {Object.entries(t.accion.campos).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
-                              <button type="submit" class="btn btn-outline ini-btn">{t.accion.texto}</button>
-                            </form>
-                          )}
-                          {t.accion.tipo === 'link' && (
-                            <a href={t.accion.url} target="_blank" rel="noopener" class="btn btn-outline ini-btn">{t.accion.texto}</a>
-                          )}
-                          {t.accion.tipo === 'folio' && (
-                            <button type="button" class="btn btn-outline ini-btn btn-registrar-folio" data-booking={t.accion.bookingId} data-folio={t.accion.sugerido ?? ''}>Registrar folio</button>
-                          )}
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              );
+            {[tareasVisibles.slice(0, VISIBLES), tareasVisibles.slice(VISIBLES)].map((grupo, gi) => {
               if (!grupo.length) return null;
+              const lista = (
+                <div class="hoy-avisos">
+                  {grupo.map((t) => (
+                    <article class={`hoy-aviso ${tono(t.clave)}`}>
+                      <div>
+                        <span class="hoy-chip">{mayus(t.chip)}</span>
+                        <h3>{t.href ? <a href={t.href} {...(t.externo ? { target: '_blank', rel: 'noopener' } : {})}>{t.titulo}</a> : t.titulo}</h3>
+                        <p>{t.detalle}</p>
+                      </div>
+                      <div class="hoy-acc">
+                        {/* Acción principal */}
+                        {t.accion?.tipo === 'wa' && (t.accion.url
+                          ? <a href={t.accion.url} target="_blank" rel="noopener" data-cobro-wa={t.accion.id} data-tomar-cobro={t.accion.id} class="hb hb-wa hb-ancho">Cobrar por WhatsApp</a>
+                          : <span class="hoy-nota">Sin teléfono válido para WhatsApp.</span>)}
+                        {t.accion?.tipo === 'wa' && t.accion.url && <span data-cobro-enviado={t.accion.id} hidden class="hoy-enviado">✓ WhatsApp abierto con el link de pago</span>}
+                        {t.accion?.tipo === 'link' && <a href={t.accion.url} target="_blank" rel="noopener" class="hb hb-borde hb-ancho">{t.accion.texto}</a>}
+                        {t.accion?.tipo === 'folio' && <button type="button" class="hb hb-borde hb-ancho btn-registrar-folio" data-booking={t.accion.bookingId} data-folio={t.accion.sugerido ?? ''}>Registrar folio</button>}
+                        {t.colegio && <a href={`/admin/agenda?fecha=${t.colegio.desde}`} class="hb hb-verde hb-ancho">Ajustar mis horas en la agenda</a>}
+                        {!t.accion && !t.colegio && t.href && <a href={t.href} {...(t.externo ? { target: '_blank', rel: 'noopener' } : {})} class="hb hb-borde hb-ancho">Abrir</a>}
+
+                        {/* "Ya lo hice" de cada aviso */}
+                        {t.cobro && (
+                          <details class="hoy-pago">
+                            <summary class="hb hb-listo">✓ Ya me pagó</summary>
+                            <form method="POST" action="/api/admin/bookings" class="hoy-pago-form">
+                              <input type="hidden" name="action" value="mark_paid" />
+                              <input type="hidden" name="id" value={t.cobro.id} />
+                              <input type="hidden" name="redirect" value="/admin" />
+                              <p>¿Cómo te pagó? ({clp(t.cobro.monto)})</p>
+                              <div class="hoy-medios">
+                                <label><input type="radio" name="medio" value="Efectivo" required /> Efectivo</label>
+                                <label><input type="radio" name="medio" value="Transferencia" /> Transferencia</label>
+                                <label><input type="radio" name="medio" value="Tarjeta" /> Tarjeta en otra máquina</label>
+                              </div>
+                              <label class="hoy-boleta"><input type="checkbox" name="emitir_boleta" checked /> Emitir y enviar la boleta</label>
+                              <button type="submit" class="hb hb-verde hb-ancho">Confirmar pago</button>
+                              <p class="hoy-nota">Los cobros con SumUp se marcan solos al revisar SumUp. Para otro monto, usa «Abrir».</p>
+                            </form>
+                          </details>
+                        )}
+                        {t.accion?.tipo === 'form' && (
+                          <form method="POST" action={t.accion.action} class="hoy-form"
+                            onsubmit={t.accion.action === '/api/admin/pago-resuelto' ? "return confirm('¿Marcar como resuelto? (ya devolviste el pago o la pasaste a otra hora). El aviso desaparece; la sesión y su pago no cambian.')" : undefined}>
+                            {Object.entries(t.accion.campos).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+                            <button type="submit" class="hb hb-listo">✓ {t.accion.texto}</button>
+                          </form>
+                        )}
+                        {t.colegio && t.id && (
+                          <form method="POST" action="/api/admin/aviso" class="hoy-form">
+                            <input type="hidden" name="id" value={t.id} /><input type="hidden" name="accion" value="atendido" /><input type="hidden" name="redirect" value="/admin" />
+                            <button type="submit" class="hb hb-listo">✓ Atiendo normal</button>
+                          </form>
+                        )}
+                        {t.id && (
+                          <form method="POST" action="/api/admin/aviso" class="hoy-form">
+                            <input type="hidden" name="id" value={t.id} /><input type="hidden" name="accion" value="manana" /><input type="hidden" name="redirect" value="/admin" />
+                            <button type="submit" class="hb hb-gris">Recordar mañana</button>
+                          </form>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              );
               return gi === 0 ? lista : (
-                <details class="ini-mas">
-                  <summary><span class="ini-mas-abrir">Ver todo ({tareas.length})</span><span class="ini-mas-cerrar">Ver menos</span></summary>
+                <details class="hoy-mas">
+                  <summary><span class="abrir">Ver {grupo.length} {grupo.length === 1 ? 'aviso' : 'avisos'} más</span><span class="cerrar">Ver menos</span></summary>
                   {lista}
                 </details>
               );
             })}
+            {hayBox && <a href="https://espaciocala.cl" target="_blank" rel="noopener" class="hoy-link">Abrir Espacio Cala ↗</a>}
           </>
         )}
       </section>
 
       <!-- Sesiones del día -->
-      <section class="card ini-lista">
-        <div class="section-header">
-          <p class="label">Sesiones · {esHoy ? 'hoy' : fechaCorta(dia)}</p>
-          <a href={`/admin/agenda?fecha=${dia}`} class="ini-link-sec">Ver en calendario</a>
-        </div>
+      <section aria-labelledby="t-sesiones" class="hoy-col-ses">
+        <h2 id="t-sesiones">{esHoy ? 'Tus sesiones de hoy' : `Sesiones del ${fechaLarga(dia)}`}</h2>
         {!delDia.length ? (
-          <p class="ini-vacio">Sin sesiones este día.</p>
+          <p class="hoy-vacio">Sin sesiones este día.</p>
         ) : (
-          <ul class="ini-sesiones">
-            {delDia.map((s) => (
-              <li class="ini-sesion-fila">
-                <a href={s.href} class="ini-sesion">
-                  <span class="ini-sesion-hora">{s.hora}</span>
-                  <span class="ini-tarea-txt">
-                    <strong>{s.paciente}</strong>
-                    <span class="ini-det">{s.tipo}</span>
-                  </span>
-                  <span class={`ini-pago ini-pago-${s.pago}`}>{PAGO_TXT[s.pago]}</span>
-                  <span class="ini-chev" set:html={chevron}></span>
-                </a>
-                {s.fichaId && (
-                  <a href={`/admin/pacientes/${s.fichaId}?tab=notas#para-revisar`} class="ini-preparar" title={`Preparar la sesión de ${s.paciente}: tareas, pendientes y tus notas`}>✦ Preparar</a>
-                )}
-              </li>
-            ))}
-          </ul>
+          <div class="hoy-sesiones">
+            {delDia.map((s) => {
+              const pasada = esHoy && hoursUntilSessionCL(s.fecha, s.hora) < -s.dur / 60;
+              const ahora = esHoy && hero === s && heroEnCurso;
+              return (
+                <div class={`hoy-sesion ${pasada ? 'pasada' : ''} ${ahora ? 'ahora' : ''}`}>
+                  <a href={s.href} class="hoy-sesion-fila">
+                    <span class="hoy-hora">{s.hora}</span>
+                    <span class="hoy-quien"><b>{s.paciente}</b><span>{s.tipo}</span></span>
+                    <span class={`hoy-pago-chip ${s.pago}`}>{mayus(PAGO_TXT[s.pago])}</span>
+                  </a>
+                  {s.fichaId && <a href={`/admin/pacientes/${s.fichaId}?tab=notas#para-revisar`} class="hoy-preparar">Preparar la sesión</a>}
+                </div>
+              );
+            })}
+          </div>
         )}
-        {google === null && <p class="ini-nota">No se pudo leer Google Calendar: faltan las sesiones de Encuadrado.</p>}
-      </section>
-    </div>
 
-    <!-- Próximos 7 días -->
-    <section class="card ini-lista">
-      <div class="section-header">
-        <p class="label">Próximos 7 días</p>
-        <a href={`/admin/agenda?fecha=${sumarDias(dia, 1)}`} class="ini-link-sec">Calendario</a>
-      </div>
-      {!proximasPorDia.length ? (
-        <p class="ini-vacio">Sin sesiones agendadas en los próximos 7 días.</p>
-      ) : (
-        <div class="ini-dias">
-          {proximasPorDia.map(([fecha, lista]) => (
-            <div class="ini-dia-card">
-              <a href={`/admin?dia=${fecha}`} class="ini-dia-card-tit">{mayus(cuando(fecha) === fechaCorta(fecha) ? fechaCorta(fecha) : `${cuando(fecha)} · ${fechaCorta(fecha)}`)} <span>{lista.length}</span></a>
-              <ul>
-                {lista.map((s) => (
-                  <li>
-                    <a href={s.href} class="ini-mini">
-                      <span class="ini-mini-hora">{s.hora}</span>
-                      <span class="ini-mini-nom">{s.paciente}</span>
-                      <span class={`ini-punto ini-pago-${s.pago}`} title={PAGO_TXT[s.pago]}></span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
+        <details class="hoy-semana">
+          <summary>Próximos 7 días</summary>
+          {!proximasPorDia.length ? (
+            <p class="hoy-vacio">Sin sesiones agendadas en los próximos 7 días.</p>
+          ) : proximasPorDia.map(([fecha, lista]) => (
+            <div class="hoy-semana-dia">
+              <a href={`/admin?dia=${fecha}`}><b>{mayus(fechaLarga(fecha))}</b> · {lista.length} {lista.length === 1 ? 'sesión' : 'sesiones'}</a>
+              <ul>{lista.map((s) => <li><a href={s.href}>{s.hora} · {s.paciente} · {PAGO_TXT[s.pago]}</a></li>)}</ul>
             </div>
           ))}
-        </div>
-      )}
-    </section>
+        </details>
 
-    <!-- Reservas por origen -->
-    <details class="card ini-origen">
-      <summary class="label">Reservas por origen (últimos 90 días)</summary>
-      {!origenes.length ? (
-        <p class="ini-vacio">Aún no hay reservas confirmadas con origen registrado.</p>
-      ) : (
-        <table>
-          <thead><tr><th>Origen</th><th>Reservas</th><th>Monto</th></tr></thead>
-          <tbody>
-            {origenes.map(([canal, v]) => (
-              <tr><td style="font-weight:500;">{canal}</td><td>{v.n}</td><td>{clp(v.monto)}</td></tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {sinOrigen > 0 && (
-        <p class="ini-nota">{sinOrigen} {sinOrigen === 1 ? 'reserva confirmada' : 'reservas confirmadas'} sin origen registrado (creadas en el panel o antes de activar esto).</p>
-      )}
-    </details>
+        <details class="hoy-semana">
+          <summary>Reservas por origen (últimos 90 días)</summary>
+          {!origenes.length ? <p class="hoy-vacio">Aún no hay reservas confirmadas con origen registrado.</p> : (
+            <ul>{origenes.map(([canal, v]) => <li>{canal}: {v.n} {v.n === 1 ? 'reserva' : 'reservas'} · {clp(v.monto)}</li>)}</ul>
+          )}
+          {sinOrigen > 0 && <p class="hoy-nota">{sinOrigen} {sinOrigen === 1 ? 'reserva confirmada' : 'reservas confirmadas'} sin origen registrado.</p>}
+        </details>
+      </section>
+    </div>
   </div>
 </AdminLayout>
 
 <style>
-  .inicio { display: flex; flex-direction: column; gap: 1rem; max-width: 1100px; }
+  .hoy { --verde:#576352; --verde-osc:#3F4A3B; --verde-claro:#E6EBE3; --dorado:#F5A623; --dorado-claro:#FDEBC8; --tinta:#2E332A; --gris:#5F5E57; --linea:#CFC8BF; --suave:#F3F0EB; --rojo:#B03A27; --rojo-claro:#FBE7E3; --ambar:#8A5200; --ambar-claro:#FDF0D9; --wa:#15803D; --sombra:0 1px 2px rgba(46,51,42,.06),0 4px 14px rgba(46,51,42,.06);
+    max-width: 1120px; margin: 0 auto; font-size: 17px; line-height: 1.45; color: var(--tinta); display: flex; flex-direction: column; gap: 16px; }
+  .hoy h1, .hoy h2, .hoy h3, .hoy p { text-wrap: balance; }
+  .hoy-cab { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .hoy-cab h1 { font: 700 28px/1.15 'Domine', Georgia, serif; }
+  .hoy-cab p { color: var(--gris); font-size: 16px; margin-top: 2px; }
+  .hoy-dias { display: flex; gap: 6px; }
+  .hoy-dias a { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border-radius: 12px; background: #fff; border: 2px solid var(--linea); color: var(--tinta); text-decoration: none; font-size: 20px; font-weight: 700; }
+  .hoy-dias a.hoy-volver { font-size: 16px; }
+  .hoy-error { background: var(--rojo-claro); color: #7A2618; border-radius: 12px; padding: 10px 14px; font-weight: 600; }
+  .hoy-deshacer { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--tinta); color: #fff; border-radius: 14px; padding: 8px 8px 8px 16px; font-weight: 600; font-size: 16px; }
+  .hoy-deshacer button { min-height: 44px; padding: 0 14px; border-radius: 10px; background: rgba(255,255,255,.15); color: var(--dorado); font-weight: 800; border: 0; cursor: pointer; }
 
-  /* Día */
-  .ini-dia { display: flex; align-items: center; gap: 0.5rem; }
-  .ini-dia-txt { flex: 1; min-width: 0; text-align: center; }
-  .ini-dia-txt h2 { font-size: 1.15rem; font-weight: 700; color: var(--enc-text-1); }
-  .ini-dia-rel { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--enc-text-3); font-weight: 600; min-height: 1em; }
-  .ini-flecha { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--enc-border); background: white; color: var(--enc-text-2); font-size: 1.5rem; line-height: 1; text-decoration: none; flex-shrink: 0; }
-  .ini-flecha:active { transform: scale(0.95); }
-  .ini-hoy { min-height: 44px; }
+  .hoy-arriba { display: grid; gap: 16px; }
+  .hoy-ahora { background: #fff; border-radius: 20px; box-shadow: var(--sombra); padding: 16px; display: grid; gap: 12px; }
+  .hoy-ahora.en-curso { border: 2px solid var(--dorado); background: #FFF8EC; }
+  .hoy-tag { font-size: 15px; font-weight: 800; color: var(--ambar); display: flex; align-items: center; gap: 8px; }
+  .hoy-tag i { width: 10px; height: 10px; border-radius: 50%; background: var(--rojo); display: inline-block; }
+  .hoy-ahora-fila { display: flex; align-items: center; gap: 14px; text-decoration: none; color: inherit; min-height: 44px; }
+  .hoy-ahora-fila b { display: block; font-size: 19px; }
+  .hoy-ahora-fila span span { font-size: 15px; color: var(--gris); }
+  .hoy-hora { font: 700 22px 'Domine', Georgia, serif; color: var(--verde-osc); min-width: 62px; }
+  .hoy-dos { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 
-  /* Próxima sesión */
-  .ini-hero { display: flex; flex-direction: column; gap: 0.75rem; }
-  .ini-hero-main { display: flex; align-items: center; gap: 0.9rem; text-decoration: none; color: inherit; min-height: 44px; }
-  .ini-hero-hora { font-size: 1.8rem; font-weight: 700; color: var(--enc-text-1); line-height: 1; }
-  .ini-hero-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .ini-hero-txt strong { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ini-hero-txt span { font-size: 0.8rem; color: var(--enc-text-3); }
-  .ini-hero-botones { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .ini-btn { min-height: 44px; }
-  .ini-hero-botones .ini-btn { flex: 1; min-width: 140px; }
+  .hoy-meta { background: var(--verde); color: #fff; border-radius: 20px; padding: 16px; box-shadow: var(--sombra); }
+  .hoy-meta-fila { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: #fff; text-decoration: none; font-weight: 600; }
+  .hoy-meta-fila b { font: 700 24px 'Domine', Georgia, serif; }
+  .hoy-barra { display: block; height: 10px; background: rgba(255,255,255,.25); border-radius: 99px; margin: 10px 0 6px; overflow: hidden; }
+  .hoy-barra i { display: block; height: 100%; background: var(--dorado); border-radius: 99px; }
+  .hoy-meta small { font-size: 15px; }
+  .hoy-libres-t { font-size: 15px; font-weight: 700; margin: 14px 0 8px; }
+  .hoy-libres { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .hoy-libre { min-height: 64px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-decoration: none; padding: 4px; text-align: center; }
+  .hoy-libre b { font-size: 17px; line-height: 1.2; }
+  .hoy-libre span { font-size: 14px; font-weight: 700; line-height: 1.2; }
+  .hoy-libre.pres { background: #fff; color: var(--verde-osc); }
+  .hoy-libre.onl { background: var(--dorado); color: var(--tinta); }
 
-  /* Pago */
-  .ini-pago { font-size: 0.7rem; font-weight: 600; padding: 0.2rem 0.55rem; border-radius: 99px; border: 1px solid; white-space: nowrap; flex-shrink: 0; }
-  .ini-pago-pagada { color: #15803d; border-color: #86efac; background: #f0fdf4; }
-  .ini-pago-por-pagar { color: #b91c1c; border-color: #fca5a5; background: #fef2f2; }
-  .ini-pago-en-consulta { color: #78350f; border-color: #b45309; border-style: dashed; background: #fef3c7; }
-  .ini-pago-anulada, .ini-pago-sin-cobro, .ini-pago-externa { color: var(--enc-text-3); border-color: var(--enc-border); background: var(--enc-body-bg); }
+  .hoy-cols { display: grid; gap: 28px; }
+  .hoy h2 { font: 700 21px 'Domine', Georgia, serif; display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .hoy-cuenta { background: var(--rojo); color: #fff; font: 700 15px Inter, sans-serif; border-radius: 99px; padding: 2px 10px; }
+  .hoy-ok { background: var(--verde-claro); color: var(--verde-osc); border-radius: 16px; padding: 18px; font-weight: 700; text-align: center; }
+  .hoy-vacio { color: var(--gris); font-size: 16px; }
+  .hoy-nota { font-size: 14px; color: var(--gris); }
 
-  /* Números */
-  .ini-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
-  .ini-stat { display: flex; flex-direction: column; gap: 0.15rem; background: white; border: 1px solid var(--enc-border); border-radius: var(--enc-radius-lg); padding: 0.9rem 1rem; box-shadow: var(--enc-shadow); text-decoration: none; color: inherit; min-height: 44px; transition: border-color .15s; }
-  .ini-stat:hover { border-color: #9ca3af; }
-  .ini-stat:active { transform: scale(0.98); }
-  .ini-stat .stat-label { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--enc-text-3); font-weight: 600; }
-  .ini-stat .stat-value { font-size: 1.7rem; font-weight: 700; color: var(--enc-text-1); line-height: 1.1; }
-  .ini-stat .stat-value small { font-size: 0.95rem; font-weight: 600; color: var(--enc-text-3); }
-  .ini-stat .stat-sub { font-size: 0.75rem; color: var(--enc-text-3); }
-  .ini-barra { display: block; height: 4px; border-radius: 99px; background: var(--enc-border-2); overflow: hidden; margin: 0.15rem 0; }
-  .ini-barra span { display: block; height: 100%; background: #4f5ce8; border-radius: 99px; }
+  .hoy-avisos { display: grid; gap: 10px; }
+  .hoy-aviso { background: #fff; border-radius: 16px; padding: 14px; box-shadow: var(--sombra); border-left: 4px solid var(--linea); display: grid; gap: 10px; }
+  .hoy-aviso.rojo { border-left-color: var(--rojo); }
+  .hoy-chip { display: inline-block; font-size: 14px; font-weight: 700; border-radius: 99px; padding: 2px 10px; margin-bottom: 4px; background: var(--suave); color: var(--gris); }
+  .rojo .hoy-chip { background: var(--rojo-claro); color: var(--rojo); }
+  .ambar .hoy-chip { background: var(--ambar-claro); color: var(--ambar); }
+  .hoy-aviso h3 { font-size: 17px; font-weight: 700; line-height: 1.3; }
+  .hoy-aviso h3 a { color: inherit; text-decoration: none; }
+  .hoy-aviso p { font-size: 15px; color: var(--gris); margin-top: 2px; }
+  .hoy-acc { display: flex; flex-wrap: wrap; gap: 8px; }
+  .hoy-form { display: flex; flex: 1 1 0; }
+  .hoy-form .hb { width: 100%; }
+  .hb { min-height: 48px; padding: 0 14px; border-radius: 14px; font-weight: 700; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; border: 0; cursor: pointer; font-family: inherit; line-height: 1.2; }
+  .hb-ancho { flex: 1 1 100%; }
+  .hb-verde { background: var(--verde); color: #fff; }
+  .hb-wa { background: var(--wa); color: #fff; }
+  .hb-borde { background: #fff; border: 2px solid var(--linea); color: var(--tinta); }
+  .hb-listo { background: var(--verde-claro); color: var(--verde-osc); }
+  .hb-gris { background: var(--suave); color: var(--gris); }
+  .hoy-enviado { flex: 1 1 100%; font-size: 14px; font-weight: 700; color: var(--verde-osc); }
+  .hoy-pago { flex: 1 1 0; }
+  .hoy-pago summary { list-style: none; width: 100%; }
+  .hoy-pago summary::-webkit-details-marker { display: none; }
+  .hoy-pago[open] { flex-basis: 100%; }
+  .hoy-pago-form { display: grid; gap: 8px; background: var(--suave); border-radius: 12px; padding: 12px; margin-top: 8px; }
+  .hoy-pago-form p { font-size: 16px; font-weight: 700; color: var(--tinta); margin: 0; }
+  .hoy-pago-form .hoy-nota { font-weight: 400; color: var(--gris); font-size: 14px; }
+  .hoy-medios { display: grid; gap: 6px; }
+  .hoy-medios label, .hoy-boleta { min-height: 48px; display: flex; align-items: center; gap: 10px; background: #fff; border: 2px solid var(--linea); border-radius: 12px; padding: 0 12px; font-weight: 600; font-size: 16px; cursor: pointer; }
+  .hoy-medios input, .hoy-boleta input { width: 20px; height: 20px; accent-color: var(--verde); }
+  .hoy-mas summary { list-style: none; min-height: 48px; display: flex; align-items: center; color: var(--verde-osc); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .hoy-mas summary::-webkit-details-marker { display: none; }
+  .hoy-mas[open] .abrir, .hoy-mas:not([open]) .cerrar { display: none; }
+  .hoy-link { display: inline-flex; min-height: 44px; align-items: center; color: var(--verde-osc); font-weight: 700; }
 
-  /* Listas */
-  .ini-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
-  .ini-lista .section-header { margin-bottom: 0.5rem; }
-  .ini-link-sec { font-size: 0.8rem; color: var(--enc-nav-active-text); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0 0.25rem; }
-  .ini-tareas, .ini-sesiones { list-style: none; display: flex; flex-direction: column; }
-  .ini-tarea { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; border-top: 1px solid var(--enc-border-2); padding: 0.15rem 0; }
-  .ini-tareas > .ini-tarea:first-child, .ini-sesiones > li:first-child > .ini-sesion { border-top: none; }
-  .ini-tarea-link { flex: 1 1 220px; min-width: 0; display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding: 0.45rem 0.25rem; text-decoration: none; color: inherit; border-radius: 8px; }
-  a.ini-tarea-link:hover, .ini-sesion:hover { background: var(--enc-body-bg); }
-  .ini-tarea-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
-  .ini-tarea-txt strong { font-size: 0.88rem; font-weight: 600; color: var(--enc-text-1); }
-  .ini-det { font-size: 0.76rem; color: var(--enc-text-3); }
-  .ini-chev { color: var(--enc-text-4); display: inline-flex; flex-shrink: 0; }
-  .ini-tarea-accion { display: flex; align-items: center; gap: 0.4rem; padding: 0 0.25rem 0.35rem; }
-  .ini-tarea-accion form { display: inline; }
-  .ini-btn-wa { background: #25D366 !important; color: white !important; border-color: #25D366 !important; }
-  .ini-hecho { font-size: 0.75rem; color: var(--enc-text-3); }
-  .ini-chip { align-self: flex-start; font-size: 0.68rem; font-weight: 600; padding: 0.1rem 0.5rem; border-radius: 99px; margin-bottom: 0.1rem; }
-  .ini-chip::first-letter { text-transform: uppercase; }
-  .ini-chip-rojo { background: #fee2e2; color: #b91c1c; }
-  .ini-chip-ambar { background: #fef3c7; color: #92400e; }
-  .ini-chip-gris { background: var(--enc-border-2); color: var(--enc-text-3); }
-  .ini-ok { font-size: 0.95rem; font-weight: 600; color: var(--enc-green-dark); padding: 0.75rem 0; }
-  .ini-vacio { font-size: 0.875rem; color: var(--enc-text-3); padding: 0.5rem 0; }
-  .ini-nota { font-size: 0.75rem; color: var(--enc-text-3); margin-top: 0.5rem; }
-  .ini-mas summary { cursor: pointer; list-style: none; font-size: 0.82rem; font-weight: 600; color: var(--enc-nav-active-text); min-height: 44px; display: flex; align-items: center; border-top: 1px solid var(--enc-border-2); }
-  .ini-mas summary::-webkit-details-marker { display: none; }
-  .ini-mas[open] summary .ini-mas-abrir, .ini-mas:not([open]) summary .ini-mas-cerrar { display: none; }
+  .hoy-sesiones { display: grid; gap: 10px; }
+  .hoy-sesion { background: #fff; border-radius: 16px; box-shadow: var(--sombra); padding: 4px 14px; }
+  .hoy-sesion.pasada { opacity: .65; box-shadow: none; background: var(--suave); }
+  .hoy-sesion.ahora { outline: 2px solid var(--dorado); }
+  .hoy-sesion-fila { display: flex; align-items: center; gap: 14px; min-height: 60px; text-decoration: none; color: inherit; }
+  .hoy-quien { flex: 1; min-width: 0; }
+  .hoy-quien b { display: block; font-size: 17px; }
+  .hoy-quien span { font-size: 15px; color: var(--gris); }
+  .hoy-pago-chip { font-size: 14px; font-weight: 700; border-radius: 99px; padding: 4px 10px; white-space: nowrap; background: var(--suave); color: var(--gris); }
+  .hoy-pago-chip.pagada { background: var(--verde-claro); color: var(--verde-osc); }
+  .hoy-pago-chip.por-pagar { background: var(--rojo-claro); color: var(--rojo); }
+  .hoy-pago-chip.en-consulta { background: var(--ambar-claro); color: var(--ambar); }
+  .hoy-preparar { display: inline-flex; min-height: 44px; align-items: center; font-size: 15px; font-weight: 700; color: var(--verde-osc); margin-bottom: 4px; }
+  .hoy-semana { margin-top: 12px; background: #fff; border-radius: 16px; box-shadow: var(--sombra); padding: 0 14px; }
+  .hoy-semana summary { min-height: 52px; display: flex; align-items: center; font-weight: 700; cursor: pointer; }
+  .hoy-semana ul { list-style: none; padding: 0 0 10px; display: grid; gap: 4px; font-size: 15px; }
+  .hoy-semana li a, .hoy-semana-dia > a { color: inherit; text-decoration: none; display: inline-flex; min-height: 40px; align-items: center; }
+  .hoy-semana-dia { border-top: 1px solid #EFEBE5; padding-top: 6px; }
 
-  .ini-sesion-fila { display: flex; align-items: center; gap: 0.4rem; border-top: 1px solid var(--enc-border-2); }
-  .ini-sesiones > li.ini-sesion-fila:first-child { border-top: none; }
-  .ini-sesion-fila > .ini-sesion { flex: 1; min-width: 0; border-top: none; }
-  .ini-preparar { flex-shrink: 0; font-size: 0.78rem; font-weight: 600; color: #4b3f2f; background: var(--enc-body-bg); border: 1px solid var(--enc-border-2); border-radius: 99px; padding: 0.35rem 0.7rem; text-decoration: none; white-space: nowrap; min-height: 36px; display: inline-flex; align-items: center; }
-  .ini-preparar:hover { border-color: #A8906C; }
-  .ini-sesion { display: flex; align-items: center; gap: 0.7rem; min-height: 48px; padding: 0.45rem 0.25rem; text-decoration: none; color: inherit; border-top: 1px solid var(--enc-border-2); border-radius: 8px; }
-  .ini-sesion-hora { font-weight: 700; font-size: 0.95rem; width: 3rem; flex-shrink: 0; }
-
-  /* Próximos 7 días */
-  .ini-dias { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0.6rem; }
-  .ini-dia-card { border: 1px solid var(--enc-border); border-radius: var(--enc-radius-lg); padding: 0.35rem 0.5rem 0.5rem; }
-  .ini-dia-card-tit { display: flex; align-items: center; justify-content: space-between; min-height: 44px; font-size: 0.8rem; font-weight: 700; color: var(--enc-text-1); text-decoration: none; }
-  .ini-dia-card-tit span { font-size: 0.7rem; font-weight: 600; color: var(--enc-text-3); background: var(--enc-border-2); border-radius: 99px; padding: 0 0.45rem; }
-  .ini-dia-card ul { list-style: none; }
-  .ini-mini { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding: 0 0.25rem; text-decoration: none; color: inherit; border-radius: 6px; font-size: 0.82rem; }
-  .ini-mini:hover { background: var(--enc-body-bg); }
-  .ini-mini-hora { font-weight: 600; width: 2.8rem; flex-shrink: 0; }
-  .ini-mini-nom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ini-punto { width: 9px; height: 9px; border-radius: 50%; padding: 0; flex-shrink: 0; border: none; background: #d1d5db; }
-  .ini-punto.ini-pago-pagada { background: #16a34a; }
-  .ini-punto.ini-pago-por-pagar { background: #dc2626; }
-  .ini-punto.ini-pago-en-consulta { background: #d97706; }
-
-  /* Origen */
-  .ini-origen summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 0.4rem; list-style: none; }
-  .ini-origen summary::-webkit-details-marker { display: none; }
-  .ini-origen summary::before { content: '▸'; font-size: 0.8rem; transition: transform .15s; }
-  .ini-origen[open] summary::before { transform: rotate(90deg); }
-  .ini-origen[open] summary { margin-bottom: 0.75rem; }
-
-  @media (max-width: 860px) {
-    .ini-cols { grid-template-columns: 1fr; }
-  }
-  @media (max-width: 640px) {
-    .ini-stats { grid-template-columns: 1fr 1fr; }
-    .ini-tarea-accion { width: 100%; padding-left: 0.25rem; }
-    .ini-tarea-accion .ini-btn { flex: 1; }
-    .ini-tarea-accion form { display: flex; flex: 1; }
-    .ini-tarea-accion form .ini-btn { flex: 1; }
-    .ini-origen { overflow-x: auto; }
+  @media (min-width: 900px) {
+    .hoy-arriba { grid-template-columns: 1.1fr 1fr; align-items: stretch; }
+    .hoy-cols { grid-template-columns: 1fr 1.1fr; align-items: start; }
+    .hoy-col-ses { order: -1; }
+    .hoy-cab h1 { font-size: 32px; }
   }
 </style>
