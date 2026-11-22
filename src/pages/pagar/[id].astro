@@ -135,19 +135,23 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
           </div>
         </div>
 
-        <button type="button" id="btn-pagar" class="btn-dark w-full justify-center text-center">Ir a pagar</button>
+        <h2 class="font-medium mb-3">¿Cómo quieres pagar?</h2>
+        <button type="button" id="btn-pagar" class="btn-dark w-full justify-center text-center">Pagar con tarjeta</button>
         <p id="pagar-error" class="hidden text-sm text-red-600 text-center mt-3"></p>
 
-        <!-- Transferencia (excepción) -->
-        <div class="mt-6 text-center">
-          <button type="button" id="btn-transfer-toggle" aria-expanded="false" aria-controls="transfer-box"
-            class="text-sm text-stone underline underline-offset-4 hover:text-ink">
-            ¿No puedes pagar con tarjeta de débito o crédito?
-          </button>
-        </div>
+        <!-- Transferencia: botón claro y pasos numerados (22 nov 2026, pedido de Vale). -->
+        <button type="button" id="btn-transfer-toggle" aria-expanded="false" aria-controls="transfer-box"
+          class="btn-outline w-full justify-center text-center mt-3">
+          Pagar por transferencia
+        </button>
         <div id="transfer-box" hidden class="mt-5 border border-dust rounded-lg p-5 text-left">
-          <p class="font-medium text-sm mb-1">Puedes pagar por transferencia</p>
-          <p class="text-xs text-stone mb-4">1. Transfiere <strong>{formatCLP(total)}</strong> a esta cuenta. 2. Sube aquí la foto o captura del comprobante.</p>
+          <p class="font-medium mb-3">Pagar por transferencia</p>
+          <ol class="list-decimal pl-5 text-sm flex flex-col gap-2 mb-5">
+            <li>Transfiere <strong>{formatCLP(total)}</strong> a esta cuenta.</li>
+            <li>Toma una foto o una captura de pantalla del comprobante.</li>
+            <li>Toca «Elegir la foto del comprobante» y elígela.</li>
+            <li>Toca «Enviar comprobante». Listo: tu pago queda registrado.</li>
+          </ol>
           {datosCompletos ? (
             <dl class="divide-y divide-dust text-sm mb-5">
               {datosTransferencia.map(([k, v]) => (
@@ -164,9 +168,11 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
             <p class="text-sm mb-5"><a href={waDatos} target="_blank" rel="noopener" class="underline">Escríbeme por WhatsApp y te mando los datos para transferir</a>.</p>
           )}
           <form id="transfer-form" class="flex flex-col gap-3">
-            <label for="comprobante" class="text-sm font-medium">Comprobante de la transferencia</label>
-            <input id="comprobante" name="comprobante" type="file" accept="image/*,application/pdf" required
-              class="text-sm file:mr-3 file:border file:border-dust file:bg-white file:px-3 file:py-1.5 file:text-sm" />
+            <label for="comprobante" class="btn-outline w-full justify-center text-center cursor-pointer">Elegir la foto del comprobante</label>
+            <input id="comprobante" name="comprobante" type="file" accept="image/*,application/pdf" class="sr-only" />
+            <p id="archivo-nombre" class="text-xs text-stone break-all"></p>
+            <label for="titular" class="text-xs text-stone">Si la cuenta desde la que transferiste no está a tu nombre, escribe aquí el nombre del titular (opcional)</label>
+            <input id="titular" type="text" autocomplete="off" class="border border-dust rounded px-3 py-3 text-base" />
             <button type="submit" id="btn-comprobante" class="btn-dark w-full justify-center text-center">Enviar comprobante</button>
             <p id="transfer-msg" class="hidden text-sm text-center" role="status" aria-live="polite"></p>
           </form>
@@ -209,18 +215,23 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
     } catch { return file; }
   }
 
+  document.getElementById('comprobante')?.addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    document.getElementById('archivo-nombre').textContent = f ? `Elegiste: ${f.name}` : '';
+  });
   const form = document.getElementById('transfer-form');
   const msg = document.getElementById('transfer-msg');
   const btn = document.getElementById('btn-comprobante');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const input = document.getElementById('comprobante');
-    if (!input.files || !input.files[0]) return;
+    if (!input.files || !input.files[0]) { msg.textContent = 'Primero elige la foto del comprobante (paso 3).'; msg.className = 'text-sm text-center text-red-600'; return; }
     btn.disabled = true; btn.textContent = 'Enviando…';
     msg.classList.add('hidden');
     try {
       const fd = new FormData();
       fd.set('patientId', JSON.parse(pendingJson).patientId);
+      fd.set('titular', document.getElementById('titular')?.value || '');
       fd.set('comprobante', await achicar(input.files[0]));
       const res = await fetch('/api/comprobante-transferencia', { method: 'POST', body: fd });
       const data = await res.json().catch(() => ({}));
@@ -264,7 +275,7 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
         errEl.textContent = data.error ?? 'No se pudo iniciar el pago. Intenta de nuevo.';
         errEl.classList.remove('hidden');
         btn.disabled = false;
-        btn.textContent = 'Ir a pagar';
+        btn.textContent = 'Pagar con tarjeta';
         return;
       }
       window.location.href = data.paymentUrl;
@@ -272,7 +283,7 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
       errEl.textContent = 'Error de conexión. Intenta de nuevo.';
       errEl.classList.remove('hidden');
       btn.disabled = false;
-      btn.textContent = 'Ir a pagar';
+      btn.textContent = 'Pagar con tarjeta';
     }
   });
 })();
