@@ -24,7 +24,7 @@ const precioPareja     = minimo(precios('pareja'));
 const desde = (tipo: string) => (new Set(precios(tipo)).size > 1 ? 'desde ' : '');
 // Texto de valores que funciona con uno, otro o ambos precios.
 const valores = [
-  precioIndividual && `La sesión individual tiene un valor ${desde('individual')}${clp(precioIndividual)}`,
+  precioIndividual && `La sesión individual tiene un valor ${desde('individual') || 'de '}${clp(precioIndividual)}`,
   precioPareja && (precioIndividual ? `la de pareja, ${desde('pareja') || 'de '}${clp(precioPareja)}` : `La sesión de pareja tiene un valor ${desde('pareja') || 'de '}${clp(precioPareja)}`),
 ].filter(Boolean).join(' y ');
 
