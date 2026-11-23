@@ -120,6 +120,13 @@ const [bookingsRes, svcRes, patientRes, allSvcRes, settingsRes] = await Promise.
 const bookings    = (bookingsRes.data ?? []) as Array<Record<string, any>>;
 // Horas con link (22 nov 2026, src/lib/horaLink.ts): su link y hasta cuándo se retiene. Consulta aparte:
 // sin la migración 0028 las columnas no existen y la agenda debe seguir igual.
+// Fichas «no tiene RUT» (extranjeras): su boleta sale con el RUT del SII, no les falta RUT. Consulta aparte:
+// si la columna no existiera, la agenda sigue igual.
+const sinRutPorCorreo = new Set<string>();
+{
+  const { data: sr, error: srErr } = await supabase.from('patients').select('email').eq('sin_rut', true);
+  if (!srErr) for (const p of sr ?? []) if (p.email) sinRutPorCorreo.add(String(p.email).toLowerCase());
+}
 const horaLinkDe: Record<string, { url: string; vence: string | null; venceIso: string | null }> = {};
 {
   const ids = bookings.filter((b) => esHoraLink(b.notes)).map((b) => b.id);
@@ -845,7 +852,7 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
                   hora_vence:     horaLinkDe[b.id]?.vence ?? null,
                   hora_wa_msg:    horaLinkDe[b.id] ? mensajeHoraWhatsapp({ nombre: b.patient_name, fecha: b.session_date, hora: String(b.session_time).slice(0, 5), online: String(b.session_type).includes('online'), url: horaLinkDe[b.id].url, venceIso: horaLinkDe[b.id].venceIso ?? new Date().toISOString(), monto: b.amount }) : null,
                   // Aviso obligatorio de RUT (23 nov 2026): pagada sin RUT para la boleta.
-                  boleta_datos:   faltaRutParaBoleta({ ...b, patient_rut: rutByEmail[(b.patient_email ?? '').toLowerCase()] || b.patient_rut }, null),
+                  boleta_datos:   faltaRutParaBoleta({ ...b, patient_rut: rutByEmail[(b.patient_email ?? '').toLowerCase()] || b.patient_rut }, { sin_rut: sinRutPorCorreo.has((b.patient_email ?? '').toLowerCase()) }),
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}${esPagoEnConsulta(b) ? ` · ${ETIQUETA_PAGO_EN_CONSULTA}` : ''}${tituloConsent(cs.estado) ? ` · ${tituloConsent(cs.estado)}` : ''}`}
               >

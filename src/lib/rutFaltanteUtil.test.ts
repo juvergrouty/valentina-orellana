@@ -1,7 +1,7 @@
 // Pruebas del aviso obligatorio de RUT (23 nov 2026). Correr: pnpm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { faltaRutParaBoleta, tieneBoletaVigente } from './rutFaltanteUtil';
+import { faltaRutParaBoleta, tieneBoletaVigente, desdeRutFaltante } from './rutFaltanteUtil';
 
 const pagada = { paid_at: '2026-11-22T15:00:00Z', amount: 65000, status: 'confirmed', payment_note: 'Flow', notes: '', patient_rut: '' };
 
@@ -25,6 +25,15 @@ test('sin pago, sin costo, anulada, deuda anulada, boleta emitida o SumUp sin bo
   assert.equal(faltaRutParaBoleta({ ...pagada, debt_voided: true }, null), false);
   assert.equal(faltaRutParaBoleta({ ...pagada, notes: 'Boleta Folio 288 Cod ABC' }, null), false);
   assert.equal(faltaRutParaBoleta({ ...pagada, notes: 'Cobro con tarjeta SumUp X de $65.000 del 18:00, asociado sin boleta' }, null), false);
+});
+
+test('pagada sin boleta a propósito (casilla desmarcada): no avisa', () => {
+  assert.equal(faltaRutParaBoleta({ ...pagada, notes: 'SinBoletaAProposito 2026-11-22T15:00:00Z' }, null), false);
+});
+
+test('ventana: desde el 1° del mes anterior (lo que acepta el SII con la fecha del pago)', () => {
+  assert.equal(desdeRutFaltante('2026-11-23'), '2026-10-01');
+  assert.equal(desdeRutFaltante('2026-01-05'), '2025-12-01');
 });
 
 test('boleta anulada vuelve a pedir RUT', () => {

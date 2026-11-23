@@ -2,8 +2,18 @@
 // Regla pura (sin base de datos) para poder probarla: rutFaltanteUtil.test.ts.
 import { rutValido } from './rut';
 
-/** Desde cuántos días atrás se revisan los pagos (los muy antiguos ya se resolvieron por otro lado). */
-export const DIAS_RUT_FALTANTE = 60;
+/** «Marcar como pagado» con la casilla de boleta desmarcada: Vale no quiere boleta para esa sesión. */
+export const MARCA_SIN_BOLETA_A_PROPOSITO = 'SinBoletaAProposito';
+
+/**
+ * Desde cuándo se revisan los pagos: el 1° del mes anterior (hora de Chile). Es el mismo límite que
+ * acepta el SII para fechar la boleta con el día del pago (fechaEmisionBoleta en apigateway.ts):
+ * así «sale con la fecha del pago» siempre es verdad.
+ */
+export function desdeRutFaltante(hoyChile: string): string {
+  const [y, m] = hoyChile.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 10);
+}
 
 export type SesionParaRut = {
   paid_at?: string | null; amount?: number | null; status?: string | null; payment_note?: string | null;
@@ -29,6 +39,7 @@ export function faltaRutParaBoleta(b: SesionParaRut, ficha?: FichaParaRut): bool
   if (b.status === 'cancelled' || b.status === 'expired') return false;
   if (b.payment_note === 'Sin costo') return false;
   if (/asociado sin boleta/i.test(b.notes ?? '')) return false;
+  if (new RegExp(`^${MARCA_SIN_BOLETA_A_PROPOSITO}\\b`, 'm').test(b.notes ?? '')) return false;
   if (tieneBoletaVigente(b.notes)) return false;
   if (rutValido(b.patient_rut) || rutValido(ficha?.rut) || ficha?.sin_rut === true) return false;
   return true;

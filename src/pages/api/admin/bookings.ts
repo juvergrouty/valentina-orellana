@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { crearHoraConLink, recalcularRetencionHora, FALTA_MIGRACION as FALTA_MIGRACION_HORA } from '../../../lib/horaLink';
 import { origenManual } from '../../../lib/origen';
+import { MARCA_SIN_BOLETA_A_PROPOSITO } from '../../../lib/rutFaltanteUtil';
 import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
@@ -191,6 +192,8 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     if (error) {
       return redirect(conParam(dest) + 'error=insert_failed&detail=' + encodeURIComponent(error.message.slice(0, 200)));
     }
+    // Pagada sin boleta a propósito (casilla desmarcada): el aviso obligatorio de RUT no la cuenta (23 nov 2026).
+    if (!emitir && !sinCosto && (previa?.amount ?? 0) > 0) await agregarLineaNotas(id, `${MARCA_SIN_BOLETA_A_PROPOSITO} ${new Date().toISOString()}`);
     if (sinCosto && (previa?.amount ?? 0) > 0) {
       await quitarLineasNotas(id, [MARCA_MONTO_SIN_COSTO]);
       await agregarLineaNotas(id, `${MARCA_MONTO_SIN_COSTO} ${previa!.amount}`);
@@ -384,7 +387,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     // tiene que poder pagar de nuevo; con la marca, /pagar le decía para siempre "lo estoy revisando".
     await quitarLineasNotas(id, [MARCA_COMPROBANTE, MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA,
       // Revisión del correo del banco (22 nov 2026, gmailBanco.ts) y avisos de la hora con link pagada.
-      MARCA_ESPERA_BANCO, MARCA_BANCO_OK, MARCA_BANCO_DUDOSO, MARCA_BANCO_NO, MARCA_TITULAR, MARCA_BOLETA_DATOS]);
+      MARCA_ESPERA_BANCO, MARCA_BANCO_OK, MARCA_BANCO_DUDOSO, MARCA_BANCO_NO, MARCA_TITULAR, MARCA_BOLETA_DATOS, MARCA_SIN_BOLETA_A_PROPOSITO]);
     if (codigoSumUp) await anularPagoSumUp(codigoSumUp).catch((e) => console.error('[unmark_paid] sumup:', e));
     for (const c of sinBoletaSueltos) await soltarSinBoleta(c).catch((e) => console.error('[unmark_paid] sumup sin boleta:', e));
     return redirect(dest);
