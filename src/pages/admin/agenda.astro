@@ -17,6 +17,7 @@ import { esPagoEnConsulta, ETIQUETA_PAGO_EN_CONSULTA } from '../../lib/pagoEnCon
 import { carrilesDelDia } from '../../lib/horaLibre';
 import { sumupConfigurado } from '../../lib/sumup';
 import { CANALES_PANEL } from '../../lib/origen';
+import { faltaRutParaBoleta } from '../../lib/rutFaltanteUtil';
 import { venceTexto, esHoraLink, tieneMarca, mensajeHoraWhatsapp, enlaceWhatsapp, MARCA_BOLETA_DATOS } from '../../lib/horaLinkUtil';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
@@ -843,7 +844,8 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
                   hora_link_url:  horaLinkDe[b.id]?.url ?? null,
                   hora_vence:     horaLinkDe[b.id]?.vence ?? null,
                   hora_wa_msg:    horaLinkDe[b.id] ? mensajeHoraWhatsapp({ nombre: b.patient_name, fecha: b.session_date, hora: String(b.session_time).slice(0, 5), online: String(b.session_type).includes('online'), url: horaLinkDe[b.id].url, venceIso: horaLinkDe[b.id].venceIso ?? new Date().toISOString(), monto: b.amount }) : null,
-                  boleta_datos:   esHoraLink(b.notes) && tieneMarca(b.notes, MARCA_BOLETA_DATOS),
+                  // Aviso obligatorio de RUT (23 nov 2026): pagada sin RUT para la boleta.
+                  boleta_datos:   faltaRutParaBoleta({ ...b, patient_rut: rutByEmail[(b.patient_email ?? '').toLowerCase()] || b.patient_rut }, null),
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}${esPagoEnConsulta(b) ? ` · ${ETIQUETA_PAGO_EN_CONSULTA}` : ''}${tituloConsent(cs.estado) ? ` · ${tituloConsent(cs.estado)}` : ''}`}
               >
@@ -3429,7 +3431,7 @@ function openSessionDetail(b) {
   if (boletaSec) boletaSec.style.display = (b.amount ?? 0) > 0 ? '' : 'none';
   const badge = document.getElementById('sp-pay-badge');
   if (isVoided)     { badge.textContent = 'Deuda anulada'; badge.className = 'sp-pay-badge badge-manual'; }
-  else if (isPaid && b.boleta_datos && !/Boleta\s+Folio\s+\d+/i.test(b.notes ?? '')) { badge.textContent = 'Pagada · boleta pendiente de datos'; badge.className = 'sp-pay-badge badge-paid'; }
+  else if (isPaid && b.boleta_datos) { badge.textContent = 'Pagada · falta su RUT para la boleta'; badge.className = 'sp-pay-badge badge-consulta'; }
   else if (isPaid)  { badge.textContent = b.payment_note ? `Pagado · ${b.payment_note}` : 'Pagado'; badge.className = 'sp-pay-badge badge-paid'; }
   else if (b.pago_en_consulta) { badge.textContent = 'Paga en consulta'; badge.className = 'sp-pay-badge badge-consulta'; }
   else              { badge.textContent = 'Por pagar'; badge.className = 'sp-pay-badge badge-pending'; }
@@ -3565,7 +3567,7 @@ function openSessionDetail(b) {
     if (emitBtn) emitBtn.style.display = '';
     // Hora con link pagada sin RUT (22 nov 2026): se abre el formulario para completarlo y emitirla.
     if (b.paid_at && b.boleta_datos && boletaResult) {
-      boletaResult.textContent = 'Pagada · boleta pendiente de datos. Escribe su RUT y emítela: sale con la fecha del pago.';
+      boletaResult.textContent = 'Falta su RUT para la boleta: pídeselo en la consulta, escríbelo aquí y emítela. Sale con la fecha del pago.';
       boletaResult.style.color = '#b45309';
       document.getElementById('sp-boleta-form').style.display = 'block';
     }

@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { emitirBoletasQueEsperabanRut } from '../../../lib/rutFaltante';
 import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { limpiarRut, rutValido } from '../../../lib/rut';
@@ -110,6 +111,11 @@ export const POST: APIRoute = async ({ request }) => {
         if (viejo && nuevo && viejo !== nuevo) {
           const { error: e2 } = await supabase.from('bookings').update({ patient_email: nuevo }).eq('patient_email', viejo);
           if (e2) redirect = withParam(redirect, 'error', `Se guardó la ficha, pero no se pudieron mover sus sesiones al correo nuevo: ${e2.message}`);
+        }
+        // RUT escrito en la ficha (23 nov 2026, aviso obligatorio de RUT): las boletas de sus sesiones
+        // pagadas que lo esperaban salen solas, con la fecha del pago.
+        if ((d.rut || d.sin_rut) && (nuevo || viejo)) {
+          await emitirBoletasQueEsperabanRut(nuevo || viejo).catch((e) => console.error('[patients] boletas con RUT:', e));
         }
       }
     }

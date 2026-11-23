@@ -226,7 +226,8 @@ type Accion =
   | { tipo: 'wa'; url: string | null; id: string }
   | { tipo: 'form'; action: string; campos: Record<string, string>; texto: string }
   | { tipo: 'link'; url: string; texto: string }
-  | { tipo: 'folio'; bookingId: string; sugerido: number | null };
+  | { tipo: 'folio'; bookingId: string; sugerido: number | null }
+  | { tipo: 'rut'; bookingId: string; redirect: string };
 type Tarea = {
   clave: string;         // plazo "YYYY-MM-DDTHH:MM" (hora de Chile) para ordenar; '9999' = sin plazo
   chip: string;
@@ -238,7 +239,10 @@ type Tarea = {
 };
 const vuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); return u.pathname + u.search; })();
 const tareas: Tarea[] = [];
-const { cobros, box, comprobanteAlerts, boletaAlerts, consentAlerts, rebotes, tarifas, impuestos, pagosPorDevolver, transferenciasPorRevisar, horasLink, banco } = avisos;
+const { cobros, box, comprobanteAlerts, boletaAlerts: boletaAlertsTodas, consentAlerts, rebotes, tarifas, impuestos, pagosPorDevolver, transferenciasPorRevisar, horasLink, banco, sinRut } = avisos;
+// El aviso de RUT (abajo) reemplaza al rojo «falta el RUT» de la misma sesión: uno solo por sesión.
+const idsSinRut = new Set((sinRut ?? []).map((r) => r.bookingId));
+const boletaAlerts = boletaAlertsTodas.filter((a) => !(idsSinRut.has(a.bookingId) && /rut/i.test(a.message)));
 
 // Pago por devolver o reagendar (19 oct 2026, ver src/lib/pagosPorDevolver.ts): queda hasta "Resuelto".
 for (const p of pagosPorDevolver ?? []) {
@@ -337,15 +341,16 @@ for (const h of horasLink ?? []) {
     });
   } else if (h.tipo === 'plazo') {
     // Plan aprobado (Línea 1): al vencer el plazo la hora NO se libera sola; se le recuerda a la paciente.
-    const recordatorio = h.recordatorio === 'whatsapp' ? 'le mandé un recordatorio por WhatsApp'
-      : h.recordatorio === 'correo' ? 'le mandé un recordatorio por correo'
+    const recordatorio = h.recordatorio === 'whatsapp' ? 'le mandé un recordatorio por WhatsApp (si no le llegó, toca para mandárselo tú)'
+      : h.recordatorio === 'correo' ? 'le mandé un recordatorio por correo (toca para mandárselo también por WhatsApp)'
+      : h.recordatorio === 'sesion' ? 'la sesión ya empezó o está por empezar, así que no le mandé recordatorio'
       : 'el recordatorio automático no salió: toca para mandárselo por WhatsApp';
     tareas.push({
       clave: h.cuando ? claveCL(h.cuando) : ahoraClave,
       chip: 'plazo vencido',
       titulo: `Venció el plazo de pago de ${h.paciente}`,
       detalle: `${mayus(fechaLarga(h.fecha))} a las ${h.hora} · ${clp(h.monto)} · la hora sigue guardada; ${recordatorio}. Si quieres liberarla, ábrela en la agenda y usa «Anular»`,
-      href: h.recordatorio === 'nada' && h.waUrl ? h.waUrl : enSesion, externo: h.recordatorio === 'nada' && !!h.waUrl,
+      href: h.recordatorio !== 'sesion' && h.waUrl ? h.waUrl : enSesion, externo: h.recordatorio !== 'sesion' && !!h.waUrl,
       accion: { tipo: 'form', action: '/api/admin/hora-link', campos: { id: h.bookingId, accion: 'plazo_visto', redirect: vuelta }, texto: 'Ya lo vi' },
     });
   } else if (h.tipo === 'pasos_whatsapp') {
@@ -357,16 +362,22 @@ for (const h of horasLink ?? []) {
       href: h.waUrl ?? enSesion, externo: !!h.waUrl,
       accion: { tipo: 'form', action: '/api/admin/hora-link', campos: { id: h.bookingId, accion: 'pasos_hecho', redirect: vuelta }, texto: 'Ya se lo mandé' },
     });
-  } else {
-    tareas.push({
-      clave: '9999',
-      chip: 'pagada',
-      titulo: `Boleta pendiente de datos: ${h.paciente}`,
-      detalle: `Sesión del ${fechaLarga(h.fecha)} · ${clp(h.monto)} · pídele el RUT en la consulta y emite la boleta desde la sesión (sale con la fecha del pago)`,
-      href: enSesion,
-      accion: { tipo: 'form', action: '/api/admin/hora-link', campos: { id: h.bookingId, accion: 'boleta_ocultar', redirect: vuelta }, texto: 'Ocultar' },
-    });
   }
+}
+// Aviso obligatorio de RUT (23 nov 2026, Vale: «el sistema me debe avisar siempre que no haya rut»).
+// No se puede descartar: se va solo cuando el RUT queda escrito, y entonces sale la boleta.
+for (const r of sinRut ?? []) {
+  tareas.push({
+    clave: ahoraClave,
+    chip: 'falta RUT',
+    titulo: `${r.paciente} pagó su sesión del ${fechaLarga(r.fecha)}: falta su RUT para la boleta`,
+    detalle: `${clp(r.monto)} · pídeselo en la consulta; al escribirlo, la boleta sale sola con la fecha del pago`,
+    href: r.fichaId ? `/admin/pacientes/${r.fichaId}?tab=info` : `/admin/agenda?booking=${r.bookingId}`,
+    accion: { tipo: 'rut', bookingId: r.bookingId, redirect: vuelta },
+  });
+}
+if (sinRut === null) {
+  tareas.push({ clave: ahoraClave, chip: 'revisar', titulo: 'No se pudieron revisar las sesiones pagadas sin RUT', detalle: 'Recarga en un rato.', href: null });
 }
 if (horasLink === null) {
   tareas.push({ clave: ahoraClave, chip: 'revisar', titulo: 'No se pudieron revisar las horas con link', detalle: 'Recarga en un rato.', href: null });
@@ -610,6 +621,14 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
                           {t.accion.tipo === 'link' && (
                             <a href={t.accion.url} target="_blank" rel="noopener" class="btn btn-outline ini-btn">{t.accion.texto}</a>
                           )}
+                          {t.accion.tipo === 'rut' && (
+                            <form method="POST" action="/api/admin/rut-boleta" class="ini-rut">
+                              <input type="hidden" name="id" value={t.accion.bookingId} />
+                              <input type="hidden" name="redirect" value={t.accion.redirect} />
+                              <input type="text" name="rut" required maxlength="12" placeholder="12.345.678-9" aria-label="RUT" data-rut class="ini-rut-input" />
+                              <button type="submit" class="btn btn-dark ini-btn">Agregar RUT</button>
+                            </form>
+                          )}
                           {t.accion.tipo === 'folio' && (
                             <button type="button" class="btn btn-outline ini-btn btn-registrar-folio" data-booking={t.accion.bookingId} data-folio={t.accion.sugerido ?? ''}>Registrar folio</button>
                           )}
@@ -771,6 +790,8 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
   .ini-det { font-size: 0.76rem; color: var(--enc-text-3); }
   .ini-chev { color: var(--enc-text-4); display: inline-flex; flex-shrink: 0; }
   .ini-tarea-accion { display: flex; align-items: center; gap: 0.4rem; padding: 0 0.25rem 0.35rem; }
+  .ini-rut { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+  .ini-rut-input { width: 9.5rem; min-height: 40px; font-size: 16px; padding: 0.35rem 0.5rem; border: 1px solid #9C978C; border-radius: 6px; }
   .ini-tarea-accion form { display: inline; }
   .ini-btn-wa { background: #25D366 !important; color: white !important; border-color: #25D366 !important; }
   .ini-hecho { font-size: 0.75rem; color: var(--enc-text-3); }

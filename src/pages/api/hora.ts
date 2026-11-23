@@ -9,6 +9,7 @@ import { crearLinkSumUp, revisarLinkSumUpDeSesion, sumupConfigurado } from '../.
 import { upsertPatientFromBooking } from '../../lib/patients';
 import { limpiarOrigen, unirOrigen } from '../../lib/origen';
 import { logError } from '../../lib/logger';
+import { hoursUntilSessionCL } from '../../lib/dateUtils';
 import { rutValido, limpiarRut } from '../../lib/rut';
 import { normalizarComuna } from '../../data/comunas';
 import { folioVigente } from '../../lib/apigateway';
@@ -59,6 +60,9 @@ export const POST: APIRoute = async ({ request }) => {
     // Hora ya liberada (Vale activó «Liberar sola»): igual se puede pagar con tarjeta (pago doble aceptado).
     // flow/confirm.ts la confirma si la hora sigue libre; si no, Vale recibe «pago por devolver o reagendar».
     const liberada = h.status === 'expired';
+    if (liberada && hoursUntilSessionCL(h.session_date, String(h.session_time).slice(0, 5)) <= 0) {
+      return json({ error: 'Esta hora ya pasó. Escríbele a Valentina y buscamos otra.' }, 400);
+    }
     if (liberada && accion === 'sumup') return json({ error: 'Para esta hora usa el pago con tarjeta por Flow.' }, 400);
     if (!liberada && !esCobrable(h)) return json({ error: 'Esta hora no tiene un pago pendiente. Si crees que es un error, escríbele a Valentina.' }, 400);
 

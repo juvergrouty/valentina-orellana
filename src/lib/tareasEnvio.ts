@@ -227,9 +227,11 @@ export async function ejecutarTarea(bookingId: string, nombre: string): Promise<
         // Hora con link sin RUT (22 nov 2026): no es un error. Queda «Pagada · boleta pendiente de datos»
         // hasta que la paciente (formulario opcional) o Vale (en la consulta) escriban el RUT; la boleta
         // sale entonces con la fecha del pago (fechaEmisionBoleta).
-        if (!res.ok && (res.error ?? '').toLowerCase().includes('rut') && esHoraLink(b.notes)) {
+        // Toda boleta que no sale por falta de RUT queda marcada: al escribir el RUT (aviso obligatorio
+        // de RUT, rutFaltante.ts) sale sola. Una hora con link no deja además el aviso rojo de error.
+        if (!res.ok && (res.error ?? '').toLowerCase().includes('rut')) {
           if (!tieneMarca(b.notes, MARCA_BOLETA_DATOS)) await agregarLineaNotas(bookingId, `${MARCA_BOLETA_DATOS} ${new Date().toISOString()}`);
-          return { ok: true, nota: 'boleta pendiente de datos (falta el RUT)' };
+          if (esHoraLink(b.notes)) return { ok: true, nota: 'boleta pendiente de datos (falta el RUT)' };
         }
         if (!res.ok) {
           const esFaltaRut = (res.error ?? '').toLowerCase().includes('rut');

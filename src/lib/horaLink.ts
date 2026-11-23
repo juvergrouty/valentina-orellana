@@ -17,7 +17,7 @@ import { normalizarTelefono } from './contacto';
 import { chocaConOtraSesion, horaDisponible } from './disponibilidad';
 import { syncBookingToCalendar, deleteBookingFromCalendar } from './syncCalendar';
 import { upsertPatientFromBooking } from './patients';
-import { agregarLineaNotas, folioVigente } from './apigateway';
+import { agregarLineaNotas, cambiarNotas, folioVigente } from './apigateway';
 import { hoursUntilSessionCL } from './dateUtils';
 import { sendExpiredBookingAdminAlert, ADMIN_EMAIL_FALLBACK, sendPaymentLinkEmail } from './email';
 import { sendWhatsappText, sendWhatsappTemplate } from './whatsapp';
@@ -293,18 +293,27 @@ export async function vencerHorasLink(hastaMs = Date.now() + 20_000): Promise<{ 
     }
 
     if (!liberarSola) {
-      // Recordatorio a la paciente; la hora sigue guardada.
+      // La marca va ANTES de enviar: si no se puede guardar, no se envía (nunca un recordatorio cada 5 min).
+      const iso = new Date().toISOString();
+      if (!(await agregarLineaNotas(b.id, `${MARCA_PLAZO_VENCIDO} ${iso} enviando`))) continue;
+      // Sesión que empieza en menos de 30 min (o ya empezó): no tiene sentido pedirle que pague; solo el aviso a Vale.
+      const minutosASesion = hoursUntilSessionCL(b.session_date, String(b.session_time).slice(0, 5)) * 60;
       const url = b.link_token ? `${SITIO}/hora/${b.link_token}` : '';
       const texto = mensajeRecordatorioHora({ nombre: b.patient_name, fecha: b.session_date, hora: String(b.session_time).slice(0, 5), url, monto: b.amount });
-      let via: 'whatsapp' | 'correo' | 'nada' = 'nada';
-      if (b.patient_phone && url) { const r = await sendWhatsappText(b.patient_phone, texto).catch(() => ({ sent: false })); if (r.sent) via = 'whatsapp'; }
+      let via: 'whatsapp' | 'correo' | 'nada' | 'sesion' = minutosASesion < 30 ? 'sesion' : 'nada';
       if (via === 'nada' && b.patient_email && url) {
         try {
           const r = await sendPaymentLinkEmail({ patientName: b.patient_name, patientEmail: b.patient_email, serviceName: 'Sesión', amount: b.amount, sessionDate: b.session_date, sessionTime: String(b.session_time).slice(0, 5), paymentUrl: url });
           if (r.sent) via = 'correo';
         } catch { /* queda el botón de WhatsApp en el aviso de Vale */ }
       }
-      await agregarLineaNotas(b.id, `${MARCA_PLAZO_VENCIDO} ${new Date().toISOString()} ${via}`);
+      // WhatsApp de texto libre: Meta solo lo entrega si la paciente escribió en las últimas 24 h, y no
+      // avisa si no llega. Por eso el aviso de Vale siempre trae el botón para mandarlo ella.
+      if ((via === 'nada' || via === 'correo') && b.patient_phone && url) {
+        const r = await sendWhatsappText(b.patient_phone, texto).catch(() => ({ sent: false }));
+        if (r.sent && via === 'nada') via = 'whatsapp';
+      }
+      await cambiarNotas(b.id, (n) => n.replace(`${MARCA_PLAZO_VENCIDO} ${iso} enviando`, `${MARCA_PLAZO_VENCIDO} ${iso} ${via}`));
       recordadas++;
       await logInfo('hora-link/plazo', `Venció el plazo de pago de la hora de ${b.patient_name} (${b.session_date} ${String(b.session_time).slice(0, 5)}); sigue guardada`, { bookingId: b.id, recordatorio: via });
       continue;
@@ -380,8 +389,8 @@ export async function textoPasosWhatsapp(b: { patient_name: string; session_type
 
 // ── Avisos del Inicio (cada uno con su botón de «atendido») ─────────────────────────────────
 export type AvisoHora = {
-  tipo: 'vencida' | 'plazo' | 'pasos_whatsapp' | 'boleta_datos';
-  recordatorio?: 'whatsapp' | 'correo' | 'nada';
+  tipo: 'vencida' | 'plazo' | 'pasos_whatsapp';
+  recordatorio?: 'whatsapp' | 'correo' | 'nada' | 'sesion' | 'enviando';
   bookingId: string; paciente: string; fecha: string; hora: string; cuando: string; monto: number;
   waUrl?: string;
 };
@@ -391,7 +400,8 @@ export async function avisosHoraLink(): Promise<AvisoHora[]> {
   const { data, error } = await supabase.from('bookings')
     .select('id, patient_name, patient_phone, session_type, session_date, session_time, status, paid_at, amount, notes, link_token')
     .ilike('notes', `%${MARCA_HORA_LINK} %`).gte('session_date', desde).limit(200);
-  if (error?.code === '42703') return []; // sin la migración 0028 no hay horas con link
+  // Sin la migración 0028 no hay horas con link (PostgREST responde 42703 o PGRST204 según la versión).
+  if (error && (error.code === '42703' || error.code === 'PGRST204' || /does not exist/i.test(error.message ?? ''))) return [];
   if (error) throw new Error(error.message);
   const avisos: AvisoHora[] = [];
   const marcaEn = (n: string | null, m: string) => new RegExp(`^${m} (\\S+)`, 'm').exec(n ?? '')?.[1] ?? '';
@@ -404,7 +414,7 @@ export async function avisosHoraLink(): Promise<AvisoHora[]> {
     }
     if (b.status === 'pending_payment' && !b.paid_at && tieneMarca(b.notes, MARCA_PLAZO_VENCIDO) && !tieneMarca(b.notes, MARCA_PLAZO_VISTO)) {
       const m = new RegExp(`^${MARCA_PLAZO_VENCIDO} (\\S+) (\\S+)`, 'm').exec(b.notes ?? '');
-      const via = (m?.[2] ?? 'nada') as 'whatsapp' | 'correo' | 'nada';
+      const via = (m?.[2] ?? 'nada') as AvisoHora['recordatorio'];
       const url = b.link_token ? `${SITIO}/hora/${b.link_token}` : '';
       avisos.push({ ...base, tipo: 'plazo', cuando: m?.[1] ?? '', recordatorio: via,
         waUrl: enlaceWhatsapp(b.patient_phone, mensajeRecordatorioHora({ nombre: b.patient_name, fecha: b.session_date, hora: base.hora, url, monto: b.amount })) });
@@ -414,10 +424,7 @@ export async function avisosHoraLink(): Promise<AvisoHora[]> {
       const texto = await textoPasosWhatsapp(b, datos);
       avisos.push({ ...base, tipo: 'pasos_whatsapp', cuando: marcaEn(b.notes, MARCA_PASOS_WA_PENDIENTE), waUrl: enlaceWhatsapp(b.patient_phone, texto) });
     }
-    if (b.paid_at && b.status !== 'cancelled' && (b.amount ?? 0) > 0 && tieneMarca(b.notes, MARCA_BOLETA_DATOS)
-      && !tieneMarca(b.notes, MARCA_BOLETA_DATOS_OCULTA) && !folioVigente(b.notes)) {
-      avisos.push({ ...base, tipo: 'boleta_datos', cuando: b.paid_at });
-    }
+    // «Boleta pendiente de datos» ahora es el aviso obligatorio de RUT para TODA sesión pagada (rutFaltante.ts).
   }
   return avisos;
 }

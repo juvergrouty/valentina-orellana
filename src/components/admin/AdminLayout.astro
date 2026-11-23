@@ -1009,6 +1009,16 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
         ✕ No se pudo guardar "Ya la revisé" de la transferencia. La tarea sigue igual: intenta de nuevo.
       </div>
     )}
+    {(Astro.url.searchParams.get('error') === 'rut_aviso_invalido' || Astro.url.searchParams.get('error') === 'rut_aviso_guardar') && (
+      <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        ✕ {Astro.url.searchParams.get('error') === 'rut_aviso_invalido' ? 'Ese RUT no es válido: revisa el número y el dígito verificador.' : 'No se pudo guardar el RUT. Intenta de nuevo.'}
+      </div>
+    )}
+    {Astro.url.searchParams.get('rut_boleta') && (
+      <div role="status" style="background:#f0fdf4;color:#15803d;border-bottom:1px solid #bbf7d0;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
+        ✓ RUT guardado. {Astro.url.searchParams.get('rut_boleta') === 'emitida' ? 'La boleta salió con la fecha del pago y se le envía por correo.' : Astro.url.searchParams.get('rut_boleta') === 'espera_banco' ? 'La boleta sale cuando se confirme la transferencia en tu banco.' : 'La boleta todavía no salió: si no aparece, revisa el aviso de boletas.'}
+      </div>
+    )}
     {Astro.url.searchParams.get('error') === 'aviso_guardar' && (
       <div role="alert" style="background:#fef2f2;color:#991b1b;border-bottom:1px solid #fecaca;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">
         ✕ No se pudo guardar que atendiste el aviso. Sigue igual: intenta de nuevo.

@@ -14,6 +14,7 @@ import { cobrosProximos, type CobroProximo } from './cobrosProximos';
 import { contarCorreosFallidos } from './correosAutomaticos';
 import { avisosPagosPorDevolver, type PagoPorDevolver } from './pagosPorDevolver';
 import { avisosHoraLink, type AvisoHora } from './horaLink';
+import { sesionesSinRut, type SinRut } from './rutFaltante';
 import { transferenciasEsperandoBanco, gmailConectado } from './gmailBanco';
 
 // Transferencias que esperan el correo del banco (22 nov 2026, gmailBanco.ts): estado por comprobante.
@@ -156,6 +157,8 @@ export type AvisosPanel = {
   // Horas con link: vencidas, Pasos por WhatsApp por mandar, boleta pendiente de datos (22 nov 2026). null = no se pudo revisar.
   horasLink: AvisoHora[] | null;
   banco: EstadoBanco | null;
+  // Sesiones pagadas sin RUT para la boleta (23 nov 2026, obligatorio). null = no se pudo revisar.
+  sinRut: SinRut[] | null;
 };
 
 /** Medición de tiempos (5 nov 2026: "por qué demora tanto el panel"): cuánto tarda cada aviso, en ms.
@@ -165,7 +168,7 @@ export async function cargarAvisosPanel(origen: string, tiempos?: Record<string,
     const t0 = Date.now();
     return p.finally(() => { if (tiempos) tiempos[nombre] = Date.now() - t0; });
   };
-  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente, pausasPorAprobar, horasLink, banco] = await Promise.all([
+  const [newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, , cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente, pausasPorAprobar, horasLink, banco, sinRut] = await Promise.all([
     // Errores nuevos desde la última visita a /admin/logs (pedido explícito de
     // Valentina, 24 sep 2026: "queda visible en /admin/logs" no sirve si nadie mira).
     medir('errores', contarErroresNuevos().catch(() => 0)),
@@ -207,6 +210,7 @@ export async function cargarAvisosPanel(origen: string, tiempos?: Record<string,
     medir('pausas', contarPausasPorAprobar().catch(() => 0)),
     medir('horasLink', avisosHoraLink().catch((): AvisoHora[] | null => null)),
     medir('banco', estadoBanco().catch((): EstadoBanco | null => null)),
+    medir('sinRut', sesionesSinRut().catch((): SinRut[] | null => null)),
   ]);
-  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente, pausasPorAprobar, horasLink, banco };
+  return { newErrorCount, boletaAlerts, consentAlerts, comprobanteAlerts, blockedDayAlerts, feriadoAlerts, google, cumpleanos, rebotes, tarifas, mantencion, box, cobros, impuestos, correosFallidos, pagosPorDevolver, transferenciasPorRevisar, calendarioPendiente, pausasPorAprobar, horasLink, banco, sinRut };
 }

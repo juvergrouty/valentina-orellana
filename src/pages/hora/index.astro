@@ -12,6 +12,7 @@ import { getOrCreatePendingConsent, consentUrl, vigente, type ConsentRow } from 
 import { comprobanteEnRevision } from '../../lib/comprobantes';
 import { sumupConfigurado } from '../../lib/sumup';
 import { conEstacionamiento } from '../../data/consulta';
+import { hoursUntilSessionCL } from '../../lib/dateUtils';
 
 Astro.response.headers.set('Cache-Control', 'private, no-store');
 const token = Astro.cookies.get(COOKIE_HORA)?.value ?? '';
@@ -37,7 +38,8 @@ const hora = h ? String(h.session_time).slice(0, 5) : '';
 const pagada = !!h?.paid_at;
 const noVigente = !!h && !pagada && (h.status === 'cancelled' || h.status === 'expired' || h.debt_voided === true);
 // Liberada sola (opción de Configuración): igual se puede pagar con tarjeta; si la hora sigue libre se confirma.
-const liberada = !!h && !pagada && h.status === 'expired' && h.debt_voided !== true;
+const liberada = !!h && !pagada && h.status === 'expired' && h.debt_voided !== true
+  && hoursUntilSessionCL(h.session_date, String(h.session_time).slice(0, 5)) > 0; // ya pasada: no se ofrece pagar
 const plazoPasado = !!h?.link_vence_at && Date.parse(h.link_vence_at) < Date.now();
 // Pagada y después anulada por Vale (o reagendada a otra): no se le dice "confirmada".
 const anulada = !!h && pagada && h.status === 'cancelled';

@@ -1,6 +1,7 @@
 ---
 export const prerender = false;
 import AdminLayout from '../../../components/admin/AdminLayout.astro';
+import { faltaRutParaBoleta } from '../../../lib/rutFaltanteUtil';
 import { supabase } from '../../../lib/supabase';
 import { nowCL, todayCL } from '../../../lib/dateUtils';
 import { vigente, type ConsentRow } from '../../../lib/consent';
@@ -116,6 +117,8 @@ const { visibles: pendientes } = separarPendientes(pendientesTodos, gestionados)
 const abiertos = new Set(pendientesTodos.map((p) => p.clave));
 
 const saved = Astro.url.searchParams.get('saved') === '1';
+// Aviso obligatorio de RUT (23 nov 2026): sesiones pagadas de esta ficha sin RUT para la boleta.
+const sesionesSinRutFicha = demo ? [] : patientBookings.filter((b) => faltaRutParaBoleta(b, patient));
 // Códigos de error que llegan desde acciones de la agenda → texto legible.
 const ERRORES_ACCION: Record<string, string> = {
   cambio_servicio: 'No se pudo cambiar el servicio de la sesión. No se le avisó nada a la paciente. Intenta de nuevo.',
@@ -228,6 +231,17 @@ const desdeNotas = (() => {
   {boletaProgramadaMsg && !errorFicha && <div class="alert-success">✓ {boletaProgramadaMsg}</div>}
   {boletaEmitida && !errorFicha && <div class="alert-success">✓ Pago registrado y boleta emitida. Se le envía a la paciente por correo (si el envío falla, se reintenta solo).</div>}
   {Astro.url.searchParams.get('pack_saltadas') && <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.65rem 1rem;border-radius:6px;font-size:0.85rem;margin-bottom:1rem;">⚠ Del pack se agendaron {Astro.url.searchParams.get('pack_creadas')} sesiones; {Astro.url.searchParams.get('pack_saltadas')} no se guardaron porque se cruzaban con otra sesión{Astro.url.searchParams.get('cruce_bloqueado') ? ' (la base de datos todavía no permite sesiones cruzadas: falta la actualización 0026)' : ''}.</div>}
+  {sesionesSinRutFicha.length > 0 && (
+    <div role="alert" style="background:#fff7ed;border:1px solid #fdba74;color:#9a3412;padding:0.75rem 1rem;border-radius:6px;font-size:0.85rem;margin-bottom:1rem;">
+      <strong>Falta su RUT para la boleta.</strong> Pagó {sesionesSinRutFicha.length === 1 ? 'su sesión' : `${sesionesSinRutFicha.length} sesiones`} ({sesionesSinRutFicha.map((b) => String(b.session_date).split('-').reverse().join('-')).join(', ')}). Pídeselo en la consulta: al escribirlo, la boleta sale sola con la fecha del pago.
+      <form method="POST" action="/api/admin/rut-boleta" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem;">
+        <input type="hidden" name="id" value={sesionesSinRutFicha[0].id} />
+        <input type="hidden" name="redirect" value={`/admin/pacientes/${id}?tab=${tab}`} />
+        <input type="text" name="rut" required maxlength="12" placeholder="12.345.678-9" aria-label="RUT" data-rut style="width:10rem;min-height:40px;font-size:16px;" />
+        <button type="submit" class="btn btn-dark btn-sm">Agregar RUT</button>
+      </form>
+    </div>
+  )}
   {errorFicha && <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:0.65rem 1rem;border-radius:6px;font-size:0.85rem;margin-bottom:1rem;">✕ {errorFicha}</div>}
 
   <!-- Header paciente -->
