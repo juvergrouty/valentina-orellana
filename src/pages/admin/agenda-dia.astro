@@ -33,9 +33,28 @@ const vuelta = `/admin/agenda-dia?fecha=${dia}`;
 const pasado = dia < hoy;
 
 // ── Datos del día ───────────────────────────────────────────────────────────
-const { data: svcs } = await supabase.from('services_catalog').select('duration_min').eq('visible', true);
+const { data: svcs } = await supabase.from('services_catalog').select('id, modality, duration_min').eq('visible', true);
 const durs = (svcs ?? []).map((s) => Number(s.duration_min)).filter((n) => Number.isFinite(n) && n > 0);
 const duracion = durs.length ? Math.min(...durs) : 50;
+
+// Horas libres servicio por servicio, igual que la página pública (23 nov 2026, Vale: "no tengo la misma
+// disponibilidad horaria para online que para presencial"; antes se juntaban todos los servicios y se perdían
+// el horario de cada uno, sus horas abiertas solo ese día y las quitadas).
+async function libresPorServicio(fecha: string): Promise<{ lp: string[]; lo: string[]; error: boolean }> {
+  const lista = ((svcs ?? []) as Array<{ id: string; modality: string | null }>).filter((x) => x.id);
+  const res = await Promise.all(lista.map((x) => calcularDisponibilidad({ date: fecha, serviceId: x.id, duration: null, modality: null })
+    .then((r) => ({ r, mod: x.modality })).catch(() => ({ r: { error: 'x', status: 500 } as const, mod: x.modality }))));
+  const lp = new Set<string>(), lo = new Set<string>();
+  let error = false;
+  for (const { r, mod } of res) {
+    if ('error' in r) { error = true; continue; }
+    for (const t of r.slots.map((x) => String(x).slice(0, 5))) {
+      if (mod !== 'online') lp.add(t);
+      if (mod !== 'presencial') lo.add(t);
+    }
+  }
+  return { lp: [...lp], lo: [...lo], error };
+}
 
 async function eventosGoogle(): Promise<Array<{ hora: string; fin: string; titulo: string; propio: boolean }> | null> {
   const auth = await getValidAccessToken();
@@ -66,24 +85,24 @@ const datosDemo = () => [
     { id: '00000000-0000-4000-8000-000000000002', patient_name: 'Martín Lagos', session_type: 'online', session_time: '20:00:00', duration_min: 50, status: 'confirmed', amount: 60000, paid_at: null, debt_voided: false, notes: null, payment_method: 'link' },
   ], error: null },
   [{ hora: '11:00', fin: '12:00', titulo: 'Entrenar', propio: false }, { hora: '17:00', fin: '17:50', titulo: 'Isidora Fuentes Sesión individual online', propio: false }],
-  { slots: ['09:00', '10:00', '15:00'] },
-  { slots: ['18:00', '19:00'] },
+  { lp: ['09:00', '10:00', '15:00'], lo: ['15:00', '18:00', '19:00'], error: false },
+  null,
   { data: null },
   { data: [] },
   [],
 ] as const;
-const [resB, google, pres, onl, bDia, bHoras, extras] = demo ? (datosDemo() as any) : await Promise.all([
+const [resB, google, libDia, , bDia, bHoras, extras] = demo ? (datosDemo() as any) : await Promise.all([
   supabase.from('bookings')
     .select('id, patient_name, session_type, session_time, duration_min, status, amount, paid_at, debt_voided, notes, payment_method')
     .eq('session_date', dia).not('status', 'in', '(cancelled,expired)').order('session_time'),
   eventosGoogle().catch(() => null),
-  pasado ? Promise.resolve({ slots: [] as string[] }) : calcularDisponibilidad({ date: dia, serviceId: null, duration: duracion, modality: 'presencial' }).catch(() => ({ error: 'x', status: 500 })),
-  pasado ? Promise.resolve({ slots: [] as string[] }) : calcularDisponibilidad({ date: dia, serviceId: null, duration: duracion, modality: 'online' }).catch(() => ({ error: 'x', status: 500 })),
+  pasado ? Promise.resolve({ lp: [] as string[], lo: [] as string[], error: false }) : libresPorServicio(dia),
+  Promise.resolve(null),
   supabase.from('blocked_dates').select('id, reason').eq('date', dia).maybeSingle(),
   supabase.from('blocked_slots' as any).select('id, date_from, date_to, time_from, time_to, all_day, label').lte('date_from', dia).gte('date_to', dia),
   leerHorasExtra().catch(() => []),
 ]);
-const errorDatos = !!resB.error || 'error' in pres || 'error' in onl;
+const errorDatos = !!resB.error || libDia.error;
 
 type Celda =
   | { tipo: 'sesion'; hora: string; fin: string; id: string | null; nombre: string; detalle: string; pago: string; pagoTono: 'ok' | 'no' | 'gris'; href: string }
@@ -120,23 +139,11 @@ for (const g of google ?? []) {
   ocupado.push([aMin(g.hora), aMin(g.fin)]);
 }
 
-const lp = new Set('slots' in pres ? pres.slots.map((x) => String(x).slice(0, 5)) : []);
-const lo = new Set('slots' in onl ? onl.slots.map((x) => String(x).slice(0, 5)) : []);
+const lp = new Set<string>(libDia.lp);
+const lo = new Set<string>(libDia.lo);
 const extraDe = (h: string) => (extras as any[]).find((e) => e.fecha === dia && e.hora === h && !e.quitar)?.id ?? null;
-// Horas abiertas «solo este día» (horas extra): la disponibilidad sin servicio no las suma, así que se agregan aquí
-// si no chocan con nada (revisión 22 nov 2026: si no, "Abrir" parecía no funcionar).
 const PREP = 20;
-const chocaSesion = (m: number, dur: number) => ocupado.some(([a, z]) => m < z + PREP && m + dur > a - 0);
 const ahoraMin = dia === hoy ? aMin(nowCL().toISOString().slice(11, 16)) : -1;
-const bloqueadoEn = (m: number) => !!bDia.data || ((bHoras.data ?? []) as any[]).some((x) => x.all_day || (!x.time_from && !x.time_to) || (m < aMin(String(x.time_to ?? '23:59').slice(0, 5)) && m + duracion > aMin(String(x.time_from ?? '00:00').slice(0, 5))));
-if (!pasado) {
-  for (const e of (extras as any[]).filter((x) => x.fecha === dia && !x.quitar)) {
-    const m = aMin(e.hora);
-    if (m <= ahoraMin + 60 || bloqueadoEn(m) || chocaSesion(m, duracion)) continue;
-    if (e.modalidad === 'presencial' || e.modalidad === 'ambos') lp.add(e.hora);
-    if (e.modalidad === 'online' || e.modalidad === 'ambos') lo.add(e.hora);
-  }
-}
 for (const h of new Set([...lp, ...lo])) {
   celdas.push({ tipo: 'libre', hora: h, modo: lp.has(h) && lo.has(h) ? 'ambas' : lp.has(h) ? 'presencial' : 'online', extraId: extraDe(h) });
   ocupado.push([aMin(h), aMin(h) + duracion]);
@@ -220,9 +227,74 @@ const plWaUrl = paymentLink && !plWaSent ? (plTel.length >= 10 ? `https://wa.me/
 const plSinTel = plTel.length < 10;
 const agendada = qp.get('agendada') ?? '';
 const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
+
+// ── Vista semana (22 nov 2026, Vale: "necesito poder elegir día o semana… visión semanal para entender mi agenda") ──
+const vista = qp.get('vista') === 'semana' ? 'semana' : 'dia';
+type DiaSem = { fecha: string; sesiones: Array<{ hora: string; nombre: string; pago: string; tono: 'ok' | 'no' | 'gris'; online: boolean }>; libres: Array<{ hora: string; modo: 'presencial' | 'online' | 'ambas' }>; cerrado: boolean };
+let semanaDatos: DiaSem[] = [];
+let errorSemana = false;
+if (vista === 'semana') {
+  const domingo = semana[6];
+  const eventosRango = async (): Promise<Array<{ fecha: string; hora: string; titulo: string; propio: boolean }> | null> => {
+    const auth = await getValidAccessToken();
+    if (!auth) return null;
+    const tMin = new Date(Date.parse(lunes + 'T00:00:00Z') - 86400000).toISOString();
+    const tMax = new Date(Date.parse(domingo + 'T00:00:00Z') + 2 * 86400000).toISOString();
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(auth.calendarId)}/events`
+      + `?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true&orderBy=startTime&maxResults=250&timeZone=America%2FSantiago`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` }, signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return ((data.items ?? []) as Array<{ summary?: string; status?: string; description?: string; start?: { dateTime?: string } }>)
+      .filter((ev) => ev.start?.dateTime && ev.status !== 'cancelled')
+      .map((ev) => ({ fecha: ev.start!.dateTime!.slice(0, 10), hora: ev.start!.dateTime!.slice(11, 16), titulo: ev.summary ?? '', propio: !!ev.description?.includes('Ps. Valentina Orellana') }))
+      .filter((ev) => ev.fecha >= lunes && ev.fecha <= domingo);
+  };
+  const libresDe = (f: string) => f < hoy ? Promise.resolve({ lp: [] as string[], lo: [] as string[], error: false }) : libresPorServicio(f);
+  const [rb, gs, bds, ...disp] = demo
+    ? [{ data: (datosDemo()[0] as any).data.map((b: any, i: number) => ({ ...b, session_date: semana[(i * 2) % 5] })), error: null }, [{ fecha: semana[1], hora: '17:00', titulo: 'Isidora Fuentes Sesión individual online', propio: false }], { data: [{ date: semana[5] }] },
+       ...semana.map((f, i) => Promise.resolve(i > 4 ? { lp: [], lo: [], error: false } : { lp: ['09:00', '10:00', '15:00'].slice(0, 3 - (i % 3)), lo: ['15:00', '18:00', '19:00'].slice(0, 1 + (i % 2)), error: false }))]
+    : await Promise.all([
+        supabase.from('bookings').select('id, patient_name, session_type, session_date, session_time, status, amount, paid_at, debt_voided, notes, payment_method')
+          .gte('session_date', lunes).lte('session_date', domingo).not('status', 'in', '(cancelled,expired)').order('session_time'),
+        eventosRango().catch(() => null),
+        supabase.from('blocked_dates').select('date').gte('date', lunes).lte('date', domingo),
+        ...semana.map(libresDe),
+      ]);
+  const dispRes = await Promise.all(disp as any[]);
+  errorSemana = !!(rb as any).error || (dispRes as any[]).some((x) => x.error);
+  semanaDatos = semana.map((f, i) => {
+    const ses: DiaSem['sesiones'] = ((rb as any).data ?? []).filter((b: any) => b.session_date === f).map((b: any) => {
+      const pago = b.paid_at ? (Number(b.amount) > 0 ? ['Pagada', 'ok'] : ['Sin costo', 'gris']) : b.debt_voided ? ['Deuda anulada', 'gris']
+        : Number(b.amount) > 0 ? (esPagoEnConsulta(b) ? ['Paga en la consulta', 'gris'] : ['Por pagar', 'no']) : ['Sin costo', 'gris'];
+      return { hora: String(b.session_time).slice(0, 5), nombre: b.patient_name, pago: pago[0], tono: pago[1] as 'ok' | 'no' | 'gris', online: String(b.session_type).includes('online') };
+    });
+    for (const g of ((gs as any) ?? []).filter((x: any) => x.fecha === f && !x.propio && /sesi[oó]n/i.test(x.titulo))) {
+      const paciente = pacienteDeTitulo(g.titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, ''));
+      if (ses.some((x) => mismaPersona(x.nombre, paciente))) continue;
+      ses.push({ hora: g.hora, nombre: paciente, pago: 'Pago en Encuadrado', tono: 'gris', online: /online/i.test(g.titulo) });
+    }
+    ses.sort((a, b) => a.hora.localeCompare(b.hora));
+    const lib = dispRes[i] as { lp: string[]; lo: string[] };
+    const lp2 = new Set<string>(lib.lp), lo2 = new Set<string>(lib.lo);
+    const libresSem = [...new Set([...lp2, ...lo2])].sort().map((h) => ({ hora: h, modo: (lp2.has(h) && lo2.has(h) ? 'ambas' : lp2.has(h) ? 'presencial' : 'online') as 'presencial' | 'online' | 'ambas' }));
+    return { fecha: f, sesiones: ses, libres: libresSem, cerrado: ((bds as any).data ?? []).some((x: any) => x.date === f) };
+  });
+}
+const totalSemana = semanaDatos.reduce((n, d) => n + d.sesiones.length, 0);
+const libresSemana = semanaDatos.reduce((n, d) => n + d.libres.length, 0);
 ---
 
 <AdminLayout title="Agenda" current="/admin/agenda">
+  {!demo && (
+    <script is:inline>
+      // En el computador se usa la agenda de la semana de siempre (23 nov 2026: dos formatos, celular y computador).
+      if (window.matchMedia('(min-width: 769px)').matches) {
+        var q = new URLSearchParams(location.search);
+        location.replace('/admin/agenda' + (q.get('fecha') ? '?fecha=' + q.get('fecha') : ''));
+      }
+    </script>
+  )}
   <div class="ag">
     <header class="ag-cab">
       <h1>Agenda</h1>
@@ -252,11 +324,41 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
       </section>
     )}
 
-    <nav class="ag-sem" aria-label="Cambiar de semana">
-      <a href={`/admin/agenda-dia?fecha=${sumar(dia, -7)}`} class="ag-flecha" aria-label="Semana anterior">‹</a>
-      <span>{semana[0].slice(5, 7) === semana[6].slice(5, 7) ? `${num(semana[0])} al ${num(semana[6])} de ${MESES[Number(semana[6].slice(5, 7)) - 1]}` : `${num(semana[0])} de ${MESES[Number(semana[0].slice(5, 7)) - 1]} al ${num(semana[6])} de ${MESES[Number(semana[6].slice(5, 7)) - 1]}`}</span>
-      <a href={`/admin/agenda-dia?fecha=${sumar(dia, 7)}`} class="ag-flecha" aria-label="Semana siguiente">›</a>
-    </nav>
+    <div class="ag-vista" role="tablist" aria-label="Cómo ver la agenda">
+      <a href={`/admin/agenda-dia?fecha=${dia}`} role="tab" aria-selected={vista === 'dia'} class={vista === 'dia' ? 'on' : ''} data-vista="dia">Día</a>
+      <a href={`/admin/agenda-dia?fecha=${dia}&vista=semana`} role="tab" aria-selected={vista === 'semana'} class={vista === 'semana' ? 'on' : ''} data-vista="semana">Semana</a>
+    </div>
+
+    {vista === 'semana' ? (
+      <>
+        <nav class="ag-sem" aria-label="Cambiar de semana">
+          <a href={`/admin/agenda-dia?fecha=${sumar(dia, -7)}&vista=semana`} class="ag-flecha" aria-label="Semana anterior">‹</a>
+          <span>{semana[0].slice(5, 7) === semana[6].slice(5, 7) ? `${num(semana[0])} al ${num(semana[6])} de ${MESES[Number(semana[6].slice(5, 7)) - 1]}` : `${num(semana[0])} de ${MESES[Number(semana[0].slice(5, 7)) - 1]} al ${num(semana[6])} de ${MESES[Number(semana[6].slice(5, 7)) - 1]}`}</span>
+          <a href={`/admin/agenda-dia?fecha=${sumar(dia, 7)}&vista=semana`} class="ag-flecha" aria-label="Semana siguiente">›</a>
+        </nav>
+        <p class="ag-resumen">{totalSemana === 1 ? '1 sesión' : `${totalSemana} sesiones`} esta semana · {libresSemana === 1 ? '1 hora libre' : `${libresSemana} horas libres`}. Toca un día para abrir o cerrar horas.</p>
+        {errorSemana && <p class="ag-error" role="alert">No se pudieron leer todas las sesiones de esta semana. Recarga en un rato.</p>}
+        <div class="ag-semana">
+          {semanaDatos.map((d) => (
+            <a href={`/admin/agenda-dia?fecha=${d.fecha}`} class={`ag-sd ${d.fecha === hoy ? 'hoy' : ''} ${d.fecha < hoy ? 'pasado' : ''}`}>
+              <div class="ag-sd-cab">
+                <b>{DIAS[dow(d.fecha)]} {num(d.fecha)}{d.fecha === hoy && <i>Hoy</i>}</b>
+                <span>{d.cerrado ? 'Cerrado' : `${d.sesiones.length === 1 ? '1 sesión' : `${d.sesiones.length} sesiones`}${d.fecha >= hoy ? ` · ${d.libres.length === 1 ? '1 libre' : `${d.libres.length} libres`}` : ''}`}</span>
+              </div>
+              {d.sesiones.map((x) => (
+                <div class={`ag-sd-ses ${x.tono === 'no' ? 'debe' : ''}`}><span class="h">{x.hora}</span><span class="n">{x.nombre}</span><span class={`pago ${x.tono}`}>{x.pago === 'Pago en Encuadrado' ? 'Encuadrado' : x.pago}</span></div>
+              ))}
+              {!d.cerrado && d.fecha >= hoy && d.libres.length > 0 && (
+                <div class="ag-sd-libres" aria-label="Horas libres">
+                  {d.libres.map((l) => <span class={`chip ${l.modo === 'online' ? 'onl' : 'pres'}`}>{l.hora} {l.modo === 'ambas' ? 'Presencial u online' : l.modo === 'online' ? 'Online' : 'Presencial'}</span>)}
+                </div>
+              )}
+              {!d.sesiones.length && (d.cerrado || !d.libres.length) && <p class="ag-sd-vacio">{d.cerrado ? 'Nadie puede agendar este día.' : d.fecha < hoy ? 'Sin sesiones.' : 'Sin horas libres. Toca para abrir alguna.'}</p>}
+            </a>
+          ))}
+        </div>
+      </>
+    ) : (<>
     <div class="ag-dias">
       {semana.map((d) => (
         <a href={`/admin/agenda-dia?fecha=${d}`} class={`ag-dia ${d === dia ? 'on' : ''} ${d === hoy ? 'hoy' : ''}`} aria-current={d === dia ? 'date' : undefined}>
@@ -264,10 +366,12 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
         </a>
       ))}
     </div>
-    <div class="ag-tit-fila">
+    <nav class="ag-sem ag-dia-nav" aria-label="Cambiar de día">
+      <a href={`/admin/agenda-dia?fecha=${sumar(dia, -1)}`} class="ag-flecha" aria-label="Día anterior">‹</a>
       <h2 class="ag-titulo">{largo(dia)}</h2>
-      {dia !== hoy && <a href="/admin/agenda-dia" class="ag-ir-hoy">Ir a hoy</a>}
-    </div>
+      <a href={`/admin/agenda-dia?fecha=${sumar(dia, 1)}`} class="ag-flecha" aria-label="Día siguiente">›</a>
+    </nav>
+    {dia !== hoy && <a href="/admin/agenda-dia" class="ag-ir-hoy">Ir a hoy</a>}
     <p class="ag-resumen">
       {pasado ? `${sesionesDia === 1 ? '1 sesión' : `${sesionesDia} sesiones`}.`
         : bDia.data ? 'Este día está cerrado.'
@@ -341,6 +445,7 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
           </form>
         : <button type="button" class="hb hb-borde hb-ancho ag-dia-form" data-hoja="dia">Cerrar todo el {DIAS[dow(dia)].toLowerCase()} {num(dia)}</button>
     )}
+    </>)}
     <div class="ag-btns">
       <button type="button" class="hb hb-borde" data-hoja="vacaciones">Días libres o vacaciones</button>
       <a href="/admin/servicios" class="hb hb-borde">Horario semanal</a>
@@ -600,6 +705,29 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
   .pago { font-size: 14px; font-weight: 800; border-radius: 99px; padding: 3px 10px; white-space: nowrap; background: #fff; flex-shrink: 0; }
   .pago.ok { color: var(--verde-osc); } .pago.no { color: var(--rojo); } .pago.gris { color: var(--gris); }
   .ag-dia-form { margin-top: 12px; }
+  .ag-vista { display: grid; grid-template-columns: 1fr 1fr; background: var(--suave); border-radius: 14px; padding: 4px; gap: 4px; }
+  .ag-vista a { min-height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 11px; font-weight: 700; font-size: 16px; color: var(--gris); text-decoration: none; }
+  .ag-vista a.on { background: #fff; color: var(--tinta); box-shadow: var(--sombra); }
+  .ag-dia-nav .ag-titulo { flex: 1; text-align: center; font-size: 20px; }
+  .ag-ir-hoy { align-self: center; }
+  .ag-semana { display: grid; gap: 10px; }
+  .ag-sd { display: grid; gap: 6px; background: #fff; border-radius: 16px; box-shadow: var(--sombra); padding: 12px 14px; text-decoration: none; color: var(--tinta); border-left: 5px solid transparent; }
+  .ag-sd.hoy { border-left-color: var(--verde); }
+  .ag-sd.pasado { opacity: .7; }
+  .ag-sd-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .ag-sd-cab b { font-size: 18px; }
+  .ag-sd-cab b i { font-style: normal; font-size: 13px; font-weight: 800; color: #fff; background: var(--verde); border-radius: 99px; padding: 2px 8px; margin-left: 8px; vertical-align: 2px; }
+  .ag-sd-cab span { font-size: 15px; color: var(--gris); font-weight: 600; text-align: right; }
+  .ag-sd-ses { display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; align-items: center; background: var(--verde-claro); border-radius: 10px; padding: 6px 10px; font-size: 15px; }
+  .ag-sd-ses.debe { background: var(--rojo-claro); }
+  .ag-sd-ses .h { font-weight: 700; color: var(--gris); }
+  .ag-sd-ses .n { font-weight: 700; line-height: 1.25; }
+  .ag-sd-ses .pago { font-size: 13px; padding: 2px 8px; }
+  .ag-sd-libres { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ag-sd-libres .chip { font-size: 14px; font-weight: 700; border-radius: 99px; padding: 4px 10px; }
+  .ag-sd-libres .chip.pres { background: #fff; border: 2px solid var(--verde); color: var(--verde-osc); }
+  .ag-sd-libres .chip.onl { background: var(--dorado-claro); border: 2px solid var(--dorado-borde); color: #6B4400; }
+  .ag-sd-vacio { font-size: 15px; color: var(--gris); }
   .ag-btns { margin-bottom: 12px; }
 
   .ag-velo { position: fixed; inset: 0; background: rgba(46,51,42,.45); opacity: 0; transition: opacity .2s; z-index: 200; }
