@@ -42,15 +42,18 @@ const duracion = durs.length ? Math.min(...durs) : 50;
 // el horario de cada uno, sus horas abiertas solo ese día y las quitadas).
 async function libresPorServicio(fecha: string): Promise<{ lp: string[]; lo: string[]; error: boolean }> {
   const lista = ((svcs ?? []) as Array<{ id: string; modality: string | null }>).filter((x) => x.id);
-  const res = await Promise.all(lista.map((x) => calcularDisponibilidad({ date: fecha, serviceId: x.id, duration: null, modality: null })
-    .then((r) => ({ r, mod: x.modality })).catch(() => ({ r: { error: 'x', status: 500 } as const, mod: x.modality }))));
+  // Un servicio que admite ambas se consulta dos veces (presencial y online), como lo hace la página pública.
+  const consultas: Array<{ id: string | null; mod: 'presencial' | 'online' }> = lista.length
+    ? lista.flatMap((x) => x.modality === 'online' ? [{ id: x.id, mod: 'online' as const }] : x.modality === 'presencial' ? [{ id: x.id, mod: 'presencial' as const }] : [{ id: x.id, mod: 'presencial' as const }, { id: x.id, mod: 'online' as const }])
+    : [{ id: null, mod: 'presencial' }, { id: null, mod: 'online' }]; // sin servicios visibles: el horario general
+  const res = await Promise.all(consultas.map((x) => calcularDisponibilidad({ date: fecha, serviceId: x.id, duration: x.id ? null : duracion, modality: x.mod })
+    .then((r) => ({ r, mod: x.mod })).catch(() => ({ r: { error: 'x', status: 500 } as const, mod: x.mod }))));
   const lp = new Set<string>(), lo = new Set<string>();
   let error = false;
   for (const { r, mod } of res) {
     if ('error' in r) { error = true; continue; }
     for (const t of r.slots.map((x) => String(x).slice(0, 5))) {
-      if (mod !== 'online') lp.add(t);
-      if (mod !== 'presencial') lo.add(t);
+      (mod === 'online' ? lo : lp).add(t);
     }
   }
   return { lp: [...lp], lo: [...lo], error };
@@ -79,6 +82,9 @@ async function eventosGoogle(): Promise<Array<{ hora: string; fin: string; titul
 // Datos inventados SOLO en `astro dev` (import.meta.env.DEV es false en producción): /admin/agenda-dia?demo=1
 // para la revisión visual sin base de datos.
 const demo = import.meta.env.DEV && !!Astro.url.searchParams.get('demo');
+const esSemana = Astro.url.searchParams.get('vista') === 'semana';
+// El token de Google se renueva una sola vez antes de las consultas en paralelo (si no, cada una lo renovaba).
+if (!demo) await getValidAccessToken().catch(() => null);
 const datosDemo = () => [
   { data: [
     { id: '00000000-0000-4000-8000-000000000001', patient_name: 'Sofía Rivas y Diego Mena', session_type: 'pareja-presencial', session_time: '08:00:00', duration_min: 60, status: 'confirmed', amount: 70000, paid_at: '2026-11-20', debt_voided: false, notes: null, payment_method: 'link' },
@@ -91,7 +97,9 @@ const datosDemo = () => [
   { data: [] },
   [],
 ] as const;
-const [resB, google, libDia, , bDia, bHoras, extras] = demo ? (datosDemo() as any) : await Promise.all([
+const [resB, google, libDia, , bDia, bHoras, extras] = demo ? (datosDemo() as any) : esSemana
+  ? [{ data: [], error: null }, [], { lp: [], lo: [], error: false }, null, { data: null }, { data: [] }, []] as any
+  : await Promise.all([
   supabase.from('bookings')
     .select('id, patient_name, session_type, session_time, duration_min, status, amount, paid_at, debt_voided, notes, payment_method')
     .eq('session_date', dia).not('status', 'in', '(cancelled,expired)').order('session_time'),
@@ -161,7 +169,7 @@ const bloqueoDe = (h: string): { id: string; tabla: 'blocked_slots' | 'blocked_d
   if (b.date_from !== b.date_to) return { id: '', tabla: 'blocked_slots', texto: `Cerraste del ${num(b.date_from)} de ${MESES[Number(b.date_from.slice(5, 7)) - 1]} al ${num(b.date_to)} de ${MESES[Number(b.date_to.slice(5, 7)) - 1]}${b.label ? ` (${b.label})` : ''}. Ese cierre se cambia desde la agenda en el computador.` };
   return { id: b.id, tabla: 'blocked_slots', texto: b.all_day || !tf ? `Cerraste este día${b.label ? ` (${b.label})` : ''}.` : `Cerraste de ${tf} a ${tt}${b.label ? ` (${b.label})` : ''}.` };
 };
-if (!pasado) {
+if (!pasado && !libDia.error) { // si falló un servicio, no se ofrece "Abrir" en horas que quizás ya están en el horario
   for (let m = 8 * 60; m <= 21 * 60; m += 60) {
     if (ocupado.some(([a, z]) => m < z && m + 60 > a)) continue;
     // Muy cerca de ahora (menos de 1 hora) o en el descanso después de una sesión: no se puede agendar igual.
