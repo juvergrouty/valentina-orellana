@@ -47,13 +47,13 @@ const errorParam    = Astro.url.searchParams.get('error');
 const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
 ---
 
-<AdminLayout title="Por cobrar" current="/admin/finanzas">
+<AdminLayout title="Sesiones por pagar" current="/admin/finanzas">
 
   <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
     <div>
-      <a href="/admin/finanzas" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Finanzas</a>
-      <h1 style="margin-top:0.5rem;">Por cobrar — links de pago pendientes</h1>
-      <p style="color:var(--stone);font-size:0.88rem;">Sesiones que todavía no ocurren y siguen sin pagar. No son deudas — nadie ha prestado el servicio todavía.</p>
+      <a href="/admin/finanzas" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Pagos</a>
+      <h1 style="margin-top:0.5rem;">Sesiones por pagar</h1>
+      <p style="color:var(--stone);font-size:0.88rem;">Sesiones que todavía no ocurren y aún no se pagan. Aquí puedes mandarles el link de pago.</p>
     </div>
     <div style="text-align:right;">
       <p class="label" style="color:#b45309;">Total pendiente</p>
@@ -88,7 +88,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
   )}
   {!pending.length ? (
     <div class="card" style="text-align:center;padding:3rem;">
-      <p style="color:var(--stone);font-size:0.9rem;">{errorLectura ? 'Sin datos por ahora.' : 'No hay sesiones por cobrar. 🎉'}</p>
+      <p style="color:var(--stone);font-size:0.9rem;">{errorLectura ? 'Sin datos por ahora.' : 'No hay sesiones por cobrar.'}</p>
     </div>
   ) : (
     <div class="card tabla-cobro" style="padding:0;">
@@ -127,15 +127,15 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
             const waUrl = !enConsulta && payUrl && waNumber.length >= 10 ? `https://wa.me/${waNumber}?text=${waMsg}` : null;
             return (
               <tr>
-                <td>
+                <td class="pc-nom-td">
                   <p style="font-weight:600;font-size:0.88rem;">{b.patient_name}</p>
                   {b.patient_email && <p style="font-size:0.75rem;color:var(--stone);">{b.patient_email}</p>}
                 </td>
-                <td style="font-size:0.84rem;">{SESSION_LABELS[b.session_type] ?? b.session_type}</td>
-                <td style="font-size:0.84rem;color:var(--stone);">{formatDate(b.session_date)}{b.session_time ? ` · ${b.session_time.slice(0,5)}` : ''}</td>
-                <td style="font-weight:600;font-size:0.88rem;white-space:nowrap;">{formatCLP(b.amount)}</td>
-                <td style="font-size:0.8rem;color:var(--stone);">{formatDate(b.created_at?.slice(0,10) ?? b.session_date)}</td>
-                <td style="white-space:nowrap;">
+                <td style="font-size:0.84rem;" data-label="Sesión">{SESSION_LABELS[b.session_type] ?? b.session_type}</td>
+                <td style="font-size:0.84rem;color:var(--stone);" data-label="Fecha">{formatDate(b.session_date)}{b.session_time ? ` · ${b.session_time.slice(0,5)}` : ''}</td>
+                <td style="font-weight:600;font-size:0.88rem;white-space:nowrap;" data-label="Monto">{formatCLP(b.amount)}</td>
+                <td style="font-size:0.8rem;color:var(--stone);" data-label="Link enviado">{formatDate(b.created_at?.slice(0,10) ?? b.session_date)}</td>
+                <td style="white-space:nowrap;" class="pc-acc-td">
                   {/* Igual que Encuadrado: dos íconos directos, sin desplegable. */}
                   {enConsulta && <span class="badge badge-consulta">{ETIQUETA_PAGO_EN_CONSULTA}</span>}
                   {waUrl && (
@@ -175,6 +175,21 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
     .tabla-cobro > table > tbody > tr > td:last-child:not([colspan]) {
       position: sticky; right: 0; background: white; box-shadow: -6px 0 6px -6px rgba(0,0,0,.18);
     }
+  }
+  /* Celular (rediseño 23 nov 2026): cada sesión es una tarjeta, con botones grandes de WhatsApp y correo. */
+  @media (max-width: 768px) {
+    .tabla-cobro { background: transparent !important; border: 0 !important; box-shadow: none !important; overflow: visible; }
+    .tabla-cobro > table, .tabla-cobro > table > tbody, .tabla-cobro > table > tbody > tr, .tabla-cobro > table > tbody > tr > td { display: block; width: 100%; }
+    .tabla-cobro > table > thead { display: none; }
+    .tabla-cobro > table > tbody > tr { background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(46,51,42,.06), 0 4px 14px rgba(46,51,42,.06); padding: 12px 14px; margin-bottom: 10px; }
+    .tabla-cobro > table > tbody > tr > td { border: 0 !important; padding: 3px 0 !important; font-size: 16px !important; position: static !important; box-shadow: none !important; white-space: normal !important; display: flex; justify-content: space-between; gap: 12px; }
+    .tabla-cobro > table > tbody > tr > td.pc-nom-td { display: block; }
+    .tabla-cobro > table > tbody > tr > td.pc-nom-td p:first-child { font-size: 18px !important; }
+    .tabla-cobro td[data-label]::before { content: attr(data-label); color: #5F5E57; font-size: 14px; font-weight: 600; flex-shrink: 0; }
+    .tabla-cobro td.pc-acc-td { display: flex; gap: 8px; padding-top: 10px !important; flex-wrap: wrap; }
+    .tabla-cobro td.pc-acc-td .icon-btn { margin: 0 !important; width: auto !important; flex: 1; min-height: 48px; height: 48px !important; border-radius: 12px !important; gap: 8px; font-weight: 700; font-size: 16px; }
+    .tabla-cobro td.pc-acc-td a.icon-btn::after { content: 'WhatsApp'; }
+    .tabla-cobro td.pc-acc-td button.icon-btn::after { content: 'Correo'; }
   }
   .icon-btn { transition: transform .08s ease-out, filter .08s ease-out, opacity .1s; }
   .icon-btn:hover { filter: brightness(1.1); }

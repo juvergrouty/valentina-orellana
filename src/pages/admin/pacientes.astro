@@ -234,6 +234,8 @@ const TABS = [
             {st.due > 0 && <p class="pc-debe">Por pagar: <b>{formatCLP(st.due)}</b></p>}
             <div class="pc-acc">
               <a href={`/admin/pacientes/${p.id}`} class="pc-btn pc-btn-borde">Ver ficha</a>
+              <a href={`/admin/agenda?agendar=1`} class="pc-btn pc-btn-borde">Agendar</a>
+              <a href={`/admin/pacientes/${p.id}#editar`} class="pc-btn pc-btn-borde">Editar</a>
               {wa ? <a href={wa} target="_blank" rel="noopener" class="pc-btn pc-btn-wa">WhatsApp</a> : <span class="pc-btn pc-btn-gris">Sin teléfono</span>}
             </div>
           </div>
@@ -376,13 +378,14 @@ const TABS = [
 }
 .pac-icon-btn:hover:not(:disabled) { background: #f9fafb; }
 .pac-icon-btn:disabled { opacity: 0.4; cursor: default; }
+.pac-icon-btn[hidden] { display: none; }
 .pac-add-btn { height: 38px; }
 
 /* Tabla */
 .pac-table-scroll { flex: 1; min-height: 0; overflow: auto; }
 .pac-cards { display: none; }
 @media (max-width: 768px) {
-  .pac-wrap { height: auto !important; overflow: visible; background: #FAF7F4; }
+  .pac-wrap { height: auto !important; overflow: visible; padding: 12px 16px 0; background: #FAF7F4; }
   .pac-head { padding: 4px 0 8px; }
   .pac-head h1 { font: 700 28px/1.15 'Domine', Georgia, serif; color: #2E332A; }
   .pac-tabs { padding: 0; gap: 6px; border-bottom: 0; overflow-x: auto; scrollbar-width: none; }

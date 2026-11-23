@@ -146,11 +146,16 @@ const formatCLP = (n: number) =>
   new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
 ---
 
-<AdminLayout title="Finanzas" current="/admin/finanzas" fullHeight={true}>
+<AdminLayout title="Pagos" current="/admin/finanzas" fullHeight={true}>
 
   <div class="fin-wrap">
     <div class="fin-head">
-      <h1>Finanzas</h1>
+      <h1>Pagos</h1>
+      <nav class="fin-atajos" aria-label="Atajos de pagos">
+        <a href="/admin/cobros" class="fin-atajo fin-atajo-pri">Cobro nuevo o link de pago</a>
+        <a href="/admin/por-cobrar" class="fin-atajo">Sesiones por pagar</a>
+        <a href="/admin/deudas" class="fin-atajo">Quién te debe</a>
+      </nav>
     </div>
 
     <div class="fin-scroll">
@@ -187,18 +192,18 @@ const formatCLP = (n: number) =>
       <div class="fin-section-head" id="deudores"><span>Quién te debe y desde cuándo</span></div>
       <div class="fin-table-wrap" style="margin-bottom:1.5rem;">
         {deudores.length === 0 ? (
-          <p class="fin-muted" style="padding:1.5rem;text-align:center;">Nadie te debe sesiones realizadas. 🎉</p>
+          <p class="fin-muted" style="padding:1.5rem;text-align:center;">Nadie te debe sesiones realizadas.</p>
         ) : (
           <table class="fin-table">
             <thead><tr><th>Paciente</th><th>Debe desde</th><th>Sesiones sin pagar</th><th style="text-align:right;">Total</th><th></th></tr></thead>
             <tbody>
               {deudores.map(d => (
                 <tr>
-                  <td><strong>{d.nombre}</strong></td>
-                  <td class="fin-muted">{fmtFecha(d.desde)}</td>
-                  <td class="fin-muted">{d.sesiones.map((b: any) => `${fmtFecha(b.session_date)} (${etiqueta(b)})`).join(' · ')}</td>
-                  <td style="text-align:right;font-weight:600;color:#dc2626;">{formatCLP(d.total)}</td>
-                  <td style="text-align:right;">
+                  <td data-label="Paciente"><strong>{d.nombre}</strong></td>
+                  <td class="fin-muted" data-label="Debe desde">{fmtFecha(d.desde)}</td>
+                  <td class="fin-muted" data-label="Sesiones">{d.sesiones.map((b: any) => `${fmtFecha(b.session_date)} (${etiqueta(b)})`).join(' · ')}</td>
+                  <td style="text-align:right;font-weight:600;color:#dc2626;" data-label="Total">{formatCLP(d.total)}</td>
+                  <td style="text-align:right;" class="fin-td-acc">
                     {d.fichaId
                       ? <a href={`/admin/pacientes/${d.fichaId}?tab=sesiones`} class="btn btn-outline btn-sm">Cobrar →</a>
                       : <a href="/admin/deudas" class="btn btn-outline btn-sm">Cobrar →</a>}
@@ -283,16 +288,16 @@ const formatCLP = (n: number) =>
             <tbody>
               {inMonth.sort((a, b) => (b.session_date ?? '').localeCompare(a.session_date ?? '')).map(b => (
                 <tr>
-                  <td class="fin-muted">{fmtFecha(b.session_date)}</td>
-                  <td>{b.patient_name}</td>
-                  <td>{etiqueta(b)}</td>
-                  <td class="fin-muted">{pagada(b) ? medio(b) : '—'}</td>
-                  <td>
+                  <td class="fin-muted" data-label="Fecha">{fmtFecha(b.session_date)}</td>
+                  <td data-label="Paciente" class="fin-td-nom">{b.patient_name}</td>
+                  <td data-label="Tipo">{etiqueta(b)}</td>
+                  <td class="fin-muted" data-label="Medio">{pagada(b) ? medio(b) : '—'}</td>
+                  <td data-label="Estado">
                     <span class={`fin-badge ${pagada(b) ? 'ok' : anulada(b) ? 'void' : 'due'}`}>
                       {pagada(b) ? 'Pagado' : anulada(b) ? 'Deuda anulada' : 'Por pagar'}
                     </span>
                   </td>
-                  <td style="text-align:right;font-weight:600;">{formatCLP(b.amount ?? 0)}</td>
+                  <td style="text-align:right;font-weight:600;" data-label="Monto">{formatCLP(b.amount ?? 0)}</td>
                 </tr>
               ))}
             </tbody>
@@ -347,6 +352,39 @@ const formatCLP = (n: number) =>
 .fin-badge.due { background: #fef2f2; color: #dc2626; }
 .fin-badge.void { background: #f3f4f6; color: #6b7280; }
 .fin-table-wrap { overflow-x: auto; }
+.fin-atajos { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+.fin-atajo { display: inline-flex; align-items: center; min-height: 40px; padding: 0 1rem; border-radius: 10px; border: 1px solid #d1d5db; font-weight: 600; font-size: 0.9rem; color: #111827; text-decoration: none; }
+.fin-atajo-pri { background: #576352; border-color: #576352; color: #fff; }
+
+/* Celular (rediseño 23 nov 2026): tarjetas en vez de tablas, letra y botones grandes. */
+@media (max-width: 768px) {
+  .fin-wrap { height: auto !important; overflow: visible; padding: 12px 16px 0; background: #FAF7F4; color: #2E332A; }
+  .fin-head { padding: 4px 0 8px; }
+  .fin-head h1 { font: 700 28px/1.15 'Domine', Georgia, serif; color: #2E332A; }
+  .fin-atajos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .fin-atajo { min-height: 52px; justify-content: center; text-align: center; border-radius: 14px; border: 2px solid #CFC8BF; background: #fff; font-size: 16px; padding: 4px 10px; line-height: 1.2; }
+  .fin-atajo-pri { grid-column: 1 / -1; background: #576352; border-color: #576352; color: #fff; }
+  .fin-scroll { overflow: visible; padding: 8px 0 16px; }
+  .fin-card, .fin-panel { background: #fff; border: 0; border-radius: 16px; box-shadow: 0 1px 2px rgba(46,51,42,.06), 0 4px 14px rgba(46,51,42,.06); padding: 14px 16px; }
+  .fin-card-label, .fin-panel-label, .fin-panel-note, .fin-break-row { font-size: 15px; }
+  .fin-card-value { font-size: 30px; }
+  .fin-card-foot .btn { min-height: 44px; font-size: 15px; display: inline-flex; align-items: center; }
+  .fin-muted { color: #5F5E57; }
+  .fin-section-head { flex-wrap: wrap; }
+  .fin-section-head span { font: 700 20px/1.25 'Domine', Georgia, serif; }
+  .fin-section-head select { min-height: 48px; font-size: 16px; border-radius: 12px; }
+  .fin-tabs { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .fin-tab { min-height: 44px; font-size: 16px; }
+  .fin-table-wrap { border: 0; overflow: visible; }
+  .fin-table, .fin-table tbody, .fin-table tr, .fin-table td { display: block; width: 100%; }
+  .fin-table thead { display: none; }
+  .fin-table tr { background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(46,51,42,.06), 0 4px 14px rgba(46,51,42,.06); padding: 10px 14px; margin-bottom: 10px; }
+  .fin-table td { border: 0 !important; padding: 3px 0; font-size: 16px; text-align: left !important; display: flex; justify-content: space-between; gap: 12px; }
+  .fin-table td[data-label]::before { content: attr(data-label); color: #5F5E57; font-size: 14px; font-weight: 600; flex-shrink: 0; }
+  .fin-table td.fin-td-acc { padding-top: 8px; }
+  .fin-table td.fin-td-acc .btn { width: 100%; min-height: 48px; justify-content: center; font-size: 16px; display: inline-flex; align-items: center; border-radius: 12px; }
+  .fin-badge { font-size: 14px; }
+}
 </style>
 
 <script>
