@@ -469,7 +469,8 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
       </div>
     </div>
 
-    <!-- reCAPTCHA -->
+    <!-- reCAPTCHA: en pausa (Vale, 23 nov 2026); sigue en Más → En pausa. Se oculta sin borrar. -->
+    {false && (
     <div class="card">
       <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1.25rem;">
         <p class="label" style="margin:0;">Google reCAPTCHA</p>
@@ -491,6 +492,7 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
         </div>
       </div>
     </div>
+    )}
 
     <!-- Resend API Key -->
     <div class="card">
