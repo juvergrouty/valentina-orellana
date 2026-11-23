@@ -47,13 +47,13 @@ const errorParam    = Astro.url.searchParams.get('error');
 const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
 ---
 
-<AdminLayout title="Por cobrar" current="/admin/finanzas">
+<AdminLayout title="Sesiones por pagar" current="/admin/finanzas">
 
   <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
     <div>
-      <a href="/admin/finanzas" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Finanzas</a>
-      <h1 style="margin-top:0.5rem;">Por cobrar — links de pago pendientes</h1>
-      <p style="color:var(--stone);font-size:0.88rem;">Sesiones que todavía no ocurren y siguen sin pagar. No son deudas — nadie ha prestado el servicio todavía.</p>
+      <a href="/admin/finanzas" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Pagos</a>
+      <h1 style="margin-top:0.5rem;">Sesiones por pagar</h1>
+      <p style="color:var(--stone);font-size:0.88rem;">Sesiones que todavía no ocurren y aún no se pagan. Aquí puedes mandarles el link de pago.</p>
     </div>
     <div style="text-align:right;">
       <p class="label" style="color:#b45309;">Total pendiente</p>
