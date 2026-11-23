@@ -105,6 +105,21 @@ for (const g of google ?? []) {
 const lp = new Set('slots' in pres ? pres.slots.map((x) => String(x).slice(0, 5)) : []);
 const lo = new Set('slots' in onl ? onl.slots.map((x) => String(x).slice(0, 5)) : []);
 const extraDe = (h: string) => (extras as any[]).find((e) => e.fecha === dia && e.hora === h && !e.quitar)?.id ?? null;
+// Horas abiertas «solo este día» (horas extra): la disponibilidad sin servicio no las suma, así que se agregan aquí
+// si no chocan con nada (revisión 22 nov 2026: si no, "Abrir" parecía no funcionar).
+const PREP = 20;
+const ocupSes = ocupado.slice(); // solo sesiones y eventos de Google (antes de sumar las horas libres)
+const chocaSesion = (m: number, dur: number) => ocupado.some(([a, z]) => m < z + PREP && m + dur > a - 0);
+const ahoraMin = dia === hoy ? aMin(nowCL().toISOString().slice(11, 16)) : -1;
+const bloqueadoEn = (m: number) => !!bDia.data || ((bHoras.data ?? []) as any[]).some((x) => x.all_day || (!x.time_from && !x.time_to) || (m < aMin(String(x.time_to ?? '23:59').slice(0, 5)) && m + duracion > aMin(String(x.time_from ?? '00:00').slice(0, 5))));
+if (!pasado) {
+  for (const e of (extras as any[]).filter((x) => x.fecha === dia && !x.quitar)) {
+    const m = aMin(e.hora);
+    if (m <= ahoraMin + 60 || bloqueadoEn(m) || chocaSesion(m, duracion)) continue;
+    if (e.modalidad === 'presencial' || e.modalidad === 'ambos') lp.add(e.hora);
+    if (e.modalidad === 'online' || e.modalidad === 'ambos') lo.add(e.hora);
+  }
+}
 for (const h of new Set([...lp, ...lo])) {
   celdas.push({ tipo: 'libre', hora: h, modo: lp.has(h) && lo.has(h) ? 'ambas' : lp.has(h) ? 'presencial' : 'online', extraId: extraDe(h) });
   ocupado.push([aMin(h), aMin(h) + duracion]);
@@ -118,13 +133,17 @@ const bloqueoDe = (h: string): { id: string; tabla: 'blocked_slots' | 'blocked_d
   const b = bloqueosHora.find((x) => x.all_day || (!x.time_from && !x.time_to) || (m < aMin(String(x.time_to ?? '23:59').slice(0, 5)) && m + duracion > aMin(String(x.time_from ?? '00:00').slice(0, 5))));
   if (!b) return null;
   const tf = String(b.time_from ?? '').slice(0, 5), tt = String(b.time_to ?? '').slice(0, 5);
+  // Un cierre de varios días no se quita desde aquí (borraría todos esos días).
+  if (b.date_from !== b.date_to) return { id: '', tabla: 'blocked_slots', texto: `Cerraste del ${num(b.date_from)} de ${MESES[Number(b.date_from.slice(5, 7)) - 1]} al ${num(b.date_to)} de ${MESES[Number(b.date_to.slice(5, 7)) - 1]}${b.label ? ` (${b.label})` : ''}. Ese cierre se cambia desde la agenda en el computador.` };
   return { id: b.id, tabla: 'blocked_slots', texto: b.all_day || !tf ? `Cerraste este día${b.label ? ` (${b.label})` : ''}.` : `Cerraste de ${tf} a ${tt}${b.label ? ` (${b.label})` : ''}.` };
 };
 if (!pasado) {
   for (let m = 8 * 60; m <= 21 * 60; m += 60) {
     if (ocupado.some(([a, z]) => m < z && m + 60 > a)) continue;
+    // Muy cerca de ahora (menos de 1 hora) o en el descanso después de una sesión: no se puede agendar igual.
+    if (dia === hoy && m <= ahoraMin + 60) continue;
+    if (ocupSes.some(([, z]) => m >= z && m < z + PREP)) continue;
     const h = aHora(m);
-    if (dia === hoy && h <= nowCL().toISOString().slice(11, 16)) continue;
     celdas.push({ tipo: 'cerrada', hora: h, bloqueo: bloqueoDe(h) });
   }
 }
@@ -147,6 +166,7 @@ const sesionesDia = celdas.filter((c) => c.tipo === 'sesion').length;
 
 // ── Mensajes después de una acción ──────────────────────────────────────────
 const qp = Astro.url.searchParams;
+const errorAccion = qp.get('error');
 const hecho = qp.get('hecho') ?? '';
 const horaHecha = (qp.get('h') ?? '').replace(/^(\d{2})(\d{2})$/, '$1:$2');
 // Deshacer: se busca lo recién creado (el bloqueo de esa hora o la hora abierta).
@@ -169,10 +189,9 @@ const MSG: Record<string, string> = {
   vacaciones: 'Listo, cerraste esos días. Nadie puede agendar.',
   'cierre-quitado': 'Quitaste el cierre. Esas horas vuelven a tu horario normal.',
 };
-const msg = qp.get('saved') === 'extra' ? `Abriste las ${horaHecha}. Ya se puede agendar en tu página.`
+const msg = errorAccion ? '' : qp.get('saved') === 'extra' ? `Abriste las ${horaHecha}. Ya se puede agendar en tu página.`
   : qp.get('saved') === 'extra-quitada' && hecho === 'deshecha' ? MSG.deshecha
   : MSG[hecho] ?? '';
-const errorAccion = qp.get('error');
 
 // Después de agendar: sugerir siempre el link de pago por WhatsApp (Valentina, 22 nov 2026).
 const paymentLink = qp.get('payment_link');
@@ -325,7 +344,7 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
 
     <div class="panel" data-panel="libre">
       <a class="hb hb-verde hb-ancho hb-grande" data-agendar>Agendar aquí</a>
-      <form method="POST" action="/api/admin/bloqueos" class="ag-grupo">
+      <form method="POST" action="/api/admin/bloqueos">
         <input type="hidden" name="action" value="block-slot" />
         <input type="hidden" name="date_from" value={dia} /><input type="hidden" name="date_to" value={dia} />
         <input type="hidden" name="time_from" data-campo="desde" /><input type="hidden" name="time_to" data-campo="hasta" />
@@ -344,18 +363,18 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
     <div class="panel" data-panel="cerrada">
       <div data-con-bloqueo hidden>
         <p class="nota" data-texto-bloqueo></p>
-        <form method="POST" action="/api/admin/bloqueos">
+        <form method="POST" action="/api/admin/bloqueos" data-quitar-cierre>
           <input type="hidden" name="action" value="delete" /><input type="hidden" name="table" data-campo="tabla" /><input type="hidden" name="id" data-campo="bloqueo" />
           <input type="hidden" name="_redirect" value={`${vuelta}&hecho=cierre-quitado`} />
           <button type="submit" class="hb hb-verde hb-ancho hb-grande">Quitar el cierre</button>
         </form>
-        <p class="nota">Esas horas vuelven a tu horario normal. Si esta hora no está en tu horario, después la puedes abrir aquí mismo.</p>
+        <p class="nota" data-quitar-cierre>Esas horas vuelven a tu horario normal. Si esta hora no está en tu horario, después la puedes abrir aquí mismo.</p>
       </div>
       <form method="POST" action="/api/admin/horas-extra" data-sin-bloqueo>
         <input type="hidden" name="action" value="agregar" />
         <input type="hidden" name="fecha" value={dia} /><input type="hidden" name="hora" data-campo="hora" />
         <input type="hidden" name="volver" data-campo="vuelta-abrir" />
-        <fieldset class="ag-grupo">
+        <fieldset class="ag-campo">
           <legend>¿Cómo quieres atender?</legend>
           <div class="ag-ops">
             <label><input type="radio" name="destino" value="mod:presencial" checked /> Presencial</label>
@@ -426,10 +445,14 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
       quitar.hidden = !b.dataset.extra; campo('extra').value = b.dataset.extra || '';
       abrir('libre', `${h} · Libre ${modo}`);
     } else if (b.dataset.hoja === 'cerrada') {
-      const conB = !!b.dataset.bloqueo;
+      const conB = !!b.dataset.texto;
       hoja.querySelector('[data-con-bloqueo]').hidden = !conB;
       hoja.querySelector('[data-sin-bloqueo]').hidden = conB;
-      if (conB) { campo('bloqueo').value = b.dataset.bloqueo; campo('tabla').value = b.dataset.tabla; hoja.querySelector('[data-texto-bloqueo]').textContent = b.dataset.texto; }
+      if (conB) {
+        campo('bloqueo').value = b.dataset.bloqueo; campo('tabla').value = b.dataset.tabla;
+        hoja.querySelector('[data-texto-bloqueo]').textContent = b.dataset.texto;
+        hoja.querySelectorAll('[data-quitar-cierre]').forEach((x) => { x.hidden = !b.dataset.bloqueo; });
+      }
       campo('hora').value = h; campo('vuelta-abrir').value = `${vuelta}&h=${hh}`;
       hoja.querySelector('[data-boton-abrir]').textContent = `Abrir las ${h}`;
       abrir('cerrada', `${h} · Cerrada`);
@@ -439,6 +462,7 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
       abrir('vacaciones', 'Días libres o vacaciones');
     }
   });
+  document.querySelector('.ag-dia.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !hoja.hidden) cerrar(); });
   // Un solo toque por botón (evita guardar dos veces).
   document.querySelectorAll('.ag form, .ag-hoja form').forEach((f) => f.addEventListener('submit', () => {
@@ -527,8 +551,8 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
   .ag-hoja .panel[hidden] { display: none; }
   .ag-hoja form { display: grid; gap: 10px; }
   .ag-hoja form[hidden], .ag-hoja [data-con-bloqueo][hidden] { display: none; }
-  .ag-grupo { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
-  .ag-grupo legend { font-size: 15px; font-weight: 700; color: #5F5E57; margin-bottom: 8px; }
+  .ag-campo { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+  .ag-campo legend { font-size: 15px; font-weight: 700; color: #5F5E57; margin-bottom: 8px; }
   .ag-ops { display: grid; gap: 8px; }
   .ag-ops label { min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-radius: 14px; border: 2px solid #CFC8BF; background: #fff; font-weight: 700; font-size: 16px; cursor: pointer; }
   .ag-ops label:has(input:checked) { border-color: #576352; background: #E6EBE3; color: #3F4A3B; }

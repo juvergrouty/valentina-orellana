@@ -1120,7 +1120,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     }
 
     // «agendada»: la agenda del celular sugiere enviar el link de pago por WhatsApp (22 nov 2026; solo la ruta de vuelta).
-    const agendadaQ = payment_mode !== 'free' && bookingIds.length ? `agendada=${bookingIds[0]}&fecha_ag=${primeraFecha || session_date}` : '';
+    const agendadaQ = bookingIds.length ? (payment_mode !== 'free' ? `agendada=${bookingIds[0]}&` : '') + `fecha_ag=${primeraFecha || session_date}` : '';
     const conAvisos = [avisoPack ? avisoPack.slice(1) : '', agendadaQ].filter(Boolean).join('&');
     return redirect(conAvisos ? conParam(dest) + conAvisos : dest);
   }
