@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   retencionHoras, calcularVence, tokenValido, correoValido, fechaLarga, venceTexto, mensajeHoraWhatsapp,
-  mensajePasosWhatsapp, enlaceWhatsapp, esHoraLink, tieneMarca, origenValido, utcDeChile, enlaceCalendario,
+  mensajePasosWhatsapp, enlaceWhatsapp, esHoraLink, tieneMarca, origenValido, utcDeChile, enlaceCalendario, mensajeRecordatorioHora,
 } from './horaLinkUtil';
 
 test('retención: 24 h por defecto y dentro del rango', () => {
@@ -77,4 +77,12 @@ test('marcas en las notas: no confunde una con otra', () => {
   assert.equal(esHoraLink('HoraLinkVencida 2026'), false);
   assert.equal(tieneMarca(n, 'HoraLinkVencida'), false);
   assert.equal(tieneMarca(n, 'HoraLinkVencidaVista'), true);
+});
+
+test('recordatorio al vencer el plazo: la hora sigue guardada', () => {
+  const m = mensajeRecordatorioHora({ nombre: 'ana', fecha: '2026-11-25', hora: '18:00', url: 'https://x.cl/hora/t', monto: 65000 });
+  assert.match(m, /^Hola Ana, te escribo por tu hora del miércoles 25 de noviembre a las 18:00/);
+  assert.match(m, /Todavía te la tengo guardada/);
+  assert.match(m, /\(\$65\.000\): https:\/\/x\.cl\/hora\/t/);
+  for (const linea of m.split('\n')) assert.match(linea, /^[A-ZÁÉÍÓÚÑ]/);
 });

@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { agregarLineaNotas } from '../../../lib/apigateway';
 import { rutaInterna } from '../../../lib/rutaInterna';
-import { MARCA_HORA_VENCIDA_VISTA, MARCA_PASOS_WA_HECHO, MARCA_BOLETA_DATOS_OCULTA } from '../../../lib/horaLinkUtil';
+import { MARCA_HORA_VENCIDA_VISTA, MARCA_PASOS_WA_HECHO, MARCA_BOLETA_DATOS_OCULTA, MARCA_PLAZO_VISTO } from '../../../lib/horaLinkUtil';
 
 export const prerender = false;
 
@@ -9,6 +9,7 @@ export const prerender = false;
 // Cada uno deja su propia marca en la sesión; nada se borra y nada más cambia.
 const MARCAS: Record<string, string> = {
   vencida_vista: MARCA_HORA_VENCIDA_VISTA,   // «Ya lo vi»: la hora se liberó sin pago
+  plazo_visto: MARCA_PLAZO_VISTO,            // «Ya lo vi»: venció el plazo, la hora sigue guardada
   pasos_hecho: MARCA_PASOS_WA_HECHO,         // «Ya se los mandé»: Pasos a seguir por WhatsApp
   boleta_ocultar: MARCA_BOLETA_DATOS_OCULTA, // «Ocultar»: boleta pendiente de datos (la sesión lo sigue mostrando)
 };

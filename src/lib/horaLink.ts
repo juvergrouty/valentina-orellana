@@ -24,9 +24,10 @@ import { sendWhatsappText, sendWhatsappTemplate } from './whatsapp';
 import { stepsPageUrl } from './stepsPage';
 import { meetDeNotas, normalizarMeet } from './enlaceSesion';
 import { conEstacionamiento } from '../data/consulta';
+import { origenManual, utmEnUrl } from './origen';
 import {
   MARCA_HORA_LINK, MARCA_HORA_VENCIDA, MARCA_HORA_VENCIDA_VISTA, MARCA_PASOS_WA_ENVIADOS, MARCA_PASOS_WA_PENDIENTE,
-  MARCA_PASOS_WA_HECHO, MARCA_BOLETA_DATOS, MARCA_BOLETA_DATOS_OCULTA,
+  MARCA_PASOS_WA_HECHO, MARCA_BOLETA_DATOS, MARCA_BOLETA_DATOS_OCULTA, MARCA_PLAZO_VENCIDO, MARCA_PLAZO_VISTO, mensajeRecordatorioHora,
   calcularVence, correoValido, mensajeHoraWhatsapp, mensajePasosWhatsapp, origenValido, retencionHoras, tieneMarca,
   enlaceWhatsapp, esHoraLink, type OrigenHora,
 } from './horaLinkUtil';
@@ -65,6 +66,10 @@ export type CrearHoraInput = {
    * Por defecto true salvo origen 'panel' (Vale puede agendar fuera de su horario).
    */
   soloHorasLibres?: boolean;
+  /** De dónde llegó la persona: uno de CANALES_PANEL (origen.ts). Lo elige Vale en el panel o lo pasa el asistente. */
+  canal?: string | null;
+  /** UTM / clic de anuncio de donde vino (ej. el anuncio de WhatsApp): se guardan y van en el link. */
+  utm?: Record<string, string> | null;
   /** Vale ya vio el aviso "se cruza con…" y eligió agendar igual (solo el panel). */
   permitirCruce?: boolean;
   /** Mandarle el link por correo si se agendó solo con correo (por defecto sí). */
@@ -157,6 +162,7 @@ export async function crearHoraConLink(input: CrearHoraInput): Promise<CrearHora
   } catch (e) { console.error('[horaLink] ficha:', e); }
 
   const token = randomBytes(18).toString('base64url'); // 24 caracteres
+  const origenReserva = origenManual({ canal: input.canal, utm: input.utm, via: origen });
   const horas = await leerRetencionHoras();
   const vence = calcularVence(Date.now(), horas, msHasta);
   const canal: 'whatsapp' | 'correo' = telefono ? 'whatsapp' : 'correo';
@@ -173,6 +179,8 @@ export async function crearHoraConLink(input: CrearHoraInput): Promise<CrearHora
     reminder_email_enabled: !!correoFinal, whatsapp_reminder_enabled: false,
     evaluation_email_enabled: false, review_email_enabled: false,
     link_token: token, link_vence_at: vence.toISOString(), link_canal: canal,
+    // Origen (revisión diaria de anuncios): canal elegido y UTM, en la misma columna que las reservas web.
+    ...(origenReserva ? { origen: origenReserva } : {}),
     // Cruce aceptado por Vale: fuera de la regla "sin cruces" de la base (migración 0026).
     ...(cruceAceptado ? { cruce_permitido: true } : {}),
   };
@@ -190,7 +198,7 @@ export async function crearHoraConLink(input: CrearHoraInput): Promise<CrearHora
   // hasta que la paciente o Vale agreguen uno (la reserva igual sale en la agenda con nombre y teléfono).
   if (correoFinal) await upsertPatientFromBooking({ patient_name: nombre, patient_email: correoFinal, patient_phone: telFinal, rut }).catch(() => null);
 
-  const url = `${site}/hora/${token}`;
+  const url = utmEnUrl(`${site}/hora/${token}`, input.utm);
   const online = modalidad === 'online';
   const mensajeWhatsapp = mensajeHoraWhatsapp({ nombre, fecha: input.fecha, hora, online, url, venceIso: vence.toISOString(), monto });
   let correoEnviado = false;
@@ -221,39 +229,50 @@ export type HoraPublica = {
   amount: number; paid_at: string | null; payment_note: string | null; notes: string | null; service_id: string | null;
   mp_preference_id: string | null; mp_payment_id: string | null; debt_voided: boolean | null; created_by_admin: boolean | null;
   link_token: string; link_vence_at: string | null; link_canal: string | null; duration_min: number | null; created_at: string | null;
+  origen: unknown;
 };
 
 /** La reserva de un link (o null). Lanza si falta la migración (para responder 404 sin romper). */
 export async function horaPorToken(token: string): Promise<HoraPublica | null> {
   const { data, error } = await supabase.from('bookings')
-    .select('id, status, session_type, session_date, session_time, patient_name, patient_email, patient_phone, patient_rut, amount, paid_at, payment_note, notes, service_id, mp_preference_id, mp_payment_id, debt_voided, created_by_admin, link_token, link_vence_at, link_canal, duration_min, created_at')
+    .select('id, status, session_type, session_date, session_time, patient_name, patient_email, patient_phone, patient_rut, amount, paid_at, payment_note, notes, service_id, mp_preference_id, mp_payment_id, debt_voided, created_by_admin, link_token, link_vence_at, link_canal, duration_min, created_at, origen')
     .eq('link_token', token).maybeSingle();
   if (error) return null;
   return (data as HoraPublica) ?? null;
 }
 
+export const CLAVE_LIBERAR_AUTO = 'hora_link_liberar_auto';
+
 /**
- * Cron cada 5 min: libera las horas con link cuyo plazo venció sin pago. Antes de liberar se le
- * pregunta a Flow si alcanzó a pagar (igual que expireBooking.ts). Una hora con comprobante de
- * transferencia o pago informado por Flow nunca se libera aquí.
+ * Cron cada 5 min: horas con link cuyo plazo venció sin pago (plan aprobado, Línea 1).
+ * - Por defecto la hora NO se libera: se le manda UN recordatorio a la paciente (WhatsApp o correo)
+ *   y Vale ve el aviso en el Inicio con su botón; la hora sigue guardada hasta que ella decida.
+ * - Solo si Vale activa «Liberar sola la hora al vencer» en Configuración (apagado por defecto), se
+ *   libera (status 'expired', se borra el evento) y se le avisa.
+ * Antes de cualquier cosa se pregunta a Flow y a SumUp si alcanzó a pagar. Una hora con comprobante de
+ * transferencia o pago informado por Flow no se toca. Si una hora liberada se paga igual, el pago se
+ * acepta: flow/confirm.ts la reactiva si sigue libre o deja el aviso «pago por devolver o reagendar».
  */
-export async function vencerHorasLink(hastaMs = Date.now() + 20_000): Promise<{ liberadas: number }> {
-  const { data, error } = await supabase.from('bookings')
-    .select('id, patient_name, patient_email, patient_phone, session_date, session_time, notes, mp_preference_id, google_event_id, link_vence_at')
+export async function vencerHorasLink(hastaMs = Date.now() + 20_000): Promise<{ liberadas: number; recordadas: number }> {
+  const { data: cfgAuto } = await supabase.from('settings').select('value').eq('key', CLAVE_LIBERAR_AUTO).maybeSingle();
+  const liberarSola = cfgAuto?.value === 'true';
+  let q = supabase.from('bookings')
+    .select('id, patient_name, patient_email, patient_phone, session_type, session_date, session_time, amount, notes, mp_preference_id, google_event_id, link_vence_at, link_token')
     .eq('status', 'pending_payment').is('paid_at', null)
-    .or('debt_voided.is.null,debt_voided.eq.false') // deuda anulada por Vale: es decisión suya, no se libera sola
-    .not('link_vence_at', 'is', null).lt('link_vence_at', new Date().toISOString())
-    .limit(20);
-  if (error) return { liberadas: 0 }; // sin la migración 0028 no hay nada que vencer
+    .or('debt_voided.is.null,debt_voided.eq.false') // deuda anulada por Vale: es decisión suya
+    .not('link_vence_at', 'is', null).lt('link_vence_at', new Date().toISOString());
+  if (!liberarSola) q = q.not('notes', 'ilike', `%${MARCA_PLAZO_VENCIDO}%`); // el recordatorio va una sola vez
+  const { data, error } = await q.limit(20);
+  if (error) return { liberadas: 0, recordadas: 0 }; // sin la migración 0028 no hay nada que vencer
   const filas = (data ?? []).filter((b) => !/ComprobanteTransferencia|PagoSinAviso/.test(b.notes ?? ''));
-  if (!filas.length) return { liberadas: 0 };
+  if (!filas.length) return { liberadas: 0, recordadas: 0 };
 
   // flow.ts se carga solo aquí: lee la configuración al cargarse y tareasEnvio.ts importa este archivo.
   const { getPaymentStatus, FLOW_URLS } = await import('./flow');
   const { data: envRow } = await supabase.from('settings').select('value').eq('key', 'flow_env').maybeSingle();
   const flowBase = envRow?.value === 'production' ? FLOW_URLS.production : envRow?.value === 'sandbox' ? FLOW_URLS.sandbox : undefined;
   const { data: notifRow } = await supabase.from('settings').select('value').eq('key', 'notification_email').maybeSingle();
-  let liberadas = 0;
+  let liberadas = 0, recordadas = 0;
   for (const b of filas) {
     if (Date.now() > hastaMs) break;
     if (b.mp_preference_id) {
@@ -263,15 +282,34 @@ export async function vencerHorasLink(hastaMs = Date.now() + 20_000): Promise<{ 
           new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Flow lento')), 4000)),
         ]);
         if (st.status === 2) continue; // pagó: el aviso de Flow la confirma (flow/confirm.ts)
-      } catch { continue; } // Flow no respondió: se intenta en la próxima pasada (nunca liberar a ciegas)
+      } catch { continue; } // Flow no respondió: se intenta en la próxima pasada
     }
-    // Link de SumUp: se pregunta antes de liberar (el cron de SumUp corre después de este).
+    // Link de SumUp: se pregunta antes (el cron de SumUp corre después de este).
     if (/SumUpCheckout/.test(b.notes ?? '')) {
       try {
         const { revisarLinkSumUpDeSesion } = await import('./sumup');
         if (await revisarLinkSumUpDeSesion(b.id)) continue;
       } catch { continue; }
     }
+
+    if (!liberarSola) {
+      // Recordatorio a la paciente; la hora sigue guardada.
+      const url = b.link_token ? `${SITIO}/hora/${b.link_token}` : '';
+      const texto = mensajeRecordatorioHora({ nombre: b.patient_name, fecha: b.session_date, hora: String(b.session_time).slice(0, 5), url, monto: b.amount });
+      let via: 'whatsapp' | 'correo' | 'nada' = 'nada';
+      if (b.patient_phone && url) { const r = await sendWhatsappText(b.patient_phone, texto).catch(() => ({ sent: false })); if (r.sent) via = 'whatsapp'; }
+      if (via === 'nada' && b.patient_email && url) {
+        try {
+          const r = await sendPaymentLinkEmail({ patientName: b.patient_name, patientEmail: b.patient_email, serviceName: 'Sesión', amount: b.amount, sessionDate: b.session_date, sessionTime: String(b.session_time).slice(0, 5), paymentUrl: url });
+          if (r.sent) via = 'correo';
+        } catch { /* queda el botón de WhatsApp en el aviso de Vale */ }
+      }
+      await agregarLineaNotas(b.id, `${MARCA_PLAZO_VENCIDO} ${new Date().toISOString()} ${via}`);
+      recordadas++;
+      await logInfo('hora-link/plazo', `Venció el plazo de pago de la hora de ${b.patient_name} (${b.session_date} ${String(b.session_time).slice(0, 5)}); sigue guardada`, { bookingId: b.id, recordatorio: via });
+      continue;
+    }
+
     const { data: upd } = await supabase.from('bookings').update({ status: 'expired' })
       .eq('id', b.id).eq('status', 'pending_payment').is('paid_at', null).select('id');
     if (!upd?.length) continue;
@@ -289,7 +327,7 @@ export async function vencerHorasLink(hastaMs = Date.now() + 20_000): Promise<{ 
     } catch (e) { console.error('[horaLink] aviso vencida:', e); }
     await logInfo('hora-link/vencida', `Venció sin pago la hora con link de ${b.patient_name} (${b.session_date} ${String(b.session_time).slice(0, 5)}): quedó libre`, { bookingId: b.id });
   }
-  return { liberadas };
+  return { liberadas, recordadas };
 }
 
 /**
@@ -342,7 +380,8 @@ export async function textoPasosWhatsapp(b: { patient_name: string; session_type
 
 // ── Avisos del Inicio (cada uno con su botón de «atendido») ─────────────────────────────────
 export type AvisoHora = {
-  tipo: 'vencida' | 'pasos_whatsapp' | 'boleta_datos';
+  tipo: 'vencida' | 'plazo' | 'pasos_whatsapp' | 'boleta_datos';
+  recordatorio?: 'whatsapp' | 'correo' | 'nada';
   bookingId: string; paciente: string; fecha: string; hora: string; cuando: string; monto: number;
   waUrl?: string;
 };
@@ -350,8 +389,9 @@ export type AvisoHora = {
 export async function avisosHoraLink(): Promise<AvisoHora[]> {
   const desde = new Date(Date.now() - 45 * 86400_000).toISOString().slice(0, 10);
   const { data, error } = await supabase.from('bookings')
-    .select('id, patient_name, patient_phone, session_type, session_date, session_time, status, paid_at, amount, notes')
+    .select('id, patient_name, patient_phone, session_type, session_date, session_time, status, paid_at, amount, notes, link_token')
     .ilike('notes', `%${MARCA_HORA_LINK} %`).gte('session_date', desde).limit(200);
+  if (error?.code === '42703') return []; // sin la migración 0028 no hay horas con link
   if (error) throw new Error(error.message);
   const avisos: AvisoHora[] = [];
   const marcaEn = (n: string | null, m: string) => new RegExp(`^${m} (\\S+)`, 'm').exec(n ?? '')?.[1] ?? '';
@@ -361,6 +401,13 @@ export async function avisosHoraLink(): Promise<AvisoHora[]> {
     const base = { bookingId: b.id, paciente: b.patient_name, fecha: b.session_date, hora: String(b.session_time).slice(0, 5), monto: b.amount ?? 0 };
     if (b.status === 'expired' && tieneMarca(b.notes, MARCA_HORA_VENCIDA) && !tieneMarca(b.notes, MARCA_HORA_VENCIDA_VISTA)) {
       avisos.push({ ...base, tipo: 'vencida', cuando: marcaEn(b.notes, MARCA_HORA_VENCIDA) });
+    }
+    if (b.status === 'pending_payment' && !b.paid_at && tieneMarca(b.notes, MARCA_PLAZO_VENCIDO) && !tieneMarca(b.notes, MARCA_PLAZO_VISTO)) {
+      const m = new RegExp(`^${MARCA_PLAZO_VENCIDO} (\\S+) (\\S+)`, 'm').exec(b.notes ?? '');
+      const via = (m?.[2] ?? 'nada') as 'whatsapp' | 'correo' | 'nada';
+      const url = b.link_token ? `${SITIO}/hora/${b.link_token}` : '';
+      avisos.push({ ...base, tipo: 'plazo', cuando: m?.[1] ?? '', recordatorio: via,
+        waUrl: enlaceWhatsapp(b.patient_phone, mensajeRecordatorioHora({ nombre: b.patient_name, fecha: b.session_date, hora: base.hora, url, monto: b.amount })) });
     }
     if (b.paid_at && b.status !== 'cancelled' && tieneMarca(b.notes, MARCA_PASOS_WA_PENDIENTE) && !tieneMarca(b.notes, MARCA_PASOS_WA_HECHO)) {
       datos ??= await datosPasos();

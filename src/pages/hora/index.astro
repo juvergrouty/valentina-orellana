@@ -36,6 +36,9 @@ const online = !!h && String(h.session_type).includes('online');
 const hora = h ? String(h.session_time).slice(0, 5) : '';
 const pagada = !!h?.paid_at;
 const noVigente = !!h && !pagada && (h.status === 'cancelled' || h.status === 'expired' || h.debt_voided === true);
+// Liberada sola (opción de Configuración): igual se puede pagar con tarjeta; si la hora sigue libre se confirma.
+const liberada = !!h && !pagada && h.status === 'expired' && h.debt_voided !== true;
+const plazoPasado = !!h?.link_vence_at && Date.parse(h.link_vence_at) < Date.now();
 // Pagada y después anulada por Vale (o reagendada a otra): no se le dice "confirmada".
 const anulada = !!h && pagada && h.status === 'cancelled';
 const enRevision = !!h && comprobanteEnRevision(h.notes);
@@ -81,7 +84,7 @@ const datosCompletos = !!tr['transfer_account_number'];
 const waOtraHora = `https://wa.me/${WA_VALE}?text=${encodeURIComponent('Hola Valentina, se venció el plazo para pagar mi hora. ¿Buscamos otra?')}`;
 const waDuda = `https://wa.me/${WA_VALE}?text=${encodeURIComponent('Hola Valentina, tengo una duda sobre el pago de mi hora.')}`;
 const waDatos = `https://wa.me/${WA_VALE}?text=${encodeURIComponent('Hola Valentina, ¿me mandas los datos para transferir?')}`;
-const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0, online, pagada, estado: pagada ? 'pagada' : noVigente ? 'vencida' : 'pendiente' });
+const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0, online, pagada, estado: pagada ? 'pagada' : liberada ? 'liberada' : noVigente ? 'vencida' : 'pendiente' });
 ---
 
 <Layout title="Tu hora" description="Tu hora con Ps. Valentina Orellana." noindex sinMenu>
@@ -101,8 +104,23 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
     ) : noVigente ? (
       <div class="text-center">
         <h1 class="font-heading text-2xl mb-3">Tu hora del {fechaLarga(h.session_date)} a las {hora} ya no está guardada</h1>
-        <p class="text-stone mb-6">El plazo para pagarla venció y la hora quedó libre. Escríbeme y buscamos otra que te acomode.</p>
-        <a href={waOtraHora} target="_blank" rel="noopener" class="btn-dark w-full sm:w-auto justify-center text-center inline-flex">Escribirme por WhatsApp</a>
+        <p class="text-stone mb-6">{liberada
+          ? 'El plazo para pagarla venció y la hora quedó libre para otras personas. Si igual quieres pagarla, la confirmo si sigue libre; si no, te escribo para buscar otra o devolverte el pago.'
+          : 'Escríbeme y buscamos otra que te acomode.'}</p>
+        {liberada && (
+          <>
+            <button type="button" id="btn-flow" class="btn-dark w-full justify-center text-center mb-3"><span data-texto>Pagar {formatCLP(h.amount)} con tarjeta</span></button>
+            <div id="correo-box" hidden={!necesitaCorreo} class="border border-dust rounded-lg p-4 flex flex-col gap-2 mb-3 text-left">
+              <label for="correo-flow" class="text-sm font-medium">Tu correo</label>
+              <p class="text-xs text-stone">Para pagar con tarjeta, Flow pide un correo para mandarte el comprobante.</p>
+              <input id="correo-flow" type="email" autocomplete="email" class="border border-dust rounded px-3 py-3 text-base" />
+              <p id="correo-error" class="hidden text-sm text-red-700" role="alert"></p>
+              <button type="button" id="btn-flow-seguir" class="btn-dark w-full justify-center text-center">Seguir al pago con tarjeta</button>
+            </div>
+            <p id="pago-error" class="hidden text-sm text-red-700 text-center mb-3" role="alert"></p>
+          </>
+        )}
+        <a href={waOtraHora} target="_blank" rel="noopener" class={`${liberada ? 'btn-outline' : 'btn-dark'} w-full sm:w-auto justify-center text-center inline-flex`}>Escribirme por WhatsApp</a>
       </div>
     ) : (
       <>
@@ -188,7 +206,9 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
         ) : (
           <div id="hora-pendiente">
             {h.link_vence_at && (
-              <p class="text-sm bg-sand border border-dust rounded-lg px-4 py-3 mb-6">Te guardo esta hora hasta el {venceTexto(h.link_vence_at)}. Al pagarla, queda confirmada.</p>
+              <p class="text-sm bg-sand border border-dust rounded-lg px-4 py-3 mb-6">{plazoPasado
+                ? 'Todavía te tengo guardada esta hora. Al pagarla, queda confirmada.'
+                : `Te guardo esta hora hasta el ${venceTexto(h.link_vence_at)}. Al pagarla, queda confirmada.`}</p>
             )}
             <h2 class="font-medium mb-3">¿Cómo quieres pagar?</h2>
             <div class="flex flex-col gap-3">

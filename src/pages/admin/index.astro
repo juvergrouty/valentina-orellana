@@ -335,6 +335,19 @@ for (const h of horasLink ?? []) {
       href: null,
       accion: { tipo: 'form', action: '/api/admin/hora-link', campos: { id: h.bookingId, accion: 'vencida_vista', redirect: vuelta }, texto: 'Ya lo vi' },
     });
+  } else if (h.tipo === 'plazo') {
+    // Plan aprobado (Línea 1): al vencer el plazo la hora NO se libera sola; se le recuerda a la paciente.
+    const recordatorio = h.recordatorio === 'whatsapp' ? 'le mandé un recordatorio por WhatsApp'
+      : h.recordatorio === 'correo' ? 'le mandé un recordatorio por correo'
+      : 'el recordatorio automático no salió: toca para mandárselo por WhatsApp';
+    tareas.push({
+      clave: h.cuando ? claveCL(h.cuando) : ahoraClave,
+      chip: 'plazo vencido',
+      titulo: `Venció el plazo de pago de ${h.paciente}`,
+      detalle: `${mayus(fechaLarga(h.fecha))} a las ${h.hora} · ${clp(h.monto)} · la hora sigue guardada; ${recordatorio}. Si quieres liberarla, ábrela en la agenda y usa «Anular»`,
+      href: h.recordatorio === 'nada' && h.waUrl ? h.waUrl : enSesion, externo: h.recordatorio === 'nada' && !!h.waUrl,
+      accion: { tipo: 'form', action: '/api/admin/hora-link', campos: { id: h.bookingId, accion: 'plazo_visto', redirect: vuelta }, texto: 'Ya lo vi' },
+    });
   } else if (h.tipo === 'pasos_whatsapp') {
     tareas.push({
       clave: ahoraClave,

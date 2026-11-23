@@ -5,6 +5,8 @@
 export const MARCA_HORA_LINK = 'HoraLink';                       // HoraLink <iso> <origen>
 export const MARCA_HORA_VENCIDA = 'HoraLinkVencida';             // HoraLinkVencida <iso>: se liberó sin pago
 export const MARCA_HORA_VENCIDA_VISTA = 'HoraLinkVencidaVista';  // Vale apretó «Ya lo vi»
+export const MARCA_PLAZO_VENCIDO = 'HoraLinkPlazoVencido';       // HoraLinkPlazoVencido <iso> <whatsapp|correo|nada>: venció el plazo, sigue guardada
+export const MARCA_PLAZO_VISTO = 'HoraLinkPlazoVisto';           // Vale apretó «Ya lo vi» en el aviso del plazo
 export const MARCA_PASOS_WA_ENVIADOS = 'PasosWhatsappEnviados';  // PasosWhatsappEnviados <iso>
 export const MARCA_PASOS_WA_PENDIENTE = 'PasosWhatsappPendiente'; // no se pudieron enviar solos: Vale los manda
 export const MARCA_PASOS_WA_HECHO = 'PasosWhatsappHecho';        // Vale apretó «Ya se los mandé»
@@ -114,6 +116,15 @@ export function enlaceCalendario(o: { fecha: string; hora: string; duracionMin: 
   if (o.lugar) p.set('location', o.lugar);
   if (o.detalle) p.set('details', o.detalle);
   return `https://calendar.google.com/calendar/render?${p.toString()}`;
+}
+
+/** Recordatorio a la paciente cuando vence el plazo (la hora sigue guardada, plan aprobado: Línea 1). */
+export function mensajeRecordatorioHora(o: { nombre: string; fecha: string; hora: string; url: string; monto?: number | null }): string {
+  const nombre = primerNombre(o.nombre);
+  const valor = o.monto && o.monto > 0 ? ` (${clp(o.monto)})` : '';
+  return `${nombre ? `Hola ${nombre}` : 'Hola'}, te escribo por tu hora del ${fechaLarga(o.fecha)} a las ${o.hora}. Todavía te la tengo guardada.\n`
+    + `Si quieres confirmarla, puedes pagarla aquí${valor}: ${o.url}\n`
+    + 'Si ya no te acomoda, me avisas y la libero para otra persona.';
 }
 
 /** Pasos a seguir por WhatsApp, al pagar: lo imprescindible para llegar o conectarse. */

@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { crearHoraConLink, recalcularRetencionHora, FALTA_MIGRACION as FALTA_MIGRACION_HORA } from '../../../lib/horaLink';
+import { origenManual } from '../../../lib/origen';
 import { normalizarTelefono } from '../../../lib/contacto';
 import { supabase } from '../../../lib/supabase';
 import { pricingPlans } from '../../../data/services';
@@ -740,6 +741,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       const overrideH = parseInt(form.get('amount_override')?.toString() ?? '', 10);
       const reqUrlH = new URL(request.url);
       const r = await crearHoraConLink({
+        canal: form.get('origen_canal')?.toString() || null,
         servicio: svc.id, fecha: session_date, hora: session_time, nombre: nombreH,
         telefono: telH || null, correo: correoH || null, origen: 'panel',
         modalidad: modality_choice === 'online' ? 'online' : 'presencial',
@@ -937,6 +939,14 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       }
     }
 
+    // Origen elegido por Vale (22 nov 2026, plan aprobado Línea 1): queda en cada sesión creada.
+    {
+      const origenSel = origenManual({ canal: form.get('origen_canal')?.toString(), via: 'panel' });
+      if (origenSel && bookingIds.length) {
+        const { error: oErr } = await supabase.from('bookings').update({ origen: origenSel }).in('id', bookingIds).is('origen', null);
+        if (oErr) console.error('[create-admin] origen:', oErr.message);
+      }
+    }
     // Lo que realmente se cobra: la suma de las sesiones creadas.
     const avisoPack = (conflictCount > 0 && bookingIds.length > 0 ? `&pack_creadas=${bookingIds.length}&pack_saltadas=${conflictCount}` : '')
       + (cruceBloqueado && bookingIds.length > 0 ? '&cruce_bloqueado=1' : '');

@@ -288,13 +288,16 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
     <div class="card">
       <p class="label" style="margin-bottom:0.75rem;">Link a una hora</p>
       <p style="font-size:0.82rem;color:var(--stone);margin-bottom:1rem;line-height:1.5;">
-        Cuando agendas con «Link a esta hora», la hora queda guardada para esa persona hasta que pague.
-        Si no paga dentro de este plazo, la hora se libera sola y te aviso en el Inicio y por correo.
-        Nunca se guarda más allá del comienzo de la sesión.
+        Cuando agendas con «Link a esta hora», la hora queda guardada para esa persona. Si no paga dentro
+        de este plazo, le mando un recordatorio y te aviso en el Inicio; la hora sigue guardada hasta que tú decidas.
       </p>
       <label class="label" for="cfg-retencion" style="display:block;margin-bottom:0.3rem;">Horas que se guarda la hora sin pagar</label>
       <input id="cfg-retencion" type="number" name={CLAVE_RETENCION} value={String(retencionHoras)} min={RETENCION_HORAS_MIN} max={RETENCION_HORAS_MAX} step="0.5" inputmode="decimal" style="max-width:8rem;" />
       <p style="font-size:0.72rem;color:var(--stone);margin-top:0.3rem;">Por defecto 24. Entre {RETENCION_HORAS_MIN} y {RETENCION_HORAS_MAX} horas.</p>
+      <label style="display:flex;align-items:flex-start;gap:0.5rem;margin-top:1rem;font-size:0.82rem;cursor:pointer;min-height:44px;">
+        <input type="checkbox" name="hora_link_liberar_auto" value="true" checked={settings['hora_link_liberar_auto'] === 'true'} style="width:auto;margin-top:0.2rem;" />
+        <span>Liberar sola la hora al vencer el plazo <span style="display:block;font-size:0.72rem;color:var(--stone);margin-top:0.15rem;">Apagado: la hora sigue guardada y decides tú. Encendido: se libera, se borra de tu calendario y te aviso. Si después la pagan igual, el pago se acepta y te aviso.</span></span>
+      </label>
     </div>
 
     <!-- Google Calendar -->

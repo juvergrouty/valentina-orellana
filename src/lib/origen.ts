@@ -64,3 +64,56 @@ export function origenTexto(origen: unknown): string | null {
   if (t?.utm_term) partes.push(`'${t.utm_term}'`);
   return partes.join(' · ');
 }
+
+// ── Origen marcado a mano (22 nov 2026, plan aprobado Línea 1) ────────────────────────────────
+// Las reservas que agenda Vale desde el panel y las horas con link (también las del asistente de
+// WhatsApp) no pasan por /agenda, así que no traen el origen del navegador. Vale elige de dónde llegó
+// la persona en un selector, y si el link trae UTM (ej. el anuncio de WhatsApp) se guardan también.
+// La revisión diaria de anuncios lee bookings.origen (canal + UTM) igual que en las reservas web.
+export const CANALES_PANEL = [
+  'Anuncio de Instagram o Facebook',
+  'Instagram (sin anuncio)',
+  'Facebook (sin anuncio)',
+  'TikTok',
+  'Anuncio de Google',
+  'Google orgánico',
+  'WhatsApp',
+  'Recomendación',
+  'Doctoralia',
+  'Paciente que vuelve',
+  'Otro',
+] as const;
+
+export type OrigenManual = Origen & { manual: true; via: string; registrado: string };
+
+/** Origen para guardar en bookings.origen. null si no hay nada que registrar. */
+export function origenManual(o: { canal?: string | null; utm?: unknown; via: string }): OrigenManual | null {
+  const canalElegido = (CANALES_PANEL as readonly string[]).includes(String(o.canal ?? '')) ? String(o.canal) : '';
+  const toque = limpiarTouch(o.utm);
+  if (!canalElegido && !toque) return null;
+  return {
+    canal: canalElegido || calcularCanal(null, toque),
+    first: null, last: toque,
+    manual: true, via: o.via.replace(/[^\w-]/g, '').slice(0, 20) || 'panel', registrado: new Date().toISOString(),
+  };
+}
+
+/** Une el origen marcado a mano con el del navegador de quien paga (sin perder el canal elegido). */
+export function unirOrigen(guardado: unknown, navegador: Origen): Origen | null {
+  const g = guardado && typeof guardado === 'object' ? guardado as Partial<OrigenManual> : null;
+  if (!g) return navegador.first || navegador.last ? navegador : null;
+  if (g.manual && !g.first && (navegador.first || navegador.last)) {
+    return { ...(g as Origen), first: navegador.first, last: g.last ?? navegador.last };
+  }
+  return null; // ya tenía origen: no se toca
+}
+
+/** Parámetros UTM / clic de anuncio para agregar a un link (los mismos que guarda BaseLayout). */
+export function utmEnUrl(url: string, utm: unknown): string {
+  const t = limpiarTouch(utm);
+  if (!t) return url;
+  const p = new URLSearchParams();
+  for (const k of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'gbraid', 'wbraid'] as const) if (t[k]) p.set(k, t[k]!);
+  const q = p.toString();
+  return q ? `${url}${url.includes('?') ? '&' : '?'}${q}` : url;
+}

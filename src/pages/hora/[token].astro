@@ -13,6 +13,12 @@ if (!tokenValido(token)) return Astro.redirect('/hora', 302);
 Astro.cookies.set(COOKIE_HORA, token, {
   path: '/', httpOnly: true, secure: import.meta.env.PROD, sameSite: 'lax', maxAge: 60 * 60 * 24 * 30,
 });
-const vista = Astro.url.searchParams.get('vista') === 'vale' ? '?vista=vale' : '';
-return Astro.redirect(`/hora${vista}`, 302);
+// UTM y clic de anuncio del link (si los trae) pasan a /hora para que el sitio los registre (vo_origen).
+const q = new URLSearchParams();
+if (Astro.url.searchParams.get('vista') === 'vale') q.set('vista', 'vale');
+for (const k of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'gbraid', 'wbraid']) {
+  const v = Astro.url.searchParams.get(k);
+  if (v) q.set(k, v.slice(0, 200));
+}
+return Astro.redirect(`/hora${q.toString() ? `?${q}` : ''}`, 302);
 ---

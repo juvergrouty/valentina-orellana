@@ -10,8 +10,12 @@ Pedido por Vale el 22 nov 2026. Rama `claude/link-pago-hora-251a14`. Requiere la
    fecha y hora, y da solo **nombre + teléfono** o **nombre + correo**.
 2. Se crea la reserva `pending_payment` con `created_by_admin = true` (no vence a los 30 min de
    `expireBooking.ts`) y su propio plazo `link_vence_at` (Configuración → «Link a una hora», 24 h
-   por defecto, nunca después del inicio de la sesión). El cron de cada 5 min
-   (`cron/boletas-pendientes`) la libera si vence sin pago y avisa a Vale (Inicio + correo).
+   por defecto, nunca después del inicio de la sesión). Al vencer sin pago (cron de cada 5 min,
+   `cron/boletas-pendientes`) la hora **NO se libera**: se le manda UN recordatorio a la paciente
+   (WhatsApp o correo) y Vale ve el aviso en el Inicio con «Ya lo vi»; la hora sigue guardada. Solo si
+   Vale activa «Liberar sola la hora al vencer el plazo» (Configuración, apagado por defecto) se libera.
+   Si una hora liberada se paga igual (Flow), el pago se acepta: se confirma si sigue libre o Vale
+   recibe «pago por devolver o reagendar».
 3. La paciente abre `/hora/<token>`: solo esa hora, modalidad, valor y tres formas de pago
    (Flow, SumUp, transferencia). Flow exige correo: si la reserva no tiene, lo pide ahí mismo.
 4. Al pagar, los mismos envíos de siempre (`tareasEnvio.ts`). Si se agendó con teléfono, la tarea
@@ -33,7 +37,9 @@ const r = await crearHoraConLink({
   nombre: 'Ana Soto',
   telefono: '+56912345678',    // o correo; basta uno
   correo: null,
-  origen: 'asistente',         // 'panel' | 'asistente' | 'whatsapp' | 'otro'
+  origen: 'asistente',         // quién la crea: 'panel' | 'asistente' | 'whatsapp' | 'otro'
+  canal: 'Anuncio de Instagram o Facebook', // de dónde llegó: uno de CANALES_PANEL (src/lib/origen.ts), opcional
+  utm: { utm_source: 'facebook', utm_medium: 'ctwa', utm_campaign: 'agenda-dic' }, // opcional: se guarda y va en el link
 });
 if (r.ok) {
   // r.url            → link /hora/<token> para mandarle
@@ -53,6 +59,14 @@ if (r.ok) {
   correo, sí le manda el link por correo (se apaga con `enviarCorreo: false`).
 - Plantilla opcional para los Pasos fuera de la ventana de 24 h de Meta: settings
   `whatsapp_pasos_template_name` (+ `whatsapp_pasos_template_lang`), con un solo parámetro de texto.
+
+## Origen (revisión diaria de anuncios)
+
+Cada hora con link y cada sesión agendada desde el panel guarda `bookings.origen` (la misma columna de
+las reservas web): `{ canal, first, last, manual: true, via, registrado }`. El panel tiene el selector
+«¿De dónde llegó?»; el asistente pasa `canal` y/o `utm`. Los UTM viajan en el link y, al pagar, se suma
+lo que registró el navegador (`unirOrigen`) sin perder el canal elegido. La ficha de la paciente ya
+muestra «Origen: …».
 
 ## Transferencias (todos los flujos)
 

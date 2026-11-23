@@ -16,6 +16,7 @@ import { estadosConsentimientoSeguro, ETIQUETA_CONSENTIMIENTO, type EstadoConsen
 import { esPagoEnConsulta, ETIQUETA_PAGO_EN_CONSULTA } from '../../lib/pagoEnConsulta';
 import { carrilesDelDia } from '../../lib/horaLibre';
 import { sumupConfigurado } from '../../lib/sumup';
+import { CANALES_PANEL } from '../../lib/origen';
 import { venceTexto, esHoraLink, tieneMarca, mensajeHoraWhatsapp, enlaceWhatsapp, MARCA_BOLETA_DATOS } from '../../lib/horaLinkUtil';
 
 // ── Week calculation ─────────────────────────────────────────────────────────
@@ -982,6 +983,15 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
             </div>
           </div>
           </div>
+        </div>
+
+        <!-- Origen (22 nov 2026): de dónde llegó, para la revisión diaria de anuncios. -->
+        <div class="bp-field">
+          <label for="bp-origen">¿De dónde llegó?</label>
+          <select name="origen_canal" id="bp-origen">
+            <option value="">Sin indicar</option>
+            {CANALES_PANEL.map((c) => <option value={c}>{c}</option>)}
+          </select>
         </div>
 
         <!-- Servicio -->

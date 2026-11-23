@@ -7,7 +7,7 @@ import { tagBookingsWithPaymentToken, esCobrable } from '../../lib/debt';
 import { comprobanteEnRevision } from '../../lib/comprobantes';
 import { crearLinkSumUp, revisarLinkSumUpDeSesion, sumupConfigurado } from '../../lib/sumup';
 import { upsertPatientFromBooking } from '../../lib/patients';
-import { limpiarOrigen } from '../../lib/origen';
+import { limpiarOrigen, unirOrigen } from '../../lib/origen';
 import { logError } from '../../lib/logger';
 import { rutValido, limpiarRut } from '../../lib/rut';
 import { normalizarComuna } from '../../data/comunas';
@@ -55,8 +55,12 @@ export const POST: APIRoute = async ({ request }) => {
 
   if (accion === 'flow' || accion === 'sumup') {
     if (h.paid_at) return json({ pagada: true });
-    if (h.status === 'cancelled' || h.status === 'expired') return json({ error: 'Esta hora ya no está reservada. Escríbele a Valentina y buscamos otra.' }, 400);
-    if (!esCobrable(h)) return json({ error: 'Esta hora no tiene un pago pendiente. Si crees que es un error, escríbele a Valentina.' }, 400);
+    if (h.status === 'cancelled' || h.debt_voided) return json({ error: 'Esta hora ya no está reservada. Escríbele a Valentina y buscamos otra.' }, 400);
+    // Hora ya liberada (Vale activó «Liberar sola»): igual se puede pagar con tarjeta (pago doble aceptado).
+    // flow/confirm.ts la confirma si la hora sigue libre; si no, Vale recibe «pago por devolver o reagendar».
+    const liberada = h.status === 'expired';
+    if (liberada && accion === 'sumup') return json({ error: 'Para esta hora usa el pago con tarjeta por Flow.' }, 400);
+    if (!liberada && !esCobrable(h)) return json({ error: 'Esta hora no tiene un pago pendiente. Si crees que es un error, escríbele a Valentina.' }, 400);
 
     if (accion === 'sumup') {
       if (!sumupConfigurado()) return json({ error: 'Esta opción no está disponible ahora. Usa otra forma de pago.' }, 400);
@@ -92,8 +96,6 @@ export const POST: APIRoute = async ({ request }) => {
         amount: h.amount, email: correo,
         orderId: `hora-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
         urlConfirmation: `${site}/api/flow/confirm`, urlReturn: `${site}/api/flow/return`, baseUrl,
-        // El link de Flow vence con la hora retenida (mínimo 30 min): un pago muy tardío no revive una hora liberada.
-        timeoutSeconds: Math.max(1800, Math.round((Date.parse(h.link_vence_at ?? '') - Date.now()) / 1000) || 1800),
       });
       const { error: tagErr } = await supabase.from('bookings').update({ mp_preference_id: order.token }).eq('id', h.id);
       if (tagErr) {
@@ -102,9 +104,10 @@ export const POST: APIRoute = async ({ request }) => {
       }
       await tagBookingsWithPaymentToken([h.id], order.token).catch(() => {});
       // De qué anuncio llegó (vo_origen del navegador), como /pagar: solo si la reserva no tenía.
+      // Si Vale marcó el origen a mano, se conserva su canal y se agrega lo del navegador (unirOrigen).
       try {
-        const o = limpiarOrigen(body.origen);
-        if (o.first || o.last) await supabase.from('bookings').update({ origen: o }).eq('id', h.id).is('origen', null);
+        const unido = unirOrigen(h.origen, limpiarOrigen(body.origen));
+        if (unido) await supabase.from('bookings').update({ origen: unido }).eq('id', h.id);
       } catch { /* sin origen no pasa nada */ }
       return json({ ok: true, paymentUrl: `${order.url}?token=${order.token}` });
     } catch (e) {
