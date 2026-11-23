@@ -75,7 +75,7 @@ export const POST: APIRoute = async ({ request }) => {
     const nuevo = String(body.correo ?? '').trim().toLowerCase();
     if (!correo) {
       if (!nuevo) return json({ necesitaCorreo: true });
-      if (!correoValido(nuevo)) return json({ error: 'Revisa tu correo: no parece válido.', necesitaCorreo: true }, 400);
+      if (!correoValido(nuevo)) return json({ error: 'Ese correo no parece válido, revísalo.', necesitaCorreo: true }, 400);
       const { error } = await supabase.from('bookings').update({ patient_email: nuevo, reminder_email_enabled: true }).eq('id', h.id).or('patient_email.is.null,patient_email.eq.');
       if (error) return json({ error: 'No se pudo guardar tu correo. Intenta de nuevo.' }, 500);
       correo = nuevo;
@@ -121,8 +121,8 @@ export const POST: APIRoute = async ({ request }) => {
     const direccion = t('direccion', 160);
     const comuna = normalizarComuna(t('comuna', 60)) ?? t('comuna', 60);
     const correoNuevo = t('correo', 200).toLowerCase();
-    if (rutRaw && !rutValido(rutRaw)) return json({ error: 'Revisa tu RUT: el número o el dígito verificador no calzan.' }, 400);
-    if (correoNuevo && !correoValido(correoNuevo)) return json({ error: 'Revisa tu correo: no parece válido.' }, 400);
+    if (rutRaw && !rutValido(rutRaw)) return json({ error: 'Ese RUT no calza, revisa el número y el dígito verificador.' }, 400);
+    if (correoNuevo && !correoValido(correoNuevo)) return json({ error: 'Ese correo no parece válido, revísalo.' }, 400);
     const rut = rutRaw ? limpiarRut(rutRaw) : '';
 
     const cambios: Record<string, unknown> = {};

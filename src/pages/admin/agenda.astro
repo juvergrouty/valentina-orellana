@@ -444,11 +444,11 @@ let horaLinkNuevo: string | null = null, hlWa: string | null = null, hlVence: st
 {
   const id = Astro.url.searchParams.get('hora_creada') ?? '';
   if (/^[0-9a-f-]{36}$/i.test(id)) {
-    const { data: hb } = await supabase.from('bookings').select('patient_name, patient_phone, session_type, session_date, session_time, link_token, link_vence_at').eq('id', id).maybeSingle();
+    const { data: hb } = await supabase.from('bookings').select('patient_name, patient_phone, session_type, session_date, session_time, amount, link_token, link_vence_at').eq('id', id).maybeSingle();
     if (hb?.link_token) {
       horaLinkNuevo = `${Astro.url.origin}/hora/${hb.link_token}`;
       hlVence = hb.link_vence_at ? venceTexto(hb.link_vence_at) : null;
-      hlWa = enlaceWhatsapp(hb.patient_phone, mensajeHoraWhatsapp({ nombre: hb.patient_name, fecha: hb.session_date, hora: String(hb.session_time).slice(0, 5), online: String(hb.session_type).includes('online'), url: horaLinkNuevo, venceIso: hb.link_vence_at ?? new Date().toISOString() }));
+      hlWa = enlaceWhatsapp(hb.patient_phone, mensajeHoraWhatsapp({ nombre: hb.patient_name, fecha: hb.session_date, hora: String(hb.session_time).slice(0, 5), online: String(hb.session_type).includes('online'), url: horaLinkNuevo, venceIso: hb.link_vence_at ?? new Date().toISOString(), monto: hb.amount }));
     }
   }
 }
@@ -841,7 +841,7 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
                   // Hora con link (22 nov 2026): link para reenviar y si la boleta espera el RUT.
                   hora_link_url:  horaLinkDe[b.id]?.url ?? null,
                   hora_vence:     horaLinkDe[b.id]?.vence ?? null,
-                  hora_wa_msg:    horaLinkDe[b.id] ? mensajeHoraWhatsapp({ nombre: b.patient_name, fecha: b.session_date, hora: String(b.session_time).slice(0, 5), online: String(b.session_type).includes('online'), url: horaLinkDe[b.id].url, venceIso: horaLinkDe[b.id].venceIso ?? new Date().toISOString() }) : null,
+                  hora_wa_msg:    horaLinkDe[b.id] ? mensajeHoraWhatsapp({ nombre: b.patient_name, fecha: b.session_date, hora: String(b.session_time).slice(0, 5), online: String(b.session_type).includes('online'), url: horaLinkDe[b.id].url, venceIso: horaLinkDe[b.id].venceIso ?? new Date().toISOString(), monto: b.amount }) : null,
                   boleta_datos:   esHoraLink(b.notes) && tieneMarca(b.notes, MARCA_BOLETA_DATOS),
                 })}
                 title={`${b.patient_name} · ${b.session_time.slice(0, 5)}${esPagoEnConsulta(b) ? ` · ${ETIQUETA_PAGO_EN_CONSULTA}` : ''}${tituloConsent(cs.estado) ? ` · ${tituloConsent(cs.estado)}` : ''}`}
@@ -938,7 +938,7 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
               <input type="email" name="patient_email" id="bp-pemail" placeholder="correo@mail.cl">
             </div>
           </div>
-          <p id="bp-hora-nota" class="bp-hora-nota" style="display:none">Basta el nombre y el teléfono o el correo. El RUT, la dirección y la comuna se los pides en la consulta (o ella los deja después de pagar).</p>
+          <p id="bp-hora-nota" class="bp-hora-nota" style="display:none">Basta el nombre y el teléfono o el correo. El RUT, la dirección y la comuna se los pides en la consulta (o te los deja en la página después de pagar).</p>
           <div id="bp-ficha-extra">
           <div class="bp-field">
             <label>RUT *</label>

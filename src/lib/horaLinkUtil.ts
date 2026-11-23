@@ -79,28 +79,56 @@ export const primerNombre = (n: string | null | undefined) => {
  * Mensaje para mandarle el link por WhatsApp. Cercano y corto, sin guion de venta
  * (regla de Vale: la primera respuesta por WhatsApp es cercanía, no un guion).
  */
-export function mensajeHoraWhatsapp(o: { nombre: string; fecha: string; hora: string; online: boolean; url: string; venceIso: string }): string {
+export function mensajeHoraWhatsapp(o: { nombre: string; fecha: string; hora: string; online: boolean; url: string; venceIso: string; monto?: number | null }): string {
   const nombre = primerNombre(o.nombre);
   const saludo = nombre ? `Hola ${nombre}` : 'Hola';
   const modalidad = o.online ? 'online' : 'presencial';
+  const valor = o.monto && o.monto > 0 ? ` (${clp(o.monto)}, con tarjeta o transferencia)` : '';
   return `${saludo}, te dejé reservada tu hora del ${fechaLarga(o.fecha)} a las ${o.hora} (${modalidad}).\n`
-    + `Para confirmarla, puedes pagarla aquí: ${o.url}\n`
-    + `Te la guardo hasta el ${venceTexto(o.venceIso)}. Cualquier duda, me escribes.`;
+    + `Para confirmarla, puedes pagarla aquí${valor}: ${o.url}\n`
+    + `Te la guardo hasta el ${venceTexto(o.venceIso)}; después se libera. Cualquier duda, me escribes.`;
+}
+
+export const clp = (n: number) => `$${Math.round(n).toLocaleString('es-CL')}`;
+
+/** Instante UTC de una fecha y hora de Chile (con su horario de verano o invierno). */
+export function utcDeChile(fecha: string, hora: string): Date {
+  const [y, m, d] = fecha.split('-').map(Number);
+  const [hh, mi] = hora.split(':').map(Number);
+  let t = Date.UTC(y, m - 1, d, hh, mi);
+  for (let i = 0; i < 2; i++) {
+    const { fecha: f, hora: h } = enChile(new Date(t));
+    const [fy, fm, fd] = f.split('-').map(Number);
+    const [fh, fmi] = h.split(':').map(Number);
+    t += Date.UTC(y, m - 1, d, hh, mi) - Date.UTC(fy, fm - 1, fd, fh, fmi);
+  }
+  return new Date(t);
+}
+
+/** «Agregar a mi calendario» (Google Calendar, sin cuenta de por medio para el sitio). */
+export function enlaceCalendario(o: { fecha: string; hora: string; duracionMin: number; titulo: string; lugar?: string | null; detalle?: string | null }): string {
+  const ini = utcDeChile(o.fecha, o.hora);
+  const fin = new Date(ini.getTime() + (o.duracionMin || 50) * 60_000);
+  const f = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const p = new URLSearchParams({ action: 'TEMPLATE', text: o.titulo, dates: `${f(ini)}/${f(fin)}` });
+  if (o.lugar) p.set('location', o.lugar);
+  if (o.detalle) p.set('details', o.detalle);
+  return `https://calendar.google.com/calendar/render?${p.toString()}`;
 }
 
 /** Pasos a seguir por WhatsApp, al pagar: lo imprescindible para llegar o conectarse. */
 export function mensajePasosWhatsapp(o: { nombre: string; fecha: string; hora: string; online: boolean; meet?: string | null; direccion?: string | null; pasosUrl?: string | null }): string {
   const nombre = primerNombre(o.nombre);
-  const lineas = [`${nombre ? `Hola ${nombre}` : 'Hola'}, tu hora quedó confirmada: ${fechaLarga(o.fecha)} a las ${o.hora}.`];
+  const lineas = [`${nombre ? `Hola ${nombre}` : 'Hola'}, tu hora del ${fechaLarga(o.fecha)} a las ${o.hora} quedó confirmada.`];
   if (o.online) {
     lineas.push(o.meet
-      ? `Es online. Para conectarte, entra a este link a la hora de la sesión: ${o.meet}`
-      : 'Es online. El link para conectarte te llega en la invitación de Google Calendar; si no la ves, me escribes y te lo mando.');
+      ? `La sesión es online; entra a este link a las ${o.hora}: ${o.meet}`
+      : 'La sesión es online. El link para conectarte te llega en la invitación de Google Calendar; si no la ves, me escribes y te lo mando.');
   } else {
     lineas.push(o.direccion ? `Te espero en ${o.direccion}.` : 'Es presencial, en mi consulta. Si necesitas la dirección, me escribes.');
   }
   if (o.pasosUrl) lineas.push(`Aquí están los pasos a seguir antes de la sesión: ${o.pasosUrl}`);
-  lineas.push('Nos vemos.');
+  lineas.push(`Nos vemos el ${fechaLarga(o.fecha).split(' ')[0]}.`);
   return lineas.join('\n');
 }
 

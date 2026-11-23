@@ -6,7 +6,9 @@ export const prerender = false;
 import Layout from '../../layouts/BaseLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { horaPorToken, COOKIE_HORA } from '../../lib/horaLink';
-import { tokenValido, fechaLarga, venceTexto, primerNombre } from '../../lib/horaLinkUtil';
+import { tokenValido, fechaLarga, venceTexto, primerNombre, enlaceCalendario } from '../../lib/horaLinkUtil';
+import { meetDeNotas, normalizarMeet } from '../../lib/enlaceSesion';
+import { getOrCreatePendingConsent, consentUrl, vigente, type ConsentRow } from '../../lib/consent';
 import { comprobanteEnRevision } from '../../lib/comprobantes';
 import { sumupConfigurado } from '../../lib/sumup';
 import { conEstacionamiento } from '../../data/consulta';
@@ -40,6 +42,27 @@ const enRevision = !!h && comprobanteEnRevision(h.notes);
 const necesitaCorreo = !!h && !h.patient_email;
 const conSumUp = sumupConfigurado();
 const nombre = primerNombre(h?.patient_name);
+const duracion = h?.duration_min ?? 50;
+// Pagada: el link de la sesión (online) o la dirección, y «Agregar a mi calendario», aquí mismo.
+const meet = h && online ? normalizarMeet(meetDeNotas(h.notes)) : null;
+const calendarioUrl = h ? enlaceCalendario({
+  fecha: h.session_date, hora, duracionMin: duracion, titulo: 'Sesión con Valentina Orellana, psicóloga',
+  lugar: online ? (meet ?? 'Online') : direccion || null, detalle: meet ? `Link de la sesión: ${meet}` : null,
+}) : '';
+// Consentimiento informado (Ley 21.719): visible siempre al pagar, fuera de lo opcional. Con ficha y sin
+// consentimiento vigente, el botón para firmarlo; sin ficha (se agendó solo con teléfono), el aviso.
+let consentimientoUrl: string | null = null;
+let consentimientoFirmado = false;
+if (h && pagada && h.patient_email) {
+  try {
+    const { data: ficha } = await supabase.from('patients').select('id').eq('email', h.patient_email.toLowerCase()).maybeSingle();
+    if (ficha) {
+      const { data: filas } = await supabase.from('consents').select('*').eq('patient_id', ficha.id);
+      consentimientoFirmado = !!vigente((filas ?? []) as ConsentRow[]);
+      if (!consentimientoFirmado) consentimientoUrl = consentUrl(Astro.url.origin, (await getOrCreatePendingConsent(ficha.id)).token);
+    }
+  } catch { consentimientoUrl = null; }
+}
 const canalPasos = h?.link_canal === 'whatsapp' || (!!h?.patient_phone && !h?.patient_email) ? 'whatsapp' : 'correo';
 
 // Datos para transferir (Configuración → Pagos), los mismos de /pagar.
@@ -66,54 +89,84 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
     {!h ? (
       <div class="text-center">
         <h1 class="font-heading text-2xl mb-3">Link no válido</h1>
-        <p class="text-stone">Este link no es correcto. Escríbeme y te mando uno nuevo.</p>
+        <p class="text-stone">Este link no funciona. Escríbeme y te mando uno nuevo.</p>
         <a href={`https://wa.me/${WA_VALE}`} target="_blank" rel="noopener" class="btn-dark justify-center text-center mt-6 inline-flex">Escribirme por WhatsApp</a>
       </div>
     ) : anulada ? (
       <div class="text-center">
-        <h1 class="font-heading text-2xl mb-3">Esta hora fue anulada</h1>
-        <p class="text-stone mb-6">Escríbeme y buscamos otra hora o vemos la devolución de tu pago.</p>
+        <h1 class="font-heading text-2xl mb-3">Esta hora quedó anulada</h1>
+        <p class="text-stone mb-6">Escríbeme y lo resolvemos, con otra hora o con la devolución de tu pago.</p>
         <a href={waDuda} target="_blank" rel="noopener" class="btn-dark w-full sm:w-auto justify-center text-center inline-flex">Escribirme por WhatsApp</a>
       </div>
     ) : noVigente ? (
       <div class="text-center">
-        <h1 class="font-heading text-2xl mb-3">Esta hora ya no está guardada</h1>
+        <h1 class="font-heading text-2xl mb-3">Tu hora del {fechaLarga(h.session_date)} a las {hora} ya no está guardada</h1>
         <p class="text-stone mb-6">El plazo para pagarla venció y la hora quedó libre. Escríbeme y buscamos otra que te acomode.</p>
         <a href={waOtraHora} target="_blank" rel="noopener" class="btn-dark w-full sm:w-auto justify-center text-center inline-flex">Escribirme por WhatsApp</a>
       </div>
     ) : (
       <>
         <p class="label text-stone mb-1">{nombre ? `Hola ${nombre}` : 'Hola'}</p>
-        <h1 class="font-heading text-2xl md:text-3xl mb-6" id="hora-titulo">{pagada ? 'Tu hora está confirmada' : 'Tu hora con Valentina'}</h1>
+        <h1 class="font-heading text-2xl md:text-3xl mb-6" id="hora-titulo">{pagada ? 'Tu hora está confirmada' : 'Confirma tu hora conmigo'}</h1>
 
         <div class="border border-dust rounded-lg divide-y divide-dust mb-6">
           <div class="px-5 py-4">
             <p class="font-medium">{servicio}</p>
             <p class="text-stone text-sm mt-1">{mayus(fechaLarga(h.session_date))} a las {hora}</p>
             <p class="text-stone text-sm mt-1">{online ? 'Online, por videollamada' : direccion ? `Presencial, en ${direccion}` : 'Presencial, en mi consulta'}</p>
+            <p class="text-stone text-sm mt-1">Duración: {duracion} minutos</p>
           </div>
           <div class="flex items-center justify-between px-5 py-4 bg-sand">
             <p class="font-medium text-sm">{pagada ? 'Pagado' : 'Valor'}</p>
             <p class="font-heading text-xl font-semibold">{formatCLP(h.amount)}</p>
           </div>
+          {!pagada && (
+            <div class="px-5 py-3 text-xs text-stone leading-relaxed">
+              <p>Valentina Orellana, psicóloga. Recibes boleta de honorarios para el reembolso de tu Isapre.</p>
+              <p class="mt-1">Puedes reagendar sin costo avisando con al menos 24 horas de anticipación. <a href="/condiciones" target="_blank" rel="noopener" class="underline underline-offset-2">Ver las condiciones</a></p>
+            </div>
+          )}
         </div>
 
         {pagada ? (
           <div id="hora-pagada">
-            <p class="text-stone mb-8 leading-relaxed">
+            <div class="border border-dust rounded-lg p-5 mb-6">
+              {online ? (
+                meet
+                  ? <p class="text-sm leading-relaxed">Para conectarte, entra a este link a las {hora}: <a href={meet} class="underline break-all">{meet}</a></p>
+                  : <p class="text-sm leading-relaxed">Te mando el link para conectarte {canalPasos === 'whatsapp' ? 'por WhatsApp' : 'a tu correo'} y también queda en tu calendario.</p>
+              ) : (
+                <p class="text-sm leading-relaxed">{direccion ? `Te espero en ${direccion}.` : 'Te espero en mi consulta.'}</p>
+              )}
+              <a href={calendarioUrl} target="_blank" rel="noopener" class="btn-outline w-full justify-center text-center mt-4 inline-flex">Agregar a mi calendario</a>
+            </div>
+            <p class="text-stone mb-6 leading-relaxed">
               {canalPasos === 'whatsapp'
-                ? `Te mandé por WhatsApp ${online ? 'cómo conectarte' : 'cómo llegar'} y los pasos a seguir antes de la sesión.`
-                : `Te mandé a tu correo ${online ? 'cómo conectarte' : 'cómo llegar'} y los pasos a seguir antes de la sesión. Si no lo ves, revisa spam o la pestaña Promociones.`}
+                ? 'Por WhatsApp te llegan también los pasos a seguir antes de la sesión.'
+                : 'A tu correo te llegan también los pasos a seguir antes de la sesión. Si no los ves, revisa spam o la pestaña Promociones.'}
             </p>
+            {!consentimientoFirmado && (
+              <div class="border border-dust rounded-lg p-5 mb-6 bg-sand">
+                <h2 class="font-medium mb-1">Consentimiento informado</h2>
+                {consentimientoUrl ? (
+                  <>
+                    <p class="text-sm text-stone leading-relaxed">Antes de la primera sesión necesito que firmes el consentimiento informado. Toma un par de minutos.</p>
+                    <a href={consentimientoUrl} class="btn-dark w-full justify-center text-center mt-4 inline-flex">Firmar el consentimiento</a>
+                  </>
+                ) : (
+                  <p class="text-sm text-stone leading-relaxed">Antes de la primera sesión te voy a pedir que firmes el consentimiento informado. {online ? 'Te lo mando antes de la sesión.' : 'Te lo mando o lo firmamos en la consulta.'}</p>
+                )}
+              </div>
+            )}
 
             <!-- Datos opcionales: la boleta sale cuando haya RUT, con la fecha del pago. -->
             <div class="border border-dust rounded-lg p-5" id="datos">
-              <h2 class="font-medium mb-1">Datos para tu boleta (opcional)</h2>
-              <p class="text-sm text-stone mb-4 leading-relaxed">Si quieres tu boleta, por ejemplo para la isapre, déjame aquí tus datos. Si prefieres, me los das en la consulta.</p>
+              <h2 class="font-medium mb-1">Datos para tu boleta</h2>
+              <p class="text-sm text-stone mb-4 leading-relaxed">Para emitir tu boleta (por ejemplo, para la Isapre) necesito tu RUT. Si prefieres, me lo das en la {online ? 'sesión' : 'consulta'}.</p>
               <form id="datos-form" class="flex flex-col gap-3" novalidate>
                 <label class="text-sm font-medium" for="d-rut">RUT</label>
                 <input id="d-rut" name="rut" type="text" inputmode="text" autocomplete="off" maxlength="12" placeholder="12.345.678-9" class="border border-dust rounded px-3 py-3 text-base" />
-                <label class="flex items-center gap-2 text-sm text-stone"><input type="checkbox" id="d-sin-rut" class="w-5 h-5" /> No tengo RUT chileno</label>
+                <label class="flex items-center gap-2 text-sm text-stone min-h-[44px]"><input type="checkbox" id="d-sin-rut" class="w-5 h-5" /> No tengo RUT chileno</label>
                 <label class="text-sm font-medium" for="d-dir">Dirección</label>
                 <input id="d-dir" name="direccion" type="text" autocomplete="street-address" placeholder="Calle, número, departamento" class="border border-dust rounded px-3 py-3 text-base" />
                 <label class="text-sm font-medium" for="d-comuna">Comuna</label>
@@ -126,6 +179,7 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
                 )}
                 <button type="submit" id="d-enviar" class="btn-dark w-full justify-center text-center mt-2">Guardar mis datos</button>
                 <p id="d-msg" class="hidden text-sm text-center" role="status" aria-live="polite"></p>
+                <p class="text-xs text-stone leading-relaxed">Uso estos datos solo para emitir tu boleta. Más detalles en la <a href="/condiciones#privacidad" target="_blank" rel="noopener" class="underline">política de privacidad</a>.</p>
               </form>
             </div>
           </div>
@@ -134,24 +188,25 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
         ) : (
           <div id="hora-pendiente">
             {h.link_vence_at && (
-              <p class="text-sm bg-sand border border-dust rounded-lg px-4 py-3 mb-6">Te guardo esta hora hasta el {venceTexto(h.link_vence_at)}. Cuando la pagas, queda confirmada.</p>
+              <p class="text-sm bg-sand border border-dust rounded-lg px-4 py-3 mb-6">Te guardo esta hora hasta el {venceTexto(h.link_vence_at)}. Al pagarla, queda confirmada.</p>
             )}
             <h2 class="font-medium mb-3">¿Cómo quieres pagar?</h2>
             <div class="flex flex-col gap-3">
               <button type="button" id="btn-flow" class="pago-opcion">
-                <span class="font-medium">Pagar con tarjeta</span>
-                <span class="text-sm text-stone">Débito o crédito, con Flow</span>
+                <span class="font-medium" data-texto>Pagar {formatCLP(h.amount)} con tarjeta</span>
+                <span class="text-sm text-stone">Débito o crédito. Pago seguro con Flow</span>
               </button>
-              <div id="correo-box" hidden class="border border-dust rounded-lg p-4 flex flex-col gap-2">
+              <div id="correo-box" hidden={!necesitaCorreo} class="border border-dust rounded-lg p-4 flex flex-col gap-2">
                 <label for="correo-flow" class="text-sm font-medium">Tu correo</label>
-                <p class="text-xs text-stone">Flow lo pide para mandarte el comprobante del pago.</p>
+                <p class="text-xs text-stone">Para pagar con tarjeta, Flow pide un correo para mandarte el comprobante.</p>
                 <input id="correo-flow" type="email" autocomplete="email" class="border border-dust rounded px-3 py-3 text-base" />
-                <button type="button" id="btn-flow-seguir" class="btn-dark w-full justify-center text-center">Seguir al pago</button>
+                <p id="correo-error" class="hidden text-sm text-red-700" role="alert"></p>
+                <button type="button" id="btn-flow-seguir" class="btn-dark w-full justify-center text-center">Seguir al pago con tarjeta</button>
               </div>
               {conSumUp && (
                 <button type="button" id="btn-sumup" class="pago-opcion">
-                  <span class="font-medium">Pagar con tarjeta por SumUp</span>
-                  <span class="text-sm text-stone">Otra opción con débito o crédito</span>
+                  <span class="font-medium" data-texto>Pagar con tarjeta por SumUp</span>
+                  <span class="text-sm text-stone">Si la tarjeta no pasa con la opción anterior</span>
                 </button>
               )}
               <button type="button" id="btn-transfer" class="pago-opcion" aria-expanded="false" aria-controls="transfer-box">
@@ -162,7 +217,6 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
             <p id="pago-error" class="hidden text-sm text-red-700 text-center mt-3" role="alert"></p>
 
             <div id="transfer-box" hidden class="mt-5 border border-dust rounded-lg p-5 text-left">
-              <h2 class="font-medium mb-4">Pagar por transferencia</h2>
               <ol class="flex flex-col gap-4 text-sm">
                 <li class="paso"><span class="paso-num">1</span>
                   <div class="min-w-0 flex-1">
@@ -174,7 +228,7 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
                             <dt class="text-stone">{k}</dt>
                             <dd class="flex items-center gap-2 min-w-0">
                               <span class="font-medium break-all text-right">{v}</span>
-                              <button type="button" class="copy-btn text-xs border border-dust rounded px-3 py-2 hover:border-ink shrink-0" data-copy={v}>Copiar</button>
+                              <button type="button" class="copy-btn text-sm border rounded px-4 py-3 min-h-[44px] hover:border-ink shrink-0" data-copy={v}>Copiar</button>
                             </dd>
                           </div>
                         ))}
@@ -187,16 +241,16 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
                 <li class="paso"><span class="paso-num">2</span><p class="flex-1">Toma una foto o una captura de pantalla del comprobante de la transferencia.</p></li>
                 <li class="paso"><span class="paso-num">3</span>
                   <div class="flex-1 min-w-0">
-                    <p class="mb-2">Toca «Elegir la foto del comprobante» y elígela.</p>
-                    <label for="comprobante" class="btn-outline w-full justify-center text-center cursor-pointer">Elegir la foto del comprobante</label>
+                    <p class="mb-2">Toca «Elegir la foto o el PDF del comprobante» y búscalo en tu celular.</p>
+                    <label for="comprobante" class="btn-outline w-full justify-center text-center cursor-pointer">Elegir la foto o el PDF del comprobante</label>
                     <input id="comprobante" name="comprobante" type="file" accept="image/*,application/pdf" class="sr-only" />
                     <p id="archivo-nombre" class="text-xs text-stone mt-2 break-all"></p>
                   </div>
                 </li>
                 <li class="paso"><span class="paso-num">4</span>
                   <div class="flex-1 min-w-0">
-                    <p class="mb-2">Toca «Enviar comprobante». Listo: tu hora queda confirmada.</p>
-                    <label for="titular" class="text-xs text-stone block mb-1">Si la cuenta desde la que transferiste no está a tu nombre, escribe aquí el nombre del titular (opcional)</label>
+                    <p class="mb-2">Toca «Enviar comprobante». Listo, tu hora queda confirmada.</p>
+                    <label for="titular" class="text-sm text-stone block mb-1">¿La cuenta no está a tu nombre? Escribe el nombre del titular (opcional)</label>
                     <input id="titular" type="text" autocomplete="off" class="border border-dust rounded px-3 py-3 text-base w-full mb-3" />
                     <button type="button" id="btn-comprobante" class="btn-dark w-full justify-center text-center">Enviar comprobante</button>
                   </div>
@@ -215,7 +269,11 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
 <style>
   [hidden] { display: none !important; }
   .pago-opcion { display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; width: 100%; text-align: left;
-    border: 1px solid #DDD8CF; border-radius: 0.5rem; padding: 1rem 1.1rem; min-height: 3.5rem; background: #fff; cursor: pointer; }
+    border: 1px solid #9C978C; border-radius: 0.5rem; padding: 1rem 2.6rem 1rem 1.1rem; min-height: 3.5rem; background: #fff; cursor: pointer; position: relative; }
+  .pago-opcion::after { content: '›'; position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); font-size: 1.6rem; line-height: 1; color: #576352; }
+  .pago-opcion[aria-expanded="true"]::after { transform: translateY(-50%) rotate(90deg); }
+  input[type="text"], input[type="email"] { border-color: #9C978C; }
+  .copy-btn { border-color: #9C978C; }
   .pago-opcion:hover, .pago-opcion:focus-visible { border-color: #1A1A18; }
   .pago-opcion[aria-expanded="true"] { border-color: #576352; background: #F6F8F4; }
   .pago-opcion:disabled { opacity: 0.6; cursor: wait; }
@@ -257,31 +315,47 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
   }
 
   const errEl = document.getElementById('pago-error');
-  const mostrarError = (t) => { if (!errEl) return; errEl.textContent = t; errEl.classList.remove('hidden'); };
+  const mostrarError = (t, metodo) => { evento('hora_link_error', { metodo: metodo || 'otro' }); if (!errEl) return; errEl.textContent = t; errEl.classList.remove('hidden'); };
+  // Mientras se prepara el pago, el botón lo dice (y vuelve a su texto si algo falla).
+  const preparando = (btn, on) => {
+    const t = btn?.querySelector('[data-texto]');
+    if (!t) return;
+    if (on) { t.dataset.original = t.textContent; t.textContent = 'Preparando el pago…'; }
+    else if (t.dataset.original) t.textContent = t.dataset.original;
+    btn.disabled = on;
+  };
+  const correoErr = document.getElementById('correo-error');
 
   // ── Flow ──
   const btnFlow = document.getElementById('btn-flow');
   const correoBox = document.getElementById('correo-box');
   const irAFlow = async (correo) => {
-    errEl?.classList.add('hidden');
-    btnFlow.disabled = true;
+    errEl?.classList.add('hidden'); correoErr?.classList.add('hidden');
+    preparando(btnFlow, true);
     try {
       const { res, data } = await api('flow', { correo, origen: origen() });
       if (data.pagada) { location.reload(); return; }
       if (data.necesitaCorreo) {
-        correoBox.hidden = false; btnFlow.disabled = false;
+        correoBox.hidden = false; preparando(btnFlow, false);
+        evento('hora_link_pide_correo');
         document.getElementById('correo-flow')?.focus();
-        if (data.error) mostrarError(data.error);
+        if (data.error && correoErr) { correoErr.textContent = data.error; correoErr.classList.remove('hidden'); }
         return;
       }
-      if (!res.ok || !data.paymentUrl) { mostrarError(data.error || 'No se pudo preparar el pago. Intenta de nuevo.'); btnFlow.disabled = false; return; }
+      if (!res.ok || !data.paymentUrl) { mostrarError(data.error || 'No se pudo preparar el pago. Intenta de nuevo.', 'flow'); preparando(btnFlow, false); return; }
       window.location.href = data.paymentUrl;
-    } catch (e) { mostrarError('Error de conexión. Intenta de nuevo.'); btnFlow.disabled = false; }
+    } catch (e) { mostrarError('Error de conexión. Intenta de nuevo.', 'flow'); preparando(btnFlow, false); }
   };
-  btnFlow?.addEventListener('click', () => { evento('hora_link_pago_inicio', { metodo: 'flow' }); irAFlow(''); });
+  btnFlow?.addEventListener('click', () => {
+    evento('hora_link_pago_inicio', { metodo: 'flow' });
+    // Sin correo, el campo ya está a la vista: se usa lo que haya escrito.
+    const v = !correoBox.hidden ? document.getElementById('correo-flow').value.trim() : '';
+    if (!correoBox.hidden && !v) { correoErr.textContent = 'Escribe tu correo para seguir.'; correoErr.classList.remove('hidden'); document.getElementById('correo-flow').focus(); return; }
+    irAFlow(v);
+  });
   document.getElementById('btn-flow-seguir')?.addEventListener('click', () => {
     const v = document.getElementById('correo-flow').value.trim();
-    if (!v) { mostrarError('Escribe tu correo para seguir.'); return; }
+    if (!v) { correoErr.textContent = 'Escribe tu correo para seguir.'; correoErr.classList.remove('hidden'); return; }
     irAFlow(v);
   });
 
@@ -290,14 +364,14 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
   btnSumup?.addEventListener('click', async () => {
     evento('hora_link_pago_inicio', { metodo: 'sumup' });
     errEl?.classList.add('hidden');
-    btnSumup.disabled = true;
+    preparando(btnSumup, true);
     try {
       const { res, data } = await api('sumup');
       if (data.pagada) { location.reload(); return; }
-      if (!res.ok || !data.paymentUrl) { mostrarError(data.error || 'No se pudo preparar el pago. Intenta de nuevo.'); btnSumup.disabled = false; return; }
+      if (!res.ok || !data.paymentUrl) { mostrarError(data.error || 'No se pudo preparar el pago. Intenta de nuevo.', 'sumup'); preparando(btnSumup, false); return; }
       try { sessionStorage.setItem('hora_sumup_' + D.token, '1'); } catch (e) { /* nada */ }
       window.location.href = data.paymentUrl;
-    } catch (e) { mostrarError('Error de conexión. Intenta de nuevo.'); btnSumup.disabled = false; }
+    } catch (e) { mostrarError('Error de conexión. Intenta de nuevo.', 'sumup'); preparando(btnSumup, false); }
   });
 
   // ── Transferencia ──
@@ -319,6 +393,7 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
   input?.addEventListener('change', () => {
     const f = input.files && input.files[0];
     document.getElementById('archivo-nombre').textContent = f ? `Elegiste: ${f.name}` : '';
+    if (f) evento('hora_link_comprobante_elegido');
   });
   // Fotos grandes del celular: se achican antes de subir (máximo 4 MB en el servidor).
   async function achicar(file) {
@@ -337,7 +412,7 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
   const msg = document.getElementById('transfer-msg');
   btnC?.addEventListener('click', async () => {
     msg.className = 'text-sm text-center mt-4 text-red-700';
-    if (!input.files || !input.files[0]) { msg.textContent = 'Primero elige la foto del comprobante (paso 3).'; return; }
+    if (!input.files || !input.files[0]) { msg.textContent = 'Primero elige la foto o el PDF del comprobante (paso 3).'; return; }
     btnC.disabled = true; btnC.textContent = 'Enviando…';
     try {
       const fd = new FormData();
@@ -348,7 +423,7 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {
         pagado('transferencia');
-        box.innerHTML = '<p class="text-sm text-center leading-relaxed"><strong>¡Listo! Recibí tu comprobante.</strong><br>Tu hora quedó confirmada. En unos minutos te llega cómo ' + (D.online ? 'conectarte' : 'llegar') + ' y los pasos a seguir.</p>';
+        box.innerHTML = '<p class="text-sm text-center leading-relaxed"><strong>¡Listo! Recibí tu comprobante y tu hora quedó confirmada.</strong><br>Te llega ' + (D.online ? 'el link para conectarte' : 'cómo llegar a la consulta') + ' y los pasos a seguir. Reviso la transferencia y, si hay algún problema, te escribo.</p>';
         setTimeout(() => location.reload(), 4000);
         return;
       }
@@ -365,14 +440,14 @@ const datosJs = JSON.stringify({ token: h ? token : null, monto: h?.amount ?? 0,
     const btn = document.getElementById('d-enviar');
     const val = (id) => (document.getElementById(id)?.value || '').trim();
     const datos = { rut: val('d-rut'), sin_rut: !!document.getElementById('d-sin-rut')?.checked, direccion: val('d-dir'), comuna: val('d-comuna'), correo: val('d-correo') };
-    if (!datos.rut && !datos.direccion && !datos.comuna && !datos.correo && !datos.sin_rut) { dMsg.className = 'text-sm text-center text-red-700'; dMsg.textContent = 'Escribe al menos un dato, o déjalo para la consulta.'; return; }
+    if (!datos.rut && !datos.direccion && !datos.comuna && !datos.correo && !datos.sin_rut) { dMsg.className = 'text-sm text-center text-red-700'; dMsg.textContent = 'Escribe al menos un dato, o déjalo para ' + (D.online ? 'la sesión.' : 'la consulta.'); return; }
     btn.disabled = true; btn.textContent = 'Guardando…';
     try {
       const { res, data } = await api('datos', datos);
       if (res.ok && data.ok) {
-        const boleta = data.boleta === 'emitida' ? ' Tu boleta va camino a tu correo.' : data.boleta === 'pendiente' ? ' La boleta sale en cuanto se confirme el pago.' : '';
+        const boleta = data.boleta === 'emitida' ? ' Tu boleta va camino a tu correo.' : data.boleta === 'pendiente' ? ' Tu boleta te llega al correo apenas vea la transferencia en mi cuenta.' : '';
         form.innerHTML = '<p class="text-sm leading-relaxed"><strong>Gracias, tus datos quedaron guardados.</strong>' + boleta + '</p>'
-          + (data.consentimiento ? '<p class="text-sm text-stone mt-3 leading-relaxed">Antes de la primera sesión te pido firmar el consentimiento informado. Toma un par de minutos.</p><a class="btn-dark w-full justify-center text-center mt-3 inline-flex" href="' + data.consentimiento + '">Firmar el consentimiento</a>' : '');
+          + (data.consentimiento && !document.querySelector('a[href*="/consentimiento/"]') ? '<p class="text-sm text-stone mt-3 leading-relaxed">Antes de la primera sesión necesito que firmes el consentimiento informado. Toma un par de minutos.</p><a class="btn-dark w-full justify-center text-center mt-3 inline-flex" href="' + data.consentimiento + '">Firmar el consentimiento</a>' : '');
         return;
       }
       dMsg.className = 'text-sm text-center text-red-700'; dMsg.textContent = data.error || 'No se pudieron guardar. Intenta de nuevo.';

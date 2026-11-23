@@ -313,7 +313,7 @@ for (const a of transferenciasPorRevisar ?? []) {
   const textoBanco = !conBoleta ? ''
     : estadoB === 'dudoso' ? ' · encontré un correo por ese monto, pero no calza el nombre o el remitente del banco: revísalo'
     : estadoB === 'no' ? ' · no encontré el correo del banco: revisa tu cuenta'
-    : banco?.gmail ? ' · estoy buscando el correo del banco' : ' · la boleta sale cuando confirmes';
+    : banco?.gmail ? ' · buscando el correo del banco' : ' · la boleta sale cuando la confirmes';
   tareas.push({
     clave: claveCL(a.subidoEl),
     chip: estadoB === 'no' ? 'sin correo del banco' : estadoB === 'dudoso' ? 'revisar nombre' : `transferencia ${cuando(claveCL(a.subidoEl).slice(0, 10), claveCL(a.subidoEl).slice(11, 16))}`,

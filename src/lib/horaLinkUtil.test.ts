@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   retencionHoras, calcularVence, tokenValido, correoValido, fechaLarga, venceTexto, mensajeHoraWhatsapp,
-  mensajePasosWhatsapp, enlaceWhatsapp, esHoraLink, tieneMarca, origenValido,
+  mensajePasosWhatsapp, enlaceWhatsapp, esHoraLink, tieneMarca, origenValido, utcDeChile, enlaceCalendario,
 } from './horaLinkUtil';
 
 test('retención: 24 h por defecto y dentro del rango', () => {
@@ -45,6 +45,8 @@ test('mensaje de WhatsApp: cercano, con link y plazo, mayúscula inicial', () =>
   assert.match(m, /miércoles 25 de noviembre a las 18:00 \(online\)/);
   assert.match(m, /https:\/\/x\.cl\/hora\/abc/);
   assert.match(m, /hasta el martes 24 de noviembre a las 18:00/);
+  const conValor = mensajeHoraWhatsapp({ nombre: 'Ana', fecha: '2026-11-25', hora: '18:00', online: false, url: 'u', venceIso: '2026-11-24T21:00:00Z', monto: 65000 });
+  assert.match(conValor, /\(\$65\.000, con tarjeta o transferencia\)/);
   for (const linea of m.split('\n')) assert.match(linea, /^[A-ZÁÉÍÓÚÑ]/);
 });
 
@@ -55,6 +57,12 @@ test('pasos por WhatsApp: online con Meet, presencial con dirección', () => {
   const pres = mensajePasosWhatsapp({ nombre: 'Ana', fecha: '2026-11-25', hora: '18:00', online: false, direccion: 'Av. Apoquindo 1234, Las Condes' });
   assert.match(pres, /Te espero en Av\. Apoquindo 1234/);
   for (const linea of pres.split('\n')) assert.match(linea, /^[A-ZÁÉÍÓÚÑ]/);
+});
+
+test('calendario: hora de Chile a UTC (verano e invierno)', () => {
+  assert.equal(utcDeChile('2026-11-25', '18:00').toISOString(), '2026-11-25T21:00:00.000Z');
+  assert.equal(utcDeChile('2026-06-10', '10:00').toISOString(), '2026-06-10T14:00:00.000Z');
+  assert.match(enlaceCalendario({ fecha: '2026-11-25', hora: '18:00', duracionMin: 50, titulo: 'Sesión' }), /dates=20261125T210000Z%2F20261125T215000Z/);
 });
 
 test('wa.me con número chileno o sin número', () => {

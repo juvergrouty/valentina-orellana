@@ -149,8 +149,8 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
           <ol class="list-decimal pl-5 text-sm flex flex-col gap-2 mb-5">
             <li>Transfiere <strong>{formatCLP(total)}</strong> a esta cuenta.</li>
             <li>Toma una foto o una captura de pantalla del comprobante.</li>
-            <li>Toca «Elegir la foto del comprobante» y elígela.</li>
-            <li>Toca «Enviar comprobante». Listo: tu pago queda registrado.</li>
+            <li>Toca «Elegir la foto o el PDF del comprobante» y búscalo en tu celular.</li>
+            <li>Toca «Enviar comprobante». Listo, tu pago queda registrado.</li>
           </ol>
           {datosCompletos ? (
             <dl class="divide-y divide-dust text-sm mb-5">
@@ -168,10 +168,10 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
             <p class="text-sm mb-5"><a href={waDatos} target="_blank" rel="noopener" class="underline">Escríbeme por WhatsApp y te mando los datos para transferir</a>.</p>
           )}
           <form id="transfer-form" class="flex flex-col gap-3">
-            <label for="comprobante" class="btn-outline w-full justify-center text-center cursor-pointer">Elegir la foto del comprobante</label>
+            <label for="comprobante" class="btn-outline w-full justify-center text-center cursor-pointer">Elegir la foto o el PDF del comprobante</label>
             <input id="comprobante" name="comprobante" type="file" accept="image/*,application/pdf" class="sr-only" />
             <p id="archivo-nombre" class="text-xs text-stone break-all"></p>
-            <label for="titular" class="text-xs text-stone">Si la cuenta desde la que transferiste no está a tu nombre, escribe aquí el nombre del titular (opcional)</label>
+            <label for="titular" class="text-sm text-stone">¿La cuenta no está a tu nombre? Escribe el nombre del titular (opcional)</label>
             <input id="titular" type="text" autocomplete="off" class="border border-dust rounded px-3 py-3 text-base" />
             <button type="submit" id="btn-comprobante" class="btn-dark w-full justify-center text-center">Enviar comprobante</button>
             <p id="transfer-msg" class="hidden text-sm text-center" role="status" aria-live="polite"></p>
@@ -225,7 +225,7 @@ const waDatos = `https://wa.me/56972735696?text=${encodeURIComponent('Hola Valen
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const input = document.getElementById('comprobante');
-    if (!input.files || !input.files[0]) { msg.textContent = 'Primero elige la foto del comprobante (paso 3).'; msg.className = 'text-sm text-center text-red-600'; return; }
+    if (!input.files || !input.files[0]) { msg.textContent = 'Primero elige la foto o el PDF del comprobante (paso 3).'; msg.className = 'text-sm text-center text-red-600'; return; }
     btn.disabled = true; btn.textContent = 'Enviando…';
     msg.classList.add('hidden');
     try {

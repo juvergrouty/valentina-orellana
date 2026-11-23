@@ -192,7 +192,7 @@ export async function crearHoraConLink(input: CrearHoraInput): Promise<CrearHora
 
   const url = `${site}/hora/${token}`;
   const online = modalidad === 'online';
-  const mensajeWhatsapp = mensajeHoraWhatsapp({ nombre, fecha: input.fecha, hora, online, url, venceIso: vence.toISOString() });
+  const mensajeWhatsapp = mensajeHoraWhatsapp({ nombre, fecha: input.fecha, hora, online, url, venceIso: vence.toISOString(), monto });
   let correoEnviado = false;
   if (canal === 'correo' && correoFinal && input.enviarCorreo !== false) {
     try {
