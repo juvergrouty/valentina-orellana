@@ -234,6 +234,7 @@ type Tarea = {
   id?: string;           // para "Recordar mañana" (src/lib/avisosPospuestos.ts); sin id no se puede posponer
   cobro?: { id: string; monto: number }; // "Ya me pagó" (marca el pago con el mismo formulario del calendario)
   colegio?: { desde: string };
+  informativo?: boolean; // solo informa: lleva «✓ Entendido», que lo esconde para siempre
   clave: string;         // plazo "YYYY-MM-DDTHH:MM" (hora de Chile) para ordenar; '9999' = sin plazo
   chip: string;
   titulo: string;
@@ -386,7 +387,27 @@ if (tarifas.length) {
   const { data } = await supabase.from('patients').select('id, name');
   for (const p of data ?? []) if (p.name) fichaPorNombre.set(normalizar(String(p.name)), p.id);
 }
+// Tarifas que solo rigen pronto (sin nada que hacer) se juntan en un aviso por fecha, con «Entendido» (22 nov 2026:
+// en vivo salían 8 tarjetas iguales "Rige mañana" que tapaban el resto).
+const proximasPorFecha = new Map<string, typeof tarifas>();
 for (const t of tarifas) {
+  if (t.fase !== 'proxima' || t.sesionesConMontoAntiguo > 0) continue;
+  proximasPorFecha.set(t.desde, [...(proximasPorFecha.get(t.desde) ?? []), t]);
+}
+for (const [desde, grupo] of proximasPorFecha) {
+  if (grupo.length < 2) continue;
+  tareas.push({
+    id: `tarifas:${desde}:${grupo.map((t) => t.id).sort().join('.').slice(0, 150)}`,
+    clave: `${desde}T00:00`,
+    chip: `rige ${cuando(desde)}`,
+    titulo: `${grupo.length} tarifas nuevas desde el ${fechaLarga(desde)}`,
+    detalle: grupo.map((t) => `${t.nombre}: ${t.anterior ? `${clp(t.anterior)} → ` : ''}${clp(t.nuevo)}`).join(' · '),
+    href: '/admin/pacientes',
+    informativo: true,
+  });
+}
+for (const t of tarifas) {
+  if ((proximasPorFecha.get(t.desde)?.length ?? 0) >= 2 && proximasPorFecha.get(t.desde)!.includes(t)) continue;
   const ficha = fichaPorNombre.get(normalizar(t.nombre));
   const monto = `${t.anterior ? `${clp(t.anterior)} → ` : ''}${clp(t.nuevo)} desde el ${fechaLarga(t.desde)}`;
   const montoAntiguo = t.sesionesConMontoAntiguo > 0 ? ` · ⚠ ${t.sesionesConMontoAntiguo} ${t.sesionesConMontoAntiguo === 1 ? 'sesión agendada' : 'sesiones agendadas'} con el monto antiguo` : '';
@@ -397,6 +418,7 @@ for (const t of tarifas) {
     titulo: t.fase === 'avisar' ? `Avisar cambio de tarifa a ${t.nombre}` : `Tarifa nueva de ${t.nombre}`,
     detalle: monto + montoAntiguo + (t.fase === 'vigente' ? ' · al agendarle usa el monto nuevo' : ''),
     href: ficha ? `/admin/pacientes/${ficha}?tab=sesiones` : '/admin/pacientes',
+    informativo: t.fase === 'proxima' && t.sesionesConMontoAntiguo === 0,
     accion: t.fase === 'proxima' ? undefined : { tipo: 'form', action: '/api/admin/cambios-tarifa', campos: { id: t.id, campo: t.fase === 'avisar' ? 'avisado' : 'aplicado', redirect: vuelta }, texto: t.fase === 'avisar' ? 'Ya le avisé' : 'Listo' },
   });
 }
@@ -632,6 +654,12 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
                             onsubmit={t.accion.action === '/api/admin/pago-resuelto' ? "return confirm('¿Marcar como resuelto? (ya devolviste el pago o la pasaste a otra hora). El aviso desaparece; la sesión y su pago no cambian.')" : undefined}>
                             {Object.entries(t.accion.campos).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
                             <button type="submit" class="hb hb-listo">✓ {t.accion.texto}</button>
+                          </form>
+                        )}
+                        {t.informativo && t.id && (
+                          <form method="POST" action="/api/admin/aviso" class="hoy-form">
+                            <input type="hidden" name="id" value={t.id} /><input type="hidden" name="accion" value="atendido" /><input type="hidden" name="redirect" value={vuelta} />
+                            <button type="submit" class="hb hb-listo">✓ Entendido</button>
                           </form>
                         )}
                         {t.colegio && t.id && (
