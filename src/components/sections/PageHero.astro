@@ -6,8 +6,9 @@ interface Props {
   image?: string;        // imagen desktop, por defecto hero-paginas.webp
   imageMobile?: string;  // imagen opcional para mobile (< 768px)
   imageMobilePosition?: string; // encuadre de imageMobile (CSS object-position)
+  overlay?: string;      // degradado opcional, para fotos claras
 }
-const { label, title, description, image = '/images/hero-paginas.webp', imageMobile, imageMobilePosition } = Astro.props;
+const { label, title, description, image = '/images/hero-paginas.webp', imageMobile, imageMobilePosition, overlay } = Astro.props;
 ---
 
 <section class="relative overflow-hidden min-h-[300px] md:min-h-[420px] flex items-end border-b border-dust">
@@ -25,7 +26,7 @@ const { label, title, description, image = '/images/hero-paginas.webp', imageMob
   </picture>
 
   <!-- Degradado sobre la imagen — más oscuro abajo para que el texto resalte -->
-  <div class="absolute inset-0 bg-gradient-to-t from-ink/80 via-ink/30 to-ink/10"></div>
+  <div class={`absolute inset-0 ${overlay ?? 'bg-gradient-to-t from-ink/80 via-ink/30 to-ink/10'}`}></div>
 
   <!-- Contenido -->
   <div class="relative z-10 container-site py-14 md:py-20 w-full">

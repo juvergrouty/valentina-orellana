@@ -1,0 +1,207 @@
+---
+export const prerender = false;
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PageHero   from '../components/sections/PageHero.astro';
+import { supabase } from '../lib/supabase';
+
+// Página "cómo trabajo" (17 nov 2026): le habla al cliente ideal que Vale
+// definió el 13 nov (le va bien, sabe que puede más, ya lo intentó y no llega)
+// y les da a los buscadores de IA (ChatGPT, Gemini, Claude, Copilot) un texto
+// claro sobre su método. Misma estructura que /terapia-online.
+const { data: servicios } = await supabase
+  .from('services_catalog')
+  .select('name, type, price, price_online, price_presencial')
+  .eq('visible', true)
+  .order('sort_order');
+
+const clp = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n);
+const minimo = (lista: number[]) => (lista.length ? Math.min(...lista) : null);
+// Igual que /terapia-individual-adultos: el menor entre presencial, online y precio base.
+const precios = (tipo: string) => (servicios ?? []).filter(s => s.type === tipo).flatMap(s => [s.price_presencial, s.price_online, s.price]).map(Number).filter(n => n > 0);
+const precioIndividual = minimo(precios('individual'));
+const precioPareja     = minimo(precios('pareja'));
+// Si hay más de un precio para el tipo, se antepone "desde" (igual que /terapia-individual-adultos).
+const desde = (tipo: string) => (new Set(precios(tipo)).size > 1 ? 'desde ' : '');
+// Texto de valores que funciona con uno, otro o ambos precios.
+const valores = [
+  precioIndividual && `La sesión individual tiene un valor ${desde('individual') || 'de '}${clp(precioIndividual)}`,
+  precioPareja && (precioIndividual ? `la de pareja, ${desde('pareja') || 'de '}${clp(precioPareja)}` : `La sesión de pareja tiene un valor ${desde('pareja') || 'de '}${clp(precioPareja)}`),
+].filter(Boolean).join(' y ');
+
+const paraQuien = [
+  'Te va bien, o razonablemente bien, y sabes que podrías estar consiguiendo mucho más.',
+  'Ya leíste, te analizaste, tomaste decisiones, quizá ya hiciste terapia, y el resultado sigue sin llegar.',
+  'Entiendes perfecto lo que te pasa y, en la vida real, vuelves a hacer lo mismo.',
+  'Cada vez que estás por dar el paso, en el trabajo, en la pareja o en una decisión importante, algo te frena.',
+  'Sientes que no avanzas, aunque desde afuera nadie lo note.',
+];
+
+const metodo = [
+  { n: '01', t: 'Qué se repite', d: 'Identificamos el patrón: en qué situaciones aparece, con quién y qué te dices justo antes de volver a hacerlo.' },
+  { n: '02', t: 'Qué lo mantiene', d: 'Muchas veces ese patrón te protegió de algo en algún momento de tu historia. Entender para qué te sirvió es el primer paso para soltarlo.' },
+  { n: '03', t: 'Qué hay que construir', d: 'Dejar de hacer algo es la mitad. Construimos la forma distinta de responder y la practicas en tu vida real, no solo en la sesión.' },
+  { n: '04', t: 'Cómo vamos', d: 'Revisamos cada cierto tiempo si estás avanzando. Si no ves avance, me lo dices, y si yo veo que no avanzas, también te lo voy a decir.' },
+];
+
+const temas = [
+  { t: 'Sentir que te estás quedando atrás', d: 'Por fuera todo funciona y por dentro sientes que no estás donde podrías estar. Miramos qué es lo que no estás viendo.' },
+  { t: 'Autosabotaje y postergación', d: 'Sabes lo que tienes que hacer y no lo haces, o lo haces a medias. Es probable que ahí haya algo más que falta de disciplina.' },
+  { t: 'Crisis de identidad', d: 'Te va bien y aun así dejaste de reconocerte en lo que haces, o no sabes bien quién eres fuera de tu rol. Trabajamos qué quieres de verdad y qué te impide ir hacia eso.' },
+  { t: 'Relaciones que se repiten', d: 'Cambia la persona y la historia termina igual. Buscamos dónde se arma ese patrón.' },
+  { t: 'Parejas que discuten siempre por lo mismo', d: 'Llevan años teniendo la misma pelea con distinta excusa. Buscamos qué la mantiene y qué pueden hacer distinto.' },
+  { t: 'Autoexigencia', d: 'Rendir en todo y sentir que nunca alcanza. Miramos de dónde viene esa exigencia y qué te está costando.' },
+];
+
+const faq = [
+  { q: '¿En qué se diferencia de otras terapias?', a: 'Trabajo con un enfoque sistémico, con dirección y método. Además de entender de dónde viene lo que te pasa, trabajamos el momento exacto en que vuelves a hacer lo mismo y qué vas a hacer distinto ahí.' },
+  { q: 'Ya hice terapia y no avancé. ¿Vale la pena intentarlo de nuevo?', a: 'Muchas personas llegan después de un proceso en el que se sintieron escuchadas, pero no avanzaron. Es probable que lo que faltaba no fuera más comprensión, sino trabajar cómo responder distinto en tu vida real.' },
+  { q: '¿Es lo mismo que un coaching?', a: 'No. Es terapia psicológica. Además de metas, trabajamos de dónde viene el patrón y qué lo mantiene.' },
+  { q: '¿Para quién no es?', a: 'Si buscas solo un espacio para desahogarte, sin trabajar cambios en tu vida real, probablemente no soy la psicóloga indicada.' },
+  { q: '¿Cómo es la primera sesión?', a: 'No es un interrogatorio y no tienes que llegar con todo ordenado. Conversamos sobre lo que te trae, lo que ya intentaste y lo que quieres lograr, y empezamos a armar juntos un plan claro de terapia.' },
+  { q: '¿Atiendes online?', a: 'Sí. Atiendo por videollamada a personas de todo Chile, o presencial en Estoril 50, oficina 811b, Las Condes.' },
+  { q: '¿Cuánto cuesta?', a: `Cada sesión dura 50 minutos.${valores ? ` ${valores}.` : ''} Por cada sesión recibes boleta de honorarios para pedir reembolso en tu Isapre o seguro complementario, según tu plan. No tengo convenio con Fonasa.` },
+  { q: '¿Y si estoy en una crisis?', a: 'Mi consulta no atiende urgencias. Si estás en crisis o piensas en hacerte daño, llama al *4141, la línea de prevención del suicidio (gratis, las 24 horas), o ve al servicio de urgencia más cercano.' },
+];
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'FAQPage',
+      mainEntity: faq.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })),
+    },
+    {
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Inicio', item: 'https://www.valentinaorellana.cl/' },
+        { '@type': 'ListItem', position: 2, name: 'Servicios', item: 'https://www.valentinaorellana.cl/servicios' },
+        { '@type': 'ListItem', position: 3, name: 'Cómo trabajo', item: 'https://www.valentinaorellana.cl/terapia-con-plan-claro' },
+      ],
+    },
+    {
+      '@type': 'Service',
+      name: 'Terapia con método y un plan claro',
+      serviceType: 'Psicoterapia para adultos que quieren dejar de repetir patrones',
+      url: 'https://www.valentinaorellana.cl/terapia-con-plan-claro',
+      areaServed: [{ '@type': 'City', name: 'Las Condes' }, { '@type': 'Country', name: 'Chile' }],
+      provider: { '@id': 'https://www.valentinaorellana.cl/#valentina' },
+      ...((precioIndividual || precioPareja) ? { offers: [
+        precioIndividual && { '@type': 'Offer', name: 'Sesión individual', price: precioIndividual, priceCurrency: 'CLP' },
+        precioPareja && { '@type': 'Offer', name: 'Sesión de pareja', price: precioPareja, priceCurrency: 'CLP' },
+      ].filter(Boolean) } : {}),
+    },
+  ],
+};
+---
+
+<BaseLayout
+  title="Terapia con método y un plan claro"
+  description="Psicóloga de adultos y parejas en Las Condes y online. Para personas a las que les va bien, saben que pueden más y siguen llegando al mismo lugar."
+>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, '\\u003c')} />
+
+  <PageHero
+    label="Cómo trabajo · Adultos y parejas"
+    title="Terapia con método y un plan claro"
+    description="Para personas a las que les va bien, que saben que pueden más y que siguen llegando al mismo lugar."
+    image="/images/consulta-puerta-1600.webp"
+    imageMobile="/images/consulta-puerta-800.webp"
+    overlay="bg-gradient-to-t from-ink/85 via-ink/55 to-ink/40"
+  />
+
+  <section class="bg-sand py-16 md:py-24">
+    <div class="container-site grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-16">
+      <div class="md:col-span-5">
+        <p class="label mb-3">¿Para quién es?</p>
+        <h2 class="section-title">Entenderlo no basta</h2>
+      </div>
+      <div class="md:col-span-7">
+        <p class="body-text text-[#4a4842] font-normal mb-6">
+          Mi terapia no está pensada para que vengas a contar lo mismo durante años. Escuchar importa, pero si la terapia se queda solo ahí, es probable que salgas de cada sesión entendiendo todo y que en la vida real vuelvas a hacer lo mismo. Es justo ahí donde a mí me interesa trabajar.
+        </p>
+        <p class="body-sm text-[#55524b] font-normal mb-6">Soy Valentina Orellana, psicóloga de la Universidad del Desarrollo, en ejercicio desde 2011 y con número de registro 360070 en la Superintendencia de Salud.</p>
+        <ul class="space-y-4">
+          {paraQuien.map(s => (
+            <li class="flex gap-4 border-b border-dust pb-4 body-text text-[#4a4842] font-normal"><span aria-hidden="true" class="text-forest">•</span><span>{s}</span></li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-warm border-y border-dust py-16 md:py-24">
+    <div class="container-site">
+      <p class="label mb-3">El método</p>
+      <h2 class="section-title mb-10 md:mb-14 max-w-2xl">Qué se repite, qué lo mantiene y qué construir distinto</h2>
+      <ol class="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {metodo.map(p => (
+          <li class="bg-white border border-dust rounded-[6px] p-7">
+            <p class="font-heading text-3xl text-gold mb-4">{p.n}</p>
+            <p class="card-title text-xl mb-3">{p.t}</p>
+            <p class="body-sm text-[#55524b] font-normal">{p.d}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section class="bg-white py-16 md:py-24">
+    <div class="container-site">
+      <p class="label mb-3">Qué trabajamos</p>
+      <h2 class="section-title mb-10 md:mb-14 max-w-2xl">Lo que suelen traer las personas que llegan así</h2>
+      <ul class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+        {temas.map(t => (
+          <li class="flex gap-4">
+            <span aria-hidden="true" class="mt-2 h-2 w-2 shrink-0 rounded-full bg-gold"></span>
+            <div>
+              <h3 class="card-title text-xl mb-2">{t.t}</h3>
+              <p class="body-sm text-[#55524b] font-normal">{t.d}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <section class="bg-sand border-t border-dust py-16 md:py-24">
+    <div class="container-site grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16">
+      <div>
+        <p class="label mb-3">Valores</p>
+        <h2 class="section-title mb-6">Sesiones de 50 minutos</h2>
+        {precioIndividual && <p class="body-text text-ink font-medium mb-2">Individual: {desde('individual')}{clp(precioIndividual)} por sesión.</p>}
+        {precioPareja && <p class="body-text text-ink font-medium mb-4">Pareja: {desde('pareja')}{clp(precioPareja)} por sesión.</p>}
+        <p class="body-sm text-[#55524b] font-normal">Presencial en Las Condes u online para todo Chile. Por cada sesión recibes boleta de honorarios para pedir reembolso en tu Isapre o seguro complementario, según tu plan. No tengo convenio con Fonasa.</p>
+      </div>
+      <div class="flex flex-col justify-center gap-4 md:items-stretch md:max-w-xs">
+        <a href="/agenda" class="btn-dark justify-center" data-cta="metodo_landing_agenda">Ver horarios</a>
+        <a href="https://wa.me/56972735696?text=Hola%20Valentina%2C%20le%C3%AD%20c%C3%B3mo%20trabajas%20y%20quiero%20consultar%20por%20terapia." target="_blank" rel="noopener" class="btn-outline justify-center" data-cta="metodo_landing_whatsapp">Escribir por WhatsApp</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-warm border-t border-dust py-16 md:py-24">
+    <div class="container-site max-w-3xl">
+      <p class="label mb-3">Preguntas frecuentes</p>
+      <h2 class="section-title mb-8">Lo que suelen preguntarme</h2>
+      <div class="divide-y divide-dust border-y border-dust">
+        {faq.map(f => (
+          <details class="group py-5">
+            <summary class="cursor-pointer list-none flex justify-between gap-4 font-body text-base text-ink font-medium">
+              {f.q}<span aria-hidden="true" class="text-forest transition-transform group-open:rotate-45">+</span>
+            </summary>
+            <p class="body-sm text-[#55524b] font-normal mt-3">{f.a}</p>
+          </details>
+        ))}
+      </div>
+      <div class="mt-12">
+        <h2 class="card-title text-xl mb-4">También te puede servir</h2>
+        <ul class="space-y-3">
+          <li class="flex gap-3 body-sm"><span aria-hidden="true" class="text-forest">•</span><a href="/terapia-individual-adultos" class="text-forest underline underline-offset-4 hover:text-ink">Terapia individual para adultos</a></li>
+          <li class="flex gap-3 body-sm"><span aria-hidden="true" class="text-forest">•</span><a href="/terapia-online" class="text-forest underline underline-offset-4 hover:text-ink">Terapia online</a></li>
+          <li class="flex gap-3 body-sm"><span aria-hidden="true" class="text-forest">•</span><a href="/blog/lo-entiendo-todo-y-aun-asi-no-cambio" class="text-forest underline underline-offset-4 hover:text-ink">Lo entiendo todo y aun así no cambio</a></li>
+          <li class="flex gap-3 body-sm"><span aria-hidden="true" class="text-forest">•</span><a href="/sobre-mi" class="text-forest underline underline-offset-4 hover:text-ink">Sobre mí</a></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
