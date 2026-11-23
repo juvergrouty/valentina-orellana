@@ -10,7 +10,9 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   const form = await request.formData();
   const id = String(form.get('id') ?? '');
   const accionRaw = String(form.get('accion') ?? '');
-  const accion = accionRaw === 'atendido' || accionRaw === 'deshacer' ? accionRaw : 'manana';
+  // «Esconder para siempre» solo para avisos informativos (tarifas y colegio); los demás se posponen hasta mañana.
+  const informativo = /^(tarifas?|tarifaprox|colegio):/.test(id);
+  const accion = accionRaw === 'deshacer' ? 'deshacer' : accionRaw === 'atendido' && informativo ? 'atendido' : 'manana';
   const destino = rutaInterna(form.get('redirect'), '/admin');
   const con = (p: string) => destino + (destino.includes('?') ? '&' : '?') + p;
   try {
