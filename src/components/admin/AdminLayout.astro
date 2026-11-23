@@ -704,6 +704,8 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   .enc-tabbar a svg { width: 25px; height: 25px; }
   .enc-tabbar a.on { color: #3F4A3B; background: #E6EBE3; }
   .enc-main { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  /* La barra de arriba repetía el título de cada página: en el celular no se muestra. */
+  .enc-topbar { display: none; }
   /* Páginas de alto completo (agenda, pacientes, pagos, reportes…): terminan sobre la barra de abajo. */
   .cal-wrap, .com-wrap, .fin-wrap, .ev-wrap, .rep-wrap, .pac-wrap { height: calc(100dvh - 76px - env(safe-area-inset-bottom)) !important; }
 }

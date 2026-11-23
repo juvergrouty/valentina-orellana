@@ -57,7 +57,22 @@ async function eventosGoogle(): Promise<Array<{ hora: string; fin: string; titul
   return out;
 }
 
-const [resB, google, pres, onl, bDia, bHoras, extras] = await Promise.all([
+// Datos inventados SOLO en `astro dev` (import.meta.env.DEV es false en producción): /admin/agenda-dia?demo=1
+// para la revisión visual sin base de datos.
+const demo = import.meta.env.DEV && !!Astro.url.searchParams.get('demo');
+const datosDemo = () => [
+  { data: [
+    { id: '00000000-0000-4000-8000-000000000001', patient_name: 'Sofía Rivas y Diego Mena', session_type: 'pareja-presencial', session_time: '08:00:00', duration_min: 60, status: 'confirmed', amount: 70000, paid_at: '2026-11-20', debt_voided: false, notes: null, payment_method: 'link' },
+    { id: '00000000-0000-4000-8000-000000000002', patient_name: 'Martín Lagos', session_type: 'online', session_time: '20:00:00', duration_min: 50, status: 'confirmed', amount: 60000, paid_at: null, debt_voided: false, notes: null, payment_method: 'link' },
+  ], error: null },
+  [{ hora: '11:00', fin: '12:00', titulo: 'Entrenar', propio: false }, { hora: '17:00', fin: '17:50', titulo: 'Isidora Fuentes Sesión individual online', propio: false }],
+  { slots: ['09:00', '10:00', '15:00'] },
+  { slots: ['18:00', '19:00'] },
+  { data: null },
+  { data: [] },
+  [],
+] as const;
+const [resB, google, pres, onl, bDia, bHoras, extras] = demo ? (datosDemo() as any) : await Promise.all([
   supabase.from('bookings')
     .select('id, patient_name, session_type, session_time, duration_min, status, amount, paid_at, debt_voided, notes, payment_method')
     .eq('session_date', dia).not('status', 'in', '(cancelled,expired)').order('session_time'),
@@ -79,6 +94,7 @@ type Celda =
 const TIPOS: Record<string, string> = { online: 'Individual · Online', presencial: 'Individual · Presencial', 'pareja-online': 'Pareja · Online', 'pareja-presencial': 'Pareja · Presencial' };
 const celdas: Celda[] = [];
 const ocupado: Array<[number, number]> = [];
+const ocupSes: Array<[number, number]> = []; // solo sesiones (para el descanso de después)
 
 for (const b of (resB.data ?? []) as any[]) {
   const h = String(b.session_time).slice(0, 5);
@@ -88,6 +104,7 @@ for (const b of (resB.data ?? []) as any[]) {
     : Number(b.amount) > 0 ? (esPagoEnConsulta(b) ? ['Paga en la consulta', 'gris'] : ['Por pagar', 'no']) : ['Sin costo', 'gris'];
   celdas.push({ tipo: 'sesion', hora: h, fin, id: b.id, nombre: b.patient_name, detalle: TIPOS[b.session_type] ?? b.session_type, pago: pago[0], pagoTono: pago[1] as 'ok' | 'no' | 'gris', href: `/admin/agenda?booking=${b.id}` });
   ocupado.push([aMin(h), aMin(fin)]);
+  ocupSes.push([aMin(h), aMin(fin)]);
 }
 for (const g of google ?? []) {
   if (g.propio) continue; // evento de una reserva de la página: ya está arriba
@@ -95,7 +112,8 @@ for (const g of google ?? []) {
   if (esSesion) {
     const paciente = pacienteDeTitulo(g.titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, ''));
     if (celdas.some((c) => c.tipo === 'sesion' && mismaPersona(c.nombre, paciente))) continue; // misma sesión (página + Encuadrado)
-    celdas.push({ tipo: 'sesion', hora: g.hora, fin: g.fin, id: null, nombre: paciente, detalle: `${/online/i.test(g.titulo) ? 'Online' : 'Presencial'} · Encuadrado`, pago: 'Encuadrado', pagoTono: 'gris', href: `/admin/agenda?fecha=${dia}&hora=${g.hora}` });
+    ocupSes.push([aMin(g.hora), aMin(g.fin)]);
+    celdas.push({ tipo: 'sesion', hora: g.hora, fin: g.fin, id: null, nombre: paciente, detalle: /online/i.test(g.titulo) ? 'Online' : 'Presencial', pago: 'Encuadrado', pagoTono: 'gris', href: `/admin/agenda?fecha=${dia}&hora=${g.hora}` });
   } else {
     celdas.push({ tipo: 'google', hora: g.hora, fin: g.fin, titulo: g.titulo });
   }
@@ -108,7 +126,6 @@ const extraDe = (h: string) => (extras as any[]).find((e) => e.fecha === dia && 
 // Horas abiertas «solo este día» (horas extra): la disponibilidad sin servicio no las suma, así que se agregan aquí
 // si no chocan con nada (revisión 22 nov 2026: si no, "Abrir" parecía no funcionar).
 const PREP = 20;
-const ocupSes = ocupado.slice(); // solo sesiones y eventos de Google (antes de sumar las horas libres)
 const chocaSesion = (m: number, dur: number) => ocupado.some(([a, z]) => m < z + PREP && m + dur > a - 0);
 const ahoraMin = dia === hoy ? aMin(nowCL().toISOString().slice(11, 16)) : -1;
 const bloqueadoEn = (m: number) => !!bDia.data || ((bHoras.data ?? []) as any[]).some((x) => x.all_day || (!x.time_from && !x.time_to) || (m < aMin(String(x.time_to ?? '23:59').slice(0, 5)) && m + duracion > aMin(String(x.time_from ?? '00:00').slice(0, 5))));
@@ -199,7 +216,8 @@ const plRaw = (qp.get('pl_phone') ?? '').replace(/\D/g, '');
 const plTel = plRaw.length === 9 ? '56' + plRaw : plRaw;
 const plWaSent = qp.get('pl_wa_sent') === '1';
 const plMsg = paymentLink ? mensajeLinkPago(qp.get('pl_nombre') ?? '', paymentLink, qp.get('pl_fecha'), qp.get('pl_hora')) : '';
-const plWaUrl = paymentLink && !plWaSent && plTel.length >= 10 ? `https://wa.me/${plTel}?text=${encodeURIComponent(plMsg)}` : null;
+const plWaUrl = paymentLink && !plWaSent ? (plTel.length >= 10 ? `https://wa.me/${plTel}?text=${encodeURIComponent(plMsg)}` : `https://wa.me/?text=${encodeURIComponent(plMsg)}`) : null;
+const plSinTel = plTel.length < 10;
 const agendada = qp.get('agendada') ?? '';
 const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
 ---
@@ -214,10 +232,11 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
     {paymentLink && (
       <section class="ag-agendada" role="status">
         <b>✓ Sesión agendada</b>
+        {(qp.get('pl_nombre') || qp.get('pl_fecha')) && <p class="ag-quien">{qp.get('pl_nombre') ?? ''}{/^\d{4}-\d{2}-\d{2}$/.test(qp.get('pl_fecha') ?? '') ? ` · ${largo(qp.get('pl_fecha')!)}` : ''}{qp.get('pl_hora') ? ` a las ${String(qp.get('pl_hora')).slice(0, 5)}` : ''}</p>}
         {plWaSent
           ? <p>El link de pago ya le llegó por WhatsApp y por correo.</p>
-          : <p>Ahora mándale el link de pago para que confirme su hora.</p>}
-        {plWaUrl && <a href={plWaUrl} target="_blank" rel="noopener" class="hb hb-wa hb-ancho">Enviar link de pago por WhatsApp</a>}
+          : <p>Ahora mándale el link de pago para que confirme su hora. Si no paga, la sesión queda en rojo «Por pagar» en la agenda.</p>}
+        {plWaUrl && <a href={plWaUrl} target="_blank" rel="noopener" class="hb hb-wa hb-ancho" data-wa-enviado>{plSinTel ? 'Enviar link de pago por WhatsApp (eliges el contacto)' : 'Enviar link de pago por WhatsApp'}</a>}
         <div class="ag-dos">
           <button type="button" class="hb hb-borde" data-copiar={paymentLink}>Copiar el link</button>
           <a href={vuelta} class="hb hb-gris">Ahora no</a>
@@ -233,14 +252,9 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
       </section>
     )}
 
-    <div class="ag-btns">
-      <a href="/admin/servicios" class="hb hb-borde">Horario semanal</a>
-      <button type="button" class="hb hb-borde" data-hoja="vacaciones">Días libres</button>
-    </div>
-
     <nav class="ag-sem" aria-label="Cambiar de semana">
       <a href={`/admin/agenda-dia?fecha=${sumar(dia, -7)}`} class="ag-flecha" aria-label="Semana anterior">‹</a>
-      <span>{num(semana[0])} de {MESES[Number(semana[0].slice(5, 7)) - 1]} al {num(semana[6])} de {MESES[Number(semana[6].slice(5, 7)) - 1]}</span>
+      <span>{semana[0].slice(5, 7) === semana[6].slice(5, 7) ? `${num(semana[0])} al ${num(semana[6])} de ${MESES[Number(semana[6].slice(5, 7)) - 1]}` : `${num(semana[0])} de ${MESES[Number(semana[0].slice(5, 7)) - 1]} al ${num(semana[6])} de ${MESES[Number(semana[6].slice(5, 7)) - 1]}`}</span>
       <a href={`/admin/agenda-dia?fecha=${sumar(dia, 7)}`} class="ag-flecha" aria-label="Semana siguiente">›</a>
     </nav>
     <div class="ag-dias">
@@ -250,9 +264,10 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
         </a>
       ))}
     </div>
-    {dia !== hoy && <a href="/admin/agenda-dia" class="ag-ir-hoy">Volver a hoy</a>}
-
-    <h2 class="ag-titulo">{largo(dia)}</h2>
+    <div class="ag-tit-fila">
+      <h2 class="ag-titulo">{largo(dia)}</h2>
+      {dia !== hoy && <a href="/admin/agenda-dia" class="ag-ir-hoy">Ir a hoy</a>}
+    </div>
     <p class="ag-resumen">
       {pasado ? `${sesionesDia === 1 ? '1 sesión' : `${sesionesDia} sesiones`}.`
         : bDia.data ? 'Este día está cerrado.'
@@ -274,23 +289,17 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
     {errorAccion && <p class="ag-error" role="alert">No se pudo guardar el cambio. No se cambió nada; intenta de nuevo.</p>}
     {errorDatos && <p class="ag-error" role="alert">No se pudieron leer todas las horas de este día. Recarga en un rato.</p>}
 
-    <div class="ag-leyenda" aria-hidden="true">
-      <span><i class="l-pres"></i>Libre presencial</span>
-      <span><i class="l-onl"></i>Libre online</span>
-      <span><i class="l-cerr"></i>Cerrada</span>
-    </div>
-
     <div class="ag-linea">
       {!filas.length && <p class="ag-vacio">{pasado ? 'No hubo sesiones este día.' : 'No hay nada este día.'}</p>}
       {filas.map((f) => {
         if ('grupo' in f) {
-          const a = f.grupo[0].hora, z = f.grupo[f.grupo.length - 1].hora;
+          const a = f.grupo[0].hora, z = aHora(aMin(f.grupo[f.grupo.length - 1].hora) + 60);
           return (
             <details class="ag-fila ag-grupo">
-              <summary><span class="h">{a}</span><span class="b b-cerr"><span><b>{a} a {z} · Cerradas</b><span>Toca para ver y abrir una</span></span><span class="mas">+</span></span></summary>
+              <summary><span class="h">{a}</span><span class="b b-cerr"><span><b>{a} a {z} · Cerradas</b><span>Toca para abrir una hora</span></span><span class="mas" aria-hidden="true">+</span></span></summary>
               {f.grupo.map((c) => (
-                <div class="ag-fila"><span class="h">{c.hora}</span>
-                  <button type="button" class="b b-cerr" data-hoja="cerrada" data-hora={c.hora}><span><b>Cerrada</b><span>Toca para abrir</span></span><span class="mas">+</span></button>
+                <div class="ag-fila" data-fila={c.hora}><span class="h">{c.hora}</span>
+                  <button type="button" class="b b-cerr" data-hoja="cerrada" data-hora={c.hora} aria-label={`${c.hora}, cerrada`} aria-haspopup="dialog"><span><b>Cerrada</b><span>Toca para abrir</span></span><span class="mas" aria-hidden="true">+</span></button>
                 </div>
               ))}
             </details>
@@ -298,24 +307,24 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
         }
         const c = f.celda;
         return (
-          <div class="ag-fila"><span class="h">{c.hora}</span>
+          <div class="ag-fila" data-fila={c.hora}><span class="h">{c.hora}</span>
             {c.tipo === 'sesion' && (
-              <a href={c.href} class={`b b-ses ${c.pagoTono === 'no' ? 'debe' : ''}`}>
-                <span><b>{c.nombre}</b><span>{c.detalle} · hasta las {c.fin}</span></span>
-                <span class={`pago ${c.pagoTono}`}>{c.pago}</span>
-              </a>
+              <button type="button" class={`b b-ses ${c.pagoTono === 'no' ? 'debe' : ''}`} data-hoja="sesion" data-hora={c.hora} data-href={c.href} data-id={c.id ?? ''} data-nombre={c.nombre} data-detalle={`${c.detalle} · ${c.hora} a ${c.fin}`} data-debe={c.pagoTono === 'no' ? '1' : ''} data-presencial={/presencial/i.test(c.detalle) ? '1' : ''} aria-label={`${c.hora}, ${c.nombre}, ${c.detalle}, ${c.pago}`} aria-haspopup="dialog">
+                <span><b>{c.nombre}</b><span>{c.detalle} · Hasta las {c.fin}</span></span>
+                <span class={`pago ${c.pagoTono}`}>{c.pago}</span><span class="mas" aria-hidden="true">›</span>
+              </button>
             )}
             {c.tipo === 'google' && (
-              <div class="b b-pers"><span><b>{c.titulo}</b><span>Tu Google Calendar · hasta las {c.fin}</span></span></div>
+              <div class="b b-pers"><span><b>{c.titulo}</b><span>Tu Google Calendar · Hasta las {c.fin}</span></span></div>
             )}
             {c.tipo === 'libre' && (
-              <button type="button" class={`b b-${c.modo === 'online' ? 'onl' : 'pres'}`} data-hoja="libre" data-hora={c.hora} data-modo={c.modo} data-extra={c.extraId ?? ''}>
-                <span><b>Libre</b><span>{c.modo === 'ambas' ? 'Presencial u online' : c.modo === 'online' ? 'Online' : 'Presencial'}</span></span><span class="mas">›</span>
+              <button type="button" class={`b b-${c.modo === 'online' ? 'onl' : 'pres'}`} data-hoja="libre" data-hora={c.hora} data-modo={c.modo} data-extra={c.extraId ?? ''} aria-label={`${c.hora}, libre, ${c.modo === 'ambas' ? 'presencial u online' : c.modo}`} aria-haspopup="dialog">
+                <span><b>Libre</b><span>{c.modo === 'ambas' ? 'Presencial u online' : c.modo === 'online' ? 'Online' : 'Presencial'}</span></span><span class="mas" aria-hidden="true">›</span>
               </button>
             )}
             {c.tipo === 'cerrada' && (
-              <button type="button" class="b b-cerr" data-hoja="cerrada" data-hora={c.hora} data-bloqueo={c.bloqueo?.id ?? ''} data-tabla={c.bloqueo?.tabla ?? ''} data-texto={c.bloqueo?.texto ?? ''}>
-                <span><b>Cerrada</b><span>{c.bloqueo ? c.bloqueo.texto : 'Toca para abrir'}</span></span><span class="mas">+</span>
+              <button type="button" class="b b-cerr" data-hoja="cerrada" data-hora={c.hora} data-bloqueo={c.bloqueo?.id ?? ''} data-tabla={c.bloqueo?.tabla ?? ''} data-texto={c.bloqueo?.texto ?? ''} aria-label={`${c.hora}, cerrada`} aria-haspopup="dialog">
+                <span><b>Cerrada</b><span>{c.bloqueo ? c.bloqueo.texto : 'Toca para abrir'}</span></span><span class="mas" aria-hidden="true">+</span>
               </button>
             )}
           </div>
@@ -332,6 +341,10 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
           </form>
         : <button type="button" class="hb hb-borde hb-ancho ag-dia-form" data-hoja="dia">Cerrar todo el {DIAS[dow(dia)].toLowerCase()} {num(dia)}</button>
     )}
+    <div class="ag-btns">
+      <button type="button" class="hb hb-borde" data-hoja="vacaciones">Días libres o vacaciones</button>
+      <a href="/admin/servicios" class="hb hb-borde">Horario semanal</a>
+    </div>
   </div>
 
   <!-- Hoja de opciones (se llena según la hora que se toca) -->
@@ -360,13 +373,20 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
       </form>
     </div>
 
+    <div class="panel" data-panel="sesion">
+      <p class="nota" data-ses-detalle></p>
+      <a class="hb hb-wa hb-ancho hb-grande" data-ses-cobrar>Enviar link de pago por WhatsApp</a>
+      <a class="hb hb-verde hb-ancho hb-grande" data-ses-grabar>● Grabar la sesión</a>
+      <a class="hb hb-borde hb-ancho" data-ses-ver>Ver detalles, mover o anular</a>
+    </div>
+
     <div class="panel" data-panel="cerrada">
       <div data-con-bloqueo hidden>
         <p class="nota" data-texto-bloqueo></p>
         <form method="POST" action="/api/admin/bloqueos" data-quitar-cierre>
           <input type="hidden" name="action" value="delete" /><input type="hidden" name="table" data-campo="tabla" /><input type="hidden" name="id" data-campo="bloqueo" />
           <input type="hidden" name="_redirect" value={`${vuelta}&hecho=cierre-quitado`} />
-          <button type="submit" class="hb hb-verde hb-ancho hb-grande">Quitar el cierre</button>
+          <button type="submit" class="hb hb-verde hb-ancho hb-grande">Quitar este cierre</button>
         </form>
         <p class="nota" data-quitar-cierre>Esas horas vuelven a tu horario normal. Si esta hora no está en tu horario, después la puedes abrir aquí mismo.</p>
       </div>
@@ -377,13 +397,13 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
         <fieldset class="ag-campo">
           <legend>¿Cómo quieres atender?</legend>
           <div class="ag-ops">
-            <label><input type="radio" name="destino" value="mod:presencial" checked /> Presencial</label>
+            <label><input type="radio" name="destino" value="mod:presencial" required /> Presencial</label>
             <label><input type="radio" name="destino" value="mod:online" /> Online</label>
             <label><input type="radio" name="destino" value="mod:ambos" /> Presencial u online</label>
           </div>
         </fieldset>
         <button type="submit" class="hb hb-verde hb-ancho hb-grande" data-boton-abrir>Abrir esta hora</button>
-        <p class="nota">Se abre solo este día y ya se puede agendar en tu página. La duración la pone el servicio que se agende.</p>
+        <p class="nota">Queda abierta solo este día. Tus pacientes ya la pueden agendar en tu página.</p>
       </form>
     </div>
 
@@ -419,13 +439,16 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
   const campo = (n) => hoja.querySelector(`[data-campo="${n}"]`);
   const sumarMin = (h, m) => { const [a, b] = h.split(':').map(Number); const t = Math.min(a * 60 + b + m, 1439); return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
   let ultimoBoton = null;
+  const fondo = [document.querySelector('.ag'), document.querySelector('.enc-tabbar'), document.querySelector('.enc-sidebar')].filter(Boolean);
   function abrir(panel, texto) {
+    fondo.forEach((el) => { el.inert = true; });
     hoja.querySelectorAll('.panel').forEach((p) => { p.hidden = p.dataset.panel !== panel; });
     titulo.textContent = texto;
     hoja.hidden = false; velo.hidden = false;
     requestAnimationFrame(() => { hoja.classList.add('on'); velo.classList.add('on'); hoja.querySelector('.ag-x').focus(); });
   }
   function cerrar() {
+    fondo.forEach((el) => { el.inert = false; });
     hoja.classList.remove('on'); velo.classList.remove('on');
     setTimeout(() => { hoja.hidden = true; velo.hidden = true; ultimoBoton?.focus(); }, 220);
   }
@@ -454,28 +477,59 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
         hoja.querySelectorAll('[data-quitar-cierre]').forEach((x) => { x.hidden = !b.dataset.bloqueo; });
       }
       campo('hora').value = h; campo('vuelta-abrir').value = `${vuelta}&h=${hh}`;
-      hoja.querySelector('[data-boton-abrir]').textContent = `Abrir las ${h}`;
+      hoja.querySelectorAll('[name="destino"]').forEach((r) => { r.checked = false; });
+      const btnAbrir = hoja.querySelector('[data-boton-abrir]');
+      btnAbrir.textContent = `Elige cómo atender las ${h}`; btnAbrir.disabled = true; btnAbrir.dataset.h = h;
       abrir('cerrada', `${h} · Cerrada`);
+    } else if (b.dataset.hoja === 'sesion') {
+      hoja.querySelector('[data-ses-detalle]').textContent = b.dataset.detalle;
+      const cobrar = hoja.querySelector('[data-ses-cobrar]');
+      cobrar.hidden = !(b.dataset.id && b.dataset.debe);
+      if (b.dataset.id) cobrar.href = `/admin/agenda?booking=${b.dataset.id}&accion=cobrar`;
+      const grabar = hoja.querySelector('[data-ses-grabar]');
+      grabar.hidden = !(b.dataset.presencial && dia === new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date()));
+      grabar.href = b.dataset.id ? `/admin/grabar?sesion=${b.dataset.id}` : '/admin/grabar';
+      const ver = hoja.querySelector('[data-ses-ver]');
+      ver.href = b.dataset.href;
+      ver.textContent = b.dataset.id ? 'Ver detalles, mover o anular' : 'Ver en la agenda (sesión de Encuadrado)';
+      abrir('sesion', b.dataset.nombre);
     } else if (b.dataset.hoja === 'dia') {
       abrir('dia', 'Cerrar el día');
     } else if (b.dataset.hoja === 'vacaciones') {
       abrir('vacaciones', 'Días libres o vacaciones');
     }
   });
+  hoja.querySelectorAll('[name="destino"]').forEach((r) => r.addEventListener('change', () => {
+    const btn = hoja.querySelector('[data-boton-abrir]');
+    const txt = { 'mod:presencial': 'presencial', 'mod:online': 'online', 'mod:ambos': 'presencial u online' }[r.value];
+    btn.disabled = false; btn.textContent = `Abrir las ${btn.dataset.h} ${txt}`;
+  }));
   document.querySelector('.ag-dia.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !hoja.hidden) cerrar(); });
+  // Vuelve a la misma hora después de guardar (la página se recarga arriba).
+  try {
+    const h = sessionStorage.getItem('agendaDiaHora');
+    sessionStorage.removeItem('agendaDiaHora');
+    if (h) document.querySelector(`[data-fila="${h}"]`)?.scrollIntoView({ block: 'center' });
+  } catch {}
+  document.querySelectorAll('.ag-grupo').forEach((d) => d.addEventListener('toggle', () => { if (d.open) d.querySelector('button')?.focus(); }));
+  document.querySelectorAll('[data-wa-enviado]').forEach((a) => a.addEventListener('click', () => { setTimeout(() => { a.textContent = '✓ Abierto en WhatsApp. Tócalo de nuevo si no se envió.'; }, 300); }));
   // Un solo toque por botón (evita guardar dos veces).
   document.querySelectorAll('.ag form, .ag-hoja form').forEach((f) => f.addEventListener('submit', () => {
+    try { if (ultimoBoton?.dataset.hora) sessionStorage.setItem('agendaDiaHora', ultimoBoton.dataset.hora); } catch {}
     f.querySelectorAll('button[type="submit"]').forEach((x) => { x.disabled = true; x.setAttribute('aria-busy', 'true'); });
   }));
   window.addEventListener('pageshow', (e) => { if (e.persisted) document.querySelectorAll('button[aria-busy]').forEach((x) => { x.disabled = false; x.removeAttribute('aria-busy'); }); });
+  const desde = hoja.querySelector('[name="date_from"]'), hasta = hoja.querySelector('[name="date_to"]');
+  desde?.addEventListener('change', () => { hasta.min = desde.value; if (hasta.value < desde.value) hasta.value = desde.value; });
   document.querySelectorAll('[data-copiar]').forEach((b) => b.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(b.dataset.copiar); b.textContent = '✓ Link copiado'; } catch { b.textContent = 'No se pudo copiar'; }
   }));
 </script>
 
 <style>
-  .ag { --verde:#576352; --verde-osc:#3F4A3B; --verde-claro:#E6EBE3; --dorado:#F5A623; --dorado-claro:#FDEBC8; --dorado-borde:#A86A00; --tinta:#2E332A; --gris:#5F5E57; --linea:#CFC8BF; --suave:#F3F0EB; --rojo:#B03A27; --rojo-claro:#FBE7E3; --wa:#15803D; --sombra:0 1px 2px rgba(46,51,42,.06),0 4px 14px rgba(46,51,42,.06);
+  .ag, .ag-hoja { --verde:#576352; --verde-osc:#3F4A3B; --verde-claro:#E6EBE3; --dorado:#F5A623; --dorado-claro:#FDEBC8; --dorado-borde:#A86A00; --tinta:#2E332A; --gris:#5F5E57; --linea:#CFC8BF; --suave:#F3F0EB; --rojo:#B03A27; --rojo-claro:#FBE7E3; --wa:#15803D; --sombra:0 1px 2px rgba(46,51,42,.06),0 4px 14px rgba(46,51,42,.06); }
+  .ag {
     max-width: 640px; margin: 0 auto; font-size: 17px; line-height: 1.45; color: var(--tinta); display: flex; flex-direction: column; gap: 12px; }
   .ag-cab { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
   .ag-cab h1 { font: 700 28px/1.15 'Domine', Georgia, serif; }
@@ -492,6 +546,7 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
   .ag-agendada { background: #fff; border-radius: 18px; box-shadow: var(--sombra); border-left: 5px solid var(--wa); padding: 14px; display: grid; gap: 10px; }
   .ag-agendada b { font-size: 18px; color: var(--verde-osc); }
   .ag-agendada p { color: var(--gris); font-size: 16px; }
+  .ag-agendada .ag-quien { color: var(--tinta); font-weight: 700; }
   .ag-sem { display: flex; align-items: center; gap: 8px; }
   .ag-sem span { flex: 1; text-align: center; font-weight: 700; font-size: 16px; }
   .ag-flecha { min-width: 48px; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; border-radius: 14px; background: #fff; border: 2px solid var(--linea); font-size: 22px; font-weight: 700; color: var(--tinta); text-decoration: none; }
@@ -503,8 +558,9 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
   .ag-dia i { font-style: normal; font-size: 13px; font-weight: 800; color: var(--verde-osc); }
   .ag-dia.on { background: var(--verde); color: #fff; }
   .ag-dia.on small, .ag-dia.on i { color: #fff; }
-  .ag-ir-hoy { align-self: center; min-height: 44px; display: inline-flex; align-items: center; font-weight: 700; color: var(--verde-osc); font-size: 16px; }
-  .ag-titulo { font: 700 22px/1.2 'Domine', Georgia, serif; margin-top: 4px; }
+  .ag-tit-fila { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 4px; }
+  .ag-ir-hoy { flex-shrink: 0; min-height: 44px; padding: 0 14px; border-radius: 12px; background: var(--verde-claro); display: inline-flex; align-items: center; font-weight: 700; color: var(--verde-osc); font-size: 16px; text-decoration: none; }
+  .ag-titulo { font: 700 22px/1.2 'Domine', Georgia, serif; }
   .ag-resumen { color: var(--gris); font-size: 16px; margin-top: -6px; }
   .ag-toast { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--tinta); color: #fff; border-radius: 14px; padding: 8px 8px 8px 16px; font-weight: 600; font-size: 16px; }
   .ag-toast button { min-height: 44px; padding: 0 14px; border-radius: 10px; background: rgba(255,255,255,.15); color: var(--dorado); font-weight: 800; border: 0; cursor: pointer; font-family: inherit; font-size: 16px; }
@@ -534,10 +590,11 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
   .b-ses { background: var(--verde-claro); color: var(--verde-osc); border: 0; border-left: 5px solid var(--verde); }
   .b-ses.debe { background: var(--rojo-claro); border-left-color: var(--rojo); color: #7A2618; }
   .b-pers { background: var(--suave); color: var(--gris); border: 1px solid var(--linea); cursor: default; }
-  .b-cerr { background: repeating-linear-gradient(135deg,#F6F3EF 0 8px,#ECE7E0 8px 16px); color: var(--gris); border: 2px dashed #B9B1A6; }
+  .b-cerr { background: repeating-linear-gradient(135deg,#F6F3EF 0 8px,#EFEAE3 8px 16px); color: var(--gris); border: 2px dashed #B9B1A6; }
   .pago { font-size: 14px; font-weight: 800; border-radius: 99px; padding: 3px 10px; white-space: nowrap; background: #fff; flex-shrink: 0; }
   .pago.ok { color: var(--verde-osc); } .pago.no { color: var(--rojo); } .pago.gris { color: var(--gris); }
-  .ag-dia-form { margin-top: 4px; }
+  .ag-dia-form { margin-top: 12px; }
+  .ag-btns { margin-bottom: 12px; }
 
   .ag-velo { position: fixed; inset: 0; background: rgba(46,51,42,.45); opacity: 0; transition: opacity .2s; z-index: 200; }
   .ag-velo.on { opacity: 1; }
@@ -550,7 +607,7 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
   .ag-hoja .panel { display: grid; gap: 12px; }
   .ag-hoja .panel[hidden] { display: none; }
   .ag-hoja form { display: grid; gap: 10px; }
-  .ag-hoja form[hidden], .ag-hoja [data-con-bloqueo][hidden] { display: none; }
+  .ag-hoja form[hidden], .ag-hoja [data-con-bloqueo][hidden], .ag-hoja a[hidden], .ag-hoja p[hidden] { display: none; }
   .ag-campo { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
   .ag-campo legend { font-size: 15px; font-weight: 700; color: #5F5E57; margin-bottom: 8px; }
   .ag-ops { display: grid; gap: 8px; }
@@ -561,6 +618,8 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
   .ag-fechas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .ag-fechas label, .ag-motivo { font-size: 15px; font-weight: 700; color: #5F5E57; display: grid; gap: 4px; }
   .ag-fechas input, .ag-motivo input { min-height: 52px; border: 2px solid #CFC8BF; border-radius: 12px; padding: 0 10px; font: inherit; font-size: 16px; background: #fff; width: 100%; color: #2E332A; }
+  .ag a:focus-visible, .ag button:focus-visible, .ag summary:focus-visible, .ag-hoja :focus-visible { outline: 3px solid #3F4A3B; outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { .ag-hoja, .ag-velo { transition: none; } }
   @media (min-width: 769px) {
     .ag-hoja { left: auto; top: 0; width: 440px; max-height: none; border-radius: 24px 0 0 24px; transform: translateX(105%); }
   }
