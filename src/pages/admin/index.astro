@@ -390,38 +390,35 @@ if (tarifas.length) {
   const { data } = await supabase.from('patients').select('id, name');
   for (const p of data ?? []) if (p.name) fichaPorNombre.set(normalizar(String(p.name)), p.id);
 }
-// Tarifas que solo rigen pronto (sin nada que hacer) se juntan en un aviso por fecha, con «Entendido» (22 nov 2026:
-// en vivo salían 8 tarjetas iguales "Rige mañana" que tapaban el resto).
-const proximasPorFecha = new Map<string, typeof tarifas>();
-for (const t of tarifas) {
-  if (t.fase !== 'proxima' || t.sesionesConMontoAntiguo > 0) continue;
-  proximasPorFecha.set(t.desde, [...(proximasPorFecha.get(t.desde) ?? []), t]);
-}
-for (const [desde, grupo] of proximasPorFecha) {
-  if (grupo.length < 2) continue;
+// Cambios de tarifa (22 nov 2026, Vale: "ya no quiero que me aparezcan los de cambio de precio porque ya los agendé
+// con precio distinto a todos"): si hay 2 o más, van juntos en UN aviso con «No me avises más», que los esconde para
+// siempre (solo en Hoy; no cambia precios ni sesiones). Una tarifa nueva que se agregue después sale de nuevo.
+const tarifasJuntas = tarifas.length >= 2;
+if (tarifasJuntas) {
+  const conAntiguo = tarifas.filter((t) => t.sesionesConMontoAntiguo > 0).length;
   tareas.push({
-    id: `tarifas:${desde}:${grupo.map((t) => t.id).sort().join('.').slice(0, 150)}`,
-    clave: `${desde}T00:00`,
-    chip: `rige ${cuando(desde)}`,
-    titulo: `${grupo.length} tarifas nuevas desde el ${fechaLarga(desde)}`,
-    detalle: grupo.map((t) => `${t.nombre}: ${t.anterior ? `${clp(t.anterior)} → ` : ''}${clp(t.nuevo)}`).join(' · '),
+    id: `tarifas:${tarifas.map((t) => t.id).sort().join('.').slice(0, 190)}`,
+    clave: tarifas.some((t) => t.fase !== 'proxima') ? ahoraClave : `${tarifas.map((t) => t.desde).sort()[0]}T00:00`,
+    chip: 'cambios de tarifa',
+    titulo: `${tarifas.length} tarifas nuevas`,
+    detalle: tarifas.map((t) => `${t.nombre}: ${t.anterior ? `${clp(t.anterior)} → ` : ''}${clp(t.nuevo)} desde el ${fechaLarga(t.desde)}`).join(' · ')
+      + (conAntiguo ? ` · ⚠ ${conAntiguo === 1 ? '1 tiene' : `${conAntiguo} tienen`} sesiones agendadas con el monto antiguo` : ''),
     href: '/admin/pacientes',
     informativo: true,
   });
 }
-for (const t of tarifas) {
-  if ((proximasPorFecha.get(t.desde)?.length ?? 0) >= 2 && proximasPorFecha.get(t.desde)!.includes(t)) continue;
+for (const t of tarifasJuntas ? [] : tarifas) {
   const ficha = fichaPorNombre.get(normalizar(t.nombre));
   const monto = `${t.anterior ? `${clp(t.anterior)} → ` : ''}${clp(t.nuevo)} desde el ${fechaLarga(t.desde)}`;
   const montoAntiguo = t.sesionesConMontoAntiguo > 0 ? ` · ⚠ ${t.sesionesConMontoAntiguo} ${t.sesionesConMontoAntiguo === 1 ? 'sesión agendada' : 'sesiones agendadas'} con el monto antiguo` : '';
   tareas.push({
-    id: t.fase === 'proxima' && t.sesionesConMontoAntiguo === 0 ? `tarifaprox:${t.id}` : `tarifa:${t.id}`, // id propio: «Entendido» no esconde los avisos que vienen después
+    id: `tarifa:${t.id}:${t.fase}`, // con la fase: «No me avises más» no esconde lo que viene después (ej. aplicar el precio)
     clave: t.fase === 'avisar' ? (t.atrasado ? ahoraClave : `${sumarDias(t.desde, -1)}T23:59`) : t.fase === 'vigente' ? ahoraClave : `${t.desde}T00:00`,
     chip: t.fase === 'avisar' ? (t.atrasado ? 'urgente: ya rige' : `avisar antes del ${cuando(t.desde)}`) : t.fase === 'proxima' ? `rige ${cuando(t.desde)}` : 'ya rige',
     titulo: t.fase === 'avisar' ? `Avisar cambio de tarifa a ${t.nombre}` : `Tarifa nueva de ${t.nombre}`,
     detalle: monto + montoAntiguo + (t.fase === 'vigente' ? ' · al agendarle usa el monto nuevo' : ''),
     href: ficha ? `/admin/pacientes/${ficha}?tab=sesiones` : '/admin/pacientes',
-    informativo: t.fase === 'proxima' && t.sesionesConMontoAntiguo === 0,
+    informativo: true,
     accion: t.fase === 'proxima' ? undefined : { tipo: 'form', action: '/api/admin/cambios-tarifa', campos: { id: t.id, campo: t.fase === 'avisar' ? 'avisado' : 'aplicado', redirect: vuelta }, texto: t.fase === 'avisar' ? 'Ya le avisé' : 'Listo' },
   });
 }
@@ -570,7 +567,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
             {hero.online && hero.id && hero.fecha === hoy && (
               <a href="/admin/sala-online" target="_blank" rel="noopener" class="hb hb-verde hoy-meet">Entrar a Meet</a>
             )}
-            {!hero.online && hero.fecha === hoy && (
+            {!hero.online && (
               <a href={hero.id ? `/admin/grabar?sesion=${hero.id}` : hero.fichaId ? `/admin/grabar?paciente=${hero.fichaId}` : '/admin/grabar'} class="hb hb-verde hoy-meet">● Grabar la sesión</a>
             )}
             <div class="hoy-dos">
@@ -668,7 +665,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
                         {t.informativo && t.id && (
                           <form method="POST" action="/api/admin/aviso" class="hoy-form">
                             <input type="hidden" name="id" value={t.id} /><input type="hidden" name="accion" value="atendido" /><input type="hidden" name="redirect" value={vuelta} />
-                            <button type="submit" class="hb hb-listo">✓ Entendido</button>
+                            <button type="submit" class="hb hb-listo">✓ No me avises más</button>
                           </form>
                         )}
                         {t.colegio && t.id && (
