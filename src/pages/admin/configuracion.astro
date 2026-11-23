@@ -326,7 +326,8 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
       )}
     </div>
 
-    <!-- WhatsApp Business (Coexistence) -->
+    <!-- WhatsApp Business (Coexistence): en pausa mientras no esté conectado (Vale, 23 nov 2026). Sigue en Más → En pausa. -->
+    {settings['whatsapp_access_token'] && (
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
         <div style="display:flex;align-items:center;gap:0.75rem;">
@@ -346,6 +347,7 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
         {settings['whatsapp_access_token'] ? 'Ver conexión' : 'Conectar WhatsApp'}
       </a>
     </div>
+    )}
 
     <!-- Reseñas de Google -->
     <div class="card">

@@ -84,10 +84,6 @@ function fmt(iso: string) {
     <div class="com-tabs">
       <a href="/admin/comunicaciones" class={`com-tab ${tab === 'masivos' ? 'active' : ''}`} id="tab-correos">Correos masivos <span class="com-tab-count">({history.length})</span></a>
       <a href="/admin/comunicaciones?tab=automaticos" class={`com-tab ${tab === 'automaticos' ? 'active' : ''}`}>Automáticos</a>
-      <button class="com-tab disabled" disabled>
-        WhatsApp
-        <span class="com-soon"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Próximamente</span>
-      </button>
     </div>
 
     {tab === 'automaticos' && (
