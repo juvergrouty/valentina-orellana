@@ -278,7 +278,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
                                 </p>
                               </div>
                               <div style="display:flex;gap:0.5rem 2rem;flex-wrap:wrap;align-items:center;">
-                                <button type="button" class="btn btn-outline btn-sm btn-toggle-pay" data-bid={b.id}>💰 Marcar pagado</button>
+                                <button type="button" class="btn btn-outline btn-sm btn-toggle-pay" data-bid={b.id}>Marcar pagado</button>
                                 {/* Separado de "Marcar pagado" (auditoría 15 oct 2026); pide confirmación. */}
                                 <button type="button" class="btn-void-debt" data-bid={b.id} style="background:none;border:none;padding:0.3rem 0;color:var(--stone);font-size:0.78rem;text-decoration:underline;cursor:pointer;">Anular deuda</button>
                               </div>
@@ -352,6 +352,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
     .tabla-cobro > table > tbody > tr.debt-row { display: flex; flex-direction: column; }
     .tabla-cobro td.dd-tog-td .btn-toggle-debt { width: 100%; min-height: 44px; border: 2px solid #CFC8BF !important; border-radius: 12px; background: #fff !important; font-size: 16px !important; font-weight: 700; color: #2E332A !important; }
     .tabla-cobro td.dd-tog-td .btn-toggle-debt::after { content: ' Ver las sesiones'; }
+    .tabla-cobro td.dd-tog-td .btn-toggle-debt[aria-expanded="true"]::after { content: ' Ocultar las sesiones'; }
     .tabla-cobro td.dd-monto-td { flex-wrap: wrap; }
     .tabla-cobro td[data-label]::before { content: attr(data-label); color: #5F5E57; font-size: 14px; font-weight: 600; flex-shrink: 0; }
     .tabla-cobro td.pc-acc-td { display: flex; gap: 8px; padding-top: 10px !important; flex-wrap: wrap; }
@@ -380,6 +381,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
         const open = detail.style.display !== 'none';
         detail.style.display = open ? 'none' : '';
         toggle.textContent = open ? '▸' : '▾';
+        toggle.setAttribute('aria-expanded', String(!open));
       }
       return;
     }

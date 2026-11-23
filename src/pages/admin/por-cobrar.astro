@@ -187,7 +187,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
     .tabla-cobro > table > tbody > tr > td.pc-nom-td p:first-child { font-size: 18px !important; }
     .tabla-cobro td[data-label]::before { content: attr(data-label); color: #5F5E57; font-size: 14px; font-weight: 600; flex-shrink: 0; }
     .tabla-cobro td.pc-acc-td { display: flex; gap: 8px; padding-top: 10px !important; flex-wrap: wrap; }
-    .tabla-cobro td.pc-acc-td .icon-btn { width: auto !important; flex: 1; min-height: 48px; height: 48px !important; border-radius: 12px !important; gap: 8px; font-weight: 700; font-size: 16px; }
+    .tabla-cobro td.pc-acc-td .icon-btn { margin: 0 !important; width: auto !important; flex: 1; min-height: 48px; height: 48px !important; border-radius: 12px !important; gap: 8px; font-weight: 700; font-size: 16px; }
     .tabla-cobro td.pc-acc-td a.icon-btn::after { content: 'WhatsApp'; }
     .tabla-cobro td.pc-acc-td button.icon-btn::after { content: 'Correo'; }
   }
