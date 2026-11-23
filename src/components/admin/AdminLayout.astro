@@ -48,10 +48,8 @@ const fechaFeriado = (iso: string) => { const [y, m, d] = iso.split('-').map(Num
 // Vuelta al mismo lugar sin el "?error=…" de un intento fallido anterior
 // (si no, el aviso de error seguía después de reintentar con éxito).
 // Rediseño (22 nov 2026): los avisos de cosas por hacer viven en Hoy («Te necesita ahora», cada uno con su botón).
-// En las demás páginas ya no se muestran completos (en el celular tapaban la pantalla entera): queda una sola línea.
+// En las demás páginas ya no se muestran (en el celular tapaban la pantalla entera); Hoy está siempre a un toque.
 const avisosEnCadaPagina = false;
-const avisosPorHacer = comprobanteAlerts.length + boletaAlerts.length + consentAlerts.length + (pagosPorDevolver?.length ?? 0)
-  + impuestos.length + rebotes.length + (cobros?.length ?? 0) + box.pendientes.length + box.liberar.length + tarifas.length;
 const urlVuelta = (() => { const u = new URL(Astro.url); u.searchParams.delete('error'); u.searchParams.delete('detail'); u.searchParams.delete('calendario'); if (u.searchParams.get('saved') === 'anulada') { u.searchParams.delete('saved'); u.searchParams.delete('correo'); } return u.pathname + u.search; })();
 const fmtSesion = (d: string | null) => d ? d.split('-').reverse().join('-') : '';
 
@@ -710,9 +708,6 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   .cal-wrap, .com-wrap, .fin-wrap, .ev-wrap, .rep-wrap, .pac-wrap { height: calc(100dvh - 76px - env(safe-area-inset-bottom)) !important; }
 }
 
-.enc-avisos-linea { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 48px; padding: 8px 16px; background: #FDEBC8; color: #2E332A; font-size: 15px; font-weight: 600; text-decoration: none; border-bottom: 1px solid #F0D9A8; }
-.enc-avisos-linea b { color: #3F4A3B; white-space: nowrap; }
-
 /* ── Field error ─────────────────────────────────────────────────────────── */
 .field-error { color: var(--enc-red); font-size: 0.8rem; }
 
@@ -900,12 +895,6 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
       </div>
     )}
     <AlertasTranscriptor />
-    {!ocultarAvisosDeInicio && avisosPorHacer > 0 && (
-      <a href="/admin" class="enc-avisos-linea">
-        <span>Tienes avisos pendientes</span>
-        <b>Ver en Hoy ›</b>
-      </a>
-    )}
     {/* Seguimientos (18 nov 2026): mensajes listos que nunca salen sin su aprobación. */}
     {(pausasPorAprobar ?? 0) > 0 && current !== '/admin/seguimientos' && (
       <div role="status" style="background:#576352;color:#fff;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;">

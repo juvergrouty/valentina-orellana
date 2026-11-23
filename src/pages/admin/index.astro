@@ -166,7 +166,10 @@ const delDia = sesiones.filter((s) => s.fecha === dia);
 // "Preparar" (29 oct 2026): cada sesión del día lleva a "Para revisar hoy" de la ficha de su paciente: lo ya
 // generado y sus notas, siempre gratis (no llama a la IA). Ficha por correo (reservas del sitio) o, si no, por nombre (eventos de
 // Google/Encuadrado), solo si hay UNA ficha que calce: ante la duda no se ofrece el botón.
-if (delDia.length) {
+// También la primera de los próximos días: puede ser la «Próxima sesión» de arriba (botón «Preparar la sesión», 22 nov 2026).
+const siguienteOtroDia = sesiones.find((s) => s.fecha > dia && s.fecha <= fin7);
+const paraFicha = siguienteOtroDia ? [...delDia, siguienteOtroDia] : delDia;
+if (paraFicha.length) {
   const { data: fichas } = await supabase.from('patients').select('id, name, email');
   // Por nombre (solo eventos de Google, sin correo): mismo primer nombre Y al menos un apellido en común;
   // un evento que diga solo "Luis" no abre la ficha de "Luis Medina" (auditoría 29 oct 2026).
@@ -175,7 +178,7 @@ if (delDia.length) {
     const x = palabras(a), y = palabras(b);
     return x.length > 1 && y.length > 1 && mismaPersonaNombre(a, b) && x.slice(1).some((w) => y.slice(1).includes(w));
   };
-  for (const s of delDia) {
+  for (const s of paraFicha) {
     const candidatas = s.email
       ? (fichas ?? []).filter((f) => String(f.email ?? '').toLowerCase() === s.email!.toLowerCase())
       : (fichas ?? []).filter((f) => f.name && conApellidoComun(String(f.name), s.paciente));
@@ -412,7 +415,7 @@ for (const t of tarifas) {
   const monto = `${t.anterior ? `${clp(t.anterior)} → ` : ''}${clp(t.nuevo)} desde el ${fechaLarga(t.desde)}`;
   const montoAntiguo = t.sesionesConMontoAntiguo > 0 ? ` · ⚠ ${t.sesionesConMontoAntiguo} ${t.sesionesConMontoAntiguo === 1 ? 'sesión agendada' : 'sesiones agendadas'} con el monto antiguo` : '';
   tareas.push({
-    id: `tarifa:${t.id}`,
+    id: t.fase === 'proxima' && t.sesionesConMontoAntiguo === 0 ? `tarifaprox:${t.id}` : `tarifa:${t.id}`, // id propio: «Entendido» no esconde los avisos que vienen después
     clave: t.fase === 'avisar' ? (t.atrasado ? ahoraClave : `${sumarDias(t.desde, -1)}T23:59`) : t.fase === 'vigente' ? ahoraClave : `${t.desde}T00:00`,
     chip: t.fase === 'avisar' ? (t.atrasado ? 'urgente: ya rige' : `avisar antes del ${cuando(t.desde)}`) : t.fase === 'proxima' ? `rige ${cuando(t.desde)}` : 'ya rige',
     titulo: t.fase === 'avisar' ? `Avisar cambio de tarifa a ${t.nombre}` : `Tarifa nueva de ${t.nombre}`,
@@ -564,11 +567,17 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
               <span class="hoy-hora">{hero.hora}</span>
               <span><b>{hero.paciente}</b><span>{hero.fecha !== dia ? `${mayus(cuando(hero.fecha))} · ` : ''}{hero.tipo} · {mayus(PAGO_TXT[hero.pago])}</span></span>
             </a>
+            {hero.online && hero.id && hero.fecha === hoy && (
+              <a href="/admin/sala-online" target="_blank" rel="noopener" class="hb hb-verde hoy-meet">Entrar a Meet</a>
+            )}
+            {!hero.online && hero.fecha === hoy && (
+              <a href={hero.id ? `/admin/grabar?sesion=${hero.id}` : hero.fichaId ? `/admin/grabar?paciente=${hero.fichaId}` : '/admin/grabar'} class="hb hb-verde hoy-meet">● Grabar la sesión</a>
+            )}
             <div class="hoy-dos">
-              {hero.online && hero.id && hero.fecha === hoy
-                ? <a href="/admin/sala-online" target="_blank" rel="noopener" class="hb hb-verde">Entrar a Meet</a>
-                : null}
               <a href={hero.href} class="hb hb-borde">Ver detalles</a>
+              {hero.fichaId
+                ? <a href={`/admin/pacientes/${hero.fichaId}?tab=notas#para-revisar`} class="hb hb-verde-claro">Preparar la sesión</a>
+                : <a href="/admin/pacientes" class="hb hb-verde-claro">Preparar la sesión</a>}
             </div>
           </>
         ) : (
@@ -709,6 +718,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
                     <span class={`hoy-pago-chip ${s.pago}`}>{mayus(PAGO_TXT[s.pago])}</span>
                   </a>
                   {s.fichaId && <a href={`/admin/pacientes/${s.fichaId}?tab=notas#para-revisar`} class="hoy-preparar">Preparar la sesión</a>}
+                  {!s.online && s.fecha === hoy && !pasada && <a href={s.id ? `/admin/grabar?sesion=${s.id}` : s.fichaId ? `/admin/grabar?paciente=${s.fichaId}` : '/admin/grabar'} class="hoy-preparar">Grabar la sesión</a>}
                 </div>
               );
             })}
@@ -781,6 +791,8 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
   .hoy-ahora-fila b { display: block; font-size: 19px; }
   .hoy-ahora-fila span span { font-size: 15px; color: var(--gris); }
   .hoy-hora { font: 700 22px 'Domine', Georgia, serif; color: var(--verde-osc); min-width: 62px; }
+  .hoy-meet { width: 100%; margin-bottom: 8px; }
+  .hb-verde-claro { background: var(--verde-claro); color: var(--verde-osc); }
   .hoy-dos { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 
   .hoy-meta { background: var(--verde); color: #fff; border-radius: 20px; padding: 16px; box-shadow: var(--sombra); }
@@ -851,6 +863,7 @@ const PAGO_TXT: Record<Sesion['pago'], string> = { 'pagada': 'pagada', 'por-paga
   .hoy-pago-chip.pagada { background: var(--verde-claro); color: var(--verde-osc); }
   .hoy-pago-chip.por-pagar { background: var(--rojo-claro); color: var(--rojo); }
   .hoy-pago-chip.en-consulta { background: var(--ambar-claro); color: var(--ambar); }
+  .hoy-preparar + .hoy-preparar { margin-left: 18px; }
   .hoy-preparar { display: inline-flex; min-height: 44px; align-items: center; font-size: 15px; font-weight: 700; color: var(--verde-osc); margin-bottom: 4px; }
   .hoy-semana { margin-top: 12px; background: #fff; border-radius: 16px; box-shadow: var(--sombra); padding: 0 14px; }
   .hoy-semana summary { min-height: 52px; display: flex; align-items: center; font-weight: 700; cursor: pointer; }
