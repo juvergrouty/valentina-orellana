@@ -59,7 +59,7 @@ const fmtSesion = (d: string | null) => d ? d.split('-').reverse().join('-') : '
 // Cada opción se marca también en sus páginas hijas (ej. Pagos en Deudas y Por cobrar).
 const SECCIONES: Record<string, string[]> = {
   '/admin':           ['/admin'],
-  '/admin/agenda':    ['/admin/agenda', '/admin/horarios', '/admin/bloqueos', '/admin/calendario'],
+  '/admin/agenda':    ['/admin/agenda', '/admin/agenda-dia', '/admin/horarios', '/admin/bloqueos', '/admin/calendario'],
   '/admin/pacientes': ['/admin/pacientes'],
   '/admin/finanzas':  ['/admin/finanzas', '/admin/deudas', '/admin/por-cobrar', '/admin/cobros'],
 };
@@ -843,7 +843,7 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   <!-- ── Menú de abajo (celular) · rediseño 22 nov 2026 ────────────────── -->
   <nav class="enc-tabbar" aria-label="Menú">
     {navMain.map(item => (
-      <a href={item.href} class={isActive(item.href) ? 'on' : ''} aria-current={isActive(item.href) ? 'page' : undefined}>
+      <a href={item.href === '/admin/agenda' ? '/admin/agenda-dia' : item.href} class={isActive(item.href) ? 'on' : ''} aria-current={isActive(item.href) ? 'page' : undefined}>
         <Fragment set:html={icons[item.icon as IconName]} />
         <span>{item.label}</span>
       </a>

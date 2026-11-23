@@ -1,0 +1,543 @@
+---
+export const prerender = false;
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import { supabase } from '../../lib/supabase';
+import { todayCL, nowCL } from '../../lib/dateUtils';
+import { calcularDisponibilidad } from '../../lib/disponibilidad';
+import { getValidAccessToken } from '../../lib/syncCalendar';
+import { leerHorasExtra } from '../../lib/horasExtra';
+import { pacienteDeTitulo } from '../../lib/boxCala';
+import { mismaPersona } from '../../lib/mismaPersona';
+import { esPagoEnConsulta } from '../../lib/pagoEnConsulta';
+import { mensajeLinkPago } from '../../lib/cobrosProximos';
+
+// Agenda del día para el celular (rediseño, muestra aprobada por Valentina el 21 nov 2026; construida el 22 nov:
+// "el calendario se ve como en el computador… no puede ser así" y "lo de abrir disponibilidad se ve igual").
+// Toca una hora: libre → agendar o cerrarla; cerrada → abrirla; sesión → ver detalles. Todo usa las mismas
+// funciones de siempre (/api/admin/bloqueos, /api/admin/horas-extra, /api/admin/bookings): no cambia lógica.
+
+const hoy = todayCL();
+const fParam = Astro.url.searchParams.get('fecha') ?? '';
+const dia = /^\d{4}-\d{2}-\d{2}$/.test(fParam) ? fParam : hoy;
+const sumar = (iso: string, n: number) => { const x = new Date(iso + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const dow = (iso: string) => new Date(iso + 'T12:00:00Z').getUTCDay();
+const lunes = sumar(dia, -((dow(dia) + 6) % 7));
+const semana = Array.from({ length: 7 }, (_, i) => sumar(lunes, i));
+const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const num = (iso: string) => Number(iso.slice(8, 10));
+const largo = (iso: string) => `${DIAS[dow(iso)]} ${num(iso)} de ${MESES[Number(iso.slice(5, 7)) - 1]}`;
+const aMin = (h: string) => { const [a, b] = h.split(':').map(Number); return a * 60 + b; };
+const aHora = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const vuelta = `/admin/agenda-dia?fecha=${dia}`;
+const pasado = dia < hoy;
+
+// ── Datos del día ───────────────────────────────────────────────────────────
+const { data: svcs } = await supabase.from('services_catalog').select('duration_min').eq('visible', true);
+const durs = (svcs ?? []).map((s) => Number(s.duration_min)).filter((n) => Number.isFinite(n) && n > 0);
+const duracion = durs.length ? Math.min(...durs) : 50;
+
+async function eventosGoogle(): Promise<Array<{ hora: string; fin: string; titulo: string; propio: boolean }> | null> {
+  const auth = await getValidAccessToken();
+  if (!auth) return null;
+  const tMin = new Date(Date.parse(dia + 'T00:00:00Z') - 86400000).toISOString();
+  const tMax = new Date(Date.parse(dia + 'T00:00:00Z') + 2 * 86400000).toISOString();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(auth.calendarId)}/events`
+    + `?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true&orderBy=startTime&maxResults=250&timeZone=America%2FSantiago`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${auth.token}` }, signal: AbortSignal.timeout(5000) });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const out: Array<{ hora: string; fin: string; titulo: string; propio: boolean }> = [];
+  for (const ev of (data.items ?? []) as Array<{ summary?: string; status?: string; description?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }>) {
+    const ini = ev.start?.dateTime;
+    if (!ini || ev.status === 'cancelled' || ini.slice(0, 10) !== dia) continue;
+    const fin = ev.end?.dateTime && ev.end.dateTime.slice(0, 10) === dia ? ev.end.dateTime.slice(11, 16) : aHora(Math.min(aMin(ini.slice(11, 16)) + 50, 1439));
+    out.push({ hora: ini.slice(11, 16), fin, titulo: ev.summary ?? 'Ocupado', propio: !!ev.description?.includes('Ps. Valentina Orellana') });
+  }
+  return out;
+}
+
+const [resB, google, pres, onl, bDia, bHoras, extras] = await Promise.all([
+  supabase.from('bookings')
+    .select('id, patient_name, session_type, session_time, duration_min, status, amount, paid_at, debt_voided, notes, payment_method')
+    .eq('session_date', dia).not('status', 'in', '(cancelled,expired)').order('session_time'),
+  eventosGoogle().catch(() => null),
+  pasado ? Promise.resolve({ slots: [] as string[] }) : calcularDisponibilidad({ date: dia, serviceId: null, duration: duracion, modality: 'presencial' }).catch(() => ({ error: 'x', status: 500 })),
+  pasado ? Promise.resolve({ slots: [] as string[] }) : calcularDisponibilidad({ date: dia, serviceId: null, duration: duracion, modality: 'online' }).catch(() => ({ error: 'x', status: 500 })),
+  supabase.from('blocked_dates').select('id, reason').eq('date', dia).maybeSingle(),
+  supabase.from('blocked_slots' as any).select('id, date_from, date_to, time_from, time_to, all_day, label').lte('date_from', dia).gte('date_to', dia),
+  leerHorasExtra().catch(() => []),
+]);
+const errorDatos = !!resB.error || 'error' in pres || 'error' in onl;
+
+type Celda =
+  | { tipo: 'sesion'; hora: string; fin: string; id: string | null; nombre: string; detalle: string; pago: string; pagoTono: 'ok' | 'no' | 'gris'; href: string }
+  | { tipo: 'google'; hora: string; fin: string; titulo: string }
+  | { tipo: 'libre'; hora: string; modo: 'presencial' | 'online' | 'ambas'; extraId: string | null }
+  | { tipo: 'cerrada'; hora: string; bloqueo: { id: string; tabla: 'blocked_slots' | 'blocked_dates'; texto: string } | null };
+
+const TIPOS: Record<string, string> = { online: 'Individual · Online', presencial: 'Individual · Presencial', 'pareja-online': 'Pareja · Online', 'pareja-presencial': 'Pareja · Presencial' };
+const celdas: Celda[] = [];
+const ocupado: Array<[number, number]> = [];
+
+for (const b of (resB.data ?? []) as any[]) {
+  const h = String(b.session_time).slice(0, 5);
+  const fin = aHora(aMin(h) + (b.duration_min ?? 50));
+  const pago = b.paid_at ? (Number(b.amount) > 0 ? ['Pagada', 'ok'] : ['Sin costo', 'gris'])
+    : b.debt_voided ? ['Deuda anulada', 'gris']
+    : Number(b.amount) > 0 ? (esPagoEnConsulta(b) ? ['Paga en la consulta', 'gris'] : ['Por pagar', 'no']) : ['Sin costo', 'gris'];
+  celdas.push({ tipo: 'sesion', hora: h, fin, id: b.id, nombre: b.patient_name, detalle: TIPOS[b.session_type] ?? b.session_type, pago: pago[0], pagoTono: pago[1] as 'ok' | 'no' | 'gris', href: `/admin/agenda?booking=${b.id}` });
+  ocupado.push([aMin(h), aMin(fin)]);
+}
+for (const g of google ?? []) {
+  if (g.propio) continue; // evento de una reserva de la página: ya está arriba
+  const esSesion = /sesi[oó]n/i.test(g.titulo);
+  if (esSesion) {
+    const paciente = pacienteDeTitulo(g.titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, ''));
+    if (celdas.some((c) => c.tipo === 'sesion' && mismaPersona(c.nombre, paciente))) continue; // misma sesión (página + Encuadrado)
+    celdas.push({ tipo: 'sesion', hora: g.hora, fin: g.fin, id: null, nombre: paciente, detalle: `${/online/i.test(g.titulo) ? 'Online' : 'Presencial'} · Encuadrado`, pago: 'Encuadrado', pagoTono: 'gris', href: `/admin/agenda?fecha=${dia}&hora=${g.hora}` });
+  } else {
+    celdas.push({ tipo: 'google', hora: g.hora, fin: g.fin, titulo: g.titulo });
+  }
+  ocupado.push([aMin(g.hora), aMin(g.fin)]);
+}
+
+const lp = new Set('slots' in pres ? pres.slots.map((x) => String(x).slice(0, 5)) : []);
+const lo = new Set('slots' in onl ? onl.slots.map((x) => String(x).slice(0, 5)) : []);
+const extraDe = (h: string) => (extras as any[]).find((e) => e.fecha === dia && e.hora === h && !e.quitar)?.id ?? null;
+for (const h of new Set([...lp, ...lo])) {
+  celdas.push({ tipo: 'libre', hora: h, modo: lp.has(h) && lo.has(h) ? 'ambas' : lp.has(h) ? 'presencial' : 'online', extraId: extraDe(h) });
+  ocupado.push([aMin(h), aMin(h) + duracion]);
+}
+
+// Horas cerradas: cada hora en punto de 8:00 a 21:00 que no tiene nada (para poder abrirla con un toque).
+const bloqueosHora = ((bHoras.data ?? []) as any[]);
+const bloqueoDe = (h: string): { id: string; tabla: 'blocked_slots' | 'blocked_dates'; texto: string } | null => {
+  if (bDia.data) return { id: bDia.data.id, tabla: 'blocked_dates', texto: `Cerraste todo este día${bDia.data.reason ? ` (${bDia.data.reason})` : ''}.` };
+  const m = aMin(h);
+  const b = bloqueosHora.find((x) => x.all_day || (!x.time_from && !x.time_to) || (m < aMin(String(x.time_to ?? '23:59').slice(0, 5)) && m + duracion > aMin(String(x.time_from ?? '00:00').slice(0, 5))));
+  if (!b) return null;
+  const tf = String(b.time_from ?? '').slice(0, 5), tt = String(b.time_to ?? '').slice(0, 5);
+  return { id: b.id, tabla: 'blocked_slots', texto: b.all_day || !tf ? `Cerraste este día${b.label ? ` (${b.label})` : ''}.` : `Cerraste de ${tf} a ${tt}${b.label ? ` (${b.label})` : ''}.` };
+};
+if (!pasado) {
+  for (let m = 8 * 60; m <= 21 * 60; m += 60) {
+    if (ocupado.some(([a, z]) => m < z && m + 60 > a)) continue;
+    const h = aHora(m);
+    if (dia === hoy && h <= nowCL().toISOString().slice(11, 16)) continue;
+    celdas.push({ tipo: 'cerrada', hora: h, bloqueo: bloqueoDe(h) });
+  }
+}
+celdas.sort((a, b) => a.hora.localeCompare(b.hora));
+
+// Varias horas cerradas seguidas (sin bloqueo propio) se juntan en una fila que se abre al tocarla.
+type Fila = { celda: Celda } | { grupo: Celda[] };
+const filas: Fila[] = [];
+for (const c of celdas) {
+  const ult = filas[filas.length - 1];
+  const juntable = c.tipo === 'cerrada' && !c.bloqueo;
+  if (juntable && ult) {
+    if ('grupo' in ult) { ult.grupo.push(c); continue; }
+    if (ult.celda.tipo === 'cerrada' && !ult.celda.bloqueo) { filas[filas.length - 1] = { grupo: [ult.celda, c] }; continue; }
+  }
+  filas.push({ celda: c });
+}
+const libres = celdas.filter((c) => c.tipo === 'libre').length;
+const sesionesDia = celdas.filter((c) => c.tipo === 'sesion').length;
+
+// ── Mensajes después de una acción ──────────────────────────────────────────
+const qp = Astro.url.searchParams;
+const hecho = qp.get('hecho') ?? '';
+const horaHecha = (qp.get('h') ?? '').replace(/^(\d{2})(\d{2})$/, '$1:$2');
+// Deshacer: se busca lo recién creado (el bloqueo de esa hora o la hora abierta).
+let deshacer: { accion: string; campos: Record<string, string> } | null = null;
+if (hecho === 'cerrada' && horaHecha) {
+  const b = bloqueosHora.find((x) => String(x.time_from ?? '').slice(0, 5) === horaHecha && x.date_from === dia && x.date_to === dia);
+  if (b) deshacer = { accion: '/api/admin/bloqueos', campos: { action: 'delete', table: 'blocked_slots', id: b.id, _redirect: `${vuelta}&hecho=reabierta` } };
+} else if (qp.get('saved') === 'extra' && horaHecha) {
+  const id = extraDe(horaHecha);
+  if (id) deshacer = { accion: '/api/admin/horas-extra', campos: { action: 'quitar', id, restaurar: '0', volver: `${vuelta}&hecho=deshecha` } };
+} else if (hecho === 'dia-cerrado' && bDia.data) {
+  deshacer = { accion: '/api/admin/bloqueos', campos: { action: 'delete', table: 'blocked_dates', id: bDia.data.id, _redirect: `${vuelta}&hecho=dia-abierto` } };
+}
+const MSG: Record<string, string> = {
+  cerrada: `Cerraste las ${horaHecha}. Nadie puede agendar esa hora.`,
+  reabierta: 'Listo, la hora quedó como estaba.',
+  deshecha: 'Listo, la hora quedó como estaba.',
+  'dia-cerrado': 'Cerraste este día. Nadie puede agendar.',
+  'dia-abierto': 'Listo, el día quedó abierto como antes.',
+  vacaciones: 'Listo, cerraste esos días. Nadie puede agendar.',
+  'cierre-quitado': 'Quitaste el cierre. Esas horas vuelven a tu horario normal.',
+};
+const msg = qp.get('saved') === 'extra' ? `Abriste las ${horaHecha}. Ya se puede agendar en tu página.`
+  : qp.get('saved') === 'extra-quitada' && hecho === 'deshecha' ? MSG.deshecha
+  : MSG[hecho] ?? '';
+const errorAccion = qp.get('error');
+
+// Después de agendar: sugerir siempre el link de pago por WhatsApp (Valentina, 22 nov 2026).
+const paymentLink = qp.get('payment_link');
+const plRaw = (qp.get('pl_phone') ?? '').replace(/\D/g, '');
+const plTel = plRaw.length === 9 ? '56' + plRaw : plRaw;
+const plWaSent = qp.get('pl_wa_sent') === '1';
+const plMsg = paymentLink ? mensajeLinkPago(qp.get('pl_nombre') ?? '', paymentLink, qp.get('pl_fecha'), qp.get('pl_hora')) : '';
+const plWaUrl = paymentLink && !plWaSent && plTel.length >= 10 ? `https://wa.me/${plTel}?text=${encodeURIComponent(plMsg)}` : null;
+const agendada = qp.get('agendada') ?? '';
+const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
+---
+
+<AdminLayout title="Agenda" current="/admin/agenda">
+  <div class="ag">
+    <header class="ag-cab">
+      <h1>Agenda</h1>
+      <a href={`/admin/agenda?agendar=1&fecha=${dia}`} class="hb hb-dorado">+ Agendar</a>
+    </header>
+
+    {paymentLink && (
+      <section class="ag-agendada" role="status">
+        <b>✓ Sesión agendada</b>
+        {plWaSent
+          ? <p>El link de pago ya le llegó por WhatsApp y por correo.</p>
+          : <p>Ahora mándale el link de pago para que confirme su hora.</p>}
+        {plWaUrl && <a href={plWaUrl} target="_blank" rel="noopener" class="hb hb-wa hb-ancho">Enviar link de pago por WhatsApp</a>}
+        <div class="ag-dos">
+          <button type="button" class="hb hb-borde" data-copiar={paymentLink}>Copiar el link</button>
+          <a href={vuelta} class="hb hb-gris">Ahora no</a>
+        </div>
+      </section>
+    )}
+    {!paymentLink && agendadaOk && (
+      <section class="ag-agendada" role="status">
+        <b>✓ Sesión agendada</b>
+        <p>¿Le mandas el link de pago por WhatsApp?</p>
+        <a href={`/admin/agenda?booking=${agendada}&accion=cobrar`} class="hb hb-wa hb-ancho">Enviar link de pago por WhatsApp</a>
+        <a href={vuelta} class="hb hb-gris hb-ancho">Ahora no</a>
+      </section>
+    )}
+
+    <div class="ag-btns">
+      <a href="/admin/servicios" class="hb hb-borde">Horario semanal</a>
+      <button type="button" class="hb hb-borde" data-hoja="vacaciones">Días libres</button>
+    </div>
+
+    <nav class="ag-sem" aria-label="Cambiar de semana">
+      <a href={`/admin/agenda-dia?fecha=${sumar(dia, -7)}`} class="ag-flecha" aria-label="Semana anterior">‹</a>
+      <span>{num(semana[0])} de {MESES[Number(semana[0].slice(5, 7)) - 1]} al {num(semana[6])} de {MESES[Number(semana[6].slice(5, 7)) - 1]}</span>
+      <a href={`/admin/agenda-dia?fecha=${sumar(dia, 7)}`} class="ag-flecha" aria-label="Semana siguiente">›</a>
+    </nav>
+    <div class="ag-dias">
+      {semana.map((d) => (
+        <a href={`/admin/agenda-dia?fecha=${d}`} class={`ag-dia ${d === dia ? 'on' : ''} ${d === hoy ? 'hoy' : ''}`} aria-current={d === dia ? 'date' : undefined}>
+          <small>{DIAS[dow(d)]}</small><b>{num(d)}</b>{d === hoy && <i>Hoy</i>}
+        </a>
+      ))}
+    </div>
+    {dia !== hoy && <a href="/admin/agenda-dia" class="ag-ir-hoy">Volver a hoy</a>}
+
+    <h2 class="ag-titulo">{largo(dia)}</h2>
+    <p class="ag-resumen">
+      {pasado ? `${sesionesDia === 1 ? '1 sesión' : `${sesionesDia} sesiones`}.`
+        : bDia.data ? 'Este día está cerrado.'
+        : `${sesionesDia === 1 ? '1 sesión' : `${sesionesDia} sesiones`} · ${libres === 1 ? '1 hora libre' : `${libres} horas libres`}.`}
+      {google === null && ' No se pudo leer Google Calendar: puede faltar algo de Encuadrado.'}
+    </p>
+
+    {msg && (
+      <div class="ag-toast" role="status">
+        <span>{msg}</span>
+        {deshacer && (
+          <form method="POST" action={deshacer.accion}>
+            {Object.entries(deshacer.campos).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+            <button type="submit">Deshacer</button>
+          </form>
+        )}
+      </div>
+    )}
+    {errorAccion && <p class="ag-error" role="alert">No se pudo guardar el cambio. No se cambió nada; intenta de nuevo.</p>}
+    {errorDatos && <p class="ag-error" role="alert">No se pudieron leer todas las horas de este día. Recarga en un rato.</p>}
+
+    <div class="ag-leyenda" aria-hidden="true">
+      <span><i class="l-pres"></i>Libre presencial</span>
+      <span><i class="l-onl"></i>Libre online</span>
+      <span><i class="l-cerr"></i>Cerrada</span>
+    </div>
+
+    <div class="ag-linea">
+      {!filas.length && <p class="ag-vacio">{pasado ? 'No hubo sesiones este día.' : 'No hay nada este día.'}</p>}
+      {filas.map((f) => {
+        if ('grupo' in f) {
+          const a = f.grupo[0].hora, z = f.grupo[f.grupo.length - 1].hora;
+          return (
+            <details class="ag-fila ag-grupo">
+              <summary><span class="h">{a}</span><span class="b b-cerr"><span><b>{a} a {z} · Cerradas</b><span>Toca para ver y abrir una</span></span><span class="mas">+</span></span></summary>
+              {f.grupo.map((c) => (
+                <div class="ag-fila"><span class="h">{c.hora}</span>
+                  <button type="button" class="b b-cerr" data-hoja="cerrada" data-hora={c.hora}><span><b>Cerrada</b><span>Toca para abrir</span></span><span class="mas">+</span></button>
+                </div>
+              ))}
+            </details>
+          );
+        }
+        const c = f.celda;
+        return (
+          <div class="ag-fila"><span class="h">{c.hora}</span>
+            {c.tipo === 'sesion' && (
+              <a href={c.href} class={`b b-ses ${c.pagoTono === 'no' ? 'debe' : ''}`}>
+                <span><b>{c.nombre}</b><span>{c.detalle} · hasta las {c.fin}</span></span>
+                <span class={`pago ${c.pagoTono}`}>{c.pago}</span>
+              </a>
+            )}
+            {c.tipo === 'google' && (
+              <div class="b b-pers"><span><b>{c.titulo}</b><span>Tu Google Calendar · hasta las {c.fin}</span></span></div>
+            )}
+            {c.tipo === 'libre' && (
+              <button type="button" class={`b b-${c.modo === 'online' ? 'onl' : 'pres'}`} data-hoja="libre" data-hora={c.hora} data-modo={c.modo} data-extra={c.extraId ?? ''}>
+                <span><b>Libre</b><span>{c.modo === 'ambas' ? 'Presencial u online' : c.modo === 'online' ? 'Online' : 'Presencial'}</span></span><span class="mas">›</span>
+              </button>
+            )}
+            {c.tipo === 'cerrada' && (
+              <button type="button" class="b b-cerr" data-hoja="cerrada" data-hora={c.hora} data-bloqueo={c.bloqueo?.id ?? ''} data-tabla={c.bloqueo?.tabla ?? ''} data-texto={c.bloqueo?.texto ?? ''}>
+                <span><b>Cerrada</b><span>{c.bloqueo ? c.bloqueo.texto : 'Toca para abrir'}</span></span><span class="mas">+</span>
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+
+    {!pasado && (
+      bDia.data
+        ? <form method="POST" action="/api/admin/bloqueos" class="ag-dia-form">
+            <input type="hidden" name="action" value="delete" /><input type="hidden" name="table" value="blocked_dates" /><input type="hidden" name="id" value={bDia.data.id} />
+            <input type="hidden" name="_redirect" value={`${vuelta}&hecho=dia-abierto`} />
+            <button type="submit" class="hb hb-verde hb-ancho">Abrir de nuevo el {DIAS[dow(dia)].toLowerCase()} {num(dia)}</button>
+          </form>
+        : <button type="button" class="hb hb-borde hb-ancho ag-dia-form" data-hoja="dia">Cerrar todo el {DIAS[dow(dia)].toLowerCase()} {num(dia)}</button>
+    )}
+  </div>
+
+  <!-- Hoja de opciones (se llena según la hora que se toca) -->
+  <div class="ag-velo" data-cerrar hidden></div>
+  <div class="ag-hoja" role="dialog" aria-modal="true" aria-labelledby="hoja-t" hidden>
+    <div class="ag-hoja-top">
+      <div><h3 id="hoja-t"></h3><p>{largo(dia)}</p></div>
+      <button type="button" class="ag-x" data-cerrar aria-label="Cerrar">×</button>
+    </div>
+
+    <div class="panel" data-panel="libre">
+      <a class="hb hb-verde hb-ancho hb-grande" data-agendar>Agendar aquí</a>
+      <form method="POST" action="/api/admin/bloqueos" class="ag-grupo">
+        <input type="hidden" name="action" value="block-slot" />
+        <input type="hidden" name="date_from" value={dia} /><input type="hidden" name="date_to" value={dia} />
+        <input type="hidden" name="time_from" data-campo="desde" /><input type="hidden" name="time_to" data-campo="hasta" />
+        <input type="hidden" name="label" value="Cerrada desde la agenda" />
+        <input type="hidden" name="_redirect" data-campo="vuelta-cerrar" />
+        <button type="submit" class="hb hb-borde hb-ancho">Cerrar esta hora solo este día</button>
+        <p class="nota">Las sesiones que ya están agendadas no se tocan. Para cerrarla todas las semanas, usa «Horario semanal».</p>
+      </form>
+      <form method="POST" action="/api/admin/horas-extra" data-quitar-extra hidden>
+        <input type="hidden" name="action" value="quitar" /><input type="hidden" name="id" data-campo="extra" />
+        <input type="hidden" name="volver" value={`${vuelta}&hecho=deshecha`} />
+        <button type="submit" class="hb hb-gris hb-ancho">Quitar esta hora que abriste</button>
+      </form>
+    </div>
+
+    <div class="panel" data-panel="cerrada">
+      <div data-con-bloqueo hidden>
+        <p class="nota" data-texto-bloqueo></p>
+        <form method="POST" action="/api/admin/bloqueos">
+          <input type="hidden" name="action" value="delete" /><input type="hidden" name="table" data-campo="tabla" /><input type="hidden" name="id" data-campo="bloqueo" />
+          <input type="hidden" name="_redirect" value={`${vuelta}&hecho=cierre-quitado`} />
+          <button type="submit" class="hb hb-verde hb-ancho hb-grande">Quitar el cierre</button>
+        </form>
+        <p class="nota">Esas horas vuelven a tu horario normal. Si esta hora no está en tu horario, después la puedes abrir aquí mismo.</p>
+      </div>
+      <form method="POST" action="/api/admin/horas-extra" data-sin-bloqueo>
+        <input type="hidden" name="action" value="agregar" />
+        <input type="hidden" name="fecha" value={dia} /><input type="hidden" name="hora" data-campo="hora" />
+        <input type="hidden" name="volver" data-campo="vuelta-abrir" />
+        <fieldset class="ag-grupo">
+          <legend>¿Cómo quieres atender?</legend>
+          <div class="ag-ops">
+            <label><input type="radio" name="destino" value="mod:presencial" checked /> Presencial</label>
+            <label><input type="radio" name="destino" value="mod:online" /> Online</label>
+            <label><input type="radio" name="destino" value="mod:ambos" /> Presencial u online</label>
+          </div>
+        </fieldset>
+        <button type="submit" class="hb hb-verde hb-ancho hb-grande" data-boton-abrir>Abrir esta hora</button>
+        <p class="nota">Se abre solo este día y ya se puede agendar en tu página. La duración la pone el servicio que se agende.</p>
+      </form>
+    </div>
+
+    <div class="panel" data-panel="dia">
+      <p class="nota">Nadie podrá agendar ese día. Las sesiones que ya tienes no se tocan{sesionesDia ? ` (ese día tienes ${sesionesDia === 1 ? '1 sesión' : `${sesionesDia} sesiones`}; si quieres, después las mueves)` : ''}.</p>
+      <form method="POST" action="/api/admin/bloqueos">
+        <input type="hidden" name="action" value="block-single" /><input type="hidden" name="date" value={dia} />
+        <input type="hidden" name="_redirect" value={`${vuelta}&hecho=dia-cerrado`} />
+        <button type="submit" class="hb hb-verde hb-ancho hb-grande">Cerrar el {DIAS[dow(dia)].toLowerCase()} {num(dia)}</button>
+      </form>
+    </div>
+
+    <div class="panel" data-panel="vacaciones">
+      <p class="nota">Nadie podrá agendar esos días. Las sesiones que ya tienes no se tocan.</p>
+      <form method="POST" action="/api/admin/bloqueos">
+        <input type="hidden" name="action" value="block-range" />
+        <div class="ag-fechas">
+          <label>Desde<input type="date" name="date_from" value={dia < hoy ? hoy : dia} min={hoy} required /></label>
+          <label>Hasta<input type="date" name="date_to" value={dia < hoy ? hoy : dia} min={hoy} required /></label>
+        </div>
+        <label class="ag-motivo">Motivo (opcional)<input type="text" name="reason" placeholder="Ejemplo: Vacaciones" maxlength="60" /></label>
+        <input type="hidden" name="_redirect" value={`${vuelta}&hecho=vacaciones`} />
+        <button type="submit" class="hb hb-verde hb-ancho hb-grande">Cerrar estos días</button>
+      </form>
+    </div>
+  </div>
+</AdminLayout>
+
+<script define:vars={{ dia, duracion, vuelta }}>
+  const hoja = document.querySelector('.ag-hoja');
+  const velo = document.querySelector('.ag-velo');
+  const titulo = document.getElementById('hoja-t');
+  const campo = (n) => hoja.querySelector(`[data-campo="${n}"]`);
+  const sumarMin = (h, m) => { const [a, b] = h.split(':').map(Number); const t = Math.min(a * 60 + b + m, 1439); return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+  let ultimoBoton = null;
+  function abrir(panel, texto) {
+    hoja.querySelectorAll('.panel').forEach((p) => { p.hidden = p.dataset.panel !== panel; });
+    titulo.textContent = texto;
+    hoja.hidden = false; velo.hidden = false;
+    requestAnimationFrame(() => { hoja.classList.add('on'); velo.classList.add('on'); hoja.querySelector('.ag-x').focus(); });
+  }
+  function cerrar() {
+    hoja.classList.remove('on'); velo.classList.remove('on');
+    setTimeout(() => { hoja.hidden = true; velo.hidden = true; ultimoBoton?.focus(); }, 220);
+  }
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-cerrar]')) { cerrar(); return; }
+    const b = e.target.closest('[data-hoja]');
+    if (!b) return;
+    ultimoBoton = b;
+    const h = b.dataset.hora;
+    const hh = h ? h.replace(':', '') : '';
+    if (b.dataset.hoja === 'libre') {
+      const modo = b.dataset.modo === 'ambas' ? 'presencial u online' : b.dataset.modo;
+      hoja.querySelector('[data-agendar]').href = `/admin/agenda?agendar=1&fecha=${dia}&hora=${h}`;
+      campo('desde').value = h; campo('hasta').value = sumarMin(h, duracion);
+      campo('vuelta-cerrar').value = `${vuelta}&hecho=cerrada&h=${hh}`;
+      const quitar = hoja.querySelector('[data-quitar-extra]');
+      quitar.hidden = !b.dataset.extra; campo('extra').value = b.dataset.extra || '';
+      abrir('libre', `${h} · Libre ${modo}`);
+    } else if (b.dataset.hoja === 'cerrada') {
+      const conB = !!b.dataset.bloqueo;
+      hoja.querySelector('[data-con-bloqueo]').hidden = !conB;
+      hoja.querySelector('[data-sin-bloqueo]').hidden = conB;
+      if (conB) { campo('bloqueo').value = b.dataset.bloqueo; campo('tabla').value = b.dataset.tabla; hoja.querySelector('[data-texto-bloqueo]').textContent = b.dataset.texto; }
+      campo('hora').value = h; campo('vuelta-abrir').value = `${vuelta}&h=${hh}`;
+      hoja.querySelector('[data-boton-abrir]').textContent = `Abrir las ${h}`;
+      abrir('cerrada', `${h} · Cerrada`);
+    } else if (b.dataset.hoja === 'dia') {
+      abrir('dia', 'Cerrar el día');
+    } else if (b.dataset.hoja === 'vacaciones') {
+      abrir('vacaciones', 'Días libres o vacaciones');
+    }
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !hoja.hidden) cerrar(); });
+  // Un solo toque por botón (evita guardar dos veces).
+  document.querySelectorAll('.ag form, .ag-hoja form').forEach((f) => f.addEventListener('submit', () => {
+    f.querySelectorAll('button[type="submit"]').forEach((x) => { x.disabled = true; x.setAttribute('aria-busy', 'true'); });
+  }));
+  window.addEventListener('pageshow', (e) => { if (e.persisted) document.querySelectorAll('button[aria-busy]').forEach((x) => { x.disabled = false; x.removeAttribute('aria-busy'); }); });
+  document.querySelectorAll('[data-copiar]').forEach((b) => b.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copiar); b.textContent = '✓ Link copiado'; } catch { b.textContent = 'No se pudo copiar'; }
+  }));
+</script>
+
+<style>
+  .ag { --verde:#576352; --verde-osc:#3F4A3B; --verde-claro:#E6EBE3; --dorado:#F5A623; --dorado-claro:#FDEBC8; --dorado-borde:#A86A00; --tinta:#2E332A; --gris:#5F5E57; --linea:#CFC8BF; --suave:#F3F0EB; --rojo:#B03A27; --rojo-claro:#FBE7E3; --wa:#15803D; --sombra:0 1px 2px rgba(46,51,42,.06),0 4px 14px rgba(46,51,42,.06);
+    max-width: 640px; margin: 0 auto; font-size: 17px; line-height: 1.45; color: var(--tinta); display: flex; flex-direction: column; gap: 12px; }
+  .ag-cab { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .ag-cab h1 { font: 700 28px/1.15 'Domine', Georgia, serif; }
+  .hb { min-height: 48px; padding: 0 16px; border-radius: 14px; font-weight: 700; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; border: 0; cursor: pointer; font-family: inherit; line-height: 1.2; color: inherit; }
+  .hb:disabled { opacity: .6; cursor: progress; }
+  .hb-ancho { width: 100%; }
+  .hb-grande { min-height: 56px; font-size: 17px; }
+  .hb-dorado { background: var(--dorado); color: var(--tinta); font-weight: 800; }
+  .hb-verde { background: var(--verde); color: #fff; }
+  .hb-borde { background: #fff; border: 2px solid var(--linea); color: var(--tinta); }
+  .hb-gris { background: var(--suave); color: var(--tinta); }
+  .hb-wa { background: var(--wa); color: #fff; }
+  .ag-btns, .ag-dos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ag-agendada { background: #fff; border-radius: 18px; box-shadow: var(--sombra); border-left: 5px solid var(--wa); padding: 14px; display: grid; gap: 10px; }
+  .ag-agendada b { font-size: 18px; color: var(--verde-osc); }
+  .ag-agendada p { color: var(--gris); font-size: 16px; }
+  .ag-sem { display: flex; align-items: center; gap: 8px; }
+  .ag-sem span { flex: 1; text-align: center; font-weight: 700; font-size: 16px; }
+  .ag-flecha { min-width: 48px; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; border-radius: 14px; background: #fff; border: 2px solid var(--linea); font-size: 22px; font-weight: 700; color: var(--tinta); text-decoration: none; }
+  .ag-dias { display: flex; gap: 6px; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 2px; scrollbar-width: none; }
+  .ag-dias::-webkit-scrollbar { display: none; }
+  .ag-dia { flex: 0 0 auto; min-width: 84px; min-height: 66px; border-radius: 14px; background: #fff; box-shadow: var(--sombra); display: flex; flex-direction: column; align-items: center; justify-content: center; text-decoration: none; color: var(--tinta); scroll-snap-align: center; padding: 4px 8px; }
+  .ag-dia small { font-size: 14px; font-weight: 600; color: var(--gris); }
+  .ag-dia b { font-size: 20px; line-height: 1.2; }
+  .ag-dia i { font-style: normal; font-size: 13px; font-weight: 800; color: var(--verde-osc); }
+  .ag-dia.on { background: var(--verde); color: #fff; }
+  .ag-dia.on small, .ag-dia.on i { color: #fff; }
+  .ag-ir-hoy { align-self: center; min-height: 44px; display: inline-flex; align-items: center; font-weight: 700; color: var(--verde-osc); font-size: 16px; }
+  .ag-titulo { font: 700 22px/1.2 'Domine', Georgia, serif; margin-top: 4px; }
+  .ag-resumen { color: var(--gris); font-size: 16px; margin-top: -6px; }
+  .ag-toast { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--tinta); color: #fff; border-radius: 14px; padding: 8px 8px 8px 16px; font-weight: 600; font-size: 16px; }
+  .ag-toast button { min-height: 44px; padding: 0 14px; border-radius: 10px; background: rgba(255,255,255,.15); color: var(--dorado); font-weight: 800; border: 0; cursor: pointer; font-family: inherit; font-size: 16px; }
+  .ag-error { background: var(--rojo-claro); color: #7A2618; border-radius: 12px; padding: 10px 14px; font-weight: 600; }
+  .ag-leyenda { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; color: var(--gris); font-weight: 600; }
+  .ag-leyenda span { display: inline-flex; align-items: center; gap: 6px; }
+  .ag-leyenda i { width: 16px; height: 16px; border-radius: 5px; display: inline-block; }
+  .l-pres { background: #fff; border: 2px solid var(--verde); }
+  .l-onl { background: var(--dorado-claro); border: 2px solid var(--dorado-borde); }
+  .l-cerr { background: repeating-linear-gradient(135deg,#F6F3EF 0 4px,#DCD5CC 4px 8px); border: 1px solid #A9A196; }
+  .ag-linea { background: #fff; border-radius: 18px; box-shadow: var(--sombra); padding: 4px 10px 4px 0; }
+  .ag-vacio { padding: 16px; color: var(--gris); }
+  .ag-fila { display: grid; grid-template-columns: 60px 1fr; min-height: 64px; border-top: 1px solid #EFEBE5; }
+  .ag-linea > .ag-fila:first-child, .ag-linea > .ag-grupo:first-child { border-top: 0; }
+  .ag-fila .h { font-size: 15px; color: var(--gris); font-weight: 600; padding: 12px 0 0 12px; }
+  .ag-grupo { display: block; }
+  .ag-grupo > summary { display: grid; grid-template-columns: 60px 1fr; list-style: none; cursor: pointer; padding: 5px 0; }
+  .ag-grupo > summary::-webkit-details-marker { display: none; }
+  .ag-grupo[open] > summary { display: none; }
+  .ag-grupo > .ag-fila:first-of-type { border-top: 0; }
+  .b { margin: 5px 0; border-radius: 12px; padding: 8px 12px; text-align: left; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 54px; width: 100%; font-family: inherit; font-size: 16px; text-decoration: none; cursor: pointer; }
+  .b b { font-size: 16px; display: block; line-height: 1.25; }
+  .b > span > span { display: block; font-size: 14px; font-weight: 600; line-height: 1.3; }
+  .b .mas { font-size: 22px; font-weight: 700; flex-shrink: 0; }
+  .b-pres { background: #fff; border: 2px solid var(--verde); color: var(--verde-osc); }
+  .b-onl { background: var(--dorado-claro); border: 2px solid var(--dorado-borde); color: #6B4400; }
+  .b-ses { background: var(--verde-claro); color: var(--verde-osc); border: 0; border-left: 5px solid var(--verde); }
+  .b-ses.debe { background: var(--rojo-claro); border-left-color: var(--rojo); color: #7A2618; }
+  .b-pers { background: var(--suave); color: var(--gris); border: 1px solid var(--linea); cursor: default; }
+  .b-cerr { background: repeating-linear-gradient(135deg,#F6F3EF 0 8px,#ECE7E0 8px 16px); color: var(--gris); border: 2px dashed #B9B1A6; }
+  .pago { font-size: 14px; font-weight: 800; border-radius: 99px; padding: 3px 10px; white-space: nowrap; background: #fff; flex-shrink: 0; }
+  .pago.ok { color: var(--verde-osc); } .pago.no { color: var(--rojo); } .pago.gris { color: var(--gris); }
+  .ag-dia-form { margin-top: 4px; }
+
+  .ag-velo { position: fixed; inset: 0; background: rgba(46,51,42,.45); opacity: 0; transition: opacity .2s; z-index: 200; }
+  .ag-velo.on { opacity: 1; }
+  .ag-hoja { position: fixed; left: 0; right: 0; bottom: 0; max-height: 88dvh; overflow: auto; background: #FAF7F4; border-radius: 24px 24px 0 0; transform: translateY(105%); transition: transform .22s ease; z-index: 201; padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); color: #2E332A; font-size: 17px; }
+  .ag-hoja.on { transform: none; }
+  .ag-hoja-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 14px; }
+  .ag-hoja-top h3 { font: 700 22px/1.2 'Domine', Georgia, serif; }
+  .ag-hoja-top p { color: #5F5E57; font-size: 16px; }
+  .ag-x { min-width: 48px; min-height: 48px; border-radius: 14px; background: #F3F0EB; font-size: 24px; border: 0; cursor: pointer; color: #2E332A; }
+  .ag-hoja .panel { display: grid; gap: 12px; }
+  .ag-hoja .panel[hidden] { display: none; }
+  .ag-hoja form { display: grid; gap: 10px; }
+  .ag-hoja form[hidden], .ag-hoja [data-con-bloqueo][hidden] { display: none; }
+  .ag-grupo { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+  .ag-grupo legend { font-size: 15px; font-weight: 700; color: #5F5E57; margin-bottom: 8px; }
+  .ag-ops { display: grid; gap: 8px; }
+  .ag-ops label { min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-radius: 14px; border: 2px solid #CFC8BF; background: #fff; font-weight: 700; font-size: 16px; cursor: pointer; }
+  .ag-ops label:has(input:checked) { border-color: #576352; background: #E6EBE3; color: #3F4A3B; }
+  .ag-ops input { width: 20px; height: 20px; accent-color: #576352; }
+  .nota { font-size: 15px; color: #5F5E57; }
+  .ag-fechas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ag-fechas label, .ag-motivo { font-size: 15px; font-weight: 700; color: #5F5E57; display: grid; gap: 4px; }
+  .ag-fechas input, .ag-motivo input { min-height: 52px; border: 2px solid #CFC8BF; border-radius: 12px; padding: 0 10px; font: inherit; font-size: 16px; background: #fff; width: 100%; color: #2E332A; }
+  @media (min-width: 769px) {
+    .ag-hoja { left: auto; top: 0; width: 440px; max-height: none; border-radius: 24px 0 0 24px; transform: translateX(105%); }
+  }
+</style>

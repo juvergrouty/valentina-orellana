@@ -437,6 +437,22 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
 ---
 
 <AdminLayout title="Agenda" current="/admin/agenda" fullHeight={true}>
+  <script is:inline>
+    // Celular (22 nov 2026): la agenda es la vista del día (/admin/agenda-dia). Esta semana de 7 columnas queda para el
+    // computador y para lo que se abre desde la agenda del día (agendar, ver una sesión, mensajes de resultado).
+    (function () {
+      if (!window.matchMedia('(max-width: 768px)').matches) return;
+      var q = new URLSearchParams(location.search);
+      var pasa = ['w', 'fecha', 'payment_link', 'pl_phone', 'pl_nombre', 'pl_fecha', 'pl_hora', 'pl_wa_sent', 'agendada', 'fecha_ag'];
+      var otros = Array.from(q.keys()).filter(function (k) { return pasa.indexOf(k) < 0; });
+      if (otros.length) return;
+      var d = new URLSearchParams();
+      var f = q.get('fecha_ag') || q.get('pl_fecha') || q.get('fecha');
+      if (f && /^\d{4}-\d{2}-\d{2}$/.test(f)) d.set('fecha', f);
+      ['payment_link', 'pl_phone', 'pl_nombre', 'pl_fecha', 'pl_hora', 'pl_wa_sent', 'agendada'].forEach(function (k) { if (q.get(k)) d.set(k, q.get(k)); });
+      location.replace('/admin/agenda-dia' + (d.toString() ? '?' + d.toString() : ''));
+    })();
+  </script>
 
   <div class="cal-wrap">
 
@@ -682,6 +698,12 @@ const sumupAfiliado = /^[\w-]{8,80}$/.test(cfg['sumup_afiliado'] ?? '') ? cfg['s
       <span style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.72rem;color:#374151;"><span style="width:12px;height:12px;border-radius:3px;background:repeating-linear-gradient(45deg,#eef1f5,#eef1f5 3px,#e5e9ef 3px,#e5e9ef 6px);border:1px dashed #9aa4b2;"></span>Google Calendar / Encuadrado</span>
     </div>
 
+    {!paymentLink && /^[0-9a-f-]{36}$/i.test(Astro.url.searchParams.get('agendada') ?? '') && (
+      <div style="margin:0.6rem 1rem;padding:0.75rem 1rem;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+        <span style="font-size:0.95rem;color:#166534;font-weight:700;">✓ Sesión agendada. ¿Le mandas el link de pago por WhatsApp?</span>
+        <a href={`/admin/agenda?booking=${Astro.url.searchParams.get('agendada')}&accion=cobrar`} class="btn btn-primary btn-sm" style="background:#15803D;border-color:#15803D;">Enviar link de pago por WhatsApp</a>
+      </div>
+    )}
     {paymentLink && (
       <div style="margin:0.6rem 1rem;padding:0.75rem 1rem;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
         <span style="font-size:0.85rem;color:#166534;font-weight:600;">
@@ -2300,6 +2322,11 @@ function closeAll() {
 }
 
 document.getElementById('bp-close')?.addEventListener('click', closeAll);
+// Si se abrió desde la agenda del celular («Agendar aquí»), cerrar el panel vuelve a la agenda del día.
+document.getElementById('bp-close')?.addEventListener('click', () => {
+  const q = new URLSearchParams(location.search);
+  if (q.get('agendar') === '1' && window.matchMedia('(max-width: 768px)').matches) location.href = '/admin/agenda-dia' + (q.get('fecha') ? `?fecha=${q.get('fecha')}` : '');
+});
 document.getElementById('sp-close')?.addEventListener('click', closeAll);
 document.getElementById('gp-close')?.addEventListener('click', closeAll);
 
@@ -2927,7 +2954,18 @@ document.getElementById('session-panel')?.addEventListener('submit', (e) => {
   }
   const fecha = qs.get('fecha');
   const hora = qs.get('hora');
-  if (!abierto && fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+  // ?agendar=1&fecha=&hora= (agenda del celular, 22 nov 2026): abre directo el panel «Agendar hora» en ese día y hora.
+  const agendar = !abierto && qs.get('agendar') === '1';
+  if (agendar) {
+    const f = fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+    const h = hora && /^\d{2}:\d{2}$/.test(hora) ? hora : `${String(new Date().getHours()).padStart(2, '0')}:00`;
+    document.getElementById('bp-date').value = f;
+    document.getElementById('bp-time').value = h;
+    document.getElementById('bp-date-label').textContent = isoToLabel(f);
+    mostrarPestanaAgenda();
+    openBookingPanel(f, h);
+  }
+  if (!abierto && !agendar && fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
     const col = document.querySelector(`.cal-col[data-date="${fecha}"]`);
     if (col && hora && /^\d{2}:\d{2}$/.test(hora)) {
       // Primero una sesión vigente (no vencida), después un evento de Google.
