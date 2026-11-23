@@ -22,7 +22,7 @@ import { agregarLineaNotas } from './apigateway';
 import { MARCA_TRANSFERENCIA_POR_REVISAR, MARCA_TRANSFERENCIA_REVISADA } from './comprobantes';
 import {
   MARCA_ESPERA_BANCO, MARCA_BANCO_OK, MARCA_BANCO_DUDOSO, MARCA_BANCO_NO, MARCA_TITULAR, PLAZO_BANCO_MS,
-  compararCorreo, consultaGmail, textoDeMensaje, remitenteDe, remitenteDelBanco,
+  compararCorreo, consultaGmail, textoDeMensaje, remitenteDe, remitenteDelBanco, listaBancos, autenticadoPorGoogle,
 } from './gmailBancoUtil';
 
 export const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
@@ -58,7 +58,8 @@ async function gmail<T>(token: string, ruta: string): Promise<T> {
 
 /** Busca el correo del banco. 'ok' + id, 'dudoso' + id, o 'no'. */
 export async function buscarCorreoBanco(token: string, o: { monto: number; subidoMs: number; nombres: string[]; remitente?: string | null; excluir: string[] }): Promise<{ resultado: 'ok' | 'dudoso' | 'no'; id?: string }> {
-  const q = encodeURIComponent(consultaGmail(o.monto, o.subidoMs, o.remitente));
+  const q = encodeURIComponent(consultaGmail(o.monto, o.subidoMs));
+  const bancos = listaBancos(o.remitente);
   const lista = await gmail<{ messages?: { id: string }[] }>(token, `/messages?q=${q}&maxResults=15`);
   let dudoso: string | undefined;
   for (const { id } of lista.messages ?? []) {
@@ -66,7 +67,9 @@ export async function buscarCorreoBanco(token: string, o: { monto: number; subid
     const de = remitenteDe(msg).toLowerCase();
     // Ni la paciente ni el propio sitio pueden "confirmar" su transferencia con un correo.
     if (o.excluir.some((x) => x && de.includes(x))) continue;
-    const r = compararCorreo(textoDeMensaje(msg), o.monto, o.nombres, remitenteDelBanco(de, o.remitente));
+    // De un banco, y Google confirma que el correo de verdad viene de ese banco (no un "From" falso).
+    const delBanco = remitenteDelBanco(de, bancos) && autenticadoPorGoogle(msg, de);
+    const r = compararCorreo(textoDeMensaje(msg), o.monto, o.nombres, delBanco);
     if (r === 'ok') return { resultado: 'ok', id };
     if (r === 'dudoso' && !dudoso) dudoso = id;
   }

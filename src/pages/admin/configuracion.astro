@@ -371,9 +371,10 @@ const agwFullForEmit = (agwTokenEnv || !!settings['apigateway_apikey'])
       {gmailOk ? (
         <div>
           <p style="font-size:0.82rem;margin-bottom:0.75rem;">Conectado con <strong>{gmailCorreo}</strong>.</p>
-          <label class="label" for="cfg-banco-remitente" style="display:block;margin-bottom:0.3rem;">Correo o dominio de tu banco</label>
-          <input id="cfg-banco-remitente" type="text" name={CLAVE_REMITENTE} value={settings[CLAVE_REMITENTE] ?? ''} placeholder="Ejemplo: santander.cl" style="max-width:16rem;" />
-          <p style="font-size:0.72rem;color:var(--stone);margin:0.3rem 0 1rem;line-height:1.5;">Mira de qué dirección te llegan los avisos de transferencia recibida y escríbela aquí. Solo con un correo que venga de ahí emito la boleta sola. En blanco, si encuentro un correo con el monto te lo muestro en el Inicio y decides tú.</p>
+          <p style="font-size:0.78rem;color:var(--stone);margin:0 0 0.75rem;line-height:1.5;">El aviso no te lo manda tu banco: te lo manda el banco de quien te paga (BancoEstado, BCI, Banco de Chile, Santander, Scotiabank, Itaú, Falabella, Mercado Pago y los demás de Chile). Ya los reviso todos. Solo emito la boleta sola si Google confirma que el correo viene de verdad de ese banco; si no, te lo muestro en el Inicio y decides tú.</p>
+          <label class="label" for="cfg-banco-remitente" style="display:block;margin-bottom:0.3rem;">Otro banco que no esté en la lista (opcional)</label>
+          <input id="cfg-banco-remitente" type="text" name={CLAVE_REMITENTE} value={settings[CLAVE_REMITENTE] ?? ''} placeholder="Ejemplo: bancoXYZ.cl" style="max-width:16rem;" />
+          <p style="font-size:0.72rem;color:var(--stone);margin:0.3rem 0 1rem;line-height:1.5;">Si te llega un aviso de un banco que no reconozco, escribe aquí su dominio (lo que va después de la @).</p>
           <button type="button" id="btn-gmail-disconnect" class="btn btn-outline btn-sm">Desconectar Gmail</button>
         </div>
       ) : (

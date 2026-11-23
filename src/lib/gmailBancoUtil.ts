@@ -42,10 +42,12 @@ export function traeNombre(texto: string, nombres: string[]): boolean {
   });
 }
 
-/** ¿Parece un aviso de transferencia RECIBIDA (y no publicidad, una enviada por Vale o un aviso del propio sitio)? */
+/** ¿Parece un aviso de transferencia RECIBIDA (y no publicidad, una enviada por Vale, un aviso del propio sitio
+ * ni la liquidación de Flow o SumUp, que el Banco de Chile avisa como «Abono realizado»)? */
 export function pareceAvisoTransferencia(texto: string): boolean {
   const t = sinTildes(texto);
   if (/comprobante de transferencia por confirmar|transferencia (realizada|enviada)|has (realizado|enviado)|realizaste|enviaste/.test(t)) return false;
+  if (/\bflow s\.? ?a\b|liquidacion de flow|sumup/.test(t)) return false;
   return /transferencia|transferido|abono|te transfiri|recibiste|has recibido|deposito/.test(t);
 }
 
@@ -62,12 +64,43 @@ export function compararCorreo(texto: string, monto: number, nombres: string[], 
   return traeNombre(texto, nombres) && delBanco ? 'ok' : 'dudoso';
 }
 
-/** ¿El remitente ("Banco <aviso@banco.cl>") es del banco configurado ("banco.cl" o "aviso@banco.cl")? */
-export function remitenteDelBanco(from: string, banco: string | null | undefined): boolean {
-  const b = (banco ?? '').trim().toLowerCase();
-  if (!b) return false;
+/**
+ * Bancos de Chile que mandan el aviso de transferencia. El aviso NO lo manda el banco de Vale (Santander no
+ * avisa): lo manda el banco de QUIEN PAGA (revisado en su Gmail el 23 nov 2026: BancoEstado
+ * «Aviso de Transferencia de Fondos» desde correo.bancoestado.cl, BCI «Notificación de abono» desde bci.cl).
+ * Por eso se aceptan todos; en Configuración se pueden agregar otros.
+ */
+export const BANCOS_CHILE = [
+  'bancoestado.cl', 'bci.cl', 'bancochile.cl', 'bancoedwards.cl', 'santander.cl', 'scotiabank.cl', 'itau.cl',
+  'bancofalabella.cl', 'bancoripley.cl', 'security.cl', 'bice.cl', 'bancointernacional.cl', 'consorcio.cl',
+  'coopeuch.cl', 'tenpo.cl', 'machbank.cl', 'mercadopago.cl', 'mercadopago.com', 'bancosecurity.cl', 'btgpactual.cl',
+];
+
+/** Lista de bancos: los de Chile + los que Vale escribió en Configuración (separados por coma o espacio). */
+export function listaBancos(extra: string | null | undefined): string[] {
+  const propios = String(extra ?? '').toLowerCase().split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
+  return [...new Set([...BANCOS_CHILE, ...propios])];
+}
+
+/** ¿El remitente ("Banco <aviso@banco.cl>") es de alguno de los bancos ("banco.cl" o "aviso@banco.cl")? */
+export function remitenteDelBanco(from: string, banco: string | string[] | null | undefined): boolean {
+  const lista = (Array.isArray(banco) ? banco : [banco ?? '']).map((b) => b.trim().toLowerCase()).filter(Boolean);
   const correo = (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
-  return b.includes('@') ? correo === b : correo.endsWith(`@${b}`) || correo.endsWith(`.${b}`);
+  return lista.some((b) => (b.includes('@') ? correo === b : correo.endsWith(`@${b}`) || correo.endsWith(`.${b}`)));
+}
+
+/**
+ * ¿Google comprobó que el correo de verdad viene de ese dominio? (encabezado Authentication-Results que pone
+ * Gmail: dmarc=pass, o dkim=pass del mismo dominio). Sin esto, cualquiera podría escribir "From: banco.cl".
+ */
+export function autenticadoPorGoogle(msg: { payload?: ParteGmail }, from: string): boolean {
+  const correo = (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
+  const dominio = correo.split('@')[1] ?? '';
+  if (!dominio) return false;
+  const auth = (msg.payload?.headers ?? []).filter((h) => h.name.toLowerCase() === 'authentication-results').map((h) => h.value.toLowerCase()).join(' ');
+  if (/\bdmarc=pass\b/.test(auth)) return true;
+  const base = dominio.split('.').slice(-2).join('.');
+  return new RegExp(`dkim=pass[^;]*header\\.(?:d|i)=@?(?:[\\w-]+\\.)*${base.replace(/\./g, '\\.')}\\b`).test(auth);
 }
 
 /** Remitente de un mensaje de Gmail. */
@@ -75,15 +108,15 @@ export function remitenteDe(msg: { payload?: ParteGmail }): string {
   return (msg.payload?.headers ?? []).find((h) => h.name.toLowerCase() === 'from')?.value ?? '';
 }
 
-/** Búsqueda de Gmail: correos con el monto entre 2 días antes y 3 días después del comprobante. */
-export function consultaGmail(monto: number, subidoMs: number, remitente?: string | null): string {
+/** Búsqueda de Gmail: correos con el monto entre 2 días antes y 3 días después del comprobante.
+ * El remitente se revisa después (puede ser cualquier banco), no en la búsqueda. */
+export function consultaGmail(monto: number, subidoMs: number): string {
   const d = String(Math.round(monto));
   const conPunto = d.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   const despues = Math.floor((subidoMs - 2 * 86400_000) / 1000);
   const antes = Math.floor((subidoMs + 3 * 86400_000) / 1000);
-  const de = (remitente ?? '').trim().replace(/[^\w.@+-]/g, '');
   // Nunca los correos que salen de la propia cuenta ni el aviso del sitio con el comprobante.
-  return `("${conPunto}" OR "${d}") after:${despues} before:${antes} -from:me -subject:"Comprobante de transferencia"${de ? ` from:${de}` : ''}`;
+  return `("${conPunto}" OR "${d}") after:${despues} before:${antes} -from:me -subject:"Comprobante de transferencia"`;
 }
 
 /** Texto de un mensaje de Gmail (format=full): partes text/plain, o text/html sin etiquetas. */
