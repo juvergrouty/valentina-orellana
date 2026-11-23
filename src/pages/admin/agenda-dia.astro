@@ -113,7 +113,7 @@ for (const g of google ?? []) {
     const paciente = pacienteDeTitulo(g.titulo.replace(/^\s*(Por pagar|Pagada)\s*·\s*/i, ''));
     if (celdas.some((c) => c.tipo === 'sesion' && mismaPersona(c.nombre, paciente))) continue; // misma sesión (página + Encuadrado)
     ocupSes.push([aMin(g.hora), aMin(g.fin)]);
-    celdas.push({ tipo: 'sesion', hora: g.hora, fin: g.fin, id: null, nombre: paciente, detalle: /online/i.test(g.titulo) ? 'Online' : 'Presencial', pago: 'Encuadrado', pagoTono: 'gris', href: `/admin/agenda?fecha=${dia}&hora=${g.hora}` });
+    celdas.push({ tipo: 'sesion', hora: g.hora, fin: g.fin, id: null, nombre: paciente, detalle: /online/i.test(g.titulo) ? 'Online' : 'Presencial', pago: 'Pago en Encuadrado', pagoTono: 'gris', href: `/admin/agenda?fecha=${dia}&hora=${g.hora}` });
   } else {
     celdas.push({ tipo: 'google', hora: g.hora, fin: g.fin, titulo: g.titulo });
   }
@@ -477,9 +477,14 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
         hoja.querySelectorAll('[data-quitar-cierre]').forEach((x) => { x.hidden = !b.dataset.bloqueo; });
       }
       campo('hora').value = h; campo('vuelta-abrir').value = `${vuelta}&h=${hh}`;
-      hoja.querySelectorAll('[name="destino"]').forEach((r) => { r.checked = false; });
+      // Queda elegida la última forma que usó (ChatGPT, 22 nov 2026); el botón dice cuál es.
+      let ultima = ''; try { ultima = localStorage.getItem('agendaModalidad') || ''; } catch {}
+      hoja.querySelectorAll('[name="destino"]').forEach((r) => { r.checked = r.value === ultima; });
       const btnAbrir = hoja.querySelector('[data-boton-abrir]');
-      btnAbrir.textContent = `Elige cómo atender las ${h}`; btnAbrir.disabled = true; btnAbrir.dataset.h = h;
+      btnAbrir.dataset.h = h;
+      const marcada = hoja.querySelector('[name="destino"]:checked');
+      if (marcada) marcada.dispatchEvent(new Event('change'));
+      else { btnAbrir.textContent = `Elige cómo atender las ${h}`; btnAbrir.disabled = true; }
       abrir('cerrada', `${h} · Cerrada`);
     } else if (b.dataset.hoja === 'sesion') {
       hoja.querySelector('[data-ses-detalle]').textContent = b.dataset.detalle;
@@ -502,7 +507,8 @@ const agendadaOk = /^[0-9a-f-]{36}$/i.test(agendada);
   hoja.querySelectorAll('[name="destino"]').forEach((r) => r.addEventListener('change', () => {
     const btn = hoja.querySelector('[data-boton-abrir]');
     const txt = { 'mod:presencial': 'presencial', 'mod:online': 'online', 'mod:ambos': 'presencial u online' }[r.value];
-    btn.disabled = false; btn.textContent = `Abrir las ${btn.dataset.h} ${txt}`;
+    btn.disabled = false; btn.textContent = `Abrir las ${btn.dataset.h} · ${txt.charAt(0).toUpperCase()}${txt.slice(1)}`;
+    try { localStorage.setItem('agendaModalidad', r.value); } catch {}
   }));
   document.querySelector('.ag-dia.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !hoja.hidden) cerrar(); });
