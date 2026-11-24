@@ -118,6 +118,28 @@ const feriados = await estadoFeriados().catch(() => []);
     gap: 0.3rem;
     flex: 1;
   }
+  /* Celular (rediseño 24 nov 2026): una columna y botones del tamaño de un dedo. */
+  @media (max-width: 768px) {
+    .hr-2col { grid-template-columns: minmax(0, 1fr) !important; gap: 1rem !important; }
+    .hr-preview { position: static !important; }
+    .day-chip { min-height: 44px; min-width: 52px; font-size: 15px !important; }
+    .hr-preset { min-height: 44px; font-size: 14px !important; }
+    #btn-apply { min-height: 52px; font-size: 15px !important; letter-spacing: 0.04em !important; }
+    .day-row { flex-direction: column; gap: 0.5rem; }
+    .day-label { width: auto; font-size: 14px; padding-top: 0; }
+    .chips-wrap { gap: 6px; }
+    .slot-chip { min-height: 44px; min-width: 64px; font-size: 15px; padding: 0 10px; border-radius: 10px; }
+    .slot-chip span { font-size: 12px !important; }
+    .hr-rango { display: grid !important; grid-template-columns: 1fr 1fr; align-items: end !important; }
+    .hr-rango > div:first-child { grid-column: 1 / -1; }
+    .hr-rango select, .hr-rango input { width: 100% !important; }
+    .hr-rango > div:nth-child(4) { grid-column: 1 / -1; }
+    .hr-rango > div:nth-child(4) .btn { width: 100%; }
+    .hr-2col table td, .hr-2col table th { font-size: 15px !important; }
+    .hr-2col table th, .hr-2col table td { padding: 0.6rem 0.45rem; }
+    .hr-rango > div:nth-child(5) { grid-column: 1 / -1; padding-bottom: 0 !important; }
+    .hr-cfg-ej { height: auto !important; min-height: 46px; }
+  }
 </style>
 
 <AdminLayout title="Horarios" current="/admin/horarios">
@@ -189,7 +211,7 @@ const feriados = await estadoFeriados().catch(() => []);
     </summary>
 
     <div class="card" style="border-top:none;border-top-left-radius:0;border-top-right-radius:0;margin-top:0;padding-top:1.25rem;">
-      <div style="display:grid;grid-template-columns:1fr 300px;gap:1.5rem;align-items:start;">
+      <div class="hr-2col" style="display:grid;grid-template-columns:1fr 300px;gap:1.5rem;align-items:start;">
 
         <!-- Controles -->
         <div>
@@ -284,7 +306,7 @@ const feriados = await estadoFeriados().catch(() => []);
         </div>
 
         <!-- Preview -->
-        <div style="position:sticky;top:4.5rem;">
+        <div class="hr-preview" style="position:sticky;top:4.5rem;">
           <p class="label" style="margin-bottom:0.75rem;">Vista previa</p>
           <div id="preview-box" style="background:var(--warm);padding:0.75rem 1rem;border-radius:var(--radius);margin-bottom:1rem;font-size:0.79rem;color:var(--stone);">
             <span id="preview-text">Selecciona días para ver el resumen.</span>
@@ -360,7 +382,7 @@ const feriados = await estadoFeriados().catch(() => []);
     {daysWithSlots.length > 0 && (
       <div style="margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--warm);">
         <p class="label" style="margin-bottom:0.75rem;">Desactivar por rango de horas</p>
-        <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+        <div class="hr-rango" style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
           <div>
             <label class="label" style="display:block;margin-bottom:0.3rem;">Día</label>
             <select id="range-day" style="width:auto;min-width:120px;">
@@ -412,7 +434,7 @@ const feriados = await estadoFeriados().catch(() => []);
           </div>
         </div>
 
-        <div style="background:var(--warm);padding:0.5rem 0.85rem;border-radius:var(--radius);font-size:0.8rem;color:var(--ink);height:38px;display:flex;align-items:center;gap:0.4rem;">
+        <div class="hr-cfg-ej" style="background:var(--warm);padding:0.5rem 0.85rem;border-radius:var(--radius);font-size:0.8rem;color:var(--ink);height:38px;display:flex;align-items:center;gap:0.4rem;">
           Sesión 30 min + descanso →
           <span id="timing-result" style="font-weight:600;color:var(--forest);">—</span>
         </div>
@@ -425,7 +447,7 @@ const feriados = await estadoFeriados().catch(() => []);
   </div>
 
   <!-- ── SECCIÓN 4: Días bloqueados ───────────────────────────── -->
-  <div style="display:grid;grid-template-columns:1fr 360px;gap:1.5rem;align-items:start;">
+  <div class="hr-2col" style="display:grid;grid-template-columns:1fr 360px;gap:1.5rem;align-items:start;">
 
     <!-- Lista -->
     <div>
