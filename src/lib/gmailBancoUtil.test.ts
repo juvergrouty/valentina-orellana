@@ -1,7 +1,7 @@
 // Pruebas de la comparación con el correo del banco (22 nov 2026). Correr: pnpm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { traeMonto, traeNombre, compararCorreo, consultaGmail, textoDeMensaje, remitenteDelBanco } from './gmailBancoUtil';
+import { traeMonto, traeNombre, compararCorreo, consultaGmail, textoDeMensaje, remitenteDelBanco, listaBancos, autenticadoPorGoogle } from './gmailBancoUtil';
 
 test('monto exacto en sus formatos chilenos', () => {
   assert.equal(traeMonto('Monto: $65.000', 65000), true);
@@ -40,14 +40,43 @@ test('remitente del banco', () => {
   assert.equal(remitenteDelBanco('Falso <santander.cl@gmail.com>', 'santander.cl'), false);
   assert.equal(remitenteDelBanco('avisos@santander.cl', 'avisos@santander.cl'), true);
   assert.equal(remitenteDelBanco('avisos@santander.cl', ''), false);
+  assert.equal(remitenteDelBanco('avisos@santander.cl', ['bci.cl', 'santander.cl']), true);
 });
 
-test('búsqueda de Gmail: monto, ventana de fechas y remitente', () => {
-  const q = consultaGmail(65000, Date.parse('2026-11-22T12:00:00Z'), 'santander.cl');
+test('búsqueda de Gmail: monto y ventana de fechas, sin filtrar remitente', () => {
+  const q = consultaGmail(65000, Date.parse('2026-11-22T12:00:00Z'));
   assert.match(q, /"65\.000" OR "65000"/);
   assert.match(q, /after:\d+ before:\d+/);
-  assert.match(q, /from:santander\.cl$/);
-  assert.doesNotMatch(consultaGmail(65000, Date.now(), 'x" OR y'), /"y/);
+  assert.doesNotMatch(q, /(^|\s)from:/);
+});
+
+test('el aviso lo manda el banco de quien paga: cualquier banco de Chile', () => {
+  const bancos = listaBancos('');
+  assert.equal(remitenteDelBanco('BancoEstado <noreply@correo.bancoestado.cl>', bancos), true);
+  assert.equal(remitenteDelBanco('transferencias@bci.cl', bancos), true);
+  assert.equal(remitenteDelBanco('Falso <bci.cl@gmail.com>', bancos), false);
+  assert.equal(remitenteDelBanco('aviso@bancoxyz.cl', bancos), false);
+  assert.equal(remitenteDelBanco('aviso@bancoxyz.cl', listaBancos('bancoxyz.cl, otro.cl')), true);
+});
+
+test('formatos reales: BancoEstado y BCI sí; liquidación de Flow o SumUp no', () => {
+  const estado = 'Aviso de Transferencia de Fondos\nHas recibido una Transferencia Electronica de nuestro(a) cliente Juan Andres Perez\nMonto$65.000\nParaVALENTINA ORELLANA\nBancoBANCO SANTANDER';
+  assert.equal(compararCorreo(estado, 65000, ['Juan Pérez']), 'ok');
+  const bci = 'Notificación de abono\nDe acuerdo a lo instruido por nuestro cliente JUAN PEREZ SOTO, le informamos que se ha realizado una transferencia de fondos hacia la cuenta 123 del banco Banco Santander. Monto transferido: 65.000';
+  assert.equal(compararCorreo(bci, 65000, ['Juan Pérez']), 'ok');
+  const flow = 'Abono realizado\npor instrucción de nuestro cliente FLOW S A, con fecha 23 de Noviembre, hemos realizado un abono a su cuenta. Monto de Pago : $ 65.000.- Liquidacion de Flow 1 Juan Perez';
+  assert.equal(compararCorreo(flow, 65000, ['Juan Pérez']), 'no');
+  const sumup = 'Abono realizado\npor instrucción de nuestro cliente SUMUP CHILE PAYMENTS SA hemos realizado un abono $ 65.000 Juan Perez';
+  assert.equal(compararCorreo(sumup, 65000, ['Juan Pérez']), 'no');
+});
+
+test('Google tiene que confirmar el remitente (DMARC o DKIM del mismo dominio)', () => {
+  const con = (v: string) => ({ payload: { headers: [{ name: 'Authentication-Results', value: v }] } });
+  assert.equal(autenticadoPorGoogle(con('mx.google.com; dkim=pass header.i=@correo.bancoestado.cl; spf=pass; dmarc=pass (p=REJECT)'), 'noreply@correo.bancoestado.cl'), true);
+  assert.equal(autenticadoPorGoogle(con('mx.google.com; dkim=pass header.i=@bci.cl; spf=pass'), 'transferencias@bci.cl'), true);
+  assert.equal(autenticadoPorGoogle(con('mx.google.com; dkim=pass header.i=@gmail.com; spf=fail; dmarc=fail'), 'transferencias@bci.cl'), false);
+  assert.equal(autenticadoPorGoogle(con('mx.google.com; dkim=pass header.i=@notbci.cl'), 'transferencias@bci.cl'), false);
+  assert.equal(autenticadoPorGoogle({ payload: { headers: [] } }, 'transferencias@bci.cl'), false);
 });
 
 test('texto de un mensaje: plano o html', () => {
