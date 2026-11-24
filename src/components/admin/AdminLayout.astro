@@ -708,6 +708,13 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   .enc-topbar { display: none; }
   /* Páginas de alto completo (agenda, pacientes, pagos, reportes…): terminan sobre la barra de abajo. */
   .cal-wrap, .com-wrap, .fin-wrap, .ev-wrap, .rep-wrap, .pac-wrap { height: calc(100dvh - 76px - env(safe-area-inset-bottom)) !important; }
+  /* Celular (23 nov 2026): campos y botones del tamaño de un dedo en todas las páginas.
+     16 px en los campos evita que el iPhone haga zoom al tocarlos. */
+  .enc-main input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),
+  .enc-main select, .enc-main textarea { font-size: 16px !important; min-height: 46px; }
+  .enc-main textarea { min-height: 96px; }
+  .enc-main .btn { min-height: 44px; }
+  .enc-main .btn.btn-sm, .enc-main a.btn-sm, .enc-main button.btn-sm { min-height: 40px; padding: 0.5rem 0.85rem !important; font-size: 14px !important; display: inline-flex; align-items: center; justify-content: center; }
 }
 
 /* ── Field error ─────────────────────────────────────────────────────────── */

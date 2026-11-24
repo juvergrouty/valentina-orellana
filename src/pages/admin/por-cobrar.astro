@@ -49,7 +49,7 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
 
 <AdminLayout title="Sesiones por pagar" current="/admin/finanzas">
 
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <div class="pc-head" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
     <div>
       <a href="/admin/finanzas" style="color:var(--stone);font-size:0.85rem;text-decoration:none;">← Pagos</a>
       <h1 style="margin-top:0.5rem;">Sesiones por pagar</h1>
@@ -178,6 +178,13 @@ const errorDetail   = Astro.url.searchParams.get('detail') ?? '';
   }
   /* Celular (rediseño 23 nov 2026): cada sesión es una tarjeta, con botones grandes de WhatsApp y correo. */
   @media (max-width: 768px) {
+    .pc-head { margin-bottom: 12px !important; gap: 10px !important; }
+    .pc-head > div:first-child > a { display: inline-flex; align-items: center; min-height: 44px; font-size: 16px !important; color: #2E332A !important; font-weight: 600; }
+    .pc-head h1 { font: 700 28px/1.15 'Domine', Georgia, serif !important; color: #2E332A; margin-top: 0 !important; }
+    .pc-head > div:first-child > p { font-size: 15px !important; }
+    .pc-head > div:last-child { width: 100%; text-align: left !important; justify-content: space-between; }
+    .pc-head > div:last-child > div { text-align: left !important; }
+    .pc-head .btn { min-height: 44px; font-size: 15px !important; display: inline-flex; align-items: center; }
     .tabla-cobro { background: transparent !important; border: 0 !important; box-shadow: none !important; overflow: visible; }
     .tabla-cobro > table, .tabla-cobro > table > tbody, .tabla-cobro > table > tbody > tr, .tabla-cobro > table > tbody > tr > td { display: block; width: 100%; }
     .tabla-cobro > table > thead { display: none; }
