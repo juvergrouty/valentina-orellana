@@ -3,6 +3,7 @@ export const prerender = false;
 import AdminLayout from '../../components/admin/AdminLayout.astro';
 import { supabase } from '../../lib/supabase';
 import { sumupConfigurado } from '../../lib/sumup';
+import { CANALES_PANEL } from '../../lib/origen';
 
 // Pacientes activos
 const { data: patients } = await supabase
@@ -165,6 +166,14 @@ const servicesJson  = JSON.stringify(services  ?? []);
             <p id="meet-hint" style="display:none;font-size:0.76rem;color:var(--forest);margin-top:0.4rem;">
               ✓ Se generará un link de Google Meet automáticamente al completar el pago.
             </p>
+          </div>
+          <!-- Origen (24 nov 2026): igual que en Agendar hora, para saber de dónde llegó cada sesión cobrada. -->
+          <div style="grid-column:1/-1;">
+            <label class="label" for="cobro-origen" style="display:block;margin-bottom:0.35rem;">¿De dónde llegó?</label>
+            <select id="cobro-origen">
+              <option value="">Sin indicar</option>
+              {CANALES_PANEL.map((c) => <option value={c}>{c}</option>)}
+            </select>
           </div>
         </div>
 
@@ -829,6 +838,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
           sessionDate:  cobroDate.value || null,
           sessionTime:  cobroTime.value || null,
           modality:     selectedModality,
+          origen_canal: document.getElementById('cobro-origen')?.value || null,
           force,
         }),
       });

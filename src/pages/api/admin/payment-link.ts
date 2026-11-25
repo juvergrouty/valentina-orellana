@@ -7,13 +7,14 @@ import { upsertPatientFromBooking } from '../../../lib/patients';
 import { chocaConOtraSesion } from '../../../lib/disponibilidad';
 import { tagBookingsWithPaymentToken, totalACobrarPorEmail } from '../../../lib/debt';
 import { FORMAS_DE_PAGO } from '../../../lib/cobrosProximos';
+import { origenManual } from '../../../lib/origen';
 
 export const prerender = false;
 
 export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
-    const { name, email, phone, amount, description, serviceType, sessionDate, sessionTime, modality, force } = body;
+    const { name, email, phone, amount, description, serviceType, sessionDate, sessionTime, modality, force, origen_canal } = body;
 
     // Validación básica
     if (!name?.trim() || !email?.trim() || !amount || !description?.trim()) {
@@ -117,10 +118,13 @@ export const POST: APIRoute = async ({ request }) => {
       // lo mismo que se usó arriba para revisar choques.
       duration_min:   50,
     };
+    // De dónde llegó (24 nov 2026): como en Agendar hora, cada cobro con sesión guarda su origen.
+    const origen = origenManual({ canal: origen_canal, via: 'cobros' });
+    if (origen) filaCobro.origen = origen;
     let { error: bookingErr } = await supabase.from('bookings').insert(filaCobro);
     if (bookingErr?.code === '42703') {
       // Base sin la columna (migración vieja): se guarda sin ella, como antes.
-      const { duration_min: _d, ...sinDuracion } = filaCobro;
+      const { duration_min: _d, origen: _o, ...sinDuracion } = filaCobro;
       ({ error: bookingErr } = await supabase.from('bookings').insert(sinDuracion));
     }
 
