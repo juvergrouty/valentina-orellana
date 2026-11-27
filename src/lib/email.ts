@@ -8,6 +8,12 @@ import { todayCL, hoursUntilSessionCL } from './dateUtils';
 import { frasePlazoPago, AVISO_REAGENDAR, FORMAS_DE_PAGO } from './cobrosProximos';
 import { conEstacionamiento } from '../data/consulta';
 import { urlReagendar, sePuedeReagendar, REAGENDAR_TEXTO } from './rescheduleLink';
+
+/** Saludo con el primer nombre (24 nov 2026: decía «Hola Valentina Orellana J», con apellido e inicial). */
+export function nombreSaludo(nombre: string | null | undefined): string {
+  const p = String(nombre ?? '').trim().split(/\s+/)[0] ?? '';
+  return p ? p.charAt(0).toUpperCase() + p.slice(1) : '';
+}
 import { asuntoAnulacion, htmlAnulacion, textoAnulacion, type DatosAnulacion } from './correoAnulacion';
 import { cierreFirmaHtml, LOGO_HEADER_HTML, FIRMA_GMAIL, REGISTRO_SUPERINTENDENCIA_HTML } from './firmaCorreo';
 import { correoSeguimiento, correoTextoPlano, type Paso, type DatosTexto } from './seguimientos/textos';
@@ -198,7 +204,7 @@ export async function sendConfirmationToClient(data: BookingEmailData, opts: { s
           Tu sesión está confirmada
         </h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:2rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(data.patient_name)}, aquí están los detalles de tu reserva.
+          Hola ${escapeHtml(nombreSaludo(data.patient_name))}, aquí están los detalles de tu reserva.
         </p>
 
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
@@ -337,7 +343,7 @@ export async function sendSessionUpdatedEmail(data: {
         ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">${data.reason}</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(data.patient_name)}, así queda tu sesión ahora.
+          Hola ${escapeHtml(nombreSaludo(data.patient_name))}, así queda tu sesión ahora.
         </p>
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
           <table style="width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:0.85rem;">
@@ -428,7 +434,7 @@ export async function sendPaymentLinkEmail(opts: {
         ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Enlace de pago de tu sesión</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(opts.patientName)}, para confirmar tu reserva realiza el pago con el siguiente enlace seguro.
+          Hola ${escapeHtml(nombreSaludo(opts.patientName))}, para confirmar tu reserva realiza el pago con el siguiente enlace seguro.
         </p>
         ${plazo ? `<p style="font-size:0.95rem;margin:0 0 1.5rem;font-family:'Inter',sans-serif;line-height:1.5;"><strong>El pago debe quedar confirmado ${plazo}.</strong></p><p style="font-size:0.9rem;margin:-1rem 0 1.5rem;font-family:'Inter',sans-serif;line-height:1.5;color:#6B6860;">${AVISO_REAGENDAR}</p>` : ''}
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
@@ -486,7 +492,7 @@ export async function sendDebtReminderEmail(opts: {
         ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Tienes un saldo pendiente</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(opts.patientName)}, tienes un saldo pendiente de ${formatCLP(opts.amount)}
+          Hola ${escapeHtml(nombreSaludo(opts.patientName))}, tienes un saldo pendiente de ${formatCLP(opts.amount)}
           por ${opts.sessionsCount} sesión${opts.sessionsCount === 1 ? '' : 'es'}.
           Puedes revisar el detalle y pagarlo con el siguiente enlace seguro. ${FORMAS_DE_PAGO}
         </p>
@@ -549,7 +555,7 @@ export async function sendReminderEmail(data: BookingEmailData, opts: { idempote
         ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Te espero pronto 🌿</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(data.patient_name)}, te recuerdo tu sesión ${deDiaRelativo(data.session_date)}.
+          Hola ${escapeHtml(nombreSaludo(data.patient_name))}, te recuerdo tu sesión ${deDiaRelativo(data.session_date)}.
         </p>
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;font-size:0.88rem;line-height:1.8;">
           <p style="margin:0;"><strong>${escapeHtml(sessionLabel)}</strong></p>
@@ -615,7 +621,7 @@ export async function sendPendingExpiredEmail(data: {
         ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.5rem;">Tu horario fue liberado</h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:1.5rem;font-family:'Inter',sans-serif;line-height:1.6;">
-          Hola ${escapeHtml(data.patient_name)}, habías reservado el <strong>${formatDate(data.session_date)} a las ${data.session_time}</strong>,
+          Hola ${escapeHtml(nombreSaludo(data.patient_name))}, habías reservado el <strong>${formatDate(data.session_date)} a las ${data.session_time}</strong>,
           pero el pago no se completó a tiempo, así que el horario quedó disponible nuevamente para otra persona.
         </p>
         ${recoverBlock}
@@ -662,7 +668,7 @@ export async function sendReviewRequestEmail(opts: {
         ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Gracias por confiar en este proceso</h1>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.25rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(opts.patientName)}, luego del proceso que has vivido en terapia, me encantaría poder
+          Hola ${escapeHtml(nombreSaludo(opts.patientName))}, luego del proceso que has vivido en terapia, me encantaría poder
           pedirte un favor: que pudieras evaluarme como psicóloga con una breve reseña en Google.
         </p>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
@@ -722,7 +728,7 @@ export async function sendEvaluationEmail(opts: {
         ${LOGO_HEADER}
         <h1 style="font-size:1.5rem;font-weight:400;margin-bottom:0.75rem;">Un momento para ti</h1>
         <p style="color:#6B6860;font-size:0.9rem;line-height:1.7;margin-bottom:1.75rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(opts.patientName)}, quería saber cómo te sentiste después de nuestra última sesión.
+          Hola ${escapeHtml(nombreSaludo(opts.patientName))}, quería saber cómo te sentiste después de nuestra última sesión.
           Tu evaluación me ayuda a acompañarte mejor en el proceso.
         </p>
         ${formBlock}
@@ -846,7 +852,7 @@ export async function sendBoletaEmail(opts: {
     html: `
       <div style="font-family:'Inter',sans-serif;max-width:560px;margin:0 auto;padding:2rem;color:#1A1A18;background:#FAF7F4;">
         ${LOGO_HEADER}
-        <p style="font-size:0.95rem;color:#6B6860;margin-bottom:1.25rem;">Hola ${escapeHtml(opts.patientName)},</p>
+        <p style="font-size:0.95rem;color:#6B6860;margin-bottom:1.25rem;">Hola ${escapeHtml(nombreSaludo(opts.patientName))},</p>
         <p style="font-size:0.92rem;line-height:1.7;">
           Gracias por tu pago. Te adjunto tu <strong>boleta de honorarios electrónica${folioTxt}</strong>
           por la atención psicológica.
@@ -1344,7 +1350,7 @@ export async function sendVitrinaConfirmation(data: VitrinaEmailData, opts: { id
           ${esContenido ? (data.amount > 0 ? 'Gracias por tu compra' : 'Aquí tienes tu contenido') : 'Tu inscripción está confirmada'}
         </h1>
         <p style="color:#6B6860;font-size:0.9rem;margin-bottom:2rem;font-family:'Inter',sans-serif;">
-          Hola ${escapeHtml(data.name)}, ${esContenido ? 'aquí tienes tu contenido.' : 'qué alegría que me acompañes. Estos son los detalles:'}
+          Hola ${escapeHtml(nombreSaludo(data.name))}, ${esContenido ? 'aquí tienes tu contenido.' : 'qué alegría que me acompañes. Estos son los detalles:'}
         </p>
 
         <div style="background:#F4F0EC;padding:1.5rem;margin-bottom:1.5rem;">
