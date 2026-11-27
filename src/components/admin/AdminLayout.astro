@@ -714,6 +714,10 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
   .enc-main select, .enc-main textarea { font-size: 16px !important; min-height: 46px; }
   .enc-main textarea { min-height: 96px; }
   .enc-main .btn { min-height: 44px; }
+  .enc-main .btn:not(.btn-sm) { font-size: 15px !important; }
+  .enc-main > .aviso-feriado[role="status"] { font-size: 15px !important; padding: 0.75rem 1rem !important; }
+  .enc-main > .aviso-feriado[role="status"] form { display: flex !important; width: 100%; margin: 8px 0 0 !important; gap: 8px !important; }
+  .enc-main > .aviso-feriado[role="status"] form button { flex: 1; min-height: 44px; padding: 0 0.5rem !important; font-size: 15px !important; border-radius: 10px !important; }
   .enc-main .btn.btn-sm, .enc-main a.btn-sm, .enc-main button.btn-sm { min-height: 40px; padding: 0.5rem 0.85rem !important; font-size: 14px !important; display: inline-flex; align-items: center; justify-content: center; }
 }
 
@@ -1213,8 +1217,8 @@ input[type="radio"]    { width: auto; accent-color: #4f5ce8; }
       </div>
     )}
     {feriadoAlerts.length > 0 && (
-      <div role="status" style="background:#7c4a1e;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
-        <p style="font-weight:700;margin:0 0 0.35rem;">🎌 {feriadoAlerts.length === 1 ? 'Se acerca un feriado' : 'Se acercan feriados'}: decide si cierras o atiendes ese día</p>
+      <div role="status" class="aviso-feriado" style="background:#7c4a1e;color:#fff;padding:0.75rem 1.25rem;font-size:0.85rem;line-height:1.5;">
+        <p style="font-weight:700;margin:0 0 0.35rem;">{feriadoAlerts.length === 1 ? 'Se acerca un feriado' : 'Se acercan feriados'}: decide si cierras o atiendes ese día</p>
         <ul style="margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:0.35rem;">
           {feriadoAlerts.map(f => (
             <li>

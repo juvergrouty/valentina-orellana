@@ -268,7 +268,7 @@ const desdeNotas = (() => {
       </div>
     </div>
 
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+    <div class="ficha-acc" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
       <!-- Transcriptor: abre el grabador con este paciente (su sesión de hoy si tiene; si no,
            "grabar sin reserva"). El consentimiento lo verifica el servidor al preparar. -->
       <a href={`/admin/grabar?paciente=${encodeURIComponent(patient.id)}`} class="btn btn-sm btn-grabar-ficha">
@@ -283,7 +283,8 @@ const desdeNotas = (() => {
         <>
           <button type="button" class="btn btn-outline btn-sm send-mail-btn"
             data-mail-action="steps" data-email={patient.email} data-name={patient.name}>Pasos a seguir</button>
-          <button type="button" class="btn btn-outline btn-sm send-mail-btn"
+          {/* Solicitar reseña: oculto (rediseño aprobado 22 nov 2026, Vale no pide más reseñas). */}
+          <button type="button" class="btn btn-outline btn-sm send-mail-btn ficha-resena" hidden
             data-mail-action="review_request" data-email={patient.email} data-name={patient.name}>Solicitar reseña</button>
         </>
       )}
@@ -295,7 +296,7 @@ const desdeNotas = (() => {
         <input type="hidden" name="id" value={patient.id} />
         <input type="hidden" name="active" value={String(patient.active)} />
         <input type="hidden" name="redirect" value={redirectBase} />
-        <button type="submit" class="btn btn-outline btn-sm">
+        <button type="submit" class="btn btn-outline btn-sm ficha-archivar">
           {patient.active ? 'Archivar' : 'Restaurar'}
         </button>
       </form>
@@ -355,7 +356,7 @@ const desdeNotas = (() => {
       { key: 'notas',    label: `Notas clínicas (${notes?.length ?? 0})` },
       { key: 'documentos', label: 'Documentos' },
     ].map(t => (
-      <a href={`${redirectBase}?tab=${t.key}`}
+      <a href={`${redirectBase}?tab=${t.key}`} aria-current={tab === t.key ? 'page' : undefined}
          style={`padding:0.6rem 1.25rem;font-size:0.8rem;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;text-decoration:none;border-bottom:2px solid ${tab===t.key ? 'var(--ink)' : 'transparent'};color:${tab===t.key ? 'var(--ink)' : 'var(--stone)'};margin-bottom:-2px;transition:color .15s;`}>
         {t.label}
       </a>
@@ -1141,6 +1142,24 @@ const desdeNotas = (() => {
   .btn.hist-cargar[hidden] { display: none; }
   .hist-summary { cursor: pointer; list-style: none; }
   .hist-summary::-webkit-details-marker { display: none; }
+
+  /* Celular (rediseño 24 nov 2026): lo más usado primero y del tamaño de un dedo. */
+  .btn.ficha-resena[hidden] { display: none !important; }
+  @media (max-width: 600px) {
+    .ficha-acc { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px !important; width: 100%; }
+    .ficha-acc > * { min-width: 0; }
+    .ficha-acc .btn { width: 100%; min-height: 48px; font-size: 15px !important; justify-content: center; }
+    .ficha-acc #open-agenda-modal { order: -3; grid-column: 1 / -1; min-height: 52px; font-size: 16px !important; }
+    .ficha-acc .btn-grabar-ficha { order: -2; }
+    .ficha-acc #mail-status { grid-column: 1 / -1; }
+    .ficha-acc #mail-status:empty { display: none; }
+    .ficha-acc form { order: 9; grid-column: 1 / -1; }
+    .ficha-acc .ficha-archivar { color: #5F5E57 !important; }
+    .patient-tabs { display: grid !important; grid-template-columns: 1fr 1fr; gap: 6px !important; border-bottom: 0 !important; overflow: visible !important; }
+    .patient-tabs a { display: flex; align-items: center; justify-content: center; min-height: 48px; margin: 0 !important; border: 2px solid #CFC8BF !important; border-radius: 12px; background: #fff; font-size: 15px !important; letter-spacing: 0 !important; text-transform: none !important; white-space: normal !important; text-align: center; }
+    .patient-tabs a:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .patient-tabs a[aria-current="page"] { background: #576352; border-color: #576352 !important; color: #fff !important; }
+  }
   @media (max-width: 600px) {
     .hist-descargar, #hist-filtro { min-height: 48px; }
     .hist-descargar { flex: 1 1 auto; justify-content: center; }

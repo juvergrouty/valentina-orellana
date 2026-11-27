@@ -159,7 +159,7 @@ const servicesJson  = JSON.stringify(services  ?? []);
               <label id="mod-online-wrap"
                 style="flex:1;display:flex;align-items:center;gap:0.5rem;padding:0.6rem 1rem;border:1.5px solid var(--dust);border-radius:var(--radius);cursor:pointer;font-size:0.88rem;background:white;color:var(--stone);transition:all .15s;">
                 <input type="radio" name="modality" id="mod-online" value="online" style="width:auto;accent-color:var(--forest);" />
-                🎥 Online (Google Meet)
+                🎥 Online<span class="cob-meet"> (Google Meet)</span>
               </label>
             </div>
             <p id="meet-hint" style="display:none;font-size:0.76rem;color:var(--forest);margin-top:0.4rem;">
@@ -339,7 +339,8 @@ const servicesJson  = JSON.stringify(services  ?? []);
   @media (max-width: 768px) {
     .cobros-grid { grid-template-columns: minmax(0, 1fr) !important; gap: 1rem !important; }
     #tab-registrado, #tab-personalizado { min-height: 48px; font-size: 14px !important; letter-spacing: 0 !important; text-transform: none !important; }
-    #mod-presencial-wrap, #mod-online-wrap { min-height: 52px; font-size: 16px !important; }
+    #mod-presencial-wrap, #mod-online-wrap { min-height: 52px; font-size: 15px !important; padding: 0.5rem 0.6rem !important; }
+    .cob-meet { display: none; }
     #btn-generar { min-height: 56px; font-size: 17px !important; }
     #wa-btn { min-height: 56px; font-size: 17px !important; }
     #clear-patient { min-width: 44px; min-height: 44px; }
